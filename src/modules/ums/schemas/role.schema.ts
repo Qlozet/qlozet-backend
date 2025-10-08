@@ -37,7 +37,7 @@ export enum VendorRole {
 
 @Schema({ timestamps: true })
 export class Role {
-  @Prop({ required: true, unique: true, trim: true, lowercase: true })
+  @Prop({ required: true, trim: true, lowercase: true })
   name: string;
 
   @Prop({ required: true, trim: true })

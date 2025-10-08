@@ -604,13 +604,12 @@ export class AuthService {
     if (!user || !user.refreshToken) {
       throw new UnauthorizedException('Access denied');
     }
-
     const rtMatches = await bcrypt.compare(refreshToken, user.refreshToken);
     if (!rtMatches) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const role = await this.roleModel.findOne<Role>({ name: user.role });
+    const role = await this.roleModel.findById(user.role);
     const jwtPayload: JwtPayload = {
       id: user._id,
       email: user.email,

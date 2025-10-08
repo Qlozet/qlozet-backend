@@ -9,7 +9,7 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UserDocument, User } from '../schemas';
-import { MailService } from 'src/modules/notifications/mail/mail.service';
+import { MailService } from '../../notifications/mail/mail.service';
 
 @Injectable()
 export class UserService {

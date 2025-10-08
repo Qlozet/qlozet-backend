@@ -10,7 +10,7 @@ import { Role, RoleSchema } from '../modules/ums/schemas/role.schema';
 import {
   Product,
   ProductSchema,
-} from 'src/modules/products/schemas/product.schema';
+} from '../modules/products/schemas/product.schema';
 
 @Module({
   exports: [MongooseModule],

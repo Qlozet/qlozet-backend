@@ -13,10 +13,10 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductService } from './products.service';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Public } from 'src/common/decorators/public.decorator';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { Public } from '../../common//decorators/public.decorator';
+import { JwtAuthGuard, RolesGuard } from '../../common//guards';
 import { UserType } from '../ums/schemas';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Products')
 @Controller('products')

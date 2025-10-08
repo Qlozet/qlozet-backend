@@ -44,7 +44,7 @@ export class PermissionsGuard implements CanActivate {
 
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET || 'your-secret-key',
+        secret: process.env.ACCESS_SECRET || 'your-secret-key',
       });
 
       // Get user with role reference
