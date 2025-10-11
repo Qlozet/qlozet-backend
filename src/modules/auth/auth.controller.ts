@@ -137,8 +137,8 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        email: { type: 'string', example: 'business@fashionstore.com' },
-        password: { type: 'string', example: 'SecurePassword123' },
+        email: { type: 'string', example: 'vendor@example.com' },
+        password: { type: 'string', example: 'Password123!' },
       },
       required: ['email', 'password'],
     },

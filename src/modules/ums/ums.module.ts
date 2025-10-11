@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { UsersController } from './users.controller';
 import { RolesService, UserService } from './services';
 import { PermissionService } from './services/permissions.service';
 import { Role } from './schemas';
@@ -10,6 +9,9 @@ import { User, UserSchema } from './schemas/user.schema';
 import { SeedService } from './services/seed.service';
 import { Business, BusinessSchema } from './schemas/business.schema';
 import { MailService } from '../notifications/mail/mail.service';
+import { UserController } from './users.controller';
+import { Product, ProductSchema } from '../products/schemas';
+import { ProductModule } from '../products/products.module';
 
 @Module({
   imports: [
@@ -18,9 +20,11 @@ import { MailService } from '../notifications/mail/mail.service';
       { name: Permission.name, schema: PermissionSchema },
       { name: User.name, schema: UserSchema },
       { name: Business.name, schema: BusinessSchema },
+      { name: Product.name, schema: ProductSchema },
     ]),
+    ProductModule,
   ],
-  controllers: [UsersController],
+  controllers: [UserController],
   providers: [
     RolesService,
     PermissionService,

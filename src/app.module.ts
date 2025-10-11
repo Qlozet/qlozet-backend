@@ -12,6 +12,7 @@ import { join } from 'path';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProductModule } from './modules/products/products.module';
 import { UmsModule } from './modules/ums/ums.module';
+import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { UmsModule } from './modules/ums/ums.module';
     ProductModule,
     NotificationsModule,
     UmsModule,
+    CloudinaryModule,
   ],
   controllers: [AppController],
   providers: [
