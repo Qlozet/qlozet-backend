@@ -10,6 +10,11 @@ import { Taxonomy, TaxonomySchema, TaxonomyDocument } from './taxonomy.schema';
 import { Variant, VariantSchema, VariantDocument } from './variant.schema';
 import { Clothing, ClothingSchema, ClothingDocument } from './clothing.schema';
 import { Discount, DiscountSchema, DiscountDocument } from './discount.schema';
+import {
+  Collection,
+  CollectionSchema,
+  CollectionDocument,
+} from './collection.schema';
 
 export {
   Accessory,
@@ -36,4 +41,7 @@ export {
   Discount,
   DiscountDocument,
   DiscountSchema,
+  Collection,
+  CollectionDocument,
+  CollectionSchema,
 };

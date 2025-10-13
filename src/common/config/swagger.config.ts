@@ -14,6 +14,7 @@ export const SetupSwagger = (app: INestApplication) => {
     .addTag('Customers', 'Customer management endpoints')
     .addTag('Uploads', 'Image upload endpoints (profile & product)')
     .addTag('Discounts', 'Discount management endpoints')
+    .addTag('Collections', 'Product collection management endpoints')
     .addBearerAuth(
       {
         type: 'http',

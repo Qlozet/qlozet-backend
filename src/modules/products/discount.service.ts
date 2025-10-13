@@ -37,11 +37,13 @@ export class DiscountService {
   /** 🔹 Create discount and trigger async apply */
   async create(
     createDiscountDto: CreateDiscountDto,
+    vendor: string,
   ): Promise<DiscountDocument> {
     this.logger.log(`Creating discount: ${JSON.stringify(createDiscountDto)}`);
 
     const discount = new this.discountModel({
       ...createDiscountDto,
+      vendor,
       condition_match: createDiscountDto.condition_match || 'all',
     });
 

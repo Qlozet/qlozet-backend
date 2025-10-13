@@ -45,8 +45,11 @@ export class DiscountController {
     description: 'Discount created successfully',
     type: Discount,
   })
-  async create(@Body() dto: CreateDiscountDto): Promise<Discount> {
-    return this.discountService.create(dto);
+  async create(
+    @Body() dto: CreateDiscountDto,
+    @Req() req: any,
+  ): Promise<Discount> {
+    return this.discountService.create(dto, req.user.id);
   }
 
   /**

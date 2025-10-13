@@ -12,6 +12,8 @@ import { ProductService } from './products.service';
 import {
   Accessory,
   AccessorySchema,
+  Collection,
+  CollectionSchema,
   Discount,
   DiscountSchema,
   Fabric,
@@ -25,6 +27,8 @@ import {
 } from './schemas';
 import { DiscountService } from './discount.service';
 import { DiscountController } from './discount.controller';
+import { CollectionService } from './collection.service';
+import { CollectionController } from './collection.controller';
 
 @Module({
   imports: [
@@ -49,10 +53,11 @@ import { DiscountController } from './discount.controller';
       { name: User.name, useFactory: () => UserSchema },
       { name: Business.name, useFactory: () => BusinessSchema },
       { name: Role.name, useFactory: () => RoleSchema },
+      { name: Collection.name, useFactory: () => CollectionSchema },
     ]),
   ],
-  controllers: [ProductsController, DiscountController],
-  providers: [JwtService, ProductService, DiscountService],
+  controllers: [ProductsController, DiscountController, CollectionController],
+  providers: [JwtService, ProductService, DiscountService, CollectionService],
   exports: [DiscountService],
 })
 export class ProductModule {}
