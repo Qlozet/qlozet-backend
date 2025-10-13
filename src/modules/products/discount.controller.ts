@@ -3,9 +3,11 @@ import {
   Get,
   Post,
   Body,
+  Param,
   UseGuards,
   UsePipes,
   ValidationPipe,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +23,7 @@ import { CreateDiscountDto } from './dto/discount.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { UserType } from '../auth/dto/base-login.dto';
+import { Product } from '../products/schemas/product.schema';
 
 @ApiTags('Discounts')
 @ApiBearerAuth('access-token')
@@ -30,6 +33,9 @@ import { UserType } from '../auth/dto/base-login.dto';
 export class DiscountController {
   constructor(private readonly discountService: DiscountService) {}
 
+  /**
+   * Create a new discount
+   */
   @Post()
   @Roles(UserType.VENDOR)
   @ApiOperation({ summary: 'Create a new discount' })
@@ -43,6 +49,9 @@ export class DiscountController {
     return this.discountService.create(dto);
   }
 
+  /**
+   * Get all discounts
+   */
   @Get()
   @ApiOperation({ summary: 'Get all discounts' })
   @ApiResponse({
@@ -54,6 +63,9 @@ export class DiscountController {
     return this.discountService.findAll();
   }
 
+  /**
+   * Get all active discounts
+   */
   @Get('active')
   @ApiOperation({ summary: 'Get all active discounts' })
   @ApiResponse({
@@ -63,5 +75,47 @@ export class DiscountController {
   })
   async findActive(): Promise<Discount[]> {
     return this.discountService.findActive();
+  }
+
+  /**
+   * Apply a specific discount manually
+   */
+  @Get('apply/:id')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Manually apply discount to matching products' })
+  @ApiResponse({
+    status: 200,
+    description: 'Products updated with discount',
+    type: [Product],
+  })
+  async applyDiscount(@Param('id') id: string): Promise<Product[]> {
+    return this.discountService.applyDiscountToMatchingProducts(id);
+  }
+
+  @Get('vendor/products')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Get discounted products for a specific vendor' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of discounted products for the vendor',
+    type: [Product],
+  })
+  async getDiscountedProductsByVendor(@Req() req: any): Promise<Product[]> {
+    return this.discountService.getDiscountedProductsByVendor(req.user.id);
+  }
+
+  /**
+   * Get all discounted products
+   */
+  @Get('discounted-products')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Get all discounted products' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of products currently under discount',
+    type: [Product],
+  })
+  async getDiscountedProducts(): Promise<Product[]> {
+    return this.discountService.getDiscountedProducts();
   }
 }

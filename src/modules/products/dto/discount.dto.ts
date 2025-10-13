@@ -1,70 +1,49 @@
-// create-discount.dto.ts
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsArray,
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-} from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsArray, ValidateNested, IsString } from 'class-validator';
 
-export class ConditionDto {
+export class DiscountConditionDto {
   @ApiProperty()
-  @IsNotEmpty()
+  @IsString()
   field: string;
 
   @ApiProperty()
-  @IsNotEmpty()
+  @IsString()
   operator: string;
 
   @ApiProperty()
-  @IsNotEmpty()
+  @IsString()
   value: string;
 }
 
 export class CreateDiscountDto {
-  @ApiProperty({
-    enum: [
-      'fixed',
-      'percentage',
-      'store_wide',
-      'flash_fixed',
-      'flash_percentage',
-      'category_specific',
-    ],
-  })
-  @IsEnum([
-    'fixed',
-    'percentage',
-    'store_wide',
-    'flash_fixed',
-    'flash_percentage',
-    'category_specific',
-  ])
+  @ApiProperty()
   type: string;
 
   @ApiProperty()
-  @IsNumber()
   value: number;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
+  value_type: string;
+
+  @ApiProperty()
+  required_discount: boolean;
+
+  @ApiProperty()
+  condition_match: string;
+
+  @ApiProperty({ type: [DiscountConditionDto] })
   @IsArray()
-  conditions?: ConditionDto[];
+  @ValidateNested({ each: true })
+  @Type(() => DiscountConditionDto)
+  conditions: DiscountConditionDto[];
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsEnum(['all', 'any'])
-  condition_match?: 'all' | 'any';
+  @ApiProperty({ required: false })
+  start_date?: Date;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsDateString()
-  start_date?: string;
+  @ApiProperty({ required: false })
+  end_date?: Date;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsDateString()
-  end_date?: string;
+  @ApiProperty()
+  is_active: boolean;
 }

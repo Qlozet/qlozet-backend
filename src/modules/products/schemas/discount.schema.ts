@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type DiscountDocument = Discount & Document;
 
@@ -56,6 +56,14 @@ export class Discount {
 
   @Prop({ default: true })
   is_active: boolean;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  })
+  vendor: Types.ObjectId;
 }
 
 export const DiscountSchema = SchemaFactory.createForClass(Discount);
