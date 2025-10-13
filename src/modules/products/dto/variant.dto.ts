@@ -1,76 +1,60 @@
-// base.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
-  IsString,
-  IsNumber,
   IsArray,
+  IsNumber,
+  IsObject,
   IsOptional,
-  IsEnum,
-  IsMongoId,
+  IsString,
   Min,
   ValidateNested,
-  IsObject,
 } from 'class-validator';
-import { Type } from 'class-transformer';
-import { Types } from 'mongoose';
-
-export class ColorDto {
-  @ApiProperty({ example: '#FF0000' })
-  @IsString()
-  hex: string;
-}
-
-export class ImageDto {
-  @ApiProperty({ example: 'image_123' })
-  @IsString()
-  publicId: string;
-
-  @ApiProperty({ example: 'https://example.com/image.jpg' })
-  @IsString()
-  url: string;
-}
+import { ColorDto, ImageDto } from './product.dto';
 
 export class VariantDto {
-  @ApiPropertyOptional({ type: [ColorDto] })
+  @ApiPropertyOptional({ type: [ColorDto], description: 'Color variants' })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ColorDto)
   colors?: ColorDto[];
 
-  @ApiPropertyOptional({ example: 'M' })
+  @ApiPropertyOptional({ description: 'Variant size (e.g., M, L)' })
   @IsOptional()
   @IsString()
   size?: string;
 
-  @ApiPropertyOptional({ type: [ImageDto] })
+  @ApiPropertyOptional({ type: [ImageDto], description: 'Variant images' })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ImageDto)
   images?: ImageDto[];
 
-  @ApiProperty({ example: 10 })
+  @ApiProperty({ example: 20, description: 'Stock quantity' })
   @IsNumber()
   @Min(0)
   stock: number;
 
-  @ApiProperty({ example: 75 })
+  @ApiProperty({ example: 5000, description: 'Price of this variant' })
   @IsNumber()
   @Min(0)
   price: number;
 
-  @ApiPropertyOptional({ example: 'PRODUCT-SKU-001' })
+  @ApiPropertyOptional({
+    example: 'SKU-RED-M',
+    description: 'Stock keeping unit code',
+  })
   @IsOptional()
   @IsString()
   sku?: string;
 
-  @ApiPropertyOptional({ example: { chest: '38-40', waist: '34-36' } })
+  @ApiPropertyOptional({ description: 'Measurement range for custom orders' })
   @IsOptional()
   @IsObject()
   measurement_range?: Record<string, any>;
 
-  @ApiPropertyOptional({ example: { material: 'cotton' } })
+  @ApiPropertyOptional({ description: 'Additional variant attributes' })
   @IsOptional()
   @IsObject()
   attributes?: Record<string, any>;

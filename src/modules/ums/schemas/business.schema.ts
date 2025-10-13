@@ -1,30 +1,30 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Schema as MongooseSchema } from 'mongoose';
+import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type BusinessDocument = Business & Document;
 
 @Schema({ timestamps: true })
 export class Business {
   @Prop({ required: true, trim: true })
-  businessName: string;
+  business_name: string;
 
-  @Prop({ required: false, unique: true, lowercase: true, trim: true }) // Made optional
-  businessEmail?: string;
+  @Prop({ required: false, unique: true, lowercase: true, trim: true })
+  business_email?: string;
 
-  @Prop({ required: false }) // Made optional
-  businessPhoneNumber?: string;
+  @Prop({ required: false })
+  business_phone_number?: string;
 
   @Prop({ required: true })
-  businessAddress: string;
+  business_address: string;
 
   @Prop()
-  addressLine2?: string;
+  address_line_2?: string;
 
   @Prop()
-  billingAddressLine2?: string;
+  billing_address_line_2?: string;
 
   @Prop()
-  timeZone?: string;
+  time_zone?: string;
 
   @Prop()
   country?: string;
@@ -36,7 +36,7 @@ export class Business {
   city?: string;
 
   @Prop()
-  zipCode?: string;
+  zip_code?: string;
 
   @Prop()
   bvn?: string;
@@ -44,38 +44,32 @@ export class Business {
   @Prop()
   nin?: string;
 
-  @Prop({ required: true })
-  personalName: string;
-
-  @Prop({ required: true })
-  personalPhoneNumber: string;
-
-  @Prop({ required: false }) // Made optional
-  displayPictureUrl?: string;
+  @Prop({ required: false })
+  display_picture_url?: string;
 
   @Prop()
   website?: string;
 
   @Prop({ type: [String], default: [] })
-  cacDocumentUrl?: string[];
+  cac_document_url?: string[];
 
-  @Prop({ required: false }) // Made optional
-  businessLogoUrl?: string;
+  @Prop({ required: false })
+  business_logo_url?: string;
 
-  @Prop({ required: false }) // Made optional
-  coverImageUrl?: string;
-
-  @Prop({ default: false })
-  emailVerified: boolean;
-
-  @Prop({ default: null })
-  verificationToken?: string;
+  @Prop({ required: false })
+  cover_image_url?: string;
 
   @Prop({ default: false })
-  verificationTokenUsed?: boolean;
+  email_verified: boolean;
 
   @Prop({ default: null })
-  verificationTokenExpiration?: Date;
+  verification_token?: string;
+
+  @Prop({ default: false })
+  verification_token_used?: boolean;
+
+  @Prop({ default: null })
+  verification_token_expiration?: Date;
 
   @Prop({
     type: [
@@ -83,104 +77,102 @@ export class Business {
         user: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
         comment: String,
         rating: { type: Number, min: 1, max: 5 },
-        createdAt: { type: Date, default: Date.now },
+        created_at: { type: Date, default: Date.now },
       },
     ],
     default: [],
   })
   reviews?: Array<{
-    user: MongooseSchema.Types.ObjectId;
+    user: Types.ObjectId;
     comment: string;
     rating: number;
-    createdAt: Date;
+    created_at: Date;
   }>;
 
   @Prop()
   description?: string;
 
   @Prop({ default: 0 })
-  successfulDeliveries?: number;
+  successful_deliveries?: number;
 
   @Prop({ default: 0 })
-  returnedDeliveries?: number;
+  returned_deliveries?: number;
 
   @Prop({ default: 0 })
-  totalItemsSold?: number;
+  total_items_sold?: number;
 
   @Prop({ default: 0 })
-  successRate?: number;
+  success_rate?: number;
 
   @Prop({ default: false })
-  isFeatured?: boolean;
+  is_featured?: boolean;
 
   @Prop({ default: 0 })
   earnings?: number;
 
   @Prop()
-  yearFounded?: string;
+  year_founded?: string;
 
   @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'User', default: [] })
-  followers?: MongooseSchema.Types.ObjectId[];
+  followers?: Types.ObjectId[];
 
   @Prop({ default: true })
-  isActive?: boolean;
+  is_active?: boolean;
 
   @Prop({ default: false })
-  twoFactorAuth?: boolean;
+  two_factor_auth?: boolean;
 
   @Prop({ default: null })
-  twoFactorCode?: string;
+  two_factor_code?: string;
 
   @Prop({ default: null })
-  twoFactorCodeExpiration?: Date;
+  two_factor_code_expiration?: Date;
 
   @Prop({
     type: {
       general: {
-        enableOrderConfirmation: { type: Boolean, default: true },
-        enableOrderNotifications: { type: Boolean, default: true },
+        enable_order_confirmation: { type: Boolean, default: true },
+        enable_order_notifications: { type: Boolean, default: true },
       },
       notifications: {
-        orderStatus: { type: Boolean, default: true },
-        returnsAndRefunds: { type: Boolean, default: true },
-        orderTracking: { type: Boolean, default: true },
+        order_status: { type: Boolean, default: true },
+        returns_and_refunds: { type: Boolean, default: true },
+        order_tracking: { type: Boolean, default: true },
       },
       customization: {
-        dailyOrderLimit: { type: Number, default: 0 },
+        daily_order_limit: { type: Number, default: 0 },
       },
-      workerSettings: {
-        maxWorkers: { type: Number, default: 10 },
-        allowWorkerInvites: { type: Boolean, default: true },
-        requireApproval: { type: Boolean, default: true },
+      worker_settings: {
+        max_workers: { type: Number, default: 10 },
+        allow_worker_invites: { type: Boolean, default: true },
+        require_approval: { type: Boolean, default: true },
       },
     },
     default: {},
   })
-  orderSettings?: {
+  order_settings?: {
     general: {
-      enableOrderConfirmation: boolean;
-      enableOrderNotifications: boolean;
+      enable_order_confirmation: boolean;
+      enable_order_notifications: boolean;
     };
     notifications: {
-      orderStatus: boolean;
-      returnsAndRefunds: boolean;
-      orderTracking: boolean;
+      order_status: boolean;
+      returns_and_refunds: boolean;
+      order_tracking: boolean;
     };
-    customization: {
-      dailyOrderLimit: number;
-    };
-    workerSettings: {
-      maxWorkers: number;
-      allowWorkerInvites: boolean;
-      requireApproval: boolean;
+    customization: { daily_order_limit: number };
+    worker_settings: {
+      max_workers: number;
+      allow_worker_invites: boolean;
+      require_approval: boolean;
     };
   };
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
-  vendor: MongooseSchema.Types.ObjectId;
+  vendor: Types.ObjectId;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
-  createdBy?: MongooseSchema.Types.ObjectId;
+  created_by?: Types.ObjectId;
 }
 
 export const BusinessSchema = SchemaFactory.createForClass(Business);

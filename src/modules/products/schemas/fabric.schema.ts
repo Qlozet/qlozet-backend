@@ -1,29 +1,28 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Product } from './product.schema';
-import { Variant, VariantSchema } from './variant.schema';
+import { ProductImage, ProductImageSchema } from './product-image.schema';
 
 export type FabricDocument = Fabric & Document;
-@Schema({ _id: false, timestamps: true })
+@Schema({ timestamps: true })
 export class Fabric {
   @Prop({ required: true })
   name: string;
   @Prop()
   description?: string;
   @Prop({ required: true })
-  productType: string;
+  product_type: string;
   @Prop({ type: [String], default: [] })
   colors?: string[];
   @Prop()
   pattern?: string;
   @Prop({ required: true, min: 0.1 })
-  yardLength: number;
+  yard_length: number;
   @Prop({ required: true, min: 10 })
   width: number;
   @Prop({ required: true, min: 0.1 })
-  minCut: number;
+  min_cut: number;
   @Prop({ required: true, min: 0 })
-  pricePerYard: number;
-  @Prop({ type: [VariantSchema], required: true, default: [] })
-  variants: Variant[];
+  price_per_yard: number;
+  @Prop({ type: [ProductImageSchema], default: [] })
+  images?: ProductImage[];
 }
 export const FabricSchema = SchemaFactory.createForClass(Fabric);

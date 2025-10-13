@@ -8,7 +8,7 @@ export class ImageDto {
   })
   @IsString()
   @IsNotEmpty()
-  publicId: string;
+  public_id: string;
 
   @ApiProperty({
     description: 'Public accessible URL of the image',

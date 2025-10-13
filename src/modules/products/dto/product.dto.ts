@@ -1,181 +1,155 @@
-// product.dto.ts
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsString,
-  IsNumber,
   IsArray,
-  IsOptional,
   IsEnum,
   IsMongoId,
-  Min,
-  ValidateNested,
+  IsNumber,
   IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
   ValidateIf,
-  IsNotEmpty,
-  IsBoolean,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ImageDto } from './base.dto';
-import { FabricDto } from './fabric.dto';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ClothingDto } from './clothing.dto';
 import { AccessoryDto } from './accessory.dto';
-import { CreateStyleDto } from './style.dto';
-import {
-  ForbiddenForKind,
-  RequiredForKind,
-} from '../../../common/validators/kind-specific.validator';
+import { FabricDto } from './fabric.dto';
 
-export class CreateProductDto {
+// ---------- BASE SUB-DTOS ---------- //
+
+export class ColorDto {
+  @ApiProperty({ example: '#FF5733', description: 'Hex code of the color' })
+  hex: string;
+}
+
+export class ImageDto {
   @ApiProperty({
-    enum: ['clothing', 'fabric', 'accessory'],
-    example: 'clothing',
+    example: 'qoobea_img_12345',
+    description: 'Public ID of image',
   })
-  @IsEnum(['clothing', 'fabric', 'accessory'])
-  kind: string;
+  public_id: string;
 
-  @ApiProperty({ example: 'Fashion Collection' })
+  @ApiProperty({
+    example:
+      'https://res.cloudinary.com/demo/image/upload/qoobea_img_12345.jpg',
+    description: 'Full image URL',
+  })
+  url: string;
+}
+
+export class ProductImageDto {
+  @ApiProperty({ description: 'Unique image ID (linked to product)' })
   @IsString()
-  title: string;
+  public_id: string;
 
-  @ApiPropertyOptional({ example: '67a1b2c3d4e5f67890123458' })
-  @IsOptional()
-  @IsMongoId()
-  taxonomy?: string;
+  @ApiProperty({ description: 'Image URL' })
+  @IsUrl()
+  url: string;
 
-  @ApiPropertyOptional({
-    enum: ['active', 'draft', 'archived'],
-    example: 'active',
-  })
-  @IsOptional()
-  @IsEnum(['active', 'draft', 'archived'])
-  status?: string;
+  @ApiPropertyOptional({ description: 'Image width in px' })
+  width?: number;
 
-  @ApiPropertyOptional({ example: true })
-  @IsOptional()
-  @IsBoolean()
-  is_customizable?: boolean;
+  @ApiPropertyOptional({ description: 'Image height in px' })
+  height?: number;
+}
 
-  @ApiPropertyOptional({ example: 14 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  turnaround_days?: number;
-
-  @ApiProperty({ example: 50 })
+// ---------- ROOT PRODUCT FIELDS ----------
+export class CreateProductDto {
+  @ApiProperty({ example: 15000, description: 'Base price in Naira' })
   @IsNumber()
   @Min(0)
   base_price: number;
 
-  @ApiPropertyOptional({ type: [ImageDto] })
+  @ApiPropertyOptional({
+    type: Object,
+    description: 'SEO metadata',
+    example: { title: 'Premium Hausa Cap', keywords: ['cap', 'Hausa'] },
+  })
   @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ImageDto)
-  images?: ImageDto[];
+  @IsObject()
+  seo?: Record<string, any>;
 
   @ApiPropertyOptional({
-    example: { title: 'SEO Title', description: 'SEO Description' },
+    type: Object,
+    description: 'Custom metafields',
+    example: { region: 'Maiduguri', material: 'cotton' },
   })
-  @IsOptional()
-  @IsObject()
-  seo?: Record<string, any>;
-
-  @ApiPropertyOptional({ example: { care_instructions: 'Machine wash cold' } })
   @IsOptional()
   @IsObject()
   metafields?: Record<string, any>;
-
-  // Fabric - required for 'fabric' kind, forbidden for others
-  @ApiPropertyOptional({ type: FabricDto })
-  @RequiredForKind(['fabric'])
-  @ForbiddenForKind(['clothing', 'accessory'])
-  @ValidateNested()
-  @Type(() => FabricDto)
-  fabrics?: FabricDto;
-
-  @ApiPropertyOptional({ type: CreateStyleDto })
-  @RequiredForKind(['clothing'])
-  @ForbiddenForKind(['accessory', 'fabric'])
-  @ValidateNested()
-  @Type(() => CreateStyleDto)
-  @IsNotEmpty({
-    message: 'Style data is required when clothing is customizable',
-  })
-  styles?: CreateStyleDto;
-
-  @ApiPropertyOptional({ type: AccessoryDto })
-  @RequiredForKind(['accessory'])
-  @ForbiddenForKind(['clothing', 'fabric'])
-  @ValidateNested()
-  @Type(() => AccessoryDto)
-  accessories?: AccessoryDto;
 }
 
-export class UpdateProductDto {
-  @ApiPropertyOptional({ example: 'Updated Product Title' })
-  @IsOptional()
-  @IsString()
-  title?: string;
+// ---------- CLOTHING ----------
+export class CreateClothingDto extends CreateProductDto {
+  @ApiProperty({ type: ClothingDto })
+  @ValidateNested()
+  @Type(() => ClothingDto)
+  clothing: ClothingDto;
+}
 
-  @ApiPropertyOptional({ example: '67a1b2c3d4e5f67890123458' })
-  @IsOptional()
-  @IsMongoId()
-  taxonomy?: string;
+// ---------- FABRIC ----------
+export class CreateFabricDto extends CreateProductDto {
+  @ApiProperty({ type: FabricDto })
+  @ValidateNested()
+  @Type(() => FabricDto)
+  fabric: FabricDto;
+}
 
-  kind: string;
-  @ApiPropertyOptional({ enum: ['active', 'draft', 'archived'] })
-  @IsOptional()
-  @IsEnum(['active', 'draft', 'archived'])
-  status?: string;
+// ---------- ACCESSORY ----------
+export class CreateAccessoryDto extends CreateProductDto {
+  @ApiProperty({ type: AccessoryDto })
+  @ValidateNested()
+  @Type(() => AccessoryDto)
+  accessory: AccessoryDto;
+}
 
-  @ApiPropertyOptional({ example: 60 })
+export class UpdateProductDto extends PartialType(CreateProductDto) {
+  @ApiPropertyOptional({
+    enum: ['clothing', 'fabric', 'accessory'],
+    description: 'Type of product (optional for updates)',
+  })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  base_price?: number;
+  @IsEnum(['clothing', 'fabric', 'accessory'])
+  kind?: string;
 
-  @ApiPropertyOptional({ type: [ImageDto] })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ImageDto)
-  images?: ImageDto[];
-
-  @ApiPropertyOptional({ example: { title: 'Updated SEO' } })
+  @ApiPropertyOptional({
+    type: Object,
+    description: 'SEO metadata object (title, keywords, etc.)',
+    example: {
+      title: 'Updated Hausa Cap',
+      keywords: ['cap', 'Hausa', 'traditional'],
+    },
+  })
   @IsOptional()
   @IsObject()
   seo?: Record<string, any>;
 
-  @ApiPropertyOptional({ example: { material: 'silk' } })
+  @ApiPropertyOptional({
+    type: Object,
+    description: 'Custom metafields for product',
+    example: { region: 'Kaduna', season: 'Dry' },
+  })
   @IsOptional()
   @IsObject()
   metafields?: Record<string, any>;
 
-  @ApiPropertyOptional({ type: FabricDto })
-  @ValidateIf((o) => o.kind === 'fabric' || o.fabrics !== undefined)
+  @ApiPropertyOptional({ type: () => FabricDto })
+  @IsOptional()
   @ValidateNested()
   @Type(() => FabricDto)
-  @IsNotEmpty({ message: 'Fabric data is required when kind is "fabric"' })
   fabrics?: FabricDto;
 
-  @ApiPropertyOptional({ type: CreateStyleDto })
-  @ValidateIf(
-    (o) =>
-      (o.kind === 'clothing' && o.is_customizable === true) ||
-      o.styles !== undefined,
-  )
-  @ValidateNested()
-  @Type(() => CreateStyleDto)
-  @IsNotEmpty({
-    message: 'Style data is required when clothing is customizable',
-  })
-  styles?: CreateStyleDto;
-
-  @ApiPropertyOptional({ type: AccessoryDto })
-  @ValidateIf((o) => o.kind === 'accessory' || o.accessories !== undefined)
+  @ApiPropertyOptional({ type: () => AccessoryDto })
+  @IsOptional()
   @ValidateNested()
   @Type(() => AccessoryDto)
-  @IsNotEmpty({
-    message: 'Accessory data is required when kind is "accessory"',
-  })
   accessories?: AccessoryDto;
+
+  @ApiPropertyOptional({ type: () => ClothingDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClothingDto)
+  clothing?: ClothingDto;
 }

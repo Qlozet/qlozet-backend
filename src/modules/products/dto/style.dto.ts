@@ -51,7 +51,7 @@ export class CreateStyleDto {
 
   @ApiProperty({ example: 'CDS-001', description: 'Unique style code' })
   @IsString()
-  styleCode: string;
+  style_code: string;
 
   @ApiProperty({
     enum: ['men', 'women', 'unisex', 'kids'],
@@ -96,7 +96,7 @@ export class CreateStyleDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  minWidthCm?: number;
+  min_width_cm?: number;
 
   @ApiPropertyOptional({
     example: 'Standard dress shirt',

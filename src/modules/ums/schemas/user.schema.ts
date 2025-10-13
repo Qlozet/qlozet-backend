@@ -12,41 +12,46 @@ export enum UserType {
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true, trim: true })
-  fullName: string;
+  full_name: string;
 
   @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email: string;
 
   @Prop({ required: true, unique: true })
-  phoneNumber: string;
+  phone_number: string;
 
   @Prop({ required: true, select: false })
-  hashedPassword: string;
+  hashed_password: string;
 
-  @Prop({
-    required: true,
-    enum: UserType,
-    default: UserType.CUSTOMER,
-  })
+  @Prop({ required: true, enum: UserType, default: UserType.CUSTOMER })
   type: UserType;
 
   @Prop({ type: Date })
   dob?: Date;
 
   @Prop({ default: false })
-  emailVerified: boolean;
+  email_verified: boolean;
 
   @Prop({ type: String, select: false })
-  emailVerificationToken?: string;
+  email_verification_token?: string;
 
   @Prop({ type: Date, select: false })
-  emailVerificationExpires?: Date;
+  email_verification_expires?: Date;
+
+  @Prop({
+    type: {
+      pin: String,
+      expire_at: Date,
+    },
+    select: false,
+  })
+  password_reset_code?: { pin: string; expire_at: Date };
 
   @Prop({
     default:
       'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQB2J8Tc056dMI-wNe0vmFtByW-ySbA3bY3nQ&s',
   })
-  profilePicture: string;
+  profile_picture: string;
 
   @Prop({
     type: String,
@@ -61,89 +66,41 @@ export class User {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Role', required: true })
   role: Types.ObjectId;
 
-  @Prop({
-    type: {
-      pin: String,
-      expireAt: Date,
-    },
-    select: false,
-  })
-  verification?: { pin: string; expireAt: Date };
-
-  @Prop({
-    type: {
-      pin: String,
-      expireAt: Date,
-    },
-    select: false,
-  })
-  passwordResetCode?: { pin: string; expireAt: Date };
-
   @Prop({ type: String, select: true })
-  refreshToken?: string;
-
-  @Prop({
-    type: [String],
-    enum: ['petite', 'curve', 'plus_size', 'tall', 'hour_glass', 'maternity'],
-  })
-  bodyFit?: string[];
-
-  @Prop({ type: String, enum: ['man', 'woman', ''], default: '' })
-  wearsPreference?: string;
-
-  @Prop({ type: [String], default: [] })
-  aestheticPreferences?: string[];
-
-  @Prop({ type: [String], default: [] })
-  emailPreferences?: string[];
-
-  @Prop({ default: false })
-  isEmailPreferenceSelected?: boolean;
-
-  @Prop({
-    type: [
-      {
-        searchTerm: String,
-        searchedAt: { type: Date, default: Date.now },
-      },
-    ],
-    default: [],
-  })
-  searchProductHistory?: Array<{ searchTerm: string; searchedAt: Date }>;
-
-  @Prop({
-    type: [
-      {
-        searchTerm: String,
-        searchedAt: { type: Date, default: Date.now },
-      },
-    ],
-    default: [],
-  })
-  searchCategoryHistory?: Array<{ searchTerm: string; searchedAt: Date }>;
+  refresh_token?: string;
 
   @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Product', default: [] })
   wishlist?: Types.ObjectId[];
 
-  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'User', default: [] })
-  following?: Types.ObjectId[];
-
-  // New fields for tracking email communication
-  @Prop({ type: Date })
-  lastWelcomeEmailSent?: Date;
+  @Prop({ type: [String], default: [] })
+  email_preferences?: string[];
 
   @Prop({ type: Date })
-  lastVerificationEmailSent?: Date;
+  last_verification_email_sent?: Date;
+
+  @Prop({ type: Date })
+  last_welcome_email_sent?: Date;
 
   @Prop({ type: Number, default: 0 })
-  verificationEmailAttempts?: number;
+  verification_email_attempts?: number;
 
   @Prop({ type: Date })
-  emailVerifiedAt?: Date;
+  email_verified_at?: Date;
+  @Prop({ type: String, default: 'woman' })
+  wears_preference: string;
+
+  @Prop({ type: [String], default: [] })
+  aesthetic_preferences: string[];
+
+  @Prop({ type: [String], default: [] })
+  body_fit: string[];
+
+  @Prop({ type: Boolean, default: false })
+  is_email_preference_selected: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
-UserSchema.index({ emailVerificationToken: 1 });
-UserSchema.index({ emailVerificationExpires: 1 });
-UserSchema.index({ status: 1, emailVerified: 1 });
+UserSchema.index({ email_verification_token: 1 });
+UserSchema.index({ email_verification_expires: 1 });
+UserSchema.index({ status: 1, email_verified: 1 });

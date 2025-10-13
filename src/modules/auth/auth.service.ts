@@ -26,6 +26,7 @@ import { UserRole } from '../ums/schemas/role.schema';
 import { JwtPayload, Tokens } from 'src/common/types';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services/users.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -51,23 +52,23 @@ export class AuthService {
 
     try {
       const {
-        personalName,
-        personalPhoneNumber,
-        personalEmail,
-        businessName,
-        businessEmail,
-        businessPhoneNumber,
-        businessAddress,
+        personal_name,
+        personal_phone_number,
+        personal_email,
+        business_name,
+        business_email,
+        business_phone_number,
+        business_address,
         password,
-        businessLogoUrl,
-        coverImageUrl,
-        displayPictureUrl,
+        business_logo_url,
+        cover_image_url,
+        display_picture_url,
         ...businessData
       } = data;
 
       // Check if business already exists
       const existingBusiness = await this.businessModel.findOne({
-        $or: [{ businessEmail }, { businessPhoneNumber }],
+        $or: [{ business_email }, { business_phone_number }],
       });
       if (existingBusiness) {
         throw new ConflictException(
@@ -76,9 +77,12 @@ export class AuthService {
       }
 
       // Check if user already exists
-      const r = await this.userService.findByPhoneNumber(personalPhoneNumber);
+      const r = await this.userService.findByPhoneNumber(personal_phone_number);
       const existingUser = await this.userModel.findOne({
-        $or: [{ email: personalEmail }, { phoneNumber: personalPhoneNumber }],
+        $or: [
+          { email: personal_email },
+          { phoneNumber: personal_phone_number },
+        ],
       });
       if (existingUser) {
         throw new ConflictException(
@@ -95,46 +99,43 @@ export class AuthService {
       }
 
       // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashed_password = await bcrypt.hash(password, 10);
 
       // Generate email verification token
-      const emailVerificationToken = this.generateVerificationToken();
+      const email_verification_token = this.generateVerificationToken();
 
       // Create the Vendor User (Business Owner) first
       const vendorUser = new this.userModel({
-        fullName: personalName,
-        email: personalEmail,
-        phoneNumber: personalPhoneNumber,
-        hashedPassword,
+        full_name: personal_name,
+        email: personal_email,
+        phone_number: personal_phone_number,
+        hashed_password,
         role: vendorRole._id,
         type: UserType.VENDOR,
-        emailVerified: false,
-        emailVerificationToken,
-        emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        email_verified: false,
+        email_verification_token: email_verification_token,
+        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
         status: 'active',
         profilePicture:
-          displayPictureUrl ||
+          display_picture_url ||
           'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQB2J8Tc056dMI-wNe0vmFtByW-ySbA3bY3nQ&s',
-        lastVerificationEmailSent: new Date(),
-        verificationEmailAttempts: 1,
+        last_verification_email_sent: new Date(),
       });
 
       await vendorUser.save({ session });
 
       // Create Business with vendor reference
       const business = new this.businessModel({
-        businessName,
-        businessEmail,
-        businessPhoneNumber,
-        businessAddress,
-        personalName,
-        personalPhoneNumber,
-        displayPictureUrl: displayPictureUrl ?? '',
-        businessLogoUrl: businessLogoUrl ?? '',
-        coverImageUrl: coverImageUrl ?? '',
+        business_name,
+        business_email,
+        business_phone_number,
+        business_address,
+        display_picture_url: display_picture_url ?? '',
+        business_logo_url: business_logo_url ?? '',
+        cover_image_url: cover_image_url ?? '',
         vendor: vendorUser._id as Types.ObjectId,
         createdBy: vendorUser._id as Types.ObjectId,
-        emailVerified: false,
+        email_verified: false,
         ...businessData,
       });
 
@@ -152,12 +153,12 @@ export class AuthService {
         type: UserType.VENDOR,
       });
       await this.userModel.findByIdAndUpdate(vendorUser._id, {
-        refreshToken: token.refreshToken,
+        refreshToken: token.refresh_token,
       });
       // Send verification email only initially
-      await this.sendVerificationEmail(vendorUser, business);
+      await this.sendVerificationEmail(vendorUser);
 
-      this.logger.log(`✅ Vendor registered successfully: ${businessName}`);
+      this.logger.log(`✅ Vendor registered successfully: ${business_name}`);
 
       return {
         data: {
@@ -196,12 +197,12 @@ export class AuthService {
     session.startTransaction();
 
     try {
-      const { fullName, email, phoneNumber, password, dob, ...customerData } =
+      const { full_name, email, phone_number, password, dob, ...customerData } =
         data;
 
       // Check if user already exists
       const existingUser = await this.userModel.findOne({
-        $or: [{ email }, { phoneNumber }],
+        $or: [{ email }, { phone_number }],
       });
       if (existingUser) {
         throw new ConflictException('Email or phone number already in use');
@@ -214,25 +215,24 @@ export class AuthService {
       }
 
       // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashed_password = await bcrypt.hash(password, 10);
 
       // Generate email verification token
-      const emailVerificationToken = this.generateVerificationToken();
+      const email_verification_token = this.generateVerificationToken();
       // Create new customer
       const newUser = new this.userModel({
-        fullName,
+        full_name,
         email,
-        phoneNumber,
-        hashedPassword,
+        phone_number,
+        hashed_password,
         role: role._id,
         type: UserType.CUSTOMER,
-        emailVerified: false,
-        emailVerificationToken,
-        emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        email_verified: false,
+        email_verification_token,
+        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
         status: 'active',
         dob: dob ? new Date(dob) : undefined,
-        lastVerificationEmailSent: new Date(),
-        verificationEmailAttempts: 1,
+        last_verification_email_sent: new Date(),
         ...customerData,
       });
 
@@ -275,18 +275,15 @@ export class AuthService {
   /**
    * Send verification email
    */
-  private async sendVerificationEmail(
-    user: UserDocument,
-    business?: BusinessDocument,
-  ) {
+  private async sendVerificationEmail(user: UserDocument) {
     try {
-      const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${user.emailVerificationToken}&type=${user.type}`;
+      const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${user.email_verification_token}&type=${user.type}`;
 
       await this.mailService.sendVerificationEmail(
         user.email,
-        user.fullName,
+        user.full_name,
         verificationLink,
-        user.emailVerificationToken as string,
+        user.email_verification_token as string,
       );
 
       // Update email tracking fields
@@ -316,8 +313,8 @@ export class AuthService {
       if (user.type === UserType.VENDOR && business) {
         await this.mailService.sendVendorWelcomeEmail(
           user.email,
-          user.fullName,
-          business.businessName,
+          user.full_name,
+          business.business_name,
         );
 
         // Update welcome email tracking
@@ -329,7 +326,7 @@ export class AuthService {
       } else if (user.type === UserType.CUSTOMER) {
         await this.mailService.sendCustomerWelcomeEmail(
           user.email,
-          user.fullName,
+          user.full_name,
         );
 
         // Update welcome email tracking
@@ -365,8 +362,8 @@ export class AuthService {
   }> {
     try {
       const user = await this.userModel.findOne({
-        emailVerificationToken: token,
-        emailVerificationExpires: { $gt: new Date() },
+        email_verification_token: token,
+        email_verification_expires: { $gt: new Date() },
       });
 
       if (!user) {
@@ -381,18 +378,18 @@ export class AuthService {
       }
 
       // Update user email verification status
-      user.emailVerified = true;
-      user.emailVerificationToken = undefined;
-      user.emailVerificationExpires = undefined;
+      user.email_verified = true;
+      user.email_verification_token = undefined;
+      user.email_verification_expires = undefined;
       user.status = 'active';
-      user.emailVerifiedAt = new Date();
+      user.email_verified_at = new Date();
 
       await user.save();
 
       // If user is a vendor, also update business email verification
       if (user.type === UserType.VENDOR && user.business) {
         await this.businessModel.findByIdAndUpdate(user.business, {
-          emailVerified: true,
+          email_verified: true,
         });
       }
 
@@ -424,16 +421,16 @@ export class AuthService {
       }
 
       // Check if email is already verified
-      if (user.emailVerified) {
+      if (user.email_verified) {
         throw new BadRequestException('Email is already verified.');
       }
       const now = new Date();
       if (
-        user.emailVerificationExpires &&
-        user.emailVerificationExpires > now
+        user.email_verification_expires &&
+        user.email_verification_expires > now
       ) {
         // Token is still valid, check if we can resend
-        const lastEmailSent = user.lastWelcomeEmailSent?.getTime();
+        const lastEmailSent = user.last_welcome_email_sent?.getTime();
         const timeSinceLastSent =
           lastEmailSent && now.getTime() - lastEmailSent;
         const minResendInterval = 2 * 60 * 1000; // 2 minutes in milliseconds
@@ -448,38 +445,22 @@ export class AuthService {
         }
       }
 
-      let attempts = user.verificationEmailAttempts || 0;
-      const maxAttempts = 5;
-      if (attempts && attempts >= maxAttempts) {
-        throw new BadRequestException(
-          'Maximum verification email attempts reached. Please contact support.',
-        );
-      }
-
-      // Generate new token if expired or about to expire
       if (
-        !user.emailVerificationExpires ||
-        user.emailVerificationExpires <= new Date(Date.now() + 60 * 60 * 1000)
+        !user.email_verification_expires ||
+        user.email_verification_expires <= new Date(Date.now() + 60 * 60 * 1000)
       ) {
-        user.emailVerificationToken = this.generateVerificationToken();
-        user.emailVerificationExpires = new Date(
+        user.email_verification_token = this.generateVerificationToken();
+        user.email_verification_expires = new Date(
           Date.now() + 24 * 60 * 60 * 1000,
         ); // 24 hours
       }
 
       // Update resend tracking
-      user.lastVerificationEmailSent = new Date();
-      attempts += 1;
+      user.last_verification_email_sent = new Date();
 
       await user.save();
 
-      let business;
-      if (user.type === UserType.VENDOR) {
-        business = await this.businessModel.findOne({ vendor: user._id });
-        await this.sendVerificationEmail(user, business);
-      } else {
-        await this.sendVerificationEmail(user);
-      }
+      this.sendVerificationEmail(user);
 
       this.logger.log(`Verification email resent to: ${email}`);
 
@@ -513,7 +494,7 @@ export class AuthService {
     verified: boolean;
     userType: UserType;
     status: string;
-    emailVerifiedAt?: Date;
+    email_verifiedAt?: Date;
   }> {
     const user = await this.userModel.findById(userId);
     if (!user) {
@@ -521,10 +502,10 @@ export class AuthService {
     }
 
     return {
-      verified: user.emailVerified,
+      verified: user.email_verified,
       userType: user.type,
       status: user.status,
-      emailVerifiedAt: user.emailVerifiedAt,
+      email_verifiedAt: user.email_verified_at,
     };
   }
 
@@ -535,20 +516,18 @@ export class AuthService {
     try {
       const vendor = await this.userModel
         .findOne({ email, type: UserType.VENDOR })
-        .select('+hashedPassword')
-        .populate('role')
-        .populate('business');
+        .select('+hashed_password');
 
       if (!vendor) {
         throw new UnauthorizedException('Invalid credentials');
       }
 
       // Check if email is verified
-      if (!vendor.emailVerified) {
+      if (!vendor.email_verified) {
         const now = new Date();
         if (
-          vendor.emailVerificationExpires &&
-          vendor.emailVerificationExpires < now
+          vendor.email_verification_expires &&
+          vendor.email_verification_expires < now
         ) {
           await this.resendVerificationEmail(vendor.email);
           return;
@@ -567,7 +546,7 @@ export class AuthService {
 
       const validPassword = await bcrypt.compare(
         password,
-        vendor.hashedPassword,
+        vendor.hashed_password,
       );
       if (!validPassword) {
         throw new UnauthorizedException('Invalid credentials');
@@ -579,7 +558,7 @@ export class AuthService {
         email: vendor.email,
         type: UserType.VENDOR,
       });
-      const hashedRt = await bcrypt.hash(token.refreshToken, 10);
+      const hashedRt = await bcrypt.hash(token.refresh_token, 10);
       await this.userModel.findByIdAndUpdate(vendor._id, {
         refreshToken: hashedRt,
       });
@@ -601,10 +580,10 @@ export class AuthService {
    */
   async refreshTokens(userId: string, refreshToken: string): Promise<Tokens> {
     const user = await this.userModel.findById(userId);
-    if (!user || !user.refreshToken) {
+    if (!user || !user.refresh_token) {
       throw new UnauthorizedException('Access denied');
     }
-    const rtMatches = await bcrypt.compare(refreshToken, user.refreshToken);
+    const rtMatches = await bcrypt.compare(refreshToken, user.refresh_token);
     if (!rtMatches) {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -619,7 +598,7 @@ export class AuthService {
 
     const tokens = await this.generateToken(jwtPayload);
 
-    const hashedRt = await bcrypt.hash(tokens.refreshToken, 10);
+    const hashedRt = await bcrypt.hash(tokens.refresh_token, 10);
     await this.userModel.findByIdAndUpdate(user._id, {
       refreshToken: hashedRt,
     });
@@ -634,7 +613,7 @@ export class AuthService {
     try {
       const user = await this.userModel
         .findOne({ email, type: UserType.CUSTOMER })
-        .select('+hashedPassword')
+        .select('+hashed_password')
         .populate('role');
 
       if (!user) {
@@ -642,11 +621,11 @@ export class AuthService {
       }
 
       // Check if email is verified
-      if (!user.emailVerified) {
+      if (!user.email_verified) {
         const now = new Date();
         if (
-          user.emailVerificationExpires &&
-          user.emailVerificationExpires < now
+          user.email_verification_expires &&
+          user.email_verification_expires < now
         ) {
           await this.resendVerificationEmail(user.email);
           return;
@@ -663,7 +642,10 @@ export class AuthService {
         );
       }
 
-      const validPassword = await bcrypt.compare(password, user.hashedPassword);
+      const validPassword = await bcrypt.compare(
+        password,
+        user.hashed_password,
+      );
       if (!validPassword) {
         throw new UnauthorizedException('Invalid credentials');
       }
@@ -698,14 +680,17 @@ export class AuthService {
     try {
       const user = await this.userModel
         .findOne({ email, status: 'active' })
-        .select('+hashedPassword')
+        .select('+hashed_password')
         .populate('role');
 
       if (!user) {
         return null;
       }
 
-      const validPassword = await bcrypt.compare(password, user.hashedPassword);
+      const validPassword = await bcrypt.compare(
+        password,
+        user.hashed_password,
+      );
       if (!validPassword) {
         return null;
       }
@@ -735,8 +720,8 @@ export class AuthService {
     ]);
 
     return {
-      accessToken: at,
-      refreshToken: rt,
+      access_token: at,
+      refresh_token: rt,
     };
   }
 
@@ -808,33 +793,32 @@ export class AuthService {
    */
   async changePassword(
     userId: string,
-    currentPassword: string,
-    newPassword: string,
+    { current_password, new_password }: ChangePasswordDto,
   ): Promise<{ message: string }> {
     const user = await this.userModel
       .findById(userId)
-      .select('+hashedPassword');
+      .select('+hashed_password');
 
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
     const validCurrentPassword = await bcrypt.compare(
-      currentPassword,
-      user.hashedPassword,
+      current_password,
+      user.hashed_password,
     );
     if (!validCurrentPassword) {
       throw new BadRequestException('Current password is incorrect');
     }
 
-    user.hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.hashed_password = await bcrypt.hash(new_password, 10);
     await user.save();
 
     // Send password updated email
     try {
       await this.mailService.sendPasswordUpdatedEmail(
         user.email,
-        user.fullName,
+        user.full_name,
       );
     } catch (error) {
       this.logger.error('Failed to send password updated email:', error);
@@ -857,9 +841,9 @@ export class AuthService {
     const resetToken = this.generateVerificationToken();
 
     // Use passwordResetCode field from schema
-    user.passwordResetCode = {
+    user.password_reset_code = {
       pin: resetToken,
-      expireAt: new Date(Date.now() + 1 * 60 * 60 * 1000), // 1 hour
+      expire_at: new Date(Date.now() + 1 * 60 * 60 * 1000), // 1 hour
     };
 
     await user.save();
@@ -869,7 +853,7 @@ export class AuthService {
     try {
       await this.mailService.sendResetEmail(
         user.email,
-        user.fullName,
+        user.full_name,
         resetLink,
       );
     } catch (error) {
@@ -896,8 +880,8 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
-    user.hashedPassword = await bcrypt.hash(newPassword, 10);
-    user.passwordResetCode = undefined;
+    user.hashed_password = await bcrypt.hash(newPassword, 10);
+    user.password_reset_code = undefined;
 
     await user.save();
 
@@ -905,7 +889,7 @@ export class AuthService {
     try {
       await this.mailService.sendPasswordResetSuccessEmail(
         user.email,
-        user.fullName,
+        user.full_name,
       );
     } catch (error) {
       this.logger.error('Failed to send password reset success email:', error);
@@ -921,9 +905,9 @@ export class AuthService {
     const userObj = user.toObject();
 
     // Remove sensitive fields
-    delete userObj.hashedPassword;
-    delete userObj.emailVerificationToken;
-    delete userObj.emailVerificationExpires;
+    delete userObj.hashed_password;
+    delete userObj.email_verification_token;
+    delete userObj.email_verification_expires;
     delete userObj.refreshToken;
     delete userObj.verification;
     delete userObj.passwordResetCode;

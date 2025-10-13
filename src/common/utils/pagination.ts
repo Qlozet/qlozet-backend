@@ -17,31 +17,31 @@ export class Utils {
     page: number = 1,
     limit: number = 10,
   ): Promise<{
-    totalItems: number;
+    total_items: number;
     data: T[];
-    totalPages: number;
-    currentPage: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-    pageSize: number;
+    total_pages: number;
+    current_page: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    page_size: number;
   }> {
-    const totalItems = Number(details.count) || 0;
+    const total_items = Number(details.count) || 0;
     const data = Array.isArray(details.rows) ? details.rows : [];
-    const currentPage = Number.isInteger(page) && page > 0 ? page : 1;
-    const pageSize = Number.isInteger(limit) && limit > 0 ? limit : 10;
-    const totalPages = Math.ceil(totalItems / pageSize);
+    const current_page = Number.isInteger(page) && page > 0 ? page : 1;
+    const page_size = Number.isInteger(limit) && limit > 0 ? limit : 10;
+    const total_pages = Math.ceil(total_items / page_size);
 
-    const hasNextPage = currentPage < totalPages;
-    const hasPreviousPage = currentPage > 1;
+    const has_next_page = current_page < total_pages;
+    const has_previous_page = current_page > 1;
 
     return {
-      totalItems,
+      total_items,
       data,
-      totalPages: totalPages || 0,
-      currentPage,
-      hasNextPage,
-      hasPreviousPage,
-      pageSize,
+      total_pages: total_pages || 0,
+      current_page,
+      has_next_page,
+      has_previous_page,
+      page_size,
     };
   }
 }

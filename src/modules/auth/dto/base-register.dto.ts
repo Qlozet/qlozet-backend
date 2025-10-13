@@ -10,27 +10,24 @@ import {
 } from 'class-validator';
 
 export class BaseRegistrationDto {
-  @ApiProperty({
-    example: 'john.doe@example.com',
-    description: 'User email address',
-  })
-  @IsEmail()
+  @ApiProperty({ description: 'Full name of the customer' })
   @IsNotEmpty()
+  @IsString()
+  full_name: string;
+
+  @ApiProperty({ description: 'Customer email' })
+  @IsNotEmpty()
+  @IsEmail()
   email: string;
 
-  @ApiProperty({ example: 'Password123!', description: 'User password' })
-  @IsString()
+  @ApiProperty({ description: 'Customer phone number' })
   @IsNotEmpty()
+  @IsPhoneNumber()
+  phone_number: string;
+
+  @ApiProperty({ description: 'Customer password', minLength: 6 })
+  @IsNotEmpty()
+  @IsString()
   @MinLength(6)
   password: string;
-
-  @ApiProperty({ example: 'John Doe', description: 'Full name of the user' })
-  @IsString()
-  @IsNotEmpty()
-  fullName: string;
-
-  @ApiPropertyOptional({ example: '+1234567890', description: 'Phone number' })
-  @IsPhoneNumber()
-  @IsOptional()
-  phoneNumber?: string;
 }

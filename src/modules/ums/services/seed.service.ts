@@ -548,10 +548,10 @@ export class SeedService {
         description: 'Full system access with all permissions',
         type: RoleType.PLATFORM,
         level: 1,
-        isDefault: false,
-        isSystem: true,
-        allowedUserTypes: [UserType.PLATFORM],
-        permissionNames: Array.from(permissions.keys()), // All permissions
+        is_default: false,
+        is_system: true,
+        allowed_user_types: [UserType.PLATFORM],
+        permission_names: Array.from(permissions.keys()), // All permissions
       },
       {
         name: 'admin',
@@ -559,10 +559,10 @@ export class SeedService {
           'Administrative access with most system management permissions',
         type: RoleType.PLATFORM,
         level: 2,
-        isDefault: false,
-        isSystem: true,
-        allowedUserTypes: [UserType.PLATFORM],
-        permissionNames: [
+        is_default: false,
+        is_system: true,
+        allowed_user_types: [UserType.PLATFORM],
+        permission_names: [
           'view_users',
           'create_users',
           'edit_users',
@@ -610,10 +610,10 @@ export class SeedService {
         description: 'Vendor access for managing products, orders, and store',
         type: RoleType.VENDOR,
         level: 4,
-        isDefault: true,
-        isSystem: true,
-        allowedUserTypes: [UserType.VENDOR],
-        permissionNames: [
+        is_default: true,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
           'view_vendors',
           'view_vendor_analytics',
           'view_products',
@@ -643,10 +643,10 @@ export class SeedService {
         description: 'Customer access for shopping and account management',
         type: RoleType.PLATFORM,
         level: 5,
-        isDefault: true,
-        isSystem: true,
-        allowedUserTypes: [UserType.CUSTOMER],
-        permissionNames: [
+        is_default: true,
+        is_system: true,
+        allowed_user_types: [UserType.CUSTOMER],
+        permission_names: [
           'view_products',
           'view_orders',
           'create_orders',
@@ -662,10 +662,10 @@ export class SeedService {
         description: 'Content moderation and user management',
         type: RoleType.PLATFORM,
         level: 3,
-        isDefault: false,
-        isSystem: true,
-        allowedUserTypes: [UserType.PLATFORM],
-        permissionNames: [
+        is_default: false,
+        is_system: true,
+        allowed_user_types: [UserType.PLATFORM],
+        permission_names: [
           'view_users',
           'edit_users',
           'ban_users',
@@ -698,7 +698,7 @@ export class SeedService {
     for (const roleData of rolesData) {
       let role = await this.roleModel.findOne({ name: roleData.name });
 
-      const permissionIds = roleData.permissionNames
+      const permissionIds = roleData.permission_names
         .map((name) => permissions.get(name)?._id)
         .filter(Boolean) as Schema.Types.ObjectId[];
 
@@ -709,9 +709,9 @@ export class SeedService {
           type: roleData.type,
           level: roleData.level,
           permissions: permissionIds,
-          isDefault: roleData.isDefault,
-          isSystem: roleData.isSystem,
-          allowedUserTypes: roleData.allowedUserTypes,
+          is_default: roleData.is_default,
+          is_system: roleData.is_system,
+          allowed_user_types: roleData.allowed_user_types,
         });
         await role.save();
         this.logger.log(`Created role: ${role.name}`);
@@ -734,7 +734,7 @@ export class SeedService {
   private async seedUsersAndBusinesses(
     roles: Map<string, RoleDocument>,
   ): Promise<void> {
-    const hashedPassword = await bcrypt.hash('Password123!', 12);
+    const hashed_password = await bcrypt.hash('Password123!', 12);
 
     // Seed Super Admin (Platform User)
     const superAdminRole = roles.get('super_admin');
@@ -745,12 +745,12 @@ export class SeedService {
       if (!existingSuperAdmin) {
         const superAdmin = new this.userModel({
           email: 'superadmin@example.com',
-          hashedPassword,
-          fullName: 'Super Administrator',
-          phoneNumber: '+1234567890',
+          hashed_password,
+          full_name: 'Super Administrator',
+          phone_number: '+1234567890',
           type: UserType.PLATFORM,
           role: superAdminRole._id,
-          emailVerified: true,
+          email_verified: true,
         });
         await superAdmin.save();
         this.logger.log('Created super admin: superadmin@example.com');
@@ -766,12 +766,12 @@ export class SeedService {
       if (!existingAdmin) {
         const admin = new this.userModel({
           email: 'admin@example.com',
-          hashedPassword,
-          fullName: 'System Administrator',
-          phoneNumber: '+1234567891',
+          hashed_password,
+          full_name: 'System Administrator',
+          phone_number: '+1234567891',
           type: UserType.PLATFORM,
           role: adminRole._id,
-          emailVerified: true,
+          email_verified: true,
         });
         await admin.save();
         this.logger.log('Created admin: admin@example.com');
@@ -787,12 +787,12 @@ export class SeedService {
       if (!existingModerator) {
         const moderator = new this.userModel({
           email: 'moderator@example.com',
-          hashedPassword,
-          fullName: 'Content Moderator',
-          phoneNumber: '+1234567894',
+          hashed_password,
+          full_name: 'Content Moderator',
+          phone_number: '+1234567894',
           type: UserType.PLATFORM,
           role: moderatorRole._id,
-          emailVerified: true,
+          email_verified: true,
         });
         await moderator.save();
         this.logger.log('Created moderator: moderator@example.com');
@@ -808,17 +808,17 @@ export class SeedService {
       if (!existingCustomer) {
         const customer = new this.userModel({
           email: 'customer@example.com',
-          hashedPassword,
-          fullName: 'John Customer',
-          phoneNumber: '+1234567892',
+          hashed_password,
+          full_name: 'John Customer',
+          phone_number: '+1234567892',
           type: UserType.CUSTOMER,
           role: customerRole._id,
-          emailVerified: true,
+          email_verified: true,
           dob: new Date('1990-01-01'),
-          wearsPreference: 'man',
-          aestheticPreferences: ['minimalist', 'vintage'],
-          bodyFit: ['petite', 'curve'],
-          isEmailPreferenceSelected: true,
+          wears_preference: 'man',
+          aesthetic_preferences: ['minimalist', 'vintage'],
+          body_fit: ['petite', 'curve'],
+          is_email_preference_selected: true,
         });
         await customer.save();
         this.logger.log('Created customer: customer@example.com');
@@ -831,17 +831,17 @@ export class SeedService {
       if (!existingCustomer2) {
         const customer2 = new this.userModel({
           email: 'jane@example.com',
-          hashedPassword,
-          fullName: 'Jane Smith',
-          phoneNumber: '+1234567893',
+          hashed_password,
+          full_name: 'Jane Smith',
+          phone_number: '+1234567893',
           type: UserType.CUSTOMER,
           role: customerRole._id,
-          emailVerified: true,
+          email_verified: true,
           dob: new Date('1992-05-15'),
-          wearsPreference: 'woman',
-          aestheticPreferences: ['elegant', 'classic'],
-          bodyFit: ['petite', 'curve'],
-          isEmailPreferenceSelected: false,
+          wears_preference: 'woman',
+          aesthetic_preferences: ['elegant', 'classic'],
+          body_fit: ['petite', 'curve'],
+          is_email_preference_selected: false,
         });
         await customer2.save();
         this.logger.log('Created customer: jane@example.com');
@@ -858,34 +858,33 @@ export class SeedService {
         // Create Vendor User
         const vendorUser = new this.userModel({
           email: 'vendor@example.com',
-          hashedPassword,
-          fullName: 'Jane Vendor',
-          phoneNumber: '+1234567895',
+          hashed_password,
+          full_name: 'Jane Vendor',
+          phone_number: '+1234567895',
           type: UserType.VENDOR,
           role: vendorRole._id,
-          emailVerified: true,
+          email_verified: true,
         });
         await vendorUser.save();
         this.logger.log('Created vendor user: vendor@example.com');
 
         // Create Business for the Vendor
         const business = new this.businessModel({
-          businessName: 'Fashion Store Inc',
-          businessEmail: 'business@fashionstore.com',
-          businessPhoneNumber: '+1234567896',
-          businessAddress: '123 Business Street, New York, NY 10001',
+          business_name: 'Fashion Store Inc',
+          business_email: 'business@fashionstore.com',
+          business_phone_number: '+1234567896',
+          business_address: '123 Business Street, New York, NY 10001',
           personalName: 'Jane Vendor',
-          personalPhoneNumber: '+1234567895',
-          displayPictureUrl: 'https://example.com/vendor.jpg',
-          businessLogoUrl: 'https://example.com/logo.jpg',
-          coverImageUrl: 'https://example.com/cover.jpg',
+          display_picture_url: 'https://example.com/vendor.jpg',
+          business_logo_url: 'https://example.com/logo.jpg',
+          cover_image_url: 'https://example.com/cover.jpg',
           vendor: vendorUser._id,
           description: 'We sell fashionable clothing for all ages',
           country: 'US',
           city: 'New York',
           state: 'NY',
-          zipCode: '10001',
-          yearFounded: '2020',
+          zip_code: '10001',
+          year_founded: '2020',
           website: 'https://fashionstore.com',
         });
         await business.save();
@@ -904,33 +903,32 @@ export class SeedService {
       if (!existingVendor2) {
         const vendorUser2 = new this.userModel({
           email: 'techgadgets@example.com',
-          hashedPassword,
-          fullName: 'Mike Tech',
-          phoneNumber: '+1234567897',
+          hashed_password,
+          full_name: 'Mike Tech',
+          phone_number: '+1234567897',
           type: UserType.VENDOR,
           role: vendorRole._id,
-          emailVerified: true,
+          email_verified: true,
         });
         await vendorUser2.save();
         this.logger.log('Created vendor user: techgadgets@example.com');
 
         const business2 = new this.businessModel({
-          businessName: 'Tech Gadgets Store',
-          businessEmail: 'business@techgadgets.com',
-          businessPhoneNumber: '+1234567898',
-          businessAddress: '456 Tech Avenue, San Francisco, CA 94102',
+          business_name: 'Tech Gadgets Store',
+          business_email: 'business@techgadgets.com',
+          business_phone_number: '+1234567898',
+          business_address: '456 Tech Avenue, San Francisco, CA 94102',
           personalName: 'Mike Tech',
-          personalPhoneNumber: '+1234567897',
-          displayPictureUrl: 'https://example.com/techvendor.jpg',
-          businessLogoUrl: 'https://example.com/techlogo.jpg',
-          coverImageUrl: 'https://example.com/techcover.jpg',
+          display_picture_url: 'https://example.com/techvendor.jpg',
+          business_logo_url: 'https://example.com/techlogo.jpg',
+          cover_image_url: 'https://example.com/techcover.jpg',
           vendor: vendorUser2._id,
           description: 'Latest tech gadgets and electronics',
           country: 'US',
           city: 'San Francisco',
           state: 'CA',
-          zipCode: '94102',
-          yearFounded: '2018',
+          zip_code: '94102',
+          year_founded: '2018',
           website: 'https://techgadgets.com',
         });
         await business2.save();

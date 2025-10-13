@@ -39,7 +39,7 @@ export class Permission {
   module: PermissionModule;
 
   @Prop({ default: true })
-  isActive: boolean;
+  is_active: boolean;
 }
 
 export const PermissionSchema = SchemaFactory.createForClass(Permission);

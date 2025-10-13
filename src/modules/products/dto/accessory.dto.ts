@@ -1,41 +1,47 @@
-// accessory.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsArray, IsOptional, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
-import { VariantDto } from './base.dto';
+import { VariantDto } from './variant.dto';
+import { ImageDto } from './product.dto';
+import { TaxonomyDto } from './taxonomy.dto';
 
 export class AccessoryDto {
-  @ApiProperty({ example: 'Leather Belt' })
+  @ApiProperty({ description: 'Accessory name' })
   @IsString()
   name: string;
 
-  @ApiPropertyOptional({ example: 'High-quality genuine leather' })
+  @ApiPropertyOptional({ description: 'Accessory description' })
   @IsOptional()
   @IsString()
   description?: string;
 
-  @ApiProperty({ example: 'belt' })
-  @IsString()
-  product_type: string;
+  @ApiProperty({ example: 5000, description: 'Base price in Naira' })
+  @IsNumber()
+  @Min(0)
+  base_price: number;
 
-  @ApiProperty({ example: 'accessories' })
-  @IsString()
-  category: string;
+  @ApiProperty({ type: TaxonomyDto, description: 'Taxonomy' })
+  @ValidateNested({ each: true })
+  @Type(() => TaxonomyDto)
+  taxonomy: TaxonomyDto;
 
-  @ApiPropertyOptional({ example: 'belts' })
-  @IsOptional()
-  @IsString()
-  subcategory?: string;
-
-  @ApiPropertyOptional({ example: ['leather', 'formal'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tags?: string[];
-
-  @ApiProperty({ type: [VariantDto] })
+  @ApiProperty({ type: [VariantDto], description: 'Accessory variants' })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VariantDto)
   variants: VariantDto[];
+
+  @ApiPropertyOptional({ type: [ImageDto], description: 'Accessory images' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImageDto)
+  images?: ImageDto[];
 }

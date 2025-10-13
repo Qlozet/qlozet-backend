@@ -6,6 +6,7 @@ import {
   HttpStatus,
   UsePipes,
   ValidationPipe,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -52,14 +53,14 @@ export class AuthController {
       sample: {
         summary: 'Sample vendor registration',
         value: {
-          businessName: 'Fashion Store Ltd',
-          businessEmail: 'business@fashionstore.com',
-          businessPhoneNumber: '+2348012345678',
-          businessAddress: '123 Fashion Street, Lagos Island, Lagos',
-          personalName: 'John Doe',
-          personalEmail: 'kendo@fashionstore.com',
-          personalPhoneNumber: '+2348012345679',
-          nationalIdentityNumber: '12345678901',
+          business_name: 'Fashion Store Ltd',
+          business_email: 'business@fashionstore.com',
+          businessP_pone_number: '+2348012345678',
+          business_address: '123 Fashion Street, Lagos Island, Lagos',
+          personal_name: 'John Doe',
+          personal_email: 'kendo@fashionstore.com',
+          personal_phone_number: '+2348012345679',
+          national_identity_number: '12345678901',
           password: 'SecurePassword123',
         },
       },
@@ -97,10 +98,8 @@ export class AuthController {
       sample: {
         summary: 'Sample customer registration',
         value: {
-          fullName: 'John Doe',
-          firstName: 'John',
-          lastName: 'Doe',
-          phoneNumber: '+2348012345678',
+          full_name: 'John Doe',
+          phone_number: '+2348012345678',
           email: 'john.doe@example.com',
           password: 'SecurePassword123',
         },
@@ -268,13 +267,12 @@ export class AuthController {
   @ApiBody({
     type: ChangePasswordDto,
   })
-  async changePassword(@Body() changePasswordDto: ChangePasswordDto) {
-    const { userId, currentPassword, newPassword } = changePasswordDto;
-    return this.authService.changePassword(
-      userId,
-      currentPassword,
-      newPassword,
-    );
+  async changePassword(
+    @Body() changePasswordDto: ChangePasswordDto,
+    @Req() req: any,
+  ) {
+    const { current_password, new_password } = changePasswordDto;
+    return this.authService.changePassword(req.user.id, changePasswordDto);
   }
   @Public()
   @Post('refresh')

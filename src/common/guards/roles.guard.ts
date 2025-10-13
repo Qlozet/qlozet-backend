@@ -65,7 +65,6 @@ export class RolesGuard implements CanActivate {
         `Access denied — requires one of: ${requiredRoles.join(', ')}`,
       );
     }
-
     // Attach user to request
     request.user = user;
     return true;

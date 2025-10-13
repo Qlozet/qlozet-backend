@@ -177,8 +177,8 @@ export class UserService {
       emailPreferences?: string[];
       isEmailPreferenceSelected?: boolean;
     },
-  ): Promise<UserDocument> {
-    return this.update(userId, preferences);
+  ) {
+    // return this.update(userId, preferences);
   }
 
   /**
@@ -191,7 +191,7 @@ export class UserService {
   ): Promise<void> {
     const user = await this.userModel
       .findById(userId)
-      .select('+hashedPassword');
+      .select('+hashed_password');
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -199,20 +199,20 @@ export class UserService {
 
     const validCurrentPassword = await bcrypt.compare(
       currentPassword,
-      user.hashedPassword,
+      user.hashed_password,
     );
     if (!validCurrentPassword) {
       throw new BadRequestException('Current password is incorrect');
     }
 
-    user.hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.hashed_password = await bcrypt.hash(newPassword, 10);
     await user.save();
 
     // Send notification email
     try {
       await this.mailService.sendPasswordUpdatedEmail(
         user.email,
-        user.fullName,
+        user.full_name,
       );
     } catch (error) {
       this.logger.error('Failed to send password updated email:', error);
@@ -254,15 +254,15 @@ export class UserService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
-    user.hashedPassword = await bcrypt.hash(newPassword, 10);
-    user.passwordResetCode = undefined;
+    user.hashed_password = await bcrypt.hash(newPassword, 10);
+    user.password_reset_code = undefined;
     await user.save();
 
     // Send success email
     try {
       await this.mailService.sendPasswordResetSuccessEmail(
         user.email,
-        user.fullName,
+        user.full_name,
       );
     } catch (error) {
       this.logger.error('Failed to send password reset success email:', error);
@@ -274,11 +274,11 @@ export class UserService {
    */
   async verifyEmail(userId: string): Promise<UserDocument> {
     return this.update(userId, {
-      emailVerified: true,
-      emailVerificationToken: undefined,
-      emailVerificationExpires: undefined,
+      email_verified: true,
+      email_verification_token: undefined,
+      email_verification_expires: undefined,
       status: 'active',
-      emailVerifiedAt: new Date(),
+      email_verified_at: new Date(),
     });
   }
 
@@ -292,14 +292,17 @@ export class UserService {
     try {
       const user = await this.userModel
         .findOne({ email, status: 'active' })
-        .select('+hashedPassword')
+        .select('+hashed_password')
         .populate('role');
 
       if (!user) {
         return null;
       }
 
-      const validPassword = await bcrypt.compare(password, user.hashedPassword);
+      const validPassword = await bcrypt.compare(
+        password,
+        user.hashed_password,
+      );
       return validPassword ? user : null;
     } catch (error) {
       this.logger.error(
@@ -351,7 +354,7 @@ export class UserService {
 
     // Remove sensitive fields
     const sensitiveFields = [
-      'hashedPassword',
+      'hashed_password',
       'emailVerificationToken',
       'emailVerificationExpires',
       'refreshToken',

@@ -23,7 +23,7 @@ export class ColorDto {
 export class ImageDto {
   @ApiProperty({ example: 'image_123', description: 'Cloudinary public ID' })
   @IsString()
-  publicId: string;
+  public_id: string;
 
   @ApiProperty({
     example: 'https://example.com/image.jpg',

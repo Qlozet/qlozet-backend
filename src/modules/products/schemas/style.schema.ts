@@ -1,7 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
-import { Image, ImageSchema } from './product.schema';
 import { Variant, VariantSchema } from './variant.schema';
+import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
+import { ProductImage, ProductImageSchema } from './product-image.schema';
 
 export type StyleDocument = Style & Document;
 
@@ -14,26 +15,20 @@ export class Style {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true, unique: true })
-  styleCode: string;
+  @Prop({ required: true })
+  style_code: string;
 
-  @Prop({ required: true, enum: ['men', 'women', 'unisex', 'kids'] })
-  audience: string;
+  @Prop({ type: TaxonomySchema, required: true })
+  taxonomy: Taxonomy;
 
-  @Prop([String])
-  categories: string[];
-
-  @Prop([String])
-  tags: string[];
-
-  @Prop({ type: [ImageSchema], default: [] })
-  images?: Image[];
+  @Prop({ type: [ProductImageSchema], default: [] })
+  images: ProductImage[];
 
   @Prop({ min: 0 })
-  price?: number;
+  price: number;
 
   @Prop()
-  minWidthCm?: number;
+  min_width_cm?: number;
 
   @Prop()
   notes?: string;
@@ -50,8 +45,6 @@ export class Style {
       }[];
     }
   >;
-  @Prop({ type: [VariantSchema], required: true, default: [] })
-  variants: Variant[];
 }
 
 export const StyleSchema = SchemaFactory.createForClass(Style);

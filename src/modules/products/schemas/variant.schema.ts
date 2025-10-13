@@ -1,17 +1,18 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Color, ColorSchema, Image, ImageSchema } from './product.schema';
+import { Color, ColorSchema } from './product.schema';
+import { ProductImage, ProductImageSchema } from './product-image.schema';
 
 export type VariantDocument = Variant & Document;
 
-@Schema({ _id: false })
+@Schema({ timestamps: true })
 export class Variant {
   @Prop({ type: [ColorSchema], default: [] })
   colors?: Color[];
   @Prop()
   size?: string;
-  @Prop({ type: [ImageSchema], default: [] })
-  images?: Image[];
+  @Prop({ type: [ProductImageSchema], default: [] })
+  images?: ProductImage[];
   @Prop({ min: 0 })
   stock: number;
   @Prop({ min: 0 })

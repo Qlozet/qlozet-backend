@@ -60,20 +60,20 @@ export class Role {
   permissions: MongooseSchema.Types.ObjectId[];
 
   @Prop({ default: false })
-  isDefault: boolean;
+  is_default: boolean;
 
   @Prop({ default: false })
-  isSystem: boolean;
+  is_system: boolean;
 
   @Prop({ default: true })
-  isActive: boolean;
+  is_active: boolean;
 
   @Prop({
     type: [String],
     enum: [UserType.CUSTOMER, UserType.VENDOR, UserType.PLATFORM],
     default: [UserType.CUSTOMER],
   })
-  allowedUserTypes: string[];
+  allowed_user_types: string[];
 }
 
 export const RoleSchema = SchemaFactory.createForClass(Role);
