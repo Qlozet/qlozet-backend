@@ -24,16 +24,19 @@ import {
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { Warehouse } from './schemas/warehouse.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { VendorRole } from '../ums/schemas';
 
 @ApiTags('Business')
 @ApiBearerAuth('access-token')
-@Controller('collections')
+@Controller('business')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
 
-  @Post()
+  @Roles(VendorRole.OWNER)
+  @Post('warehouse')
   @ApiOperation({ summary: 'Create a new warehouse' })
   @ApiResponse({ status: 201, description: 'Warehouse successfully created' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
@@ -44,6 +47,27 @@ export class BusinessController {
   ): Promise<Warehouse> {
     try {
       return await this.businessService.create(dto, req.user.id);
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+  @Roles(VendorRole.OWNER)
+  @Post('warehouse/:id/activate')
+  @ApiOperation({ summary: 'Activate a warehouse (only one active at a time)' })
+  @ApiResponse({ status: 200, description: 'Warehouse activated successfully' })
+  @ApiResponse({ status: 404, description: 'Warehouse not found' })
+  async activateWarehouse(@Param('id') id: string, @Req() req: any) {
+    try {
+      const businessId = req.user.business;
+      const warehouse = await this.businessService.activateWarehouse(
+        id,
+        businessId,
+      );
+      return {
+        data: warehouse,
+        message:
+          'Warehouse activated successfully. Other warehouses have been deactivated.',
+      };
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }

@@ -40,13 +40,4 @@ export class CreateWarehouseDto {
   })
   @IsEmail()
   contact_email: string;
-
-  @ApiProperty({
-    description: 'Current status of the warehouse',
-    enum: ['active', 'inactive'],
-    default: 'active',
-    example: 'active',
-  })
-  @IsEnum(['active', 'inactive'])
-  status: 'active' | 'inactive';
 }
