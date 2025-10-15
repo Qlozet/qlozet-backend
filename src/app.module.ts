@@ -13,6 +13,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ProductModule } from './modules/products/products.module';
 import { UmsModule } from './modules/ums/ums.module';
 import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
+import { BusinessModule } from './modules/business/business.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
     NotificationsModule,
     UmsModule,
     CloudinaryModule,
+    BusinessModule,
   ],
   controllers: [AppController],
   providers: [

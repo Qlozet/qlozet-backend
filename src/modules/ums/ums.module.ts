@@ -12,6 +12,9 @@ import { MailService } from '../notifications/mail/mail.service';
 import { UserController } from './users.controller';
 import { Product, ProductSchema } from '../products/schemas';
 import { ProductModule } from '../products/products.module';
+import { TeamService } from './services/team.service';
+import { TeamMember, TeamMemberSchema } from './schemas/team.schema';
+import { JwtService } from '@nestjs/jwt';
 
 @Module({
   imports: [
@@ -21,6 +24,7 @@ import { ProductModule } from '../products/products.module';
       { name: User.name, schema: UserSchema },
       { name: Business.name, schema: BusinessSchema },
       { name: Product.name, schema: ProductSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
     ]),
     ProductModule,
   ],
@@ -30,7 +34,10 @@ import { ProductModule } from '../products/products.module';
     PermissionService,
     SeedService,
     UserService,
+    TeamService,
     MailService,
+    TeamService,
+    JwtService,
   ],
   exports: [RolesService, PermissionService, SeedService, UserService],
 })

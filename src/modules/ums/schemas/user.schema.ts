@@ -60,11 +60,8 @@ export class User {
   })
   status: string;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
-  business?: Types.ObjectId;
-
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Role', required: true })
-  role: Types.ObjectId;
+  @Prop({ default: false })
+  must_change_password: boolean;
 
   @Prop({ type: String, select: true })
   refresh_token?: string;
@@ -86,7 +83,7 @@ export class User {
 
   @Prop({ type: Date })
   email_verified_at?: Date;
-  @Prop({ type: String, default: 'woman' })
+  @Prop({ type: String, default: null })
   wears_preference: string;
 
   @Prop({ type: [String], default: [] })
@@ -97,6 +94,12 @@ export class User {
 
   @Prop({ type: Boolean, default: false })
   is_email_preference_selected: boolean;
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Business',
+    default: null,
+  })
+  business: Types.ObjectId;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

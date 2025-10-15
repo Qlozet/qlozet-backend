@@ -18,6 +18,7 @@ import { PermissionSchema } from '../ums/schemas/permission.schema';
 import { PermissionService } from '../ums/services/permissions.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
+import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { UserService } from '../ums/services';
       { name: Role.name, schema: RoleSchema },
       { name: Business.name, schema: BusinessSchema },
       { name: Permission.name, schema: PermissionSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
     ]),
   ],
   controllers: [AuthController],

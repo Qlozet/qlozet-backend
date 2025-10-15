@@ -8,13 +8,7 @@ import {
   ValidationPipe,
   Req,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBody,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { VendorRegisterDto, CustomerRegistrationDto } from './dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
@@ -55,7 +49,7 @@ export class AuthController {
         value: {
           business_name: 'Fashion Store Ltd',
           business_email: 'business@fashionstore.com',
-          businessP_pone_number: '+2348012345678',
+          business_phone_number: '+2348012345678',
           business_address: '123 Fashion Street, Lagos Island, Lagos',
           personal_name: 'John Doe',
           personal_email: 'kendo@fashionstore.com',
@@ -271,7 +265,6 @@ export class AuthController {
     @Body() changePasswordDto: ChangePasswordDto,
     @Req() req: any,
   ) {
-    const { current_password, new_password } = changePasswordDto;
     return this.authService.changePassword(req.user.id, changePasswordDto);
   }
   @Public()

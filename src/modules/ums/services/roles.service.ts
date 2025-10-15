@@ -55,7 +55,13 @@ export class RolesService {
   }
 
   async getVendorRoles(): Promise<RoleDocument[]> {
-    return this.findByType(RoleType.VENDOR);
+    return this.roleModel
+      .find({
+        type: RoleType.VENDOR,
+        name: { $ne: 'Owner' }, // exclude owner
+      })
+      .sort({ createdAt: 1 })
+      .exec();
   }
 
   async getPlatformRoles(): Promise<RoleDocument[]> {

@@ -168,11 +168,25 @@ export class Business {
     };
   };
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
-  vendor: Types.ObjectId;
-
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
-  created_by?: Types.ObjectId;
+  @Prop({
+    type: {
+      id: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
+      name: String,
+      email: String,
+    },
+    default: null,
+  })
+  created_by?: {
+    id?: Types.ObjectId;
+    name?: string;
+    email?: string;
+  };
+  @Prop({
+    type: [MongooseSchema.Types.ObjectId],
+    ref: 'TeamMember',
+    default: [],
+  })
+  team_members?: Types.ObjectId[];
 }
 
 export const BusinessSchema = SchemaFactory.createForClass(Business);

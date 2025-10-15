@@ -14,7 +14,12 @@ import {
   UserDocument,
   Role,
   RoleDocument,
+  BusinessDocument,
 } from '../../modules/ums/schemas';
+import {
+  TeamMember,
+  TeamMemberDocument,
+} from '../../modules/ums/schemas/team.schema';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -23,6 +28,8 @@ export class RolesGuard implements CanActivate {
     private readonly jwtService: JwtService,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
+    @InjectModel(TeamMember.name)
+    private readonly teamMemberModel: Model<TeamMemberDocument>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -48,25 +55,38 @@ export class RolesGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    const user = await this.userModel
+    const vendor = await this.userModel
       .findById(payload.id)
-      .populate<{ role: RoleDocument }>('role')
+      .populate({
+        path: 'business',
+        populate: {
+          path: 'team_members',
+          populate: { path: 'role', select: 'name permissions' },
+        },
+      })
       .exec();
 
-    if (!user) {
-      throw new ForbiddenException('User not found');
+    const business = vendor?.business as unknown as BusinessDocument;
+    const members = business?.team_members as unknown as TeamMemberDocument[];
+
+    if (!members || members.length === 0) {
+      throw new ForbiddenException(
+        'No active team members found for this user',
+      );
     }
 
-    const userRole = user.role?.name;
-    const hasRole = requiredRoles.includes(userRole);
-
+    const hasRole = members.some((tm) => {
+      const role = tm.role as unknown as RoleDocument;
+      return requiredRoles.includes(role?.name);
+    });
     if (!hasRole) {
       throw new ForbiddenException(
         `Access denied — requires one of: ${requiredRoles.join(', ')}`,
       );
     }
-    // Attach user to request
-    request.user = user;
+    request.team_members = members;
+    request.business = business;
+
     return true;
   }
 

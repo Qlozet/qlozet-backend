@@ -20,6 +20,7 @@ export enum RoleType {
 
 export enum PlatformRole {
   SUPER_ADMIN = 'super_admin',
+  ADMIN = 'admin',
   MARKETING = 'marketing',
   OPERATIONS = 'operations',
   SALES = 'sales',
@@ -28,9 +29,11 @@ export enum PlatformRole {
 }
 
 export enum VendorRole {
-  ADMIN = 'admin',
+  OWNER = 'owner',
+  CUSTOMER_SUPPORT = 'customer_support',
   OPERATIONS = 'operations',
   MARKETING = 'marketing',
+  TAILOR = 'tailor',
   DATA_ANALYST = 'data_analyst',
   SALES = 'sales',
 }

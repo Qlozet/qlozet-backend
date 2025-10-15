@@ -20,8 +20,8 @@ import {
 import { Discount } from './schemas/discount.schema';
 import { DiscountService } from './discount.service';
 import { CreateDiscountDto } from './dto/discount.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { UserType } from '../auth/dto/base-login.dto';
 import { Product } from '../products/schemas/product.schema';
 

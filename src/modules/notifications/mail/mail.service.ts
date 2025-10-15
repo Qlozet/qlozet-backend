@@ -14,6 +14,7 @@ interface EmailTemplates {
   passwordUpdated: CompiledTemplate;
   vendorWelcome: CompiledTemplate;
   customerWelcome: CompiledTemplate;
+  inviteUser: CompiledTemplate;
 }
 
 @Injectable()
@@ -53,6 +54,7 @@ export class MailService {
         passwordUpdated: await this.loadTemplate('password-updated'),
         vendorWelcome: await this.loadTemplate('vendor-welcome'),
         customerWelcome: await this.loadTemplate('customer-welcome'),
+        inviteUser: await this.loadTemplate('invite-user'),
       };
     } catch (error) {
       console.error('❌ Failed to initialize email templates:', error);
@@ -69,9 +71,6 @@ export class MailService {
       // Check if partials directory exists
       await fs.access(partialsDir);
       const partialFiles = await fs.readdir(partialsDir);
-
-      console.log(`📁 Found partials directory: ${partialsDir}`);
-      console.log(`📄 Partial files found: ${partialFiles.join(', ')}`);
 
       for (const file of partialFiles) {
         if (file.endsWith('.hbs')) {
@@ -333,6 +332,40 @@ export class MailService {
       return true;
     } catch (error) {
       console.error('❌ Failed to send customer welcome email:', error);
+      throw error;
+    }
+  }
+  async sendTeamInviteEmail(
+    to: string,
+    name: string,
+    role: string,
+    businessName: string,
+    temporaryPassword: string,
+  ) {
+    try {
+      if (!this.templates.inviteUser) {
+        throw new Error('Team invite template not loaded');
+      }
+
+      const html = this.templates.inviteUser({
+        userName: name,
+        role,
+        companyName: businessName,
+        temporaryPassword,
+        loginUrl: `${process.env.FRONTEND_URL || 'https://qoobea.com'}/login`,
+        supportEmail: process.env.SUPPORT_EMAIL || 'support@qoobea.com',
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Welcome to ${businessName} on Qlozet!`,
+        html,
+      });
+
+      console.log('✅ Team invite email sent successfully to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send team invite email:', error);
       throw error;
     }
   }

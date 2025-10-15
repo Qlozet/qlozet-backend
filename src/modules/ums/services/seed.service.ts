@@ -606,38 +606,109 @@ export class SeedService {
         ],
       },
       {
-        name: 'vendor',
-        description: 'Vendor access for managing products, orders, and store',
+        name: 'owner',
+        description:
+          'Full vendor control — manages all aspects of the business',
         type: RoleType.VENDOR,
-        level: 4,
+        level: 1,
         is_default: true,
         is_system: true,
         allowed_user_types: [UserType.VENDOR],
+        permission_names: Array.from(permissions.keys()), // Owner has all vendor permissions
+      },
+      {
+        name: 'customer_support',
+        description: 'Handles customer inquiries, support tickets, and chat',
+        type: RoleType.VENDOR,
+        level: 2,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
         permission_names: [
-          'view_vendors',
-          'view_vendor_analytics',
-          'view_products',
-          'create_products',
-          'edit_products',
-          'delete_products',
+          'view_tickets',
+          'respond_tickets',
+          'resolve_tickets',
+          'view_chat',
+          'view_orders',
+          'process_refunds',
+        ],
+      },
+      {
+        name: 'operations',
+        description: 'Manages orders, logistics, and fulfillment operations',
+        type: RoleType.VENDOR,
+        level: 3,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
           'view_orders',
           'edit_orders',
           'cancel_orders',
           'process_refunds',
           'view_sales_reports',
-          'manage_reviews',
-          'view_transactions',
-          'manage_coupons',
           'view_financial_reports',
-          'view_tickets',
-          'respond_tickets',
-          'resolve_tickets',
+        ],
+      },
+      {
+        name: 'marketing',
+        description: 'Responsible for promotions, ads, and marketing analytics',
+        type: RoleType.VENDOR,
+        level: 4,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
+          'manage_banners',
+          'manage_coupons',
+          'manage_blogs',
+          'feature_products',
           'view_dashboard',
+          'view_sales_analytics',
+          'export_data',
+        ],
+      },
+      {
+        name: 'tailor',
+        description: 'Handles tailoring, fitting, and product adjustments',
+        type: RoleType.VENDOR,
+        level: 5,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
+          'view_orders',
+          'update_order_status',
+          'view_products',
+        ],
+      },
+      {
+        name: 'data_analyst',
+        description: 'Monitors reports and analytics for performance insights',
+        type: RoleType.VENDOR,
+        level: 6,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
+          'view_dashboard',
+          'view_vendor_analytics',
           'view_sales_analytics',
           'view_product_analytics',
           'export_data',
         ],
       },
+      {
+        name: 'sales',
+        description: 'Manages sales operations and customer relations',
+        type: RoleType.VENDOR,
+        level: 7,
+        is_system: true,
+        allowed_user_types: [UserType.VENDOR],
+        permission_names: [
+          'view_products',
+          'view_orders',
+          'create_orders',
+          'cancel_orders',
+          'manage_reviews',
+        ],
+      },
+
       {
         name: 'customer',
         description: 'Customer access for shopping and account management',
@@ -657,6 +728,7 @@ export class SeedService {
           'respond_tickets',
         ],
       },
+
       {
         name: 'moderator',
         description: 'Content moderation and user management',
@@ -890,8 +962,6 @@ export class SeedService {
         await business.save();
         this.logger.log('Created business for vendor');
 
-        // Update vendor user with business reference
-        vendorUser.business = business._id as Types.ObjectId;
         await vendorUser.save();
         this.logger.log('Updated vendor user with business reference');
       }
@@ -934,7 +1004,6 @@ export class SeedService {
         await business2.save();
         this.logger.log('Created business for second vendor');
 
-        vendorUser2.business = business2._id as Types.ObjectId;
         await vendorUser2.save();
         this.logger.log('Updated second vendor user with business reference');
       }

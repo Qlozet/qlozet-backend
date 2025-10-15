@@ -22,11 +22,13 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { CustomerRegistrationDto, VendorRegisterDto } from './dto';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '../ums/schemas/role.schema';
+import { UserRole, VendorRole } from '../ums/schemas/role.schema';
 import { JwtPayload, Tokens } from 'src/common/types';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services/users.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { TeamMember, TeamMemberDocument } from '../ums/schemas/team.schema';
+import { sanitizeUser } from '../../common/utils/sanitization';
 
 @Injectable()
 export class AuthService {
@@ -37,10 +39,11 @@ export class AuthService {
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
+    @InjectModel(TeamMember.name)
+    private readonly teamMemberModel: Model<TeamMemberDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
-    private readonly userService: UserService,
   ) {}
 
   /**
@@ -60,71 +63,56 @@ export class AuthService {
         business_phone_number,
         business_address,
         password,
+        display_picture_url,
         business_logo_url,
         cover_image_url,
-        display_picture_url,
         ...businessData
       } = data;
 
-      // Check if business already exists
+      // Check existing business
       const existingBusiness = await this.businessModel.findOne({
         $or: [{ business_email }, { business_phone_number }],
       });
-      if (existingBusiness) {
-        throw new ConflictException(
-          'A business with the provided email or phone number already exists.',
-        );
-      }
+      if (existingBusiness)
+        throw new ConflictException('Business already exists.');
 
-      // Check if user already exists
-      const r = await this.userService.findByPhoneNumber(personal_phone_number);
+      // Check existing user
       const existingUser = await this.userModel.findOne({
         $or: [
           { email: personal_email },
-          { phoneNumber: personal_phone_number },
+          { phone_number: personal_phone_number },
         ],
       });
-      if (existingUser) {
-        throw new ConflictException(
-          'A user with this email or phone number already exists.',
-        );
-      }
+      if (existingUser) throw new ConflictException('User already exists.');
 
-      // Find vendor role using enum
-      const vendorRole = await this.roleModel.findOne({
-        name: UserRole.VENDOR,
+      // Get owner role
+      const ownerRole = await this.roleModel.findOne({
+        name: VendorRole.OWNER,
       });
-      if (!vendorRole) {
-        throw new BadRequestException('Vendor role not found.');
-      }
+      if (!ownerRole) throw new BadRequestException('Vendor role not found.');
 
-      // Hash password
       const hashed_password = await bcrypt.hash(password, 10);
-
-      // Generate email verification token
       const email_verification_token = this.generateVerificationToken();
 
-      // Create the Vendor User (Business Owner) first
+      // Create Vendor User
       const vendorUser = new this.userModel({
         full_name: personal_name,
         email: personal_email,
         phone_number: personal_phone_number,
         hashed_password,
-        role: vendorRole._id,
+        role: ownerRole._id,
         type: UserType.VENDOR,
         email_verified: false,
-        email_verification_token: email_verification_token,
-        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        email_verification_token,
+        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
         status: 'active',
-        profilePicture:
-          display_picture_url ||
-          'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQB2J8Tc056dMI-wNe0vmFtByW-ySbA3bY3nQ&s',
+        profilePicture: display_picture_url || '',
         last_verification_email_sent: new Date(),
       });
 
       await vendorUser.save({ session });
 
-      // Create Business with vendor reference
+      // Create Business
       const business = new this.businessModel({
         business_name,
         business_email,
@@ -133,54 +121,68 @@ export class AuthService {
         display_picture_url: display_picture_url ?? '',
         business_logo_url: business_logo_url ?? '',
         cover_image_url: cover_image_url ?? '',
-        vendor: vendorUser._id as Types.ObjectId,
-        createdBy: vendorUser._id as Types.ObjectId,
-        email_verified: false,
+        created_by: {
+          id: vendorUser._id,
+          name: vendorUser.full_name,
+          email: vendorUser.email,
+        },
         ...businessData,
+        team_members: [],
       });
 
       await business.save({ session });
 
-      // Update vendor user with business reference
-      vendorUser.business = business._id as Types.ObjectId;
-      await vendorUser.save({ session });
+      // Create TeamMember for owner
+      const ownerMember = await this.teamMemberModel.create(
+        [
+          {
+            business: business._id,
+            user: vendorUser._id,
+            role: ownerRole._id,
+            full_name: vendorUser.full_name,
+            email: vendorUser.email,
+            phone_number: vendorUser.phone_number,
+            accepted: true,
+            is_owner: true,
+            is_active: true,
+          },
+        ],
+        { session },
+      );
+
+      // Add owner to business.team_members
+      await this.businessModel.findByIdAndUpdate(
+        business._id,
+        { $push: { team_members: ownerMember[0]._id } },
+        { session },
+      );
 
       await session.commitTransaction();
+
+      // Send verification and generate token
       const token = await this.generateToken({
         id: vendorUser._id,
-        role: UserRole.VENDOR,
         email: vendorUser.email,
-        type: UserType.VENDOR,
       });
       await this.userModel.findByIdAndUpdate(vendorUser._id, {
         refreshToken: token.refresh_token,
+        business: business.id,
       });
-      // Send verification email only initially
       await this.sendVerificationEmail(vendorUser);
-
-      this.logger.log(`✅ Vendor registered successfully: ${business_name}`);
 
       return {
         data: {
           business,
-          user: this.sanitizeUser(vendorUser),
+          user: sanitizeUser(vendorUser),
         },
-        message:
-          'Vendor registered successfully. Please check your email to verify your account.',
+        message: 'Vendor registered successfully. Check email to verify.',
       };
     } catch (error) {
       await session.abortTransaction();
-      this.logger.error('❌ Vendor registration failed', error.stack);
-
-      if (
-        error instanceof BadRequestException ||
+      throw error instanceof BadRequestException ||
         error instanceof ConflictException
-      ) {
-        throw error;
-      }
-      throw new InternalServerErrorException(
-        'Vendor registration failed. Please try again.',
-      );
+        ? error
+        : new InternalServerErrorException('Vendor registration failed.');
     } finally {
       session.endSession();
     }
@@ -246,7 +248,7 @@ export class AuthService {
 
       return {
         data: {
-          user: this.sanitizeUser(newUser),
+          user: sanitizeUser(newUser),
         },
         message:
           'Customer registered successfully. Please check your email to verify your account.',
@@ -372,11 +374,6 @@ export class AuthService {
 
       let business;
 
-      // If user is a vendor, get business details
-      if (user.type === UserType.VENDOR && user.business) {
-        business = await this.businessModel.findById(user.business);
-      }
-
       // Update user email verification status
       user.email_verified = true;
       user.email_verification_token = undefined;
@@ -385,13 +382,6 @@ export class AuthService {
       user.email_verified_at = new Date();
 
       await user.save();
-
-      // If user is a vendor, also update business email verification
-      if (user.type === UserType.VENDOR && user.business) {
-        await this.businessModel.findByIdAndUpdate(user.business, {
-          email_verified: true,
-        });
-      }
 
       // Send welcome email AFTER successful verification
       await this.sendWelcomeEmail(user, business);
@@ -516,7 +506,15 @@ export class AuthService {
     try {
       const vendor = await this.userModel
         .findOne({ email, type: UserType.VENDOR })
-        .select('+hashed_password');
+        .select('+hashed_password')
+        .populate({
+          path: 'business',
+          populate: {
+            path: 'team_members',
+            populate: { path: 'role', select: 'name permissions' },
+          },
+        })
+        .exec();
 
       if (!vendor) {
         throw new UnauthorizedException('Invalid credentials');
@@ -554,9 +552,7 @@ export class AuthService {
 
       const token = await this.generateToken({
         id: vendor._id,
-        role: UserRole.VENDOR,
         email: vendor.email,
-        type: UserType.VENDOR,
       });
       const hashedRt = await bcrypt.hash(token.refresh_token, 10);
       await this.userModel.findByIdAndUpdate(vendor._id, {
@@ -565,7 +561,7 @@ export class AuthService {
       return {
         message: 'Login successful. Welcome back!',
         data: {
-          user: this.sanitizeUser(vendor),
+          user: sanitizeUser(vendor),
           token,
         },
       };
@@ -588,12 +584,9 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const role = await this.roleModel.findById(user.role);
     const jwtPayload: JwtPayload = {
       id: user._id,
       email: user.email,
-      role: role?.name,
-      type: user.type,
     };
 
     const tokens = await this.generateToken(jwtPayload);
@@ -652,15 +645,13 @@ export class AuthService {
 
       const token = await this.generateToken({
         id: user._id,
-        role: UserRole.CUSTOMER,
         email: user.email,
-        type: UserType.CUSTOMER,
       });
 
       return {
         message: 'Login successful. Welcome back!',
         data: {
-          user: this.sanitizeUser(user),
+          user: sanitizeUser(user),
           token,
         },
       };
@@ -766,7 +757,7 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
-    return this.sanitizeUser(user);
+    return sanitizeUser(user);
   }
 
   /**
@@ -785,7 +776,7 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
-    return this.sanitizeUser(user);
+    return sanitizeUser(user);
   }
 
   /**
@@ -899,23 +890,6 @@ export class AuthService {
   }
 
   /**
-   * Sanitize user object - remove sensitive fields
-   */
-  private sanitizeUser(user: UserDocument): any {
-    const userObj = user.toObject();
-
-    // Remove sensitive fields
-    delete userObj.hashed_password;
-    delete userObj.email_verification_token;
-    delete userObj.email_verification_expires;
-    delete userObj.refreshToken;
-    delete userObj.verification;
-    delete userObj.passwordResetCode;
-
-    return userObj;
-  }
-
-  /**
    * Update user preferences
    */
   async updateUserPreferences(
@@ -937,7 +911,7 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
-    return this.sanitizeUser(user);
+    return sanitizeUser(user);
   }
 
   /**

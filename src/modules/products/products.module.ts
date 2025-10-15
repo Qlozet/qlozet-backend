@@ -29,6 +29,7 @@ import { DiscountService } from './discount.service';
 import { DiscountController } from './discount.controller';
 import { CollectionService } from './collection.service';
 import { CollectionController } from './collection.controller';
+import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { CollectionController } from './collection.controller';
       { name: Business.name, useFactory: () => BusinessSchema },
       { name: Role.name, useFactory: () => RoleSchema },
       { name: Collection.name, useFactory: () => CollectionSchema },
+      { name: TeamMember.name, useFactory: () => TeamMemberSchema },
     ]),
   ],
   controllers: [ProductsController, DiscountController, CollectionController],

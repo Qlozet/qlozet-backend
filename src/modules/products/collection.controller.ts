@@ -17,8 +17,8 @@ import {
 } from '@nestjs/swagger';
 import { CollectionService } from './collection.service';
 import { Collection } from './schemas/collection.schema';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 import { CreateCollectionDto } from './dto/collection.dto';
 

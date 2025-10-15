@@ -9,6 +9,7 @@ export const SetupSwagger = (app: INestApplication) => {
     )
     .setVersion('1.0.0')
     .addTag('Auth', 'Authentication endpoints')
+    .addTag('Users', 'Users management endpoints')
     .addTag('Vendors', 'Vendor management endpoints')
     .addTag('Products', 'Product management endpoints')
     .addTag('Customers', 'Customer management endpoints')
