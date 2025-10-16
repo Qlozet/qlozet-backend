@@ -4,8 +4,6 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  UsePipes,
-  ValidationPipe,
   Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
@@ -23,13 +21,6 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
-// @UsePipes(
-//   new ValidationPipe({
-//     whitelist: true,
-//     forbidNonWhitelisted: true,
-//     transform: true,
-//   }),
-// )
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
   @Post('register/vendor')

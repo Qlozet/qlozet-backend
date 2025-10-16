@@ -29,6 +29,7 @@ import { UserService } from '../ums/services/users.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { TeamMember, TeamMemberDocument } from '../ums/schemas/team.schema';
 import { sanitizeUser } from '../../common/utils/sanitization';
+import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 
 @Injectable()
 export class AuthService {
@@ -39,6 +40,8 @@ export class AuthService {
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
+    @InjectModel(Wallet.name)
+    private readonly walletModel: Model<WalletDocument>,
     @InjectModel(TeamMember.name)
     private readonly teamMemberModel: Model<TeamMemberDocument>,
     @InjectConnection() private readonly connection: Connection,
@@ -156,6 +159,13 @@ export class AuthService {
         { $push: { team_members: ownerMember[0]._id } },
         { session },
       );
+
+      const wallet = new this.walletModel({
+        business: business._id,
+        balance: 0,
+        currency: 'NGN',
+      });
+      await wallet.save({ session });
 
       await session.commitTransaction();
 
