@@ -9,6 +9,11 @@ import Axios from 'axios';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import zohoConfig from '../../common/config/zoho.config';
 import { ZohoToken, ZohoTokenDocument } from './schema/zoho-token.schema';
+import {
+  Support,
+  SupportDocument,
+  SupportSchema,
+} from './schema/support.schema';
 
 function addMinutes(minutes: number): Date {
   return new Date(Date.now() + minutes * 60 * 1000);
@@ -21,6 +26,8 @@ export class SupportService {
   constructor(
     @InjectModel(ZohoToken.name)
     private readonly zohoTokenModel: Model<ZohoTokenDocument>,
+    @InjectModel(Support.name)
+    private readonly supportModel: Model<SupportDocument>,
   ) {}
 
   /** Save or update Zoho token */
@@ -140,7 +147,7 @@ export class SupportService {
   }
 
   /** Create Zoho support ticket */
-  async createTicket(dto: CreateTicketDto): Promise<any> {
+  async createTicket(dto: CreateTicketDto, business: string): Promise<any> {
     try {
       const token = await this.getValidToken();
 
@@ -160,8 +167,19 @@ export class SupportService {
       const { data } = await Axios.post(zohoConfig.tickets, ticketData, {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
+      const support = new this.supportModel({
+        first_name: dto.first_name,
+        last_name: dto.last_name,
+        email: dto.email,
+        message: dto.message,
+        subject: dto.subject,
+        phone_number: dto.phone_number,
+        business,
+        zoho_ticket_id: data.id,
+      });
+      await support.save();
 
-      return data;
+      return support.toJSON();
     } catch (error) {
       const errorMessage =
         error.response?.data?.message ||
@@ -169,6 +187,22 @@ export class SupportService {
         'Ticket creation failed';
       this.logger.error(errorMessage);
       throw new InternalServerErrorException(errorMessage);
+    }
+  }
+  async getTicketsByBusiness(businessId: string): Promise<Support[]> {
+    try {
+      return this.supportModel
+        .find({ business: businessId })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch tickets for business ${businessId}: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'Could not retrieve support tickets',
+      );
     }
   }
 }
