@@ -16,6 +16,7 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { BusinessModule } from './modules/business/business.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { SupportsModule } from './modules/supports/supports.module';
+import { CartModule } from './modules/cart/cart.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { SupportsModule } from './modules/supports/supports.module';
     BusinessModule,
     TransactionsModule,
     SupportsModule,
+    CartModule,
   ],
   controllers: [AppController],
   providers: [

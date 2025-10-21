@@ -3,6 +3,7 @@ import { Document, Types } from 'mongoose';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 import { Clothing, ClothingSchema } from './clothing.schema';
+import { Discount } from './discount.schema';
 
 export type ProductDocument = Product & Document;
 
@@ -44,8 +45,8 @@ export class Product extends Document {
   @Prop({ type: Number, default: null })
   discounted_price?: number;
 
-  @Prop({ type: [Types.ObjectId], ref: 'Discount', default: [] })
-  applied_discounts?: Types.ObjectId[];
+  @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
+  applied_discount?: Types.ObjectId | Discount;
 
   @Prop({ type: [Types.ObjectId], ref: 'Collection', default: [] })
   collections?: Types.ObjectId[];

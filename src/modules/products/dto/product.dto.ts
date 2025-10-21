@@ -24,37 +24,6 @@ export class ColorDto {
   hex: string;
 }
 
-export class ImageDto {
-  @ApiProperty({
-    example: 'qoobea_img_12345',
-    description: 'Public ID of image',
-  })
-  public_id: string;
-
-  @ApiProperty({
-    example:
-      'https://res.cloudinary.com/demo/image/upload/qoobea_img_12345.jpg',
-    description: 'Full image URL',
-  })
-  url: string;
-}
-
-export class ProductImageDto {
-  @ApiProperty({ description: 'Unique image ID (linked to product)' })
-  @IsString()
-  public_id: string;
-
-  @ApiProperty({ description: 'Image URL' })
-  @IsUrl()
-  url: string;
-
-  @ApiPropertyOptional({ description: 'Image width in px' })
-  width?: number;
-
-  @ApiPropertyOptional({ description: 'Image height in px' })
-  height?: number;
-}
-
 // ---------- ROOT PRODUCT FIELDS ----------
 export class CreateProductDto {
   @ApiProperty({ example: 15000, description: 'Base price in Naira' })

@@ -5,6 +5,7 @@ import { Variant, VariantSchema } from './variant.schema';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Style, StyleSchema } from './style.schema';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
+import { Accessory, AccessorySchema } from './accessory.schema';
 
 export type ClothingDocument = Clothing & Document;
 
@@ -33,6 +34,9 @@ export class Clothing {
 
   @Prop({ type: [StyleSchema], default: [] })
   styles?: Style;
+
+  @Prop({ type: [AccessorySchema], default: [] })
+  accessory?: Accessory;
 
   @Prop({ type: [VariantSchema], default: [] })
   color_variants?: Variant[];
