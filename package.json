@@ -11,7 +11,7 @@
     "seed:permissions": "ts-node scripts/seed.ts permissions",
     "seed:roles": "ts-node scripts/seed.ts roles",
     "seed:users": "ts-node scripts/seed.ts users",
-    "build": "nest build && copyfiles -u 1 src/modules/notifications/mail/templates/**/* dist/src/modules/notifications/mail/templates",
+   "build": "nest build && copyfiles src/modules/notifications/mail/templates/**/* dist/src/modules/notifications/mail/templates",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",

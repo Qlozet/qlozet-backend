@@ -1,10 +1,10 @@
 import { MailerService } from '@nestjs-modules/mailer';
 import { Injectable } from '@nestjs/common';
 import * as handlebars from 'handlebars';
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
+import { promises as fsp } from 'fs';
 import * as path from 'path';
 
-// Define proper types for compiled templates
 type CompiledTemplate = (data: any) => string;
 
 interface EmailTemplates {
@@ -25,28 +25,56 @@ export class MailService {
     this.initializeTemplates();
   }
 
+  // ✅ Robust template path resolver (works for local + Docker + Fly)
   private getTemplatesBasePath(): string {
-    const basePath =
-      process.env.NODE_ENV === 'production'
-        ? path.join(__dirname, 'templates')
-        : path.join(
-            process.cwd(),
-            'src',
-            'modules',
-            'notifications',
-            'mail',
-            'templates',
-          );
+    const localSrcPath = path.join(
+      process.cwd(),
+      'src',
+      'modules',
+      'notifications',
+      'mail',
+      'templates',
+    );
+    const distPath = path.join(__dirname, 'templates');
+    const altDistPath = path.join(
+      __dirname,
+      '../../modules/notifications/mail/templates',
+    );
+    const dockerDistPath = path.join(
+      process.cwd(),
+      'dist',
+      'modules',
+      'notifications',
+      'mail',
+      'templates',
+    );
 
-    return basePath;
+    if (fs.existsSync(localSrcPath)) {
+      console.log('📂 Using local template path:', localSrcPath);
+      return localSrcPath;
+    }
+    if (fs.existsSync(distPath)) {
+      console.log('📂 Using dist template path:', distPath);
+      return distPath;
+    }
+    if (fs.existsSync(altDistPath)) {
+      console.log('📂 Using alt dist template path:', altDistPath);
+      return altDistPath;
+    }
+    if (fs.existsSync(dockerDistPath)) {
+      console.log('📂 Using docker dist template path:', dockerDistPath);
+      return dockerDistPath;
+    }
+
+    console.warn('⚠️ No valid templates directory found.');
+    return localSrcPath; // fallback
   }
 
   private async initializeTemplates() {
     try {
-      // Register partials
+      console.log('🟡 Initializing email templates...');
       await this.registerPartials();
 
-      // Load all templates
       this.templates = {
         verification: await this.loadTemplate('email-verification'),
         passwordReset: await this.loadTemplate('password-reset-request'),
@@ -56,6 +84,8 @@ export class MailService {
         customerWelcome: await this.loadTemplate('customer-welcome'),
         inviteUser: await this.loadTemplate('invite-user'),
       };
+
+      console.log('✅ All email templates initialized successfully!');
     } catch (error) {
       console.error('❌ Failed to initialize email templates:', error);
     }
@@ -63,27 +93,24 @@ export class MailService {
 
   private async registerPartials() {
     const templatesBasePath = this.getTemplatesBasePath();
-
-    // FIX: Look for partials in layouts/partials instead of templates/partials
     const partialsDir = path.join(templatesBasePath, 'layouts', 'partials');
 
     try {
-      // Check if partials directory exists
-      await fs.access(partialsDir);
-      const partialFiles = await fs.readdir(partialsDir);
+      await fsp.access(partialsDir);
+      const partialFiles = await fsp.readdir(partialsDir);
 
       for (const file of partialFiles) {
         if (file.endsWith('.hbs')) {
           const partialName = path.basename(file, '.hbs');
           const partialPath = path.join(partialsDir, file);
-          const partialContent = await fs.readFile(partialPath, 'utf-8');
+          const partialContent = await fsp.readFile(partialPath, 'utf-8');
           handlebars.registerPartial(partialName, partialContent);
           console.log(`✅ Registered partial: ${partialName}`);
         }
       }
 
       console.log('🎉 All partials registered successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.warn('⚠️ Could not load email partials:', error.message);
       console.log('Partials directory attempted:', partialsDir);
     }
@@ -100,25 +127,24 @@ export class MailService {
         `${templateName}.hbs`,
       );
 
-      await fs.access(layoutPath);
-      await fs.access(templatePath);
+      await fsp.access(layoutPath);
+      await fsp.access(templatePath);
 
       const [layoutContent, templateContent] = await Promise.all([
-        fs.readFile(layoutPath, 'utf-8'),
-        fs.readFile(templatePath, 'utf-8'),
+        fsp.readFile(layoutPath, 'utf-8'),
+        fsp.readFile(templatePath, 'utf-8'),
       ]);
 
-      // ✅ Register partials
       const partialsDir = path.join(templatesBasePath, 'layouts', 'partials');
       try {
-        const partialFiles = await fs.readdir(partialsDir);
+        const partialFiles = await fsp.readdir(partialsDir);
         for (const file of partialFiles) {
           const partialPath = path.join(partialsDir, file);
           const partialName = path.parse(file).name;
-          const partialContent = await fs.readFile(partialPath, 'utf-8');
+          const partialContent = await fsp.readFile(partialPath, 'utf-8');
           handlebars.registerPartial(partialName, partialContent);
         }
-      } catch (err) {
+      } catch {
         console.warn(`⚠️ No partials found in ${partialsDir}`);
       }
 
@@ -155,35 +181,9 @@ export class MailService {
     };
   }
 
-  // ... rest of your email methods remain the same ...
-  async sendResetEmail(to: string, name: string, resetLink: string) {
-    try {
-      if (!this.templates.passwordReset) {
-        throw new Error('Password reset template not loaded');
-      }
-
-      const html = this.templates.passwordReset({
-        userName: name,
-        resetUrl: resetLink,
-        expiryTime: '1 hour',
-        subject: 'Reset Your Password',
-        ipAddress: 'Unknown',
-        browserInfo: 'Unknown',
-      });
-
-      await this.mailerService.sendMail({
-        to,
-        subject: 'Reset Your Password',
-        html,
-      });
-
-      console.log('✅ Password reset email sent successfully to:', to);
-      return true;
-    } catch (error) {
-      console.error('❌ Failed to send password reset email:', error);
-      throw error;
-    }
-  }
+  // ================================================================
+  // EMAIL SENDING METHODS
+  // ================================================================
 
   async sendVerificationEmail(
     to: string,
@@ -192,14 +192,13 @@ export class MailService {
     verificationCode: string,
   ) {
     try {
-      if (!this.templates.verification) {
+      if (!this.templates.verification)
         throw new Error('Verification template not loaded');
-      }
 
       const html = this.templates.verification({
         userName: name,
         verificationUrl: verificationLink,
-        verificationCode: verificationCode,
+        verificationCode,
         expiryTime: '24 hours',
         subject: 'Verify Your Email Address',
       });
@@ -218,11 +217,36 @@ export class MailService {
     }
   }
 
+  async sendResetEmail(to: string, name: string, resetLink: string) {
+    try {
+      if (!this.templates.passwordReset)
+        throw new Error('Password reset template not loaded');
+
+      const html = this.templates.passwordReset({
+        userName: name,
+        resetUrl: resetLink,
+        expiryTime: '1 hour',
+        subject: 'Reset Your Password',
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: 'Reset Your Password',
+        html,
+      });
+
+      console.log('✅ Password reset email sent successfully to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send password reset email:', error);
+      throw error;
+    }
+  }
+
   async sendPasswordResetSuccessEmail(to: string, name: string) {
     try {
-      if (!this.templates.passwordResetSuccess) {
+      if (!this.templates.passwordResetSuccess)
         throw new Error('Password reset success template not loaded');
-      }
 
       const html = this.templates.passwordResetSuccess({
         userName: name,
@@ -251,9 +275,8 @@ export class MailService {
 
   async sendPasswordUpdatedEmail(to: string, name: string) {
     try {
-      if (!this.templates.passwordUpdated) {
+      if (!this.templates.passwordUpdated)
         throw new Error('Password updated template not loaded');
-      }
 
       const html = this.templates.passwordUpdated({
         userName: name,
@@ -282,17 +305,20 @@ export class MailService {
 
   async sendVendorWelcomeEmail(to: string, name: string, businessName: string) {
     try {
-      if (!this.templates.vendorWelcome) {
+      if (!this.templates.vendorWelcome)
         throw new Error('Vendor welcome template not loaded');
-      }
 
       const html = this.templates.vendorWelcome({
         userName: name,
-        businessName: businessName,
+        businessName,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
-        dashboardUrl: `${process.env.FRONTEND_URL || 'https://yourapp.com'}/vendor/dashboard`,
+        dashboardUrl: `${
+          process.env.FRONTEND_URL || 'https://yourapp.com'
+        }/vendor/dashboard`,
         supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com',
-        setupGuideUrl: `${process.env.FRONTEND_URL || 'https://yourapp.com'}/vendor/setup-guide`,
+        setupGuideUrl: `${
+          process.env.FRONTEND_URL || 'https://yourapp.com'
+        }/vendor/setup-guide`,
       });
 
       await this.mailerService.sendMail({
@@ -311,14 +337,15 @@ export class MailService {
 
   async sendCustomerWelcomeEmail(to: string, name: string) {
     try {
-      if (!this.templates.customerWelcome) {
+      if (!this.templates.customerWelcome)
         throw new Error('Customer welcome template not loaded');
-      }
 
       const html = this.templates.customerWelcome({
         userName: name,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
-        exploreUrl: `${process.env.FRONTEND_URL || 'https://yourapp.com'}/products`,
+        exploreUrl: `${
+          process.env.FRONTEND_URL || 'https://yourapp.com'
+        }/products`,
         supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com',
       });
 
@@ -335,6 +362,7 @@ export class MailService {
       throw error;
     }
   }
+
   async sendTeamInviteEmail(
     to: string,
     name: string,
@@ -343,9 +371,8 @@ export class MailService {
     temporaryPassword: string,
   ) {
     try {
-      if (!this.templates.inviteUser) {
+      if (!this.templates.inviteUser)
         throw new Error('Team invite template not loaded');
-      }
 
       const html = this.templates.inviteUser({
         userName: name,
@@ -370,7 +397,6 @@ export class MailService {
     }
   }
 
-  // Check if templates are loaded
   areTemplatesLoaded(): boolean {
     return !!(
       this.templates.verification &&
