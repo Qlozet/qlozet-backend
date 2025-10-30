@@ -3,22 +3,19 @@ import { Document } from 'mongoose';
 
 export type TaxonomyDocument = Taxonomy & Document;
 
-@Schema({ timestamps: true, collection: 'taxonomies' })
+@Schema({ timestamps: true, _id: true })
 export class Taxonomy {
   @Prop({ required: true })
   product_type: string;
 
-  @Prop({ required: true })
-  category: string;
+  @Prop({ type: [String], required: true })
+  categories: string[];
 
-  @Prop()
-  sub_category?: string;
+  @Prop({ type: [String], required: true })
+  attributes: string[];
 
-  @Prop([String])
-  tags?: string[];
-
-  @Prop()
-  audience?: string;
+  @Prop({ type: String, required: true })
+  audience: string;
 }
 
 export const TaxonomySchema = SchemaFactory.createForClass(Taxonomy);

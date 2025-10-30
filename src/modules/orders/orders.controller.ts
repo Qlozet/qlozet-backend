@@ -12,43 +12,64 @@ import {
   Req,
   NotFoundException,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Orders')
+@ApiBearerAuth('access-token')
 @Controller('orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
+  /**
+   * 🧾 Create a new order
+   * - Direct checkout or from cart
+   */
+  @Roles('customer')
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UsePipes(new ValidationPipe({ whitelist: true }))
-  @ApiOperation({ summary: 'Create a new order from cart' })
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiOperation({ summary: 'Create a new order (direct or from cart)' })
   async create(@Body() dto: CreateOrderDto, @Req() req) {
-    const userId = req.user?._id;
-    if (!userId) throw new NotFoundException('User not found');
-    return this.orderService.createOrderFromCart(userId, dto);
+    const customer = req.user?.id;
+    const business = req.business?.id;
+    return this.orderService.createOrder(dto, business, customer);
   }
 
-  @Get()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all orders for current user (paginated)' })
-  async findAll(@Req() req, @Query('page') page = 1, @Query('size') size = 10) {
-    const userId = req.user?._id;
+  // In your controller
+  @Get('customer')
+  async findCustomerOrders(
+    @Req() req,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+    @Query('status') status?: string,
+  ) {
+    const userId = req.user?._id || req.user?.id;
     if (!userId) throw new NotFoundException('User not found');
-    return this.orderService.findUserOrders(userId, page, size);
+
+    return this.orderService.findCustomerOrdersWithFilters(
+      userId,
+      Number(page),
+      Number(size),
+      status,
+    );
   }
 
-  @Get(':id')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get single order by ID for current user' })
-  async findOne(@Param('id') id: string, @Req() req) {
-    const userId = req.user?._id;
-    if (!userId) throw new NotFoundException('User not found');
-
-    const order = await this.orderService.findUserOrderById(id, userId);
-    if (!order) throw new NotFoundException('Order not found');
-    return order;
+  @Get('vendor')
+  async findVendorOrders(
+    @Req() req,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+    @Query('status') status?: string,
+  ) {
+    const userId = req.user?._id || req.user?.id;
+    return this.orderService.findVendorOrders(
+      userId,
+      Number(page),
+      Number(size),
+      status,
+    );
   }
 }

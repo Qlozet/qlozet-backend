@@ -17,6 +17,7 @@ import { BusinessModule } from './modules/business/business.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { SupportsModule } from './modules/supports/supports.module';
 import { CartModule } from './modules/cart/cart.module';
+import { OrdersModule } from './modules/orders/orders.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { CartModule } from './modules/cart/cart.module';
     TransactionsModule,
     SupportsModule,
     CartModule,
+    OrdersModule,
   ],
   controllers: [AppController],
   providers: [

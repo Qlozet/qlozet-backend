@@ -16,14 +16,14 @@ export class Cart {
           type: {
             color_variant_id: {
               type: Types.ObjectId,
-              ref: 'ProductColorVariant',
+              ref: 'Variant',
             },
             fabric_variant_id: {
               type: Types.ObjectId,
-              ref: 'ProductFabricVariant',
+              ref: 'Fabric',
             },
-            style_id: { type: Types.ObjectId, ref: 'ProductStyle' },
-            accessory_id: { type: Types.ObjectId, ref: 'ProductAccessory' },
+            style_id: { type: Types.ObjectId, ref: 'Style' },
+            accessory_id: { type: Types.ObjectId, ref: 'Accessory' },
           },
           default: {},
         },

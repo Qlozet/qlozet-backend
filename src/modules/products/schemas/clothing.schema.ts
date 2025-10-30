@@ -7,10 +7,17 @@ import { Style, StyleSchema } from './style.schema';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 
+export enum ClothingType {
+  CUSTOMIZE = 'customize',
+  NON_CUSTOMIZE = 'non_customize',
+}
 export type ClothingDocument = Clothing & Document;
 
 @Schema({ timestamps: true })
 export class Clothing {
+  @Prop({ required: true, enum: ClothingType })
+  type: ClothingType;
+
   @Prop({ required: true })
   name: string;
 
@@ -19,9 +26,6 @@ export class Clothing {
 
   @Prop({ required: true, min: 0 })
   turnaround_days: number;
-
-  @Prop({ default: false })
-  is_customizable?: boolean;
 
   @Prop({ type: TaxonomySchema, required: true })
   taxonomy: Taxonomy;
@@ -33,16 +37,16 @@ export class Clothing {
   images?: ProductImage[];
 
   @Prop({ type: [StyleSchema], default: [] })
-  styles?: Style;
+  styles?: Style[];
 
   @Prop({ type: [AccessorySchema], default: [] })
-  accessory?: Accessory;
+  accessories?: Accessory[];
 
   @Prop({ type: [VariantSchema], default: [] })
-  color_variants?: Variant[];
+  variants?: Variant[];
 
   @Prop({ type: [FabricSchema], default: [] })
-  fabric_variants?: Fabric[];
+  fabrics?: Fabric[];
 }
 
 export const ClothingSchema = SchemaFactory.createForClass(Clothing);

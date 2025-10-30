@@ -72,7 +72,7 @@ export class ProductsController {
     return this.productService.create(accessoryDto, req.user.id, 'accessory');
   }
   @Get()
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, 'customer', UserType.ADMIN)
   @ApiOperation({
     summary: 'Get all products with pagination and optional filters/search',
   })
@@ -177,6 +177,7 @@ export class ProductsController {
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async delete(@Param('id') id: string, @Req() req: any) {
+    console.log(req.user.id, ' req.user.id');
     await this.productService.delete(id, req.user.id);
     return { message: 'Product deleted successfully' };
   }

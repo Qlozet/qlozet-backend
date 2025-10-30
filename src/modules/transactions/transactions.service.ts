@@ -7,8 +7,8 @@ import {
   TransactionStatus,
   TransactionType,
 } from './schema/transaction.schema';
-import { Utils } from 'src/common/utils/pagination';
-import { generateUniqueQlozetReference } from 'src/common/utils/generateString';
+import { Utils } from '../../common/utils/pagination';
+import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 
 interface CreateTransactionDto {
   initiator: string;

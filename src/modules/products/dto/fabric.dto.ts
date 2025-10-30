@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductImageDto } from './product-image.dto';
+import { ColorDto } from './base.dto';
 
 export class FabricDto {
   @ApiProperty({
@@ -35,14 +36,14 @@ export class FabricDto {
   product_type: string;
 
   @ApiPropertyOptional({
-    type: [String],
+    type: [ColorDto],
     description: 'Available color options for this fabric',
-    example: ['Royal Blue', 'Navy Blue', 'Sky Blue'],
+    example: [{ hex: '#2A2A72' }],
   })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  colors?: string[];
+  colors?: ColorDto[];
 
   @ApiPropertyOptional({
     example: 'striped',

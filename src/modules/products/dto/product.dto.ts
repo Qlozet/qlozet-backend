@@ -2,6 +2,7 @@ import {
   IsArray,
   IsEnum,
   IsMongoId,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
@@ -26,11 +27,6 @@ export class ColorDto {
 
 // ---------- ROOT PRODUCT FIELDS ----------
 export class CreateProductDto {
-  @ApiProperty({ example: 15000, description: 'Base price in Naira' })
-  @IsNumber()
-  @Min(0)
-  base_price: number;
-
   @ApiPropertyOptional({
     type: Object,
     description: 'SEO metadata',
@@ -77,11 +73,11 @@ export class CreateAccessoryDto extends CreateProductDto {
 export class UpdateProductDto extends PartialType(CreateProductDto) {
   @ApiPropertyOptional({
     enum: ['clothing', 'fabric', 'accessory'],
-    description: 'Type of product (optional for updates)',
+    description: 'Type of product',
   })
-  @IsOptional()
+  @IsNotEmpty()
   @IsEnum(['clothing', 'fabric', 'accessory'])
-  kind?: string;
+  kind: string;
 
   @ApiPropertyOptional({
     type: Object,
@@ -108,13 +104,13 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsOptional()
   @ValidateNested()
   @Type(() => FabricDto)
-  fabrics?: FabricDto;
+  fabric?: FabricDto;
 
   @ApiPropertyOptional({ type: () => AccessoryDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => AccessoryDto)
-  accessories?: AccessoryDto;
+  accessory?: AccessoryDto;
 
   @ApiPropertyOptional({ type: () => ClothingDto })
   @IsOptional()

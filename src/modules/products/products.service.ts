@@ -18,6 +18,7 @@ import {
 } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
+import { CreateClothingDto } from './dto/product.dto';
 
 @Injectable()
 export class ProductService {
@@ -46,7 +47,6 @@ export class ProductService {
     } else if (kind === 'fabric') {
       totalPrice = this.computeFabricPrice(createProductDto);
     }
-
     const createdProduct = new this.productModel({
       ...createProductDto,
       vendor,
@@ -103,15 +103,22 @@ export class ProductService {
   async findById(id: string): Promise<ProductDocument> {
     const product = await this.productModel.findById(id).exec();
     if (!product) throw new NotFoundException('Product not found');
-    return product.toJSON();
+    return product;
   }
 
   /**
    * Delete a product
    */
   async delete(id: string, vendor: string): Promise<void> {
-    const deleted = await this.productModel.findByIdAndDelete({ id, vendor });
-    if (!deleted) throw new NotFoundException('Product not found');
+    const deleted = await this.productModel.findOneAndDelete({
+      _id: new Types.ObjectId(id),
+    });
+
+    if (!deleted) {
+      throw new NotFoundException(
+        'Product not found or you do not have permission to delete this product',
+      );
+    }
   }
 
   // 💰 Helper methods

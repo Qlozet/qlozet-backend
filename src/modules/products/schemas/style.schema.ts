@@ -1,25 +1,59 @@
+// src/schemas/style.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
-import { Variant, VariantSchema } from './variant.schema';
-import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
+import { Document, Types } from 'mongoose';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
 
 export type StyleDocument = Style & Document;
 
 /**
- * STYLE SCHEMA
- * Used for customizable clothing templates
+ * Sub-schema for each selectable option in a style field
  */
-@Schema({ timestamps: true, collection: 'styles' })
+@Schema()
+export class StyleFieldOption {
+  @Prop({ required: true })
+  name: string;
+
+  @Prop({ type: Number })
+  price_effect?: number;
+
+  @Prop({ type: Number })
+  yardage_effect?: number;
+}
+
+export const StyleFieldOptionSchema =
+  SchemaFactory.createForClass(StyleFieldOption);
+
+/**
+ * Sub-schema for each field in a style
+ */
+@Schema()
+export class StyleField {
+  @Prop({ required: true })
+  label: string;
+
+  @Prop({ type: [StyleFieldOptionSchema], required: true, default: null })
+  options: StyleFieldOption;
+}
+
+export const StyleFieldSchema = SchemaFactory.createForClass(StyleField);
+
+/**
+ * Main Style schema
+ */
+@Schema({ timestamps: true })
 export class Style {
+  _id?: Types.ObjectId;
   @Prop({ required: true })
   name: string;
 
   @Prop({ required: true })
   style_code: string;
 
-  @Prop({ type: TaxonomySchema, required: true })
-  taxonomy: Taxonomy;
+  @Prop({ type: [String], required: true })
+  categories: string[];
+
+  @Prop({ type: [String], required: true })
+  attributes: string[];
 
   @Prop({ type: [ProductImageSchema], default: [] })
   images: ProductImage[];
@@ -33,18 +67,8 @@ export class Style {
   @Prop()
   notes?: string;
 
-  @Prop({ type: Object })
-  fields?: Record<
-    string,
-    {
-      label: string;
-      options: {
-        name: string;
-        price_effect?: number;
-        yardage_effect?: number;
-      }[];
-    }
-  >;
+  @Prop({ type: String, required: true })
+  type: string;
 }
 
 export const StyleSchema = SchemaFactory.createForClass(Style);

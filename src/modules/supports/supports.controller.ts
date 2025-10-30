@@ -17,12 +17,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Public } from 'src/common/decorators/public.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { SupportService } from './supports.service';
 import { GenerateCodeDto } from './dto/generate-code.dto';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRole } from '../ums/schemas';
 
 @ApiTags('Supports')

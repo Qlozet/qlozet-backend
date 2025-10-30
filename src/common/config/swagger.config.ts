@@ -12,6 +12,7 @@ export const SetupSwagger = (app: INestApplication) => {
     .addTag('Users', 'Users management endpoints')
     .addTag('Vendors', 'Vendor management endpoints')
     .addTag('Products', 'Product management endpoints')
+    .addTag('Orders', 'Order management endpoints')
     .addTag('Customers', 'Customer management endpoints')
     .addTag('Uploads', 'Image upload endpoints (profile & product)')
     .addTag('Discounts', 'Discount management endpoints')

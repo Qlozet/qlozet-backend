@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -41,9 +43,10 @@ export class AccessoryDto {
     type: TaxonomyDto,
     description: 'Taxonomy information for categorization',
     example: {
-      category: 'Accessories',
-      subcategory: 'Belts',
-      tags: ['leather', 'fashion', 'men', 'qlozet'],
+      product_type: 'accessory',
+      categories: ['Belt'],
+      attributes: ['leather', 'fashion', 'men', 'qlozet'],
+      audience: 'men',
     },
   })
   @ValidateNested({ each: true })
@@ -51,30 +54,22 @@ export class AccessoryDto {
   taxonomy: TaxonomyDto;
 
   @ApiProperty({
-    type: [VariantDto],
+    type: VariantDto,
     description:
       'Available accessory variants (e.g., different colors or sizes)',
-    example: [
-      {
-        color: 'Black',
-        size: 'M',
-        price: 8800,
-        stock: 20,
-      },
-      {
-        color: 'Brown',
-        size: 'L',
-        price: 9000,
-        stock: 12,
-      },
-    ],
+    example: {
+      color: ['Black'],
+      size: 'M',
+      price: 8800,
+      stock: 20,
+    },
   })
-  @IsArray()
+  @IsObject()
   @ValidateNested({ each: true })
   @Type(() => VariantDto)
-  variants: VariantDto[];
+  variant: VariantDto;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     type: [ImageDto],
     description: 'Accessory images',
     example: [
@@ -92,7 +87,7 @@ export class AccessoryDto {
       },
     ],
   })
-  @IsOptional()
+  @IsNotEmpty()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ImageDto)

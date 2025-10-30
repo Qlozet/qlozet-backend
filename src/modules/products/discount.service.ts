@@ -68,7 +68,7 @@ export class DiscountService {
   async applyDiscountToMatchingProducts(
     discountId: string,
   ): Promise<ProductDocument[]> {
-    this.logger.log(`Applying discount to products: ${discountId}`);
+    this.logger.log(`Applying discount: ${discountId}`);
 
     const discount = await this.discountModel.findById(discountId).exec();
     if (!discount) throw new NotFoundException('Discount not found');
@@ -123,11 +123,17 @@ export class DiscountService {
       }
 
       if (!isApplicable) continue;
+      const discountId = discount.id;
+      // 3️⃣ Avoid duplicate application
+      const existingDiscountId =
+        product.applied_discount instanceof Types.ObjectId
+          ? product.applied_discount.toString()
+          : discountId;
 
-      // 3️⃣ Avoid duplicate discount IDs
-      if (!product.applied_discounts) product.applied_discounts = [];
-      const existingIds = product.applied_discounts.map((id) => id.toString());
-      if (existingIds.includes(discount.id)) continue;
+      if (existingDiscountId === discount.id) {
+        this.logger.debug(`Product ${product._id} already has discount`);
+        continue;
+      }
 
       // 4️⃣ Apply discount calculation
       let finalPrice = product.base_price;
@@ -151,14 +157,15 @@ export class DiscountService {
       }
 
       product.discounted_price = Math.max(finalPrice, 0);
-      product.applied_discounts.push(discount.id);
+      product.applied_discount = discountId;
 
       try {
         await product.save();
         updatedProducts.push(product);
+        this.logger.log(`✅ Updated product ${product._id}`);
       } catch (err) {
         this.logger.error(
-          `Failed to save product ${product._id}: ${err.message}`,
+          `❌ Failed to save product ${product._id}: ${err.message}`,
         );
       }
     }
@@ -166,6 +173,7 @@ export class DiscountService {
     this.logger.log(
       `✅ Finished applying discount to ${updatedProducts.length} products`,
     );
+
     return updatedProducts;
   }
 

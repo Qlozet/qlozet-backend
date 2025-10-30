@@ -1,72 +1,89 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Address, AddressSchema } from './address.schema';
+import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
 export type OrderDocument = Order & Document;
 
+/** ------------------ Sub-schemas for selections ------------------ */
+@Schema({ _id: false })
+class VariantSelection {
+  @Prop({ type: Types.ObjectId, ref: 'Variant', required: true })
+  variant_id: Types.ObjectId;
+
+  @Prop({ type: String })
+  size?: string;
+
+  @Prop({ type: Number, min: 1, default: 1 })
+  quantity?: number;
+}
+
+@Schema({ _id: false })
+class FabricSelection {
+  @Prop({ type: Types.ObjectId, ref: 'Fabric', required: true })
+  fabric_id: Types.ObjectId;
+
+  @Prop({ type: Number, min: 0.1 })
+  yardage: number;
+
+  @Prop({ type: Number, min: 1 })
+  quantity: number;
+}
+
+@Schema()
+class StyleSelection {
+  @Prop({ type: Types.ObjectId, ref: 'Style', required: true })
+  style_id: Types.ObjectId;
+}
+
+@Schema({ _id: false })
+class AccessorySelection {
+  @Prop({ type: Types.ObjectId, ref: 'Accessory', required: true })
+  accessory_id: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Variant', required: true })
+  variant_id: Types.ObjectId;
+
+  @Prop({ type: Number, min: 1, default: 1 })
+  quantity?: number;
+}
+
+/** ------------------ Sub-schema for each item ------------------ */
+@Schema({ _id: false })
+class OrderItem {
+  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  product_id: Types.ObjectId;
+
+  @Prop({ type: [VariantSelection], default: [] })
+  variant_selections?: VariantSelection[];
+
+  @Prop({ type: [FabricSelection], default: [] })
+  fabric_selections?: FabricSelection[];
+
+  @Prop({ type: [Types.ObjectId], default: [] })
+  style_selections?: StyleSelection[];
+
+  @Prop({ type: [AccessorySelection], default: [] })
+  accessory_selections?: AccessorySelection[];
+
+  @Prop({ type: String })
+  note?: string;
+}
+
+/** ------------------ Main Order Schema ------------------ */
 @Schema({ timestamps: true })
 export class Order {
   @Prop()
   reference: string;
+
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
-  @Prop({
-    type: [
-      {
-        product_id: { type: Types.ObjectId, ref: 'Product', required: true },
-        selected_items: {
-          type: {
-            color_variant_ids: {
-              type: [{ type: Types.ObjectId, ref: 'ProductColorVariant' }],
-              default: [],
-            },
-            fabric_variant_ids: {
-              type: [{ type: Types.ObjectId, ref: 'ProductFabricVariant' }],
-              default: [],
-            },
-            style_ids: {
-              type: [{ type: Types.ObjectId, ref: 'ProductStyle' }],
-              default: [],
-            },
-            accessory_ids: {
-              type: [{ type: Types.ObjectId, ref: 'ProductAccessory' }],
-              default: [],
-            },
-          },
-          default: {},
-        },
 
-        quantity: { type: Number, required: true, min: 1 },
-        unit_price: { type: Number, required: true },
-        total_price: { type: Number, required: true },
+  @Prop({ type: [OrderItem], required: true })
+  items: OrderItem[];
 
-        note: { type: String },
-      },
-    ],
-    required: true,
-  })
-  items: Array<{
-    product_id: Types.ObjectId;
-    selected_items?: {
-      color_variant_ids?: Types.ObjectId[];
-      fabric_variant_ids?: Types.ObjectId[];
-      style_ids?: Types.ObjectId[];
-      accessory_ids?: Types.ObjectId[];
-    };
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    note?: string;
-  }>;
-  @Prop({
-    type: [AddressSchema],
-    validate: [
-      (val: any[]) =>
-        val.every((a) => ['shipping', 'billing'].includes(a.type)),
-      'Invalid address type',
-    ],
-  })
-  addresses: Address[];
+  @Prop({ type: AddressSchema })
+  addresses: Address;
+
   @Prop({ type: Number, required: true })
   subtotal: number;
 
@@ -75,6 +92,7 @@ export class Order {
 
   @Prop({ type: Number, required: true })
   total: number;
+
   @Prop({
     type: String,
     enum: ['pending', 'processing', 'completed', 'cancelled'],

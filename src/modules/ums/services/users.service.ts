@@ -10,6 +10,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UserDocument, User } from '../schemas';
 import { MailService } from '../../notifications/mail/mail.service';
+import { Address, AddressDocument } from '../schemas/address.schema';
+import { AddressDto } from '../dto/address.dto';
 
 @Injectable()
 export class UserService {
@@ -17,6 +19,8 @@ export class UserService {
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Address.name)
+    private readonly addressModel: Model<AddressDocument>,
     private readonly mailService: MailService,
   ) {}
 
@@ -377,5 +381,29 @@ export class UserService {
   async getSanitizedUser(userId: string): Promise<any> {
     const user = await this.findById(userId);
     return this.sanitizeUser(user);
+  }
+  async upsertUserAddress(user: UserDocument, dto: AddressDto) {
+    const existing = await this.addressModel.findOne({ user: user.id });
+
+    if (existing) {
+      Object.assign(existing, dto);
+      await existing.save();
+      return existing.toJSON();
+    }
+
+    // Create new address
+    const newAddress = new this.addressModel({
+      customer: user.id,
+      ...(!dto.full_name && { full_name: user.full_name }),
+      ...(!dto.phone_number && { full_name: user.phone_number }),
+      ...dto,
+    });
+    return (await newAddress.save()).toJSON();
+  }
+
+  async getUserAddress(userId: Types.ObjectId) {
+    const address = await this.addressModel.findOne({ user: userId });
+    if (!address) throw new NotFoundException('No address found for this user');
+    return address;
   }
 }

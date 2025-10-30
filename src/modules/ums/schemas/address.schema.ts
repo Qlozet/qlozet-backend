@@ -7,14 +7,11 @@ export enum AddressType {
 }
 @Schema({ timestamps: true })
 export class Address {
-  @Prop({ enum: AddressType, required: true, default: AddressType.SHIPPING })
-  type: AddressType;
+  @Prop({ required: false })
+  full_name?: string;
 
-  @Prop({ required: true })
-  full_name: string;
-
-  @Prop({ required: true })
-  phone_number: string;
+  @Prop({ required: false })
+  phone_number?: string;
 
   @Prop({ required: true })
   street: string;

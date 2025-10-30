@@ -20,6 +20,7 @@ import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
+import { AddressSchema, Address } from '../ums/schemas/address.schema';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
       { name: Permission.name, schema: PermissionSchema },
       { name: TeamMember.name, schema: TeamMemberSchema },
       { name: Wallet.name, schema: WalletSchema },
+      { name: Address.name, schema: AddressSchema },
     ]),
   ],
   controllers: [AuthController],

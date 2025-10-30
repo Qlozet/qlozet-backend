@@ -14,12 +14,12 @@ import {
   UserDocument,
   Role,
   RoleDocument,
-  BusinessDocument,
 } from '../../modules/ums/schemas';
 import {
   TeamMember,
   TeamMemberDocument,
 } from '../../modules/ums/schemas/team.schema';
+import { UserType } from '../../modules/ums/schemas/user.schema';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -37,15 +37,15 @@ export class RolesGuard implements CanActivate {
       'roles',
       context.getHandler(),
     );
+
+    // If no @Roles() metadata, allow access
     if (!requiredRoles?.length) return true;
 
     const request = context.switchToHttp().getRequest();
     const token = this.extractTokenFromHeader(request);
+    if (!token) throw new UnauthorizedException('Authentication token missing');
 
-    if (!token) {
-      throw new UnauthorizedException('Authentication token missing');
-    }
-
+    // ✅ Verify JWT
     let payload: any;
     try {
       payload = await this.jwtService.verifyAsync(token, {
@@ -55,39 +55,89 @@ export class RolesGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    const vendor = await this.userModel
+    // ✅ Fetch full user
+    const user = await this.userModel
       .findById(payload.id)
+      .populate({
+        path: 'role',
+        select: 'name type',
+      })
       .populate({
         path: 'business',
         populate: {
           path: 'team_members',
-          populate: { path: 'role', select: 'name permissions' },
+          populate: {
+            path: 'role',
+            select: 'name type',
+          },
         },
       })
       .exec();
 
-    const business = vendor?.business as unknown as BusinessDocument;
-    const members = business?.team_members as unknown as TeamMemberDocument[];
+    if (!user) throw new UnauthorizedException('User not found');
 
-    if (!members || members.length === 0) {
-      throw new ForbiddenException(
-        'No active team members found for this user',
-      );
+    const normalizedRequiredRoles = requiredRoles.map((r) =>
+      r.toString().toLowerCase(),
+    );
+
+    // ✅ Step 1: Allow if @Roles includes the user's UserType
+    if (normalizedRequiredRoles.includes(user.type.toLowerCase())) {
+      return true;
     }
 
-    const hasRole = members.some((tm) => {
-      const role = tm.role as unknown as RoleDocument;
-      return requiredRoles.includes(role?.name);
-    });
-    if (!hasRole) {
-      throw new ForbiddenException(
-        `Access denied — requires one of: ${requiredRoles.join(', ')}`,
-      );
-    }
-    request.team_members = members;
-    request.business = business;
+    // ✅ Step 2: Check Platform roles
+    if (user.type === UserType.PLATFORM) {
+      const role = (user as any).role as RoleDocument | undefined;
+      if (!role) {
+        throw new ForbiddenException('No role assigned to platform user');
+      }
 
-    return true;
+      const hasRole = normalizedRequiredRoles.includes(role.name.toLowerCase());
+      if (!hasRole) {
+        throw new ForbiddenException(
+          `Access denied — requires one of: ${requiredRoles.join(', ')}`,
+        );
+      }
+
+      return true;
+    }
+
+    // ✅ Step 3: Check Vendor roles (team members)
+    if (user.type === UserType.VENDOR) {
+      const business: any = user.business;
+      const members: TeamMemberDocument[] = business?.team_members || [];
+
+      if (!members?.length) {
+        throw new ForbiddenException('No active team members found for vendor');
+      }
+
+      const hasRole = members.some((tm) => {
+        const role = tm.role as any as RoleDocument | undefined;
+        return (
+          role && normalizedRequiredRoles.includes(role.name.toLowerCase())
+        );
+      });
+
+      if (!hasRole) {
+        throw new ForbiddenException(
+          `Access denied — requires one of: ${requiredRoles.join(', ')}`,
+        );
+      }
+
+      request.team_members = members;
+      request.business = business;
+      return true;
+    }
+
+    // ✅ Step 4: Customer routes (optional)
+    if (user.type === UserType.CUSTOMER) {
+      if (normalizedRequiredRoles.includes(UserType.CUSTOMER.toLowerCase())) {
+        return true;
+      }
+      throw new ForbiddenException('Customer access denied for this route');
+    }
+
+    throw new ForbiddenException('Invalid user type');
   }
 
   private extractTokenFromHeader(request: any): string | undefined {

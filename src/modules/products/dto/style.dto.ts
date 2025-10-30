@@ -14,6 +14,14 @@ import { Type } from 'class-transformer';
 import { ImageDto } from './image.dto';
 import { Types } from 'mongoose';
 import { VariantDto } from './base.dto';
+import { TaxonomyDto } from './taxonomy.dto';
+
+export enum AudienceType {
+  MEN = 'men',
+  WOMEN = 'women',
+  UNISEX = 'unisex',
+  KIDS = 'kids',
+}
 
 // style.dto.ts
 export class StyleFieldOptionDto {
@@ -53,18 +61,17 @@ export class CreateStyleDto {
   @IsString()
   style_code: string;
 
-  @ApiProperty({
-    enum: ['men', 'women', 'unisex', 'kids'],
-    example: 'men',
-    description: 'Target audience',
-  })
-  @IsEnum(['men', 'women', 'unisex', 'kids'])
-  audience: string;
-
   @ApiProperty({ example: ['shirts', 'formal'], description: 'Categories' })
   @IsArray()
   @IsString({ each: true })
   categories: string[];
+
+  @ApiPropertyOptional({ type: [ImageDto], description: 'Style images' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImageDto)
+  images?: ImageDto[];
 
   @ApiPropertyOptional({
     example: ['dress', 'formal'],
@@ -73,14 +80,7 @@ export class CreateStyleDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  tags?: string[];
-
-  @ApiPropertyOptional({ type: [ImageDto], description: 'Style images' })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ImageDto)
-  images?: ImageDto[];
+  attributes?: string[];
 
   @ApiPropertyOptional({ example: 70, description: 'Base price', minimum: 0 })
   @IsOptional()

@@ -15,6 +15,7 @@ import { ProductModule } from '../products/products.module';
 import { TeamService } from './services/team.service';
 import { TeamMember, TeamMemberSchema } from './schemas/team.schema';
 import { JwtService } from '@nestjs/jwt';
+import { Address, AddressSchema } from './schemas/address.schema';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { JwtService } from '@nestjs/jwt';
       { name: Business.name, schema: BusinessSchema },
       { name: Product.name, schema: ProductSchema },
       { name: TeamMember.name, schema: TeamMemberSchema },
+      { name: Address.name, schema: AddressSchema },
     ]),
     ProductModule,
   ],

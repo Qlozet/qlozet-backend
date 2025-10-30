@@ -32,6 +32,13 @@ export class User {
   @Prop({ default: false })
   email_verified: boolean;
 
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Role',
+    default: null,
+  })
+  role?: Types.ObjectId;
+
   @Prop({ type: String, select: false })
   email_verification_token?: string;
 
