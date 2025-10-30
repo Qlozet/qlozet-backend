@@ -2,6 +2,7 @@ import {
   IsArray,
   IsEnum,
   IsMongoId,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
@@ -24,44 +25,8 @@ export class ColorDto {
   hex: string;
 }
 
-export class ImageDto {
-  @ApiProperty({
-    example: 'qoobea_img_12345',
-    description: 'Public ID of image',
-  })
-  public_id: string;
-
-  @ApiProperty({
-    example:
-      'https://res.cloudinary.com/demo/image/upload/qoobea_img_12345.jpg',
-    description: 'Full image URL',
-  })
-  url: string;
-}
-
-export class ProductImageDto {
-  @ApiProperty({ description: 'Unique image ID (linked to product)' })
-  @IsString()
-  public_id: string;
-
-  @ApiProperty({ description: 'Image URL' })
-  @IsUrl()
-  url: string;
-
-  @ApiPropertyOptional({ description: 'Image width in px' })
-  width?: number;
-
-  @ApiPropertyOptional({ description: 'Image height in px' })
-  height?: number;
-}
-
 // ---------- ROOT PRODUCT FIELDS ----------
 export class CreateProductDto {
-  @ApiProperty({ example: 15000, description: 'Base price in Naira' })
-  @IsNumber()
-  @Min(0)
-  base_price: number;
-
   @ApiPropertyOptional({
     type: Object,
     description: 'SEO metadata',
@@ -108,11 +73,11 @@ export class CreateAccessoryDto extends CreateProductDto {
 export class UpdateProductDto extends PartialType(CreateProductDto) {
   @ApiPropertyOptional({
     enum: ['clothing', 'fabric', 'accessory'],
-    description: 'Type of product (optional for updates)',
+    description: 'Type of product',
   })
-  @IsOptional()
+  @IsNotEmpty()
   @IsEnum(['clothing', 'fabric', 'accessory'])
-  kind?: string;
+  kind: string;
 
   @ApiPropertyOptional({
     type: Object,
@@ -139,13 +104,13 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsOptional()
   @ValidateNested()
   @Type(() => FabricDto)
-  fabrics?: FabricDto;
+  fabric?: FabricDto;
 
   @ApiPropertyOptional({ type: () => AccessoryDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => AccessoryDto)
-  accessories?: AccessoryDto;
+  accessory?: AccessoryDto;
 
   @ApiPropertyOptional({ type: () => ClothingDto })
   @IsOptional()

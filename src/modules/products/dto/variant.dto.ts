@@ -9,7 +9,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { ColorDto, ImageDto } from './product.dto';
+import { ColorDto } from './product.dto';
+import { ProductImageDto } from './product-image.dto';
 
 export class VariantDto {
   @ApiPropertyOptional({ type: [ColorDto], description: 'Color variants' })
@@ -24,12 +25,15 @@ export class VariantDto {
   @IsString()
   size?: string;
 
-  @ApiPropertyOptional({ type: [ImageDto], description: 'Variant images' })
+  @ApiPropertyOptional({
+    type: [ProductImageDto],
+    description: 'Variant images',
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ImageDto)
-  images?: ImageDto[];
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
 
   @ApiProperty({ example: 20, description: 'Stock quantity' })
   @IsNumber()

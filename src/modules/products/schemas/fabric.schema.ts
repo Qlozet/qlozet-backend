@@ -1,17 +1,20 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
+import { Types } from 'mongoose';
+import { Color, ColorSchema } from './product.schema';
 
 export type FabricDocument = Fabric & Document;
 @Schema({ timestamps: true })
 export class Fabric {
+  _id?: Types.ObjectId;
   @Prop({ required: true })
   name: string;
   @Prop()
   description?: string;
   @Prop({ required: true })
   product_type: string;
-  @Prop({ type: [String], default: [] })
-  colors?: string[];
+  @Prop({ type: [ColorSchema], default: [] })
+  colors?: Color[];
   @Prop()
   pattern?: string;
   @Prop({ required: true, min: 0.1 })

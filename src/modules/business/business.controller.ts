@@ -24,7 +24,7 @@ import {
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { Warehouse } from './schemas/warehouse.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRole } from '../ums/schemas';
 
 @ApiTags('Business')

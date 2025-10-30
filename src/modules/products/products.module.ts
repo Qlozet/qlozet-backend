@@ -12,6 +12,8 @@ import { ProductService } from './products.service';
 import {
   Accessory,
   AccessorySchema,
+  Clothing,
+  ClothingSchema,
   Collection,
   CollectionSchema,
   Discount,
@@ -33,29 +35,20 @@ import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeatureAsync([
-      {
-        name: Product.name,
-        useFactory: () => {
-          const schema = ProductSchema;
-          schema.discriminator(Style.name, StyleSchema);
-          schema.discriminator(Fabric.name, FabricSchema);
-          schema.discriminator(Accessory.name, AccessorySchema);
-          return schema;
-        },
-      },
-      { name: Variant.name, useFactory: () => VariantSchema },
-      { name: Discount.name, useFactory: () => DiscountSchema },
-      { name: Style.name, useFactory: () => StyleSchema },
-      { name: Taxonomy.name, useFactory: () => TaxonomySchema },
-      { name: Product.name, useFactory: () => ProductSchema },
-      { name: Fabric.name, useFactory: () => FabricSchema },
-      { name: Accessory.name, useFactory: () => AccessorySchema },
-      { name: User.name, useFactory: () => UserSchema },
-      { name: Business.name, useFactory: () => BusinessSchema },
-      { name: Role.name, useFactory: () => RoleSchema },
-      { name: Collection.name, useFactory: () => CollectionSchema },
-      { name: TeamMember.name, useFactory: () => TeamMemberSchema },
+    MongooseModule.forFeature([
+      { name: Variant.name, schema: VariantSchema },
+      { name: Discount.name, schema: DiscountSchema },
+      { name: Style.name, schema: StyleSchema },
+      { name: Taxonomy.name, schema: TaxonomySchema },
+      { name: Product.name, schema: ProductSchema },
+      { name: Fabric.name, schema: FabricSchema },
+      { name: Accessory.name, schema: AccessorySchema },
+      { name: User.name, schema: UserSchema },
+      { name: Business.name, schema: BusinessSchema },
+      { name: Role.name, schema: RoleSchema },
+      { name: Collection.name, schema: CollectionSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
+      { name: Clothing.name, schema: ClothingSchema },
     ]),
   ],
   controllers: [ProductsController, DiscountController, CollectionController],

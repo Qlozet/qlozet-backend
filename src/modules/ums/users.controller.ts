@@ -33,6 +33,8 @@ import {
   CreateRoleDto,
   UpdateRoleDto,
 } from './dto/roles.dto';
+import { AddressDto } from './dto/address.dto';
+import { UserType } from '../auth/dto/base-login.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -162,5 +164,22 @@ export class UserController {
     @Body() dto: AssignPermissionsDto,
   ): Promise<Role> {
     return this.rolesService.removePermissionsFromRole(id, dto.permission_ids);
+  }
+
+  @Roles('customer')
+  @Post('customer/shipping-address/upsert')
+  @HttpCode(HttpStatus.OK)
+  async upsertAddress(@Req() req, @Body() dto: AddressDto) {
+    const user = req.user;
+    const address = await this.userService.upsertUserAddress(user, dto);
+    return { message: 'Address saved successfully', data: address };
+  }
+
+  @Roles('customer')
+  @Get('customer/shipping-address')
+  async getMyAddress(@Req() req) {
+    const userId = req.user._id;
+    const address = await this.userService.getUserAddress(userId);
+    return { address };
   }
 }

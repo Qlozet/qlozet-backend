@@ -7,6 +7,7 @@ export type VariantDocument = Variant & Document;
 
 @Schema({ timestamps: true })
 export class Variant {
+  _id?: Types.ObjectId;
   @Prop({ type: [ColorSchema], default: [] })
   colors?: Color[];
   @Prop()
