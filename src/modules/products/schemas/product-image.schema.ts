@@ -18,7 +18,7 @@ export class ProductImage {
   @Prop()
   height?: number;
 
-  @Prop({ type: [StyleHotspotSchema], default: [] })
+  @Prop({ required: false, type: [StyleHotspotSchema], default: [] })
   hotspots?: StyleHotspot[];
 }
 

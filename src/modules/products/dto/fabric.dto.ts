@@ -9,7 +9,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductImageDto } from './product-image.dto';
-import { ColorDto } from './base.dto';
+import { VariantDto } from './variant.dto';
+import { ColorDto } from './product.dto';
 
 export class FabricDto {
   @ApiProperty({
@@ -35,14 +36,10 @@ export class FabricDto {
   @IsString()
   product_type: string;
 
-  @ApiPropertyOptional({
-    type: [ColorDto],
-    description: 'Available color options for this fabric',
-    example: [{ hex: '#2A2A72' }],
-  })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ColorDto)
   colors?: ColorDto[];
 
   @ApiPropertyOptional({
@@ -109,4 +106,21 @@ export class FabricDto {
   @ValidateNested({ each: true })
   @Type(() => ProductImageDto)
   images?: ProductImageDto[];
+  @ApiPropertyOptional({
+    type: [VariantDto],
+    description: 'Available  variants',
+    example: [
+      {
+        size: 'L',
+        stock: 15,
+        price: 16000,
+        sku: 'QZT-KFTN-L-BLUE',
+        yard_per_order: 5,
+      },
+    ],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantDto)
+  variants: VariantDto[];
 }

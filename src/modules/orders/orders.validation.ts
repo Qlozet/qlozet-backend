@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { FlattenMaps, Model, Types } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Product,
   ProductDocument,
@@ -13,27 +13,14 @@ import {
   Accessory,
   AccessoryDocument,
 } from '../products/schemas';
-import {
-  ProductKind,
-  FabricSelection,
-  AccessorySelection,
-  ClothingType,
-} from './schemas/orders.interfaces';
+import { ProductKind, ClothingType } from './schemas/orders.interfaces';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
-import { StyleSelectionDto } from './dto/selection.dto';
 
 @Injectable()
 export class OrderValidationService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel(Fabric.name)
-    private readonly fabricModel: Model<FabricDocument>,
-    @InjectModel(Variant.name)
-    private readonly variantModel: Model<VariantDocument>,
-    @InjectModel(Style.name) private readonly styleModel: Model<StyleDocument>,
-    @InjectModel(Accessory.name)
-    private readonly accessoryModel: Model<AccessoryDocument>,
   ) {}
 
   /** Entry point for a single order item */
@@ -55,7 +42,6 @@ export class OrderValidationService {
       accessories: [],
       styles: [],
     };
-
     /** ---------------- CLOTHING ---------------- */
     if (product.kind === ProductKind.CLOTHING) {
       const clothing = product.clothing;
@@ -65,23 +51,23 @@ export class OrderValidationService {
       const isCustomize = clothing.type === ClothingType.CUSTOMIZE;
       const {
         fabric_selections,
-        variant_selections,
+        color_variant_selections,
         style_selections,
         accessory_selections,
       } = item.selections || {};
 
       // Validation rules
       if (isCustomize) {
-        if (!fabric_selections?.length && !variant_selections?.length)
+        if (!fabric_selections?.length && !color_variant_selections?.length)
           throw new BadRequestException(
             'Customized clothing must include either fabric or variant selections',
           );
-        if (fabric_selections?.length && variant_selections?.length)
+        if (fabric_selections?.length && color_variant_selections?.length)
           throw new BadRequestException(
             'Customized clothing cannot include both fabric and variant selections',
           );
       } else {
-        if (!variant_selections?.length)
+        if (!color_variant_selections?.length)
           throw new BadRequestException(
             'Non-customized clothing must include variant selections',
           );
@@ -96,27 +82,33 @@ export class OrderValidationService {
       }
 
       /** ---------------- VARIANT PRICING ---------------- */
-      if (variant_selections?.length) {
-        for (const v of variant_selections) {
-          const variant = clothing.variants?.find(
-            (vDoc) => String(vDoc._id) === String(v.variant_id),
+      if (color_variant_selections?.length) {
+        for (const cv of color_variant_selections) {
+          const color = clothing.color_variants?.find(
+            (vDoc) => String(vDoc._id) === String(cv.variant_id),
           );
-          if (!variant)
-            throw new BadRequestException(`Variant not found: ${v.variant_id}`);
-
-          if ((variant.stock ?? 0) < (v.quantity ?? 0))
+          if (!color)
             throw new BadRequestException(
-              `Not enough stock for variant "${variant._id}". Remaining: ${variant.stock}`,
+              `Color variant not found: ${cv.variant_id}`,
             );
 
-          const price = variant.price ?? 0;
-          totalPrice += price * (v.quantity ?? 1);
+          for (const v of color.variants) {
+            if (v.size === cv.size) {
+              if ((v.stock ?? 0) < (cv.quantity ?? 0))
+                throw new BadRequestException(
+                  `Not enough stock for variant "${v._id}". Remaining: ${v.stock}`,
+                );
 
-          breakdown.variants.push({
-            name: variant._id,
-            price,
-            quantity: v.quantity ?? 1,
-          });
+              const price = v.price ?? 0;
+              totalPrice += price * (cv.quantity ?? 1);
+
+              breakdown.variants.push({
+                name: v._id,
+                price,
+                quantity: cv.quantity ?? 1,
+              });
+            }
+          }
         }
       }
 
@@ -180,13 +172,16 @@ export class OrderValidationService {
               `Not enough stock for accessory "${accessory.name}". Remaining: ${accessory.stock}`,
             );
 
-          let price = accessory.base_price ?? 0;
-          if (a.variant_id && accessory.variant) {
-            if (String(accessory.variant._id) !== String(a.variant_id))
-              throw new BadRequestException(
-                `Selected variant not found for accessory "${accessory.name}"`,
-              );
-            price += accessory.variant.price ?? 0;
+          let price = accessory.price ?? 0;
+          const variants = accessory.variants;
+          if (a.variant_id && variants.length > 0) {
+            for (const v of variants) {
+              if (String(v._id) !== String(a.variant_id))
+                throw new BadRequestException(
+                  `Selected variant not found for accessory "${accessory.name}"`,
+                );
+              price += price ?? 0;
+            }
           }
 
           totalPrice += price * (a.quantity ?? 1);
@@ -207,7 +202,7 @@ export class OrderValidationService {
         );
 
       if (
-        item.selections?.variant_selections?.length ||
+        item.selections?.color_variant_selections?.length ||
         item.selections?.style_selections?.length ||
         item.selections?.accessory_selections?.length
       )
@@ -239,7 +234,7 @@ export class OrderValidationService {
         );
 
       if (
-        item.selections?.variant_selections?.length ||
+        item.selections?.color_variant_selections?.length ||
         item.selections?.style_selections?.length ||
         item.selections?.fabric_selections?.length
       )
@@ -254,13 +249,16 @@ export class OrderValidationService {
             `Accessory not found: ${a.accessory_id}`,
           );
 
-        let price = accessory.base_price ?? 0;
-        if (a.variant_id && accessory.variant) {
-          if (String(accessory.variant._id) !== String(a.variant_id))
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}"`,
-            );
-          price += accessory.variant.price ?? 0;
+        let price = accessory.price ?? 0;
+        const variants = accessory.variants;
+        if (a.variant_id && variants.length > 0) {
+          for (const v of variants) {
+            if (String(v._id) !== String(a.variant_id))
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}"`,
+              );
+            price += price ?? 0;
+          }
         }
 
         totalPrice += price * (a.quantity ?? 1);
@@ -280,125 +278,6 @@ export class OrderValidationService {
 
     return { total_price: totalPrice, breakdown };
   }
-
-  /** ---------------- VARIANT VALIDATION ---------------- */
-  private async validateColorVariant(
-    colorVariantId: Types.ObjectId,
-    quantity: number,
-    size?: string,
-  ): Promise<void> {
-    if (quantity <= 0)
-      throw new BadRequestException('Quantity must be greater than 0');
-
-    const variant = await this.variantModel.findById(colorVariantId);
-    if (!variant)
-      throw new BadRequestException('Selected color variant not found');
-
-    if (variant.stock != null && variant.stock < quantity)
-      throw new BadRequestException(
-        `Insufficient stock for selected color variant. Available: ${variant.stock}, Requested: ${quantity}`,
-      );
-
-    if (size && variant.size && variant.size !== size)
-      throw new BadRequestException(
-        `Size '${size}' is not available for this variant (available: ${variant.size})`,
-      );
-
-    if (!variant.colors?.length)
-      throw new BadRequestException(
-        'Selected variant has no color information',
-      );
-  }
-
-  /** ---------------- FABRIC VALIDATION ---------------- */
-  private async validateFabricSelection(
-    fabric: FabricSelection,
-    productId?: Types.ObjectId,
-  ): Promise<void> {
-    if (!fabric.yardage || fabric.yardage <= 0) {
-      throw new BadRequestException('Valid yardage is required');
-    }
-
-    // 1️⃣ Try to find fabric as standalone
-    let fabricDoc: any = await this.fabricModel
-      .findById(fabric.fabric_id)
-      .lean();
-
-    // 2️⃣ If not found, check within product.clothing.fabrics
-    if (!fabricDoc && productId) {
-      const product = await this.productModel.findById(productId).lean();
-      const clothingFabrics = product?.clothing?.fabrics || [];
-
-      fabricDoc = clothingFabrics.find(
-        (f: any) => f._id?.toString() === fabric.fabric_id,
-      );
-    }
-
-    // 3️⃣ Still not found — invalid
-    if (!fabricDoc) {
-      throw new BadRequestException(
-        `Selected fabric not found: ${fabric.fabric_id}`,
-      );
-    }
-
-    // 4️⃣ Validate stock and min cut
-    if (fabric.yardage < fabricDoc.min_cut) {
-      throw new BadRequestException(
-        `Minimum yardage for fabric "${fabricDoc.name}" is ${fabricDoc.min_cut}`,
-      );
-    }
-
-    if (
-      fabricDoc.yard_length != null &&
-      fabric.yardage > fabricDoc.yard_length
-    ) {
-      throw new BadRequestException(
-        `Insufficient fabric stock. Available: ${fabricDoc.yard_length} yards, Requested: ${fabric.yardage}`,
-      );
-    }
-  }
-
-  /** ---------------- STYLE VALIDATION ---------------- */
-  private async validateStyleSelection(
-    styleSelection: StyleSelectionDto,
-    used: Set<string> = new Set(),
-  ): Promise<void> {
-    const id = styleSelection.style_id.toString();
-    if (used.has(id))
-      throw new BadRequestException(`Style "${id}" selected more than once`);
-    used.add(id);
-
-    const style = await this.styleModel.findById(styleSelection.style_id);
-    if (!style) throw new BadRequestException('Selected style not found');
-  }
-
-  /** ---------------- ACCESSORY VALIDATION ---------------- */
-  private async validateAccessorySelection(
-    a: AccessorySelection,
-  ): Promise<void> {
-    if (!a.accessory_id)
-      throw new BadRequestException('Accessory ID is required');
-    if (a.quantity <= 0)
-      throw new BadRequestException('Quantity must be greater than 0');
-
-    const accessory = await this.accessoryModel.findById(a.accessory_id);
-    if (!accessory) throw new BadRequestException('Accessory not found');
-
-    if (a.variant_id) {
-      const variant = accessory.variant;
-      if (!variant)
-        throw new BadRequestException('Accessory variant not found');
-      if (variant.stock < a.quantity)
-        throw new BadRequestException(
-          `Insufficient stock for accessory variant. Available: ${variant.stock}, Requested: ${a.quantity}`,
-        );
-    } else if (accessory.stock < a.quantity) {
-      throw new BadRequestException(
-        `Insufficient stock for accessory "${accessory.name}". Available: ${accessory.stock}, Requested: ${a.quantity}`,
-      );
-    }
-  }
-
   /** ---------------- FULL ORDER VALIDATION ---------------- */
   async validateCompleteOrder(
     items: ProcessedOrderItemDto[],

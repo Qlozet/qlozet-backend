@@ -123,51 +123,44 @@ export class DiscountService {
       }
 
       if (!isApplicable) continue;
-      const discountId = discount.id;
-      // 3️⃣ Avoid duplicate application
-      const existingDiscountId =
-        product.applied_discount instanceof Types.ObjectId
-          ? product.applied_discount.toString()
-          : discountId;
 
-      if (existingDiscountId === discount.id) {
-        this.logger.debug(`Product ${product._id} already has discount`);
+      // 3️⃣ Avoid duplicate application
+      const alreadyHasDiscount =
+        product.applied_discount &&
+        product.applied_discount.toString() === discount.id.toString();
+
+      if (alreadyHasDiscount) {
+        this.logger.debug(`Product ${product._id} already has this discount`);
         continue;
       }
 
       // 4️⃣ Apply discount calculation
-      let finalPrice = product.base_price;
-      switch (discount.type) {
-        case 'fixed':
-        case 'flash_fixed':
-          finalPrice -= discount.value;
-          break;
-        case 'percentage':
-        case 'flash_percentage':
-        case 'store_wide':
-          finalPrice -= (discount.value / 100) * finalPrice;
-          break;
-        case 'category_specific':
-          if (discount.value_type === 'fixed') {
-            finalPrice -= discount.value;
-          } else {
-            finalPrice -= (discount.value / 100) * finalPrice;
-          }
-          break;
+      const basePrice = product.base_price || 0;
+      let discountValue = 0;
+
+      if (
+        ['percentage', 'flash_percentage', 'store_wide'].includes(discount.type)
+      ) {
+        discountValue = discount.value;
+      } else {
+        discountValue = discount.value;
       }
 
-      product.discounted_price = Math.max(finalPrice, 0);
-      product.applied_discount = discountId;
+      const finalPrice = Math.max(basePrice - discountValue, 0);
 
-      try {
-        await product.save();
-        updatedProducts.push(product);
-        this.logger.log(`✅ Updated product ${product._id}`);
-      } catch (err) {
-        this.logger.error(
-          `❌ Failed to save product ${product._id}: ${err.message}`,
-        );
-      }
+      await this.productModel.updateOne(
+        { _id: product._id },
+        {
+          $set: {
+            applied_discount: discount._id,
+          },
+        },
+      );
+
+      updatedProducts.push(product);
+      this.logger.log(
+        `✅ Applied discount ${discount._id} to product ${product._id}, new price: ${finalPrice}`,
+      );
     }
 
     this.logger.log(
@@ -261,16 +254,14 @@ export class DiscountService {
         return false;
     }
   }
-  /**
-   * Get discounted products per vendor
-   */
+
+  /** 🔹 Get discounted products per vendor */
   async getDiscountedProductsByVendor(
     vendorId: string,
   ): Promise<ProductDocument[]> {
     return this.productModel
       .find({
         vendor: vendorId,
-        discounted_price: { $gt: 0 },
         applied_discounts: { $exists: true, $ne: [] },
       })
       .populate('applied_discounts')

@@ -7,18 +7,14 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
-  ClothingDocument,
   Discount,
   DiscountDocument,
   Product,
   ProductDocument,
-  Style,
-  StyleDocument,
-  TaxonomyDocument,
 } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
-import { CreateClothingDto } from './dto/product.dto';
+import { ClothingType } from './dto/clothing.dto';
 
 @Injectable()
 export class ProductService {
@@ -39,7 +35,6 @@ export class ProductService {
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
     let totalPrice = 0;
-
     if (kind === 'clothing') {
       totalPrice = this.computeClothingPrice(createProductDto);
     } else if (kind === 'accessory') {
@@ -124,29 +119,103 @@ export class ProductService {
   // 💰 Helper methods
 
   private computeClothingPrice(dto: any): number {
-    let total = 0;
     const clothing = dto?.clothing;
-    // Add fabric variants
-    if (clothing?.fabric_variants?.length) {
-      const fabricSum = clothing.fabric_variants.reduce(
-        (sum, f) => sum + (f.price_per_yard * f.yard_length || 0),
-        0,
-      );
-      total += fabricSum;
+    if (!clothing) return 0;
+
+    const isCustomize = clothing?.type === ClothingType.CUSTOMIZE;
+    let total = 0;
+    console.log(isCustomize, 'TYPE');
+    // --- CUSTOMIZE ---
+    if (isCustomize) {
+      const hasFabric =
+        Array.isArray(clothing.fabrics) && clothing.fabrics.length > 0;
+      const hasColorVariants =
+        Array.isArray(clothing.color_variants) &&
+        clothing.color_variants.length > 0;
+      const hasStyles =
+        Array.isArray(clothing.styles) && clothing.styles.length > 0;
+      const hasAccessories =
+        Array.isArray(clothing.accessories) && clothing.accessories.length > 0;
+
+      // ✅ Validate rules
+      if (!hasStyles)
+        throw new Error('Styles are required for customized clothing.');
+      if (hasFabric && hasColorVariants)
+        throw new Error(
+          'Customized clothing cannot have both fabric and color variants.',
+        );
+
+      // 🎨 Styles (required)
+      total += clothing.styles.reduce((sum, s) => sum + (s.price || 0), 0);
+
+      // 🧵 Fabric (optional)
+      if (hasFabric) {
+        total += clothing.fabrics.reduce((sum, fabric) => {
+          const fabricBase =
+            (fabric.price_per_yard || 0) * (fabric.yard_length || 0);
+          const variantTotal = Array.isArray(fabric.variants)
+            ? fabric.variants.reduce(
+                (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
+                0,
+              )
+            : 0;
+          return sum + fabricBase + variantTotal;
+        }, 0);
+      }
+
+      // 🎨 Color Variants (optional, exclusive with fabric)
+      else if (hasColorVariants) {
+        total += clothing.color_variants.reduce((sum, color) => {
+          const colorSum = Array.isArray(color.variants)
+            ? color.variants.reduce(
+                (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
+                0,
+              )
+            : 0;
+          return sum + colorSum;
+        }, 0);
+      }
+
+      // 🧷 Accessories (optional)
+      if (hasAccessories) {
+        total += clothing.accessories.reduce((sum, accessory) => {
+          const basePrice = accessory.price || 0;
+          const variantStock =
+            accessory.variants?.reduce((vSum, v) => vSum + (v.stock || 0), 0) ||
+            0;
+          const accessoryTotal = variantStock
+            ? variantStock * basePrice
+            : basePrice;
+          return sum + accessoryTotal;
+        }, 0);
+      }
+
+      return total;
     }
 
-    // Add color variants
-    if (clothing?.color_variants?.length) {
-      const colorSum = clothing.color_variants.reduce(
-        (sum, v) => sum + (v?.stock ? v.price * v.stock : 0),
-        0,
-      );
-      total += colorSum;
-    }
+    // --- NON-CUSTOMIZE ---
+    const hasFabric =
+      Array.isArray(clothing.fabrics) && clothing.fabrics.length > 0;
+    const hasStyles =
+      Array.isArray(clothing.styles) && clothing.styles.length > 0;
+    const hasAccessories =
+      Array.isArray(clothing.accessories) && clothing.accessories.length > 0;
 
-    // Add style price
-    if (clothing.styles?.price) {
-      total += clothing.styles.price;
+    if (hasFabric || hasStyles || hasAccessories)
+      throw new BadRequestException(
+        'Fabric, styles, and accessories are not allowed for non-customized clothing.',
+      );
+
+    if (Array.isArray(clothing.color_variants)) {
+      total += clothing.color_variants.reduce((sum, color) => {
+        const colorSum = Array.isArray(color.variants)
+          ? color.variants.reduce(
+              (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
+              0,
+            )
+          : 0;
+        return sum + colorSum;
+      }, 0);
     }
 
     return total;
@@ -154,15 +223,14 @@ export class ProductService {
 
   private computeAccessoryPrice(dto: any): number {
     const accessory = dto?.accessory;
-    let total = accessory.base_price || 0;
+    if (!accessory) return 0;
 
-    if (accessory.variants?.length) {
-      const variantSum = accessory.variants.reduce(
-        (sum, v) => sum + (v.price || 0),
-        0,
-      );
-      total += variantSum;
-    }
+    const basePrice = accessory.price || 0;
+    const variantStock =
+      Array.isArray(accessory.variants) && accessory.variants.length > 0
+        ? accessory.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+        : 0;
+    const total = variantStock > 0 ? basePrice * variantStock : basePrice;
 
     return total;
   }

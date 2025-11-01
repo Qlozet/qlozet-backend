@@ -2,6 +2,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -16,6 +17,7 @@ import {
   Fabric,
   Accessory,
   Variant,
+  DiscountDocument,
 } from '../products/schemas';
 import {
   ProductKind,
@@ -31,17 +33,14 @@ import {
 
 @Injectable()
 export class PriceCalculationService {
+  private readonly logger = new Logger(PriceCalculationService.name);
+
   constructor(
     @InjectModel('Product')
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel('Style') private readonly styleModel: Model<StyleDocument>,
-    @InjectModel('Fabric') private readonly fabricModel: Model<FabricDocument>,
-    @InjectModel('Clothing')
-    private readonly clothingModel: Model<ClothingDocument>,
-    @InjectModel('Accessory')
-    private readonly accessoryModel: Model<AccessoryDocument>,
-    @InjectModel('Variant')
-    private readonly variantModel: Model<VariantDocument>,
+
+    @InjectModel('Discount')
+    private readonly discountModel: Model<DiscountDocument>,
   ) {}
 
   // ========== PUBLIC METHODS ==========
@@ -75,41 +74,64 @@ export class PriceCalculationService {
   }
 
   async calculateItemTotal(item: ProcessedOrderItem): Promise<number> {
-    const product = await this.productModel.findById(item.product_id);
+    const product = await this.productModel.findById(item.product_id).lean();
 
     if (!product) {
       throw new NotFoundException(`Product not found: ${item.product_id}`);
     }
 
+    let discountValue = 0;
+
+    // --- Fetch discount if product has applied_discount ---
+    if (product.applied_discount) {
+      const discount = await this.discountModel
+        .findById(product.applied_discount)
+        .lean();
+
+      if (discount) {
+        discountValue = this.applyDiscount(product, discount);
+      }
+    }
+
+    // --- Normalize Selections ---
     const normalizedSelections = this.normalizeSelections(item.selections);
+    let total = 0;
+
+    // --- Calculate Total Based on Product Type ---
     switch (product.kind) {
       case ProductKind.CLOTHING:
-        return this.calculateClothingTotal(
-          {
-            ...item,
-            selections: normalizedSelections,
-          },
+        total = await this.calculateClothingTotal(
+          { ...item, selections: normalizedSelections },
           product as ProductDocument,
         );
+        break;
 
       case ProductKind.FABRIC:
-        return this.calculateFabricTotal(
-          {
-            ...item,
-            selections: normalizedSelections,
-          },
+        total = await this.calculateFabricTotal(
+          { ...item, selections: normalizedSelections },
           product as ProductDocument,
         );
+        break;
 
       case ProductKind.ACCESSORY:
-        return this.calculateAccessoryTotal(
+        total = await this.calculateAccessoryTotal(
           normalizedSelections.accessory_selection as AccessorySelectionDto[],
           product as ProductDocument,
         );
+        break;
 
       default:
-        return 0;
+        total = 0;
     }
+
+    // --- Apply Discount (deduct from total) ---
+    const finalTotal = Math.max(total - discountValue, 0);
+
+    this.logger.debug(
+      `🧾 Product ${product._id} (${product.kind}) => Base total: ${total}, Discount: ${discountValue}, Final total: ${finalTotal}`,
+    );
+
+    return finalTotal;
   }
 
   private normalizeSelections(
@@ -134,6 +156,47 @@ export class PriceCalculationService {
       accessory_selection:
         selections.accessory_selection ?? selections.accessory_selection ?? [],
     };
+  }
+  private applyDiscount(product: ProductDocument, discount: any): number {
+    if (!discount || !product?.base_price) return 0;
+
+    const basePrice = product.base_price;
+    let discountValue = 0;
+
+    switch (discount.type) {
+      /** ---------------- BASIC DISCOUNTS ---------------- */
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        // Percentage-based discounts
+        discountValue = (basePrice * (discount.value || 0)) / 100;
+        break;
+
+      case 'fixed':
+      case 'flash_fixed':
+        discountValue = discount.value || 0;
+        break;
+      case 'category_specific':
+        if (discount.categories?.length && product.collections?.length) {
+          const match = product.collections.some((cId: any) =>
+            discount.categories.includes(String(cId)),
+          );
+          if (match) {
+            if (discount.mode === 'percentage') {
+              discountValue = (basePrice * (discount.value || 0)) / 100;
+            } else {
+              discountValue = discount.value || 0;
+            }
+          }
+        }
+        break;
+
+      /** ---------------- DEFAULT ---------------- */
+      default:
+        discountValue = 0;
+        break;
+    }
+    return Math.min(discountValue, basePrice);
   }
 
   private async calculateStyleCost(
@@ -293,23 +356,24 @@ export class PriceCalculationService {
         }
 
         // Handle single variant if specified
-        const variant = accessory.variant;
-        if (variant && s.variant_id) {
-          if (String(variant._id) !== String(s.variant_id)) {
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}"`,
-            );
-          }
+        const variants = accessory.variants;
+        if (s.variant_id && variants.length > 0) {
+          for (const v of variants) {
+            if (String(v._id) !== String(s.variant_id)) {
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}"`,
+              );
+            }
 
-          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-            throw new BadRequestException(
-              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}". Remaining: ${variant.stock}`,
-            );
-          }
+            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+              throw new BadRequestException(
+                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}". Remaining: ${v.stock}`,
+              );
+            }
 
-          total +=
-            (variant.price ?? accessory.base_price ?? 0) * (s.quantity ?? 1);
-          continue; // already processed
+            total += (accessory.price ?? 0) * (s.quantity ?? 1);
+            continue; // already processed
+          }
         }
 
         // Check accessory stock
@@ -319,7 +383,7 @@ export class PriceCalculationService {
           );
         }
 
-        total += (accessory.base_price ?? 0) * (s.quantity ?? 1);
+        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
 
       if (product.kind === ProductKind.CLOTHING) {
@@ -333,23 +397,24 @@ export class PriceCalculationService {
           );
         }
 
-        const variant = accessory.variant;
-        if (variant && s.variant_id) {
-          if (String(variant._id) !== String(s.variant_id)) {
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}" in clothing`,
-            );
-          }
+        const variants = accessory.variants;
+        if (s.variant_id && variants.length > 0) {
+          for (const v of variants) {
+            if (String(v._id) !== String(s.variant_id)) {
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}" in clothing`,
+              );
+            }
 
-          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-            throw new BadRequestException(
-              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}" in clothing. Remaining: ${variant.stock}`,
-            );
-          }
+            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+              throw new BadRequestException(
+                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}" in clothing. Remaining: ${v.stock}`,
+              );
+            }
 
-          total +=
-            (variant.price ?? accessory.base_price ?? 0) * (s.quantity ?? 1);
-          continue;
+            total += (accessory.price ?? 0) * (s.quantity ?? 1);
+            continue;
+          }
         }
 
         // Check accessory stock
@@ -359,7 +424,7 @@ export class PriceCalculationService {
           );
         }
 
-        total += (accessory.base_price ?? 0) * (s.quantity ?? 1);
+        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
     }
 
@@ -373,22 +438,24 @@ export class PriceCalculationService {
     let total = 0;
 
     for (const s of selections) {
-      const variant = product.clothing?.variants?.find(
+      const color = product.clothing?.color_variants?.find(
         (v) => String(v._id) === String(s.variant_id),
       );
 
-      if (!variant) {
+      if (!color) {
         throw new BadRequestException('Selected variant not found in clothing');
       }
 
       // Optional: check stock
-      if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-        throw new BadRequestException(
-          `Not enough stock for variant "${variant._id}" in clothing. Remaining: ${variant.stock}`,
-        );
-      }
+      for (const v of color.variants) {
+        if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+          throw new BadRequestException(
+            `Not enough stock for variant "${v._id}" in clothing. Remaining: ${v.stock}`,
+          );
+        }
 
-      total += (variant.price ?? 0) * (s.quantity ?? 1);
+        total += (v.price ?? 0) * (s.quantity ?? 1);
+      }
     }
 
     return this.round(total);

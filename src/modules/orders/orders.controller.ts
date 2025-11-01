@@ -44,7 +44,7 @@ export class OrderController {
     @Req() req,
     @Query('page') page = 1,
     @Query('size') size = 10,
-    @Query('status') status?: string,
+    // @Query('status') status?: string,
   ) {
     const userId = req.user?._id || req.user?.id;
     if (!userId) throw new NotFoundException('User not found');
@@ -53,7 +53,6 @@ export class OrderController {
       userId,
       Number(page),
       Number(size),
-      status,
     );
   }
 

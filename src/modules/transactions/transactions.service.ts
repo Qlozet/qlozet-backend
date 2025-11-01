@@ -101,6 +101,30 @@ export class TransactionService {
       size,
     );
   }
+  async findByCustomer(
+    customerId: string,
+    page: number = 1,
+    size: number = 10,
+  ) {
+    const { take, skip } = await Utils.getPagination(page, size);
+
+    const [transactions, total] = await Promise.all([
+      this.transactionModel
+        .find({ initiator: new Types.ObjectId(customerId) })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(take),
+      this.transactionModel.countDocuments({
+        initiator: new Types.ObjectId(customerId),
+      }),
+    ]);
+
+    return Utils.getPagingData(
+      { count: total, rows: transactions },
+      page,
+      size,
+    );
+  }
 
   // ✅ Find transaction by reference
   async findByReference(reference: string) {

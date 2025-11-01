@@ -68,7 +68,7 @@ export class OrderItemSelectionsDto {
   @ValidateNested({ each: true })
   @Type(() => VariantSelectionDto)
   @IsOptional()
-  variant_selections?: VariantSelectionDto[];
+  color_variant_selections?: VariantSelectionDto[];
 
   @IsArray()
   @ValidateNested({ each: true })

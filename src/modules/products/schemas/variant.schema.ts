@@ -8,21 +8,20 @@ export type VariantDocument = Variant & Document;
 @Schema({ timestamps: true })
 export class Variant {
   _id?: Types.ObjectId;
-  @Prop({ type: [ColorSchema], default: [] })
-  colors?: Color[];
   @Prop()
-  size?: string;
-  @Prop({ type: [ProductImageSchema], default: [] })
-  images?: ProductImage[];
+  size: string;
+
   @Prop({ min: 0 })
   stock: number;
   @Prop({ min: 0 })
   price: number;
+
+  @Prop({ min: 0 })
+  yard_per_order: number;
+
   @Prop()
   sku?: string;
-  @Prop({ type: Object })
-  measurement_range?: Record<string, any>;
-  @Prop({ type: Object })
-  attributes?: Record<string, any>;
+  @Prop({ type: [ProductImageSchema], default: [] })
+  images?: ProductImage[];
 }
 export const VariantSchema = SchemaFactory.createForClass(Variant);

@@ -6,6 +6,7 @@ import { Fabric, FabricSchema } from './fabric.schema';
 import { Style, StyleSchema } from './style.schema';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
+import { Color, ColorSchema } from './product.schema';
 
 export enum ClothingType {
   CUSTOMIZE = 'customize',
@@ -42,8 +43,8 @@ export class Clothing {
   @Prop({ type: [AccessorySchema], default: [] })
   accessories?: Accessory[];
 
-  @Prop({ type: [VariantSchema], default: [] })
-  variants?: Variant[];
+  @Prop({ type: [ColorSchema], default: [] })
+  color_variants?: Color[];
 
   @Prop({ type: [FabricSchema], default: [] })
   fabrics?: Fabric[];

@@ -11,45 +11,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ImageDto } from './image.dto';
-import { Types } from 'mongoose';
-import { VariantDto } from './base.dto';
-import { TaxonomyDto } from './taxonomy.dto';
+import { ProductImageDto } from './product-image.dto';
 
 export enum AudienceType {
   MEN = 'men',
   WOMEN = 'women',
   UNISEX = 'unisex',
   KIDS = 'kids',
-}
-
-// style.dto.ts
-export class StyleFieldOptionDto {
-  @ApiProperty({ example: 'French Cuff', description: 'Option name' })
-  @IsString()
-  name: string;
-
-  @ApiPropertyOptional({ example: 10, description: 'Price effect' })
-  @IsOptional()
-  @IsNumber()
-  price_effect?: number;
-
-  @ApiPropertyOptional({ example: 0.1, description: 'Yardage effect' })
-  @IsOptional()
-  @IsNumber()
-  yardage_effect?: number;
-}
-
-export class StyleFieldDto {
-  @ApiProperty({ example: 'Cuff Style', description: 'Field label' })
-  @IsString()
-  label: string;
-
-  @ApiProperty({ type: [StyleFieldOptionDto], description: 'Field options' })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => StyleFieldOptionDto)
-  options: StyleFieldOptionDto[];
 }
 
 export class CreateStyleDto {
@@ -62,40 +30,41 @@ export class CreateStyleDto {
   style_code: string;
 
   @ApiProperty({ example: ['shirts', 'formal'], description: 'Categories' })
+  @IsNotEmpty()
   @IsArray()
   @IsString({ each: true })
   categories: string[];
 
-  @ApiPropertyOptional({ type: [ImageDto], description: 'Style images' })
-  @IsOptional()
+  @ApiProperty({ type: [ProductImageDto], description: 'Style images' })
+  @IsNotEmpty()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ImageDto)
-  images?: ImageDto[];
+  @Type(() => ProductImageDto)
+  images: ProductImageDto[];
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: ['dress', 'formal'],
     description: 'Style tags',
   })
-  @IsOptional()
+  @IsNotEmpty()
   @IsArray()
   @IsString({ each: true })
   attributes?: string[];
 
-  @ApiPropertyOptional({ example: 70, description: 'Base price', minimum: 0 })
-  @IsOptional()
+  @ApiProperty({ example: 70, description: 'Base price', minimum: 0 })
+  @IsNotEmpty()
   @IsNumber()
-  @Min(0)
-  price?: number;
+  @Min(1)
+  price: number;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 60,
     description: 'Minimum width in cm',
     minimum: 0,
   })
-  @IsOptional()
+  @IsNotEmpty()
   @IsNumber()
-  @Min(0)
+  @Min(1)
   min_width_cm?: number;
 
   @ApiPropertyOptional({
@@ -106,81 +75,11 @@ export class CreateStyleDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({
-    example: {
-      collar_style: {
-        label: 'Collar Style',
-        options: [
-          { name: 'Standard Point', price_effect: 0 },
-          { name: 'Spread Collar', price_effect: 5 },
-        ],
-      },
-    },
+  @ApiProperty({
+    example: 'neckline',
     description: 'Customization fields',
   })
-  @IsOptional()
-  @IsObject()
-  fields?: Record<string, StyleFieldDto>;
-  @ApiProperty({ type: [VariantDto] })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => VariantDto)
-  variants: VariantDto[];
-}
-
-export class StyleResponseDto {
-  @ApiProperty({ example: '67a1b2c3d4e5f67890123460', description: 'Style ID' })
-  _id: Types.ObjectId;
-
-  @ApiProperty({ example: 'Classic Dress Shirt', description: 'Style name' })
-  name: string;
-
-  @ApiProperty({ example: 'CDS-001', description: 'Unique style code' })
-  styleCode: string;
-
-  @ApiProperty({
-    enum: ['men', 'women', 'unisex', 'kids'],
-    example: 'men',
-    description: 'Target audience',
-  })
-  audience: string;
-
-  @ApiProperty({ example: ['shirts', 'formal'], description: 'Categories' })
-  categories: string[];
-
-  @ApiPropertyOptional({
-    example: ['dress', 'formal'],
-    description: 'Style tags',
-  })
-  tags?: string[];
-
-  @ApiPropertyOptional({ type: [ImageDto], description: 'Style images' })
-  images?: ImageDto[];
-
-  @ApiPropertyOptional({ example: 70, description: 'Base price' })
-  price?: number;
-
-  @ApiPropertyOptional({ example: 60, description: 'Minimum width in cm' })
-  minWidthCm?: number;
-
-  @ApiPropertyOptional({
-    example: 'Standard dress shirt',
-    description: 'Additional notes',
-  })
-  notes?: string;
-
-  @ApiPropertyOptional({ description: 'Customization fields' })
-  fields?: Record<string, StyleFieldDto>;
-
-  @ApiProperty({
-    example: '2024-01-15T10:30:00.000Z',
-    description: 'Creation timestamp',
-  })
-  createdAt: Date;
-
-  @ApiProperty({
-    example: '2024-01-15T10:30:00.000Z',
-    description: 'Last update timestamp',
-  })
-  updatedAt: Date;
+  @IsNotEmpty()
+  @IsString()
+  type: string;
 }

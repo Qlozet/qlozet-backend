@@ -53,8 +53,6 @@ export class OrderService {
     await this.validationService.validateCompleteOrder(orderData.items);
     const shippingAddress = await this.resolveShippingAddress(customer);
     const processedItems = await this.processOrderItems(orderData.items);
-
-    // Use a distinct prefix for order references
     const orReference = await generateUniqueQlozetReference(
       this.orderModel,
       'ORD',
@@ -67,7 +65,7 @@ export class OrderService {
       const selections = item.selections || {};
 
       return {
-        product_id: item.product_id,
+        product: item.product_id,
         note: item.note,
         product_kind: item.product_kind,
         clothing_type: item.clothing_type,
@@ -75,7 +73,8 @@ export class OrderService {
         fabric_selections: selections.fabric_selection || [],
         style_selections: selections.style_selection || [],
         accessory_selections: selections.accessory_selection || [],
-        total_price: subtotal ?? 0,
+        total_price: total ?? 0,
+        subtotal,
       };
     });
 
@@ -96,6 +95,7 @@ export class OrderService {
       this.transactionModel,
       'TXN',
     );
+
     await this.createTransaction({
       business: new Types.ObjectId(business),
       initiator: savedOrder.customer,
@@ -255,7 +255,9 @@ export class OrderService {
 
     return {
       variant_selection:
-        selections.variant_selections ?? selections.variant_selections ?? [],
+        selections.color_variant_selections ??
+        selections.color_variant_selections ??
+        [],
       style_selection:
         selections.style_selections ?? selections.style_selections ?? [],
       fabric_selection:
@@ -376,6 +378,24 @@ export class OrderService {
       }
     }
   }
+  private calculateDiscountDeduction(discount: any, basePrice: number): number {
+    const value = discount.value || 0;
+
+    switch (discount.type) {
+      case 'fixed':
+      case 'flash_fixed':
+      case 'category_specific':
+        return Math.min(value, basePrice);
+
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        return (basePrice * value) / 100;
+
+      default:
+        return 0;
+    }
+  }
 
   private async updateClothingInventory(
     item: ProcessedOrderItem,
@@ -386,13 +406,19 @@ export class OrderService {
     ) {
       for (const variant of item.selections.variant_selection) {
         const clothing = await this.productModel.findById(item.product_id);
-        if (clothing && clothing.clothing?.variants) {
-          const productVariant = clothing.clothing.variants.find(
+        if (clothing && clothing.clothing?.color_variants) {
+          const colorVariant = clothing.clothing.color_variants.find(
             (v: any) => v._id.toString() === variant.variant_id.toString(),
           );
-          if (productVariant && productVariant.stock !== undefined) {
-            productVariant.stock -= variant.quantity;
-            await clothing.save();
+          if (!colorVariant)
+            throw new BadRequestException(
+              `Color variant not found: ${variant.variant_id}`,
+            );
+          for (const v of colorVariant?.variants) {
+            if (v && v.stock !== undefined) {
+              v.stock -= variant.quantity;
+              await clothing.save();
+            }
           }
         }
       }
@@ -541,7 +567,6 @@ export class OrderService {
     customerId: Types.ObjectId,
     page: number = 1,
     size: number = 10,
-    status?: string,
   ): Promise<{
     data: OrderDocument[];
     total_items: number;
@@ -554,10 +579,7 @@ export class OrderService {
     const { skip, take } = await Utils.getPagination(page, size);
 
     // Build query
-    const query: any = { customer: customerId };
-    if (status && status !== 'all') {
-      query.status = status;
-    }
+    const query: any = { customer: new Types.ObjectId(customerId) };
 
     const [orders, total] = await Promise.all([
       this.orderModel
@@ -565,7 +587,7 @@ export class OrderService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(take)
-        .populate('items.product_id', 'name images base_price')
+        .populate('items.product', 'name images base_price')
         .populate('customer', 'firstName lastName email')
         .exec(),
 
