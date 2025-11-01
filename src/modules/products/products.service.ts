@@ -35,7 +35,6 @@ export class ProductService {
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
     let totalPrice = 0;
-    await this.productModel.deleteMany();
     if (kind === 'clothing') {
       totalPrice = this.computeClothingPrice(createProductDto);
     } else if (kind === 'accessory') {
