@@ -73,7 +73,8 @@ export class OrderService {
         fabric_selections: selections.fabric_selection || [],
         style_selections: selections.style_selection || [],
         accessory_selections: selections.accessory_selection || [],
-        total_price: subtotal ?? 0,
+        total_price: total ?? 0,
+        subtotal,
       };
     });
 
@@ -94,6 +95,7 @@ export class OrderService {
       this.transactionModel,
       'TXN',
     );
+
     await this.createTransaction({
       business: new Types.ObjectId(business),
       initiator: savedOrder.customer,
@@ -376,6 +378,24 @@ export class OrderService {
       }
     }
   }
+  private calculateDiscountDeduction(discount: any, basePrice: number): number {
+    const value = discount.value || 0;
+
+    switch (discount.type) {
+      case 'fixed':
+      case 'flash_fixed':
+      case 'category_specific':
+        return Math.min(value, basePrice);
+
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        return (basePrice * value) / 100;
+
+      default:
+        return 0;
+    }
+  }
 
   private async updateClothingInventory(
     item: ProcessedOrderItem,
@@ -547,7 +567,6 @@ export class OrderService {
     customerId: Types.ObjectId,
     page: number = 1,
     size: number = 10,
-    status?: string,
   ): Promise<{
     data: OrderDocument[];
     total_items: number;
@@ -560,7 +579,7 @@ export class OrderService {
     const { skip, take } = await Utils.getPagination(page, size);
 
     // Build query
-    const query: any = { customer: customerId };
+    const query: any = { customer: new Types.ObjectId(customerId) };
 
     const [orders, total] = await Promise.all([
       this.orderModel

@@ -56,9 +56,6 @@ export class Product extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   vendor: Types.ObjectId;
 
-  @Prop({ type: Number, default: null })
-  discounted_price: number;
-
   @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;
 

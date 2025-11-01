@@ -2,6 +2,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -16,6 +17,7 @@ import {
   Fabric,
   Accessory,
   Variant,
+  DiscountDocument,
 } from '../products/schemas';
 import {
   ProductKind,
@@ -31,17 +33,14 @@ import {
 
 @Injectable()
 export class PriceCalculationService {
+  private readonly logger = new Logger(PriceCalculationService.name);
+
   constructor(
     @InjectModel('Product')
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel('Style') private readonly styleModel: Model<StyleDocument>,
-    @InjectModel('Fabric') private readonly fabricModel: Model<FabricDocument>,
-    @InjectModel('Clothing')
-    private readonly clothingModel: Model<ClothingDocument>,
-    @InjectModel('Accessory')
-    private readonly accessoryModel: Model<AccessoryDocument>,
-    @InjectModel('Variant')
-    private readonly variantModel: Model<VariantDocument>,
+
+    @InjectModel('Discount')
+    private readonly discountModel: Model<DiscountDocument>,
   ) {}
 
   // ========== PUBLIC METHODS ==========
@@ -75,41 +74,64 @@ export class PriceCalculationService {
   }
 
   async calculateItemTotal(item: ProcessedOrderItem): Promise<number> {
-    const product = await this.productModel.findById(item.product_id);
+    const product = await this.productModel.findById(item.product_id).lean();
 
     if (!product) {
       throw new NotFoundException(`Product not found: ${item.product_id}`);
     }
 
+    let discountValue = 0;
+
+    // --- Fetch discount if product has applied_discount ---
+    if (product.applied_discount) {
+      const discount = await this.discountModel
+        .findById(product.applied_discount)
+        .lean();
+
+      if (discount) {
+        discountValue = this.applyDiscount(product, discount);
+      }
+    }
+
+    // --- Normalize Selections ---
     const normalizedSelections = this.normalizeSelections(item.selections);
+    let total = 0;
+
+    // --- Calculate Total Based on Product Type ---
     switch (product.kind) {
       case ProductKind.CLOTHING:
-        return this.calculateClothingTotal(
-          {
-            ...item,
-            selections: normalizedSelections,
-          },
+        total = await this.calculateClothingTotal(
+          { ...item, selections: normalizedSelections },
           product as ProductDocument,
         );
+        break;
 
       case ProductKind.FABRIC:
-        return this.calculateFabricTotal(
-          {
-            ...item,
-            selections: normalizedSelections,
-          },
+        total = await this.calculateFabricTotal(
+          { ...item, selections: normalizedSelections },
           product as ProductDocument,
         );
+        break;
 
       case ProductKind.ACCESSORY:
-        return this.calculateAccessoryTotal(
+        total = await this.calculateAccessoryTotal(
           normalizedSelections.accessory_selection as AccessorySelectionDto[],
           product as ProductDocument,
         );
+        break;
 
       default:
-        return 0;
+        total = 0;
     }
+
+    // --- Apply Discount (deduct from total) ---
+    const finalTotal = Math.max(total - discountValue, 0);
+
+    this.logger.debug(
+      `🧾 Product ${product._id} (${product.kind}) => Base total: ${total}, Discount: ${discountValue}, Final total: ${finalTotal}`,
+    );
+
+    return finalTotal;
   }
 
   private normalizeSelections(
@@ -134,6 +156,47 @@ export class PriceCalculationService {
       accessory_selection:
         selections.accessory_selection ?? selections.accessory_selection ?? [],
     };
+  }
+  private applyDiscount(product: ProductDocument, discount: any): number {
+    if (!discount || !product?.base_price) return 0;
+
+    const basePrice = product.base_price;
+    let discountValue = 0;
+
+    switch (discount.type) {
+      /** ---------------- BASIC DISCOUNTS ---------------- */
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        // Percentage-based discounts
+        discountValue = (basePrice * (discount.value || 0)) / 100;
+        break;
+
+      case 'fixed':
+      case 'flash_fixed':
+        discountValue = discount.value || 0;
+        break;
+      case 'category_specific':
+        if (discount.categories?.length && product.collections?.length) {
+          const match = product.collections.some((cId: any) =>
+            discount.categories.includes(String(cId)),
+          );
+          if (match) {
+            if (discount.mode === 'percentage') {
+              discountValue = (basePrice * (discount.value || 0)) / 100;
+            } else {
+              discountValue = discount.value || 0;
+            }
+          }
+        }
+        break;
+
+      /** ---------------- DEFAULT ---------------- */
+      default:
+        discountValue = 0;
+        break;
+    }
+    return Math.min(discountValue, basePrice);
   }
 
   private async calculateStyleCost(

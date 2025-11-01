@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { FlattenMaps, Model, Types } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Product,
   ProductDocument,
@@ -13,27 +13,14 @@ import {
   Accessory,
   AccessoryDocument,
 } from '../products/schemas';
-import {
-  ProductKind,
-  FabricSelection,
-  AccessorySelection,
-  ClothingType,
-} from './schemas/orders.interfaces';
+import { ProductKind, ClothingType } from './schemas/orders.interfaces';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
-import { StyleSelectionDto } from './dto/selection.dto';
 
 @Injectable()
 export class OrderValidationService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel(Fabric.name)
-    private readonly fabricModel: Model<FabricDocument>,
-    @InjectModel(Variant.name)
-    private readonly variantModel: Model<VariantDocument>,
-    @InjectModel(Style.name) private readonly styleModel: Model<StyleDocument>,
-    @InjectModel(Accessory.name)
-    private readonly accessoryModel: Model<AccessoryDocument>,
   ) {}
 
   /** Entry point for a single order item */
@@ -55,7 +42,6 @@ export class OrderValidationService {
       accessories: [],
       styles: [],
     };
-
     /** ---------------- CLOTHING ---------------- */
     if (product.kind === ProductKind.CLOTHING) {
       const clothing = product.clothing;
