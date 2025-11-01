@@ -11,8 +11,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TaxonomyDto } from './taxonomy.dto';
-import { VariantDto } from './variant.dto';
 import { ImageDto } from './image.dto';
+import { ProductImageDto } from './product-image.dto';
+import { VariantDto } from './variant.dto';
 
 export class AccessoryDto {
   @ApiProperty({
@@ -32,12 +33,12 @@ export class AccessoryDto {
   description?: string;
 
   @ApiProperty({
-    example: 8500,
-    description: 'Base price in Naira',
+    description: 'Base price of the accessory',
+    example: 5000,
   })
+  @IsNotEmpty()
   @IsNumber()
-  @Min(0)
-  base_price: number;
+  price: number;
 
   @ApiProperty({
     type: TaxonomyDto,
@@ -54,23 +55,30 @@ export class AccessoryDto {
   taxonomy: TaxonomyDto;
 
   @ApiProperty({
-    type: VariantDto,
+    type: [VariantDto],
     description:
       'Available accessory variants (e.g., different colors or sizes)',
-    example: {
-      color: ['Black'],
-      size: 'M',
-      price: 8800,
-      stock: 20,
-    },
+    example: [
+      {
+        color: { name: 'Black', hex: '#000' },
+        size: 'M',
+        stock: 20,
+      },
+      {
+        color: { name: 'White', hex: '#fff' },
+        size: 'M',
+        stock: 20,
+      },
+    ],
   })
-  @IsObject()
+  @IsArray()
+  @IsNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => VariantDto)
-  variant: VariantDto;
+  variants: VariantDto[];
 
   @ApiProperty({
-    type: [ImageDto],
+    type: [ProductImageDto],
     description: 'Accessory images',
     example: [
       {
@@ -91,5 +99,5 @@ export class AccessoryDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ImageDto)
-  images?: ImageDto[];
+  images?: ProductImageDto[];
 }

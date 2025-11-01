@@ -6,12 +6,6 @@ export type StyleHotspotDocument = StyleHotspot & Document;
 @Schema({ _id: false })
 export class StyleHotspot {
   @Prop({ required: true })
-  id: string; // ulid/uuid
-
-  @Prop({ required: true })
-  image_id: string; // The product image this hotspot belongs to
-
-  @Prop({ required: true })
   field_key: string; // e.g., "neckline", "sleeve_style", "skirt"
 
   @Prop()

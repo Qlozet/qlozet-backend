@@ -9,38 +9,21 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { ColorDto } from './product.dto';
 import { ProductImageDto } from './product-image.dto';
 
 export class VariantDto {
-  @ApiPropertyOptional({ type: [ColorDto], description: 'Color variants' })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ColorDto)
-  colors?: ColorDto[];
-
   @ApiPropertyOptional({ description: 'Variant size (e.g., M, L)' })
   @IsOptional()
   @IsString()
-  size?: string;
-
-  @ApiPropertyOptional({
-    type: [ProductImageDto],
-    description: 'Variant images',
-  })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ProductImageDto)
-  images?: ProductImageDto[];
+  size: string;
 
   @ApiProperty({ example: 20, description: 'Stock quantity' })
   @IsNumber()
-  @Min(0)
+  @Min(1)
   stock: number;
 
   @ApiProperty({ example: 5000, description: 'Price of this variant' })
+  @IsOptional()
   @IsNumber()
   @Min(0)
   price: number;
@@ -53,13 +36,22 @@ export class VariantDto {
   @IsString()
   sku?: string;
 
-  @ApiPropertyOptional({ description: 'Measurement range for custom orders' })
+  @ApiPropertyOptional({
+    example: 2.5,
+    description: 'Yard per order (in yards)',
+  })
   @IsOptional()
-  @IsObject()
-  measurement_range?: Record<string, any>;
+  @IsNumber()
+  @Min(0.1)
+  yard_per_order: number;
 
-  @ApiPropertyOptional({ description: 'Additional variant attributes' })
+  @ApiPropertyOptional({
+    type: [ProductImageDto],
+    description: 'Variant images',
+  })
   @IsOptional()
-  @IsObject()
-  attributes?: Record<string, any>;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
 }

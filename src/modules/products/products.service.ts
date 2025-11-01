@@ -7,18 +7,13 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
-  ClothingDocument,
   Discount,
   DiscountDocument,
   Product,
   ProductDocument,
-  Style,
-  StyleDocument,
-  TaxonomyDocument,
 } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
-import { CreateClothingDto } from './dto/product.dto';
 
 @Injectable()
 export class ProductService {
@@ -39,7 +34,7 @@ export class ProductService {
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
     let totalPrice = 0;
-
+    await this.productModel.deleteMany();
     if (kind === 'clothing') {
       totalPrice = this.computeClothingPrice(createProductDto);
     } else if (kind === 'accessory') {
@@ -126,42 +121,51 @@ export class ProductService {
   private computeClothingPrice(dto: any): number {
     let total = 0;
     const clothing = dto?.clothing;
-    // Add fabric variants
-    if (clothing?.fabric_variants?.length) {
-      const fabricSum = clothing.fabric_variants.reduce(
+    console.log(clothing, 'clothing');
+    console.log(clothing.fabrics, 'fabric_variants');
+    if (clothing?.fabrics?.length) {
+      const fabricSum = clothing.fabrics.reduce(
         (sum, f) => sum + (f.price_per_yard * f.yard_length || 0),
         0,
       );
       total += fabricSum;
+      for (const f of clothing?.fabrics) {
+        const vSum = f.variants.reduce(
+          (sum, f) => sum + (f.stock * f.price || 0),
+          0,
+        );
+        total += vSum;
+      }
     }
-
     // Add color variants
     if (clothing?.color_variants?.length) {
-      const colorSum = clothing.color_variants.reduce(
-        (sum, v) => sum + (v?.stock ? v.price * v.stock : 0),
-        0,
-      );
-      total += colorSum;
+      for (const c of clothing?.color_variants) {
+        const colorSum = c.variants.reduce(
+          (sum, v) => sum + (v?.stock ? v.price * v.stock : 0),
+          0,
+        );
+        total += colorSum;
+      }
     }
 
-    // Add style price
-    if (clothing.styles?.price) {
-      total += clothing.styles.price;
+    if (clothing?.styles) {
+      for (const s of clothing?.styles) {
+        total += s.price;
+      }
     }
 
     return total;
   }
 
   private computeAccessoryPrice(dto: any): number {
-    const accessory = dto?.accessory;
-    let total = accessory.base_price || 0;
-
+    const accessory = dto.accessory;
+    let total = dto.accessory.price || 0;
     if (accessory.variants?.length) {
       const variantSum = accessory.variants.reduce(
-        (sum, v) => sum + (v.price || 0),
+        (sum, v) => sum + (v.stock || 0),
         0,
       );
-      total += variantSum;
+      return variantSum * total;
     }
 
     return total;

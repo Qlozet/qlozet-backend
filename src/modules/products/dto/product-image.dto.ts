@@ -10,9 +10,6 @@ import {
 import { Type } from 'class-transformer';
 
 class StyleHotspotDto {
-  @IsString()
-  image_id: string;
-
   @ApiProperty({ example: 'collar_style', description: 'Target field key' })
   @IsString()
   field_key: string;

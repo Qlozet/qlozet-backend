@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
-  IsBoolean,
   IsEnum,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,13 +11,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateAccessoryDto } from './product.dto';
-import { VariantDto } from './variant.dto';
 import { FabricDto } from './fabric.dto';
 import { CreateStyleDto } from './style.dto';
 import { TaxonomyDto } from './taxonomy.dto';
 import { ProductImageDto } from './product-image.dto';
 import { AccessoryDto } from './accessory.dto';
+import { ColorDto } from './product.dto';
 
 export enum ClothingType {
   CUSTOMIZE = 'customize',
@@ -50,10 +49,7 @@ export class ClothingDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({
-    example: 7,
-    description: 'Production turnaround days (number of days to complete)',
-  })
+  @ApiProperty({ example: 7, description: 'Production turnaround days' })
   @IsNumber()
   @Min(0)
   turnaround_days: number;
@@ -68,42 +64,22 @@ export class ClothingDto {
       audience: 'men',
     },
   })
-  @ValidateNested({ each: true })
+  @ValidateNested()
   @Type(() => TaxonomyDto)
   taxonomy: TaxonomyDto;
 
   @ApiProperty({
     enum: ['active', 'draft', 'archived'],
-    description: 'Publication status of the product',
+    description: 'Publication status',
     example: 'active',
   })
   @IsEnum(['active', 'draft', 'archived'])
   status: 'active' | 'draft' | 'archived';
 
+  // ✅ Images
   @ApiPropertyOptional({
     type: [ProductImageDto],
     description: 'Product images with optional style hotspots',
-    example: [
-      {
-        public_id: 'qlozet/products/denim-jacket-1',
-        url: 'https://res.cloudinary.com/qlozet/image/upload/v1/products/denim-jacket-1.jpg',
-        width: 1200,
-        height: 1600,
-        hotspots: [
-          {
-            id: 'hotspot1',
-            image_id: 'qlozet/products/denim-jacket-1',
-            field_key: 'collar_style',
-            label: 'Classic Collar',
-            x: 0.45,
-            y: 0.1,
-            anchor: 'center',
-            radius: 12,
-            zIndex: 1,
-          },
-        ],
-      },
-    ],
   })
   @IsOptional()
   @IsArray()
@@ -111,95 +87,78 @@ export class ClothingDto {
   @Type(() => ProductImageDto)
   images?: ProductImageDto[];
 
+  // ✅ Styles (only allowed for CUSTOMIZE)
+  @ValidateIf((o) => o.type === ClothingType.CUSTOMIZE)
   @ApiPropertyOptional({
     type: [CreateStyleDto],
-    description:
-      'Available custom styles (only required if clothing_type is "customize")',
-    example: [
-      {
-        name: 'Classic Fit Kaftan',
-        style_code: 'CF-001',
-        categories: ['traditional'],
-        attributes: ['premium', 'custom'],
-        price: 16000,
-        min_width_cm: 60,
-        notes: 'Slim fit kaftan with embroidered neckline',
-        type: 'Neckline',
-        variants: [
-          {
-            size: 'M',
-            price: 16000,
-            stock: 10,
-            sku: 'CF-M',
-          },
-        ],
-      },
-    ],
+    description: 'Custom styles (only for customize type)',
   })
-  @ValidateIf((o) => o.clothing_type === ClothingType.CUSTOMIZE)
-  @IsArray({ message: 'Styles are required when clothing_type is "customize"' })
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateStyleDto)
   styles?: CreateStyleDto[];
 
+  @ValidateIf((o) => o.type === ClothingType.CUSTOMIZE)
   @ApiPropertyOptional({
-    type: [CreateAccessoryDto],
-    description: 'Attached accessories (e.g., matching cap or bracelet)',
-    example: [
-      {
-        name: 'Qlozet Hausa Cap',
-        description: 'Handwoven matching cap with custom embroidery',
-        base_price: 5000,
-        taxonomy: {
-          product_type: 'accessory',
-          categories: ['Belt'],
-          attributes: ['leather', 'fashion', 'men', 'qlozet'],
-          audience: 'men',
-        },
-        variant: { color: 'Cream', size: 'M', price: 5500, stock: 10 },
-      },
-    ],
+    type: [AccessoryDto],
+    description: 'Attached accessories (only for customize type)',
   })
-  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AccessoryDto)
   accessories?: AccessoryDto[];
 
-  @ApiPropertyOptional({
-    type: [VariantDto],
-    description:
-      'Available color or size variants (primarily for non-customize clothing)',
+  @ApiProperty({
+    type: [ColorDto],
+    description: 'Color variants allowed for all types',
     example: [
       {
-        colors: [{ hex: '#2A2A72' }],
-        size: 'L',
-        stock: 15,
-        price: 16000,
-        sku: 'QZT-KFTN-L-BLUE',
-        attributes: { fabric: 'cotton', sleeve: 'long' },
+        name: 'White',
+        hex: '#fff',
+        images: [
+          {
+            public_id: 'qlozet/fabrics/royal-blue-cotton',
+            url: 'https://res.cloudinary.com/qlozet/image/upload/v1/fabrics/royal-blue-cotton.jpg',
+            width: 800,
+            height: 600,
+          },
+          {
+            public_id: 'qlozet/fabrics/navy-blue-cotton',
+            url: 'https://res.cloudinary.com/qlozet/image/upload/v1/fabrics/navy-blue-cotton.jpg',
+            width: 800,
+            height: 600,
+          },
+        ],
+        variants: [
+          {
+            size: 'L',
+            stock: 15,
+            price: 16000,
+            sku: 'QZT-KFTN-L-BLUE',
+          },
+        ],
       },
     ],
   })
-  @ValidateIf((o) => o.clothing_type === ClothingType.NON_CUSTOMIZE)
-  @IsArray({
-    message:
-      'Color variants are required when clothing_type is "non_customize"',
-  })
+  @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => VariantDto)
-  variants?: VariantDto[];
+  @Type(() => ColorDto)
+  color_variants?: ColorDto[];
 
+  @ValidateIf((o) => o.type === ClothingType.CUSTOMIZE)
   @ApiPropertyOptional({
     type: [FabricDto],
-    description:
-      'Available fabric variants for this clothing (primarily for customize clothing)',
+    description: 'Fabric variants (only for customize type)',
     example: [
       {
-        name: 'Royal Blue Cotton',
-        description: 'High-thread-count cotton fabric with smooth finish',
+        name: 'Qlozet Royal Blue Cotton',
+        description:
+          'High-thread-count royal blue cotton fabric with a soft, breathable finish. Ideal for kaftans and agbadas.',
         product_type: 'cotton',
-        colors: [{ hex: '#2A2A72' }],
+        colors: [
+          { name: 'Royal Blue', hex: '#2A2A72' },
+          { name: 'Navy Blue', hex: '#1E3A8A' },
+        ],
         pattern: 'plain',
         yard_length: 2.5,
         width: 60,
@@ -212,14 +171,33 @@ export class ClothingDto {
             width: 800,
             height: 600,
           },
+          {
+            public_id: 'qlozet/fabrics/navy-blue-cotton',
+            url: 'https://res.cloudinary.com/qlozet/image/upload/v1/fabrics/navy-blue-cotton.jpg',
+            width: 800,
+            height: 600,
+          },
+        ],
+        variants: [
+          {
+            size: 'L',
+            stock: 15,
+            price: 16000,
+            sku: 'QZT-KFTN-L-BLUE',
+            yard_per_order: 5,
+          },
+          {
+            size: 'XL',
+            stock: 10,
+            price: 17000,
+            sku: 'QZT-KFTN-XL-BLUE',
+            yard_per_order: 6,
+          },
         ],
       },
     ],
   })
-  @ValidateIf((o) => o.clothing_type === ClothingType.CUSTOMIZE)
-  @IsArray({
-    message: 'Fabric variants are required when clothing_type is "customize"',
-  })
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FabricDto)
   fabrics?: FabricDto[];

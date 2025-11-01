@@ -293,23 +293,24 @@ export class PriceCalculationService {
         }
 
         // Handle single variant if specified
-        const variant = accessory.variant;
-        if (variant && s.variant_id) {
-          if (String(variant._id) !== String(s.variant_id)) {
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}"`,
-            );
-          }
+        const variants = accessory.variants;
+        if (s.variant_id && variants.length > 0) {
+          for (const v of variants) {
+            if (String(v._id) !== String(s.variant_id)) {
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}"`,
+              );
+            }
 
-          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-            throw new BadRequestException(
-              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}". Remaining: ${variant.stock}`,
-            );
-          }
+            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+              throw new BadRequestException(
+                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}". Remaining: ${v.stock}`,
+              );
+            }
 
-          total +=
-            (variant.price ?? accessory.base_price ?? 0) * (s.quantity ?? 1);
-          continue; // already processed
+            total += (accessory.price ?? 0) * (s.quantity ?? 1);
+            continue; // already processed
+          }
         }
 
         // Check accessory stock
@@ -319,7 +320,7 @@ export class PriceCalculationService {
           );
         }
 
-        total += (accessory.base_price ?? 0) * (s.quantity ?? 1);
+        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
 
       if (product.kind === ProductKind.CLOTHING) {
@@ -333,23 +334,24 @@ export class PriceCalculationService {
           );
         }
 
-        const variant = accessory.variant;
-        if (variant && s.variant_id) {
-          if (String(variant._id) !== String(s.variant_id)) {
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}" in clothing`,
-            );
-          }
+        const variants = accessory.variants;
+        if (s.variant_id && variants.length > 0) {
+          for (const v of variants) {
+            if (String(v._id) !== String(s.variant_id)) {
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}" in clothing`,
+              );
+            }
 
-          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-            throw new BadRequestException(
-              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}" in clothing. Remaining: ${variant.stock}`,
-            );
-          }
+            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+              throw new BadRequestException(
+                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}" in clothing. Remaining: ${v.stock}`,
+              );
+            }
 
-          total +=
-            (variant.price ?? accessory.base_price ?? 0) * (s.quantity ?? 1);
-          continue;
+            total += (accessory.price ?? 0) * (s.quantity ?? 1);
+            continue;
+          }
         }
 
         // Check accessory stock
@@ -359,7 +361,7 @@ export class PriceCalculationService {
           );
         }
 
-        total += (accessory.base_price ?? 0) * (s.quantity ?? 1);
+        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
     }
 
@@ -373,22 +375,24 @@ export class PriceCalculationService {
     let total = 0;
 
     for (const s of selections) {
-      const variant = product.clothing?.variants?.find(
+      const color = product.clothing?.color_variants?.find(
         (v) => String(v._id) === String(s.variant_id),
       );
 
-      if (!variant) {
+      if (!color) {
         throw new BadRequestException('Selected variant not found in clothing');
       }
 
       // Optional: check stock
-      if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
-        throw new BadRequestException(
-          `Not enough stock for variant "${variant._id}" in clothing. Remaining: ${variant.stock}`,
-        );
-      }
+      for (const v of color.variants) {
+        if ((v.stock ?? 0) < (s.quantity ?? 0)) {
+          throw new BadRequestException(
+            `Not enough stock for variant "${v._id}" in clothing. Remaining: ${v.stock}`,
+          );
+        }
 
-      total += (variant.price ?? 0) * (s.quantity ?? 1);
+        total += (v.price ?? 0) * (s.quantity ?? 1);
+      }
     }
 
     return this.round(total);

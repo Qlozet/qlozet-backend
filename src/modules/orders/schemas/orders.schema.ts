@@ -51,7 +51,7 @@ class AccessorySelection {
 @Schema({ _id: false })
 class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
-  product_id: Types.ObjectId;
+  product: Types.ObjectId;
 
   @Prop({ type: [VariantSelection], default: [] })
   variant_selections?: VariantSelection[];

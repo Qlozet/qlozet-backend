@@ -1,15 +1,10 @@
 import {
   IsArray,
   IsEnum,
-  IsMongoId,
   IsNotEmpty,
-  IsNumber,
   IsObject,
   IsOptional,
   IsString,
-  IsUrl,
-  Min,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -17,12 +12,38 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { ClothingDto } from './clothing.dto';
 import { AccessoryDto } from './accessory.dto';
 import { FabricDto } from './fabric.dto';
+import { VariantDto } from './variant.dto';
 
 // ---------- BASE SUB-DTOS ---------- //
 
 export class ColorDto {
+  @ApiPropertyOptional({ example: 'Red', description: 'Name of the color' })
+  @IsString()
+  @IsOptional()
+  name: string;
+
   @ApiProperty({ example: '#FF5733', description: 'Hex code of the color' })
+  @IsString()
+  @IsNotEmpty()
   hex: string;
+
+  @ApiPropertyOptional({
+    type: [VariantDto],
+    description: 'Available  color variants',
+    example: [
+      {
+        size: 'L',
+        stock: 15,
+        price: 16000,
+        sku: 'QZT-KFTN-L-BLUE',
+      },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantDto)
+  variants?: VariantDto[];
 }
 
 // ---------- ROOT PRODUCT FIELDS ----------
