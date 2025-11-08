@@ -20,20 +20,19 @@ import {
 } from '../products/schemas';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
-import {
-  TransactionDocument,
-  TransactionStatus,
-  TransactionType,
-} from '../transactions/schema/transaction.schema';
+import { TransactionType } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { AddressDocument } from '../ums/schemas/address.schema';
 import { OrderItemSelectionsDto } from './dto/selection.dto';
+import { TransactionService } from '../transactions/transactions.service';
+import { User } from '../ums/schemas';
 
 @Injectable()
 export class OrderService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private validationService: OrderValidationService,
+    private transactionService: TransactionService,
     private priceCalculationService: PriceCalculationService,
     @InjectModel('Product') private productModel: Model<ProductDocument>,
     @InjectModel('Style') private styleModel: Model<StyleDocument>,
@@ -41,31 +40,26 @@ export class OrderService {
     @InjectModel('Accessory') private accessoryModel: Model<AccessoryDocument>,
     @InjectModel('Discount') private discountModel: Model<DiscountDocument>,
     @InjectModel('Address') private addressModel: Model<AddressDocument>,
-    @InjectModel('Transaction')
-    private transactionModel: Model<TransactionDocument>,
   ) {}
 
-  async createOrder(
-    orderData: CreateOrderDto,
-    business: string,
-    customer: string,
-  ): Promise<OrderDocument> {
-    await this.validationService.validateCompleteOrder(orderData.items);
-    const shippingAddress = await this.resolveShippingAddress(customer);
-    const processedItems = await this.processOrderItems(orderData.items);
-    const orReference = await generateUniqueQlozetReference(
-      this.orderModel,
-      'ORD',
-    );
+  async createOrder(orderData: CreateOrderDto, customer: User) {
+    const [, shippingAddress, processedItems] = await Promise.all([
+      this.validationService.validateCompleteOrder(orderData.items),
+      this.resolveShippingAddress(customer.id),
+      this.processOrderItems(orderData.items),
+    ]);
 
-    const { total, subtotal } =
-      await this.priceCalculationService.calculateOrderTotal(processedItems);
+    const [orderReference, { total, subtotal }] = await Promise.all([
+      generateUniqueQlozetReference(this.orderModel, 'ORD'),
+      this.priceCalculationService.calculateOrderTotal(processedItems),
+    ]);
 
     const normalizedItems = processedItems.map((item) => {
       const selections = item.selections || {};
-
+      console.log(item.business, 'item.business');
       return {
         product: item.product_id,
+        business: item.business,
         note: item.note,
         product_kind: item.product_kind,
         clothing_type: item.clothing_type,
@@ -79,8 +73,8 @@ export class OrderService {
     });
 
     const order = new this.orderModel({
-      reference: orReference,
-      customer: new Types.ObjectId(customer), // ensure ObjectId
+      reference: orderReference,
+      customer: new Types.ObjectId(customer.id),
       addresses: shippingAddress,
       items: normalizedItems,
       status: 'pending',
@@ -88,22 +82,13 @@ export class OrderService {
       shipping_fee: 0,
       total,
     });
-
     const savedOrder = await order.save();
 
-    const txReference = await generateUniqueQlozetReference(
-      this.transactionModel,
-      'TXN',
-    );
-
-    await this.createTransaction({
-      business: new Types.ObjectId(business),
-      initiator: savedOrder.customer,
-      order: savedOrder?.id,
+    const transaction = await this.transactionService.create({
+      initiator: new Types.ObjectId(customer.id),
+      order: savedOrder.id,
       type: TransactionType.DEBIT,
       amount: savedOrder.total,
-      status: TransactionStatus.PENDING,
-      reference: txReference,
       description: `Order payment for order ${savedOrder.reference}`,
       channel: 'checkout',
       metadata: {
@@ -112,15 +97,26 @@ export class OrderService {
       },
     });
 
-    return savedOrder;
+    const paymentInit = await this.transactionService.initializePaystackPayment(
+      transaction.id,
+      customer.email,
+    );
+
+    return {
+      message: 'Order created successfully. Redirect to payment.',
+      data: {
+        order: savedOrder,
+        transaction: {
+          reference: transaction.reference,
+          amount: transaction.amount,
+          status: transaction.status,
+          metadata: transaction.metadata,
+        },
+        payment: paymentInit.data,
+      },
+    };
   }
 
-  private async createTransaction(
-    transactionData: Partial<TransactionDocument>,
-  ): Promise<TransactionDocument> {
-    const transaction = new this.transactionModel(transactionData);
-    return await transaction.save();
-  }
   // processOrderItems (fixed)
   private async processOrderItems(
     items: ProcessedOrderItemDto[],
@@ -133,11 +129,9 @@ export class OrderService {
             `Product not found: ${item.product_id}`,
           );
         }
-
-        // Normalize incoming selections (keep original plural props for lookups)
+        console.log(product.business, 'product.business');
         const rawSelections = this.normalizeSelections(item.selections);
 
-        // Prefer plural arrays if present, fall back to singular aliases (supports either input shape)
         const styleSelections =
           rawSelections.style_selection ?? rawSelections.style_selection ?? [];
         const fabricSelections =
@@ -191,6 +185,7 @@ export class OrderService {
 
         const itemForPricing: ProcessedOrderItem = {
           ...item,
+          business: product?.business,
           selections,
           total_price: 0,
           discount_snapshot: discountSnapshot
@@ -211,6 +206,7 @@ export class OrderService {
 
         return {
           product_id: item.product_id,
+          business: product?.business,
           product_kind: product.kind as ProductKind,
           clothing_type: product.clothing?.type as ClothingType,
           note: item.note,
@@ -378,24 +374,6 @@ export class OrderService {
       }
     }
   }
-  private calculateDiscountDeduction(discount: any, basePrice: number): number {
-    const value = discount.value || 0;
-
-    switch (discount.type) {
-      case 'fixed':
-      case 'flash_fixed':
-      case 'category_specific':
-        return Math.min(value, basePrice);
-
-      case 'percentage':
-      case 'flash_percentage':
-      case 'store_wide':
-        return (basePrice * value) / 100;
-
-      default:
-        return 0;
-    }
-  }
 
   private async updateClothingInventory(
     item: ProcessedOrderItem,
@@ -426,147 +404,53 @@ export class OrderService {
     // For customize clothing, no inventory update needed as it's made-to-order
   }
   async findVendorOrders(
-    vendorId: Types.ObjectId,
+    business: Types.ObjectId,
     page: number = 1,
     size: number = 10,
     status?: string,
-  ): Promise<{
-    data: any[];
-    total_items: number;
-    total_pages: number;
-    current_page: number;
-    has_next_page: boolean;
-    has_previous_page: boolean;
-    page_size: number;
-  }> {
-    const { skip, take } = await Utils.getPagination(page, size);
-    const vendorProductIds = await this.getVendorProductIds(vendorId);
+  ) {
+    try {
+      const { skip, take } = await Utils.getPagination(page, size);
+      const filter: any = {
+        'items.business': business,
+      };
 
-    const matchQuery: any = {
-      'items.product_id': { $in: vendorProductIds },
-    };
+      if (status && status !== 'all') {
+        filter.status = status;
+      }
 
-    if (status && status !== 'all') {
-      matchQuery.status = status;
+      const [orders, total] = await Promise.all([
+        this.orderModel
+          .find(filter)
+          .populate('customer', 'email')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(take)
+          .lean(),
+        this.orderModel.countDocuments(filter),
+      ]);
+
+      console.log(`Found ${orders.length} orders for business ${business}`);
+
+      return Utils.getPagingData(
+        {
+          count: total,
+          rows: orders,
+        },
+        page,
+        size,
+      );
+    } catch (error) {
+      console.error('Error in findVendorOrders:', error);
+      throw error;
     }
-
-    const aggregationPipeline: any[] = [
-      { $match: matchQuery },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'customer',
-          foreignField: '_id',
-          as: 'customer',
-          pipeline: [{ $project: { firstName: 1, lastName: 1, email: 1 } }],
-        },
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: 'items.product_id',
-          foreignField: '_id',
-          as: 'productDetails',
-          pipeline: [
-            {
-              $match: {
-                _id: { $in: vendorProductIds },
-                vendor: vendorId,
-              },
-            },
-            {
-              $project: {
-                name: 1,
-                base_price: 1,
-                kind: 1,
-                fabric: 1,
-                accessory: 1,
-                clothing: 1,
-                discounted_price: 1,
-                vendor: 1,
-              },
-            },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          customer: { $arrayElemAt: ['$customer', 0] },
-          items: {
-            $map: {
-              input: '$items',
-              as: 'item',
-              in: {
-                $mergeObjects: [
-                  '$$item',
-                  {
-                    product_details: {
-                      $arrayElemAt: [
-                        {
-                          $filter: {
-                            input: '$productDetails',
-                            as: 'product',
-                            cond: {
-                              $eq: ['$$product._id', '$$item.product_id'],
-                            },
-                          },
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          items: {
-            $filter: {
-              input: '$items',
-              as: 'item',
-              cond: { $ne: ['$$item.product_details', null] },
-            },
-          },
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      {
-        $facet: {
-          metadata: [{ $count: 'total' }],
-          data: [{ $skip: skip }, { $limit: take }],
-        },
-      },
-    ];
-
-    const [result] = await this.orderModel
-      .aggregate(aggregationPipeline)
-      .exec();
-
-    const data = result?.data || [];
-    const total = result?.metadata?.[0]?.total || 0;
-
-    return Utils.getPagingData({ count: total, rows: data }, page, size);
-  }
-
-  private async getVendorProductIds(
-    vendorId: Types.ObjectId,
-  ): Promise<Types.ObjectId[]> {
-    const vendorProducts = await this.productModel
-      .find({ vendor: vendorId })
-      .select('_id')
-      .lean()
-      .exec();
-
-    return vendorProducts.map((p) => p.id);
   }
 
   async findCustomerOrdersWithFilters(
     customerId: Types.ObjectId,
     page: number = 1,
     size: number = 10,
+    status?: string,
   ): Promise<{
     data: OrderDocument[];
     total_items: number;
@@ -580,6 +464,9 @@ export class OrderService {
 
     // Build query
     const query: any = { customer: new Types.ObjectId(customerId) };
+    if (status) {
+      query.status = status;
+    }
 
     const [orders, total] = await Promise.all([
       this.orderModel

@@ -52,6 +52,8 @@ class AccessorySelection {
 class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   product: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
+  business: Types.ObjectId;
 
   @Prop({ type: [VariantSelection], default: [] })
   variant_selections?: VariantSelection[];

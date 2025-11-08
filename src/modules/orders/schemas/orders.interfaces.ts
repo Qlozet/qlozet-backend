@@ -54,6 +54,7 @@ export interface AccessorySelection {
 // MAIN ORDER ITEM INTERFACE
 export interface ProcessedOrderItem {
   product_id: Types.ObjectId;
+  business: Types.ObjectId;
   product_kind?: ProductKind;
   clothing_type?: ClothingType; // Only for clothing products
   note?: string;

@@ -25,7 +25,7 @@ export class CreateOrderDto {
               quantity: 1,
             },
           ],
-          variant_selections: [
+          color_variant_selections: [
             {
               variant_id: '507f1f77bcf86cd799439020',
               size: 'L',

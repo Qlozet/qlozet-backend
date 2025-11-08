@@ -10,7 +10,7 @@ export enum UserType {
 }
 
 @Schema({ timestamps: true })
-export class User {
+export class User extends Document {
   @Prop({ required: true, trim: true })
   full_name: string;
 

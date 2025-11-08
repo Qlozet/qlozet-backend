@@ -200,15 +200,16 @@ export class OrderValidationService {
         throw new BadRequestException(
           'Fabric product must include fabric selections',
         );
-
+      console.log(item.selections, 'item.selections');
       if (
-        item.selections?.color_variant_selections?.length ||
-        item.selections?.style_selections?.length ||
-        item.selections?.accessory_selections?.length
-      )
+        (item.selections?.color_variant_selections?.length ?? 0) > 0 ||
+        (item.selections?.style_selections?.length ?? 0) > 0 ||
+        (item.selections?.accessory_selections?.length ?? 0) > 0
+      ) {
         throw new BadRequestException(
-          'Fabric product cannot include styles, variants, or accessories',
+          'Fabric product cannot include styles, color variants, or accessories',
         );
+      }
 
       for (const f of fabricSelections) {
         const fabric = product.fabric;

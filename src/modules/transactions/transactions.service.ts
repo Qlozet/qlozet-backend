@@ -1,6 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import {
   Transaction,
   TransactionDocument,
@@ -9,14 +13,18 @@ import {
 } from './schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { firstValueFrom } from 'rxjs';
+import * as crypto from 'crypto';
 
 interface CreateTransactionDto {
-  initiator: string;
-  business: string;
+  initiator: Types.ObjectId;
   amount: number;
   type: TransactionType;
-  wallet?: string;
-  order?: string;
+  wallet?: Types.ObjectId;
+  order?: Types.ObjectId;
+  channel: string;
   description?: string;
   currency?: string;
   payment_method?: string;
@@ -28,6 +36,8 @@ export class TransactionService {
   constructor(
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ✅ Create a new transaction
@@ -37,20 +47,153 @@ export class TransactionService {
       'TRX',
     );
     const transaction = new this.transactionModel({
-      initiator: new Types.ObjectId(dto.initiator),
-      business: new Types.ObjectId(dto.business),
-      wallet: new Types.ObjectId(dto.wallet),
-      order: dto.order ? new Types.ObjectId(dto.order) : undefined,
+      initiator: dto.initiator,
+      wallet: dto.wallet ? dto.wallet : undefined,
+      order: dto.order ? dto.order : undefined,
       type: dto.type,
       amount: dto.amount,
       reference,
       description: dto.description ?? '',
       currency: dto.currency ?? 'NGN',
-      payment_method: dto.payment_method ?? '',
+      payment_method: dto.payment_method ?? 'paystack',
       metadata: dto.metadata ?? {},
+      status: TransactionStatus.PENDING,
     });
 
     return transaction.save();
+  }
+
+  // ✅ Initialize Paystack Payment
+  async initializePaystackPayment(transactionId: string, email: string) {
+    const transaction = await this.transactionModel.findById(transactionId);
+    if (!transaction) throw new NotFoundException('Transaction not found');
+
+    const PAYSTACK_SECRET = this.configService.get<string>(
+      'PAYSTACK_SECRET_KEY',
+    );
+    const FRONTEND_URL = this.configService.get<string>('FRONTEND_URL');
+
+    const payload = {
+      email,
+      amount: transaction.amount * 100, // Paystack uses kobo
+      reference: transaction.reference,
+      currency: transaction.currency,
+      callback_url: `${FRONTEND_URL}/payment/verify`,
+    };
+
+    const response: any = await firstValueFrom(
+      this.httpService.post(
+        'https://api.paystack.co/transaction/initialize',
+        payload,
+        {
+          headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        },
+      ),
+    );
+
+    const { authorization_url, reference, access_code } = response.data.data;
+
+    transaction.metadata = {
+      ...transaction.metadata,
+      paystack: {
+        authorization_url,
+        access_code,
+        reference,
+        initialized_at: new Date().toISOString(),
+      },
+    };
+    await transaction.save();
+
+    return {
+      success: true,
+      message: 'Payment initialized successfully',
+      data: {
+        paymentUrl: authorization_url,
+        reference,
+        access_code,
+        amount: transaction.amount,
+      },
+    };
+  }
+
+  // ✅ Verify Paystack Payment
+  async verifyPaystackPayment(reference: string) {
+    const PAYSTACK_SECRET = this.configService.get<string>(
+      'PAYSTACK_SECRET_KEY',
+    );
+    const verifyUrl = `https://api.paystack.co/transaction/verify/${reference}`;
+
+    const response: any = await firstValueFrom(
+      this.httpService.get(verifyUrl, {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+      }),
+    );
+
+    const data = response.data.data;
+    const transaction = await this.transactionModel.findOne({ reference });
+
+    if (!transaction) throw new NotFoundException('Transaction not found');
+
+    if (data.status === 'success') {
+      transaction.status = TransactionStatus.SUCCESS;
+      transaction.metadata = { ...transaction.metadata, paystack: data };
+      await transaction.save();
+    } else {
+      transaction.status = TransactionStatus.FAILED;
+      await transaction.save();
+    }
+
+    return {
+      success: true,
+      status: transaction.status,
+      reference,
+      amount: transaction.amount,
+      message:
+        transaction.status === TransactionStatus.SUCCESS
+          ? 'Payment verified successfully'
+          : 'Payment failed or incomplete',
+    };
+  }
+
+  async handlePaystackWebhook(payload: any) {
+    const { event, data } = payload;
+    const transaction = await this.findByReference(data.reference).catch(
+      () => null,
+    );
+    if (!transaction)
+      return { status: 'ignored', message: 'Transaction not found' };
+
+    switch (event) {
+      case 'charge.success':
+        transaction.status = TransactionStatus.SUCCESS;
+        break;
+      case 'charge.failed':
+        transaction.status = TransactionStatus.FAILED;
+        break;
+      case 'transfer.success':
+        transaction.status = TransactionStatus.SUCCESS;
+        break;
+      case 'transfer.failed':
+        transaction.status = TransactionStatus.FAILED;
+        break;
+      default:
+        break;
+    }
+
+    transaction.metadata = {
+      ...transaction.metadata,
+      webhook: data,
+      last_event: event,
+      processed_at: new Date().toISOString(),
+    };
+
+    await transaction.save();
+
+    return {
+      status: 'success',
+      received: true,
+      reference: transaction.reference,
+    };
   }
 
   // ✅ Update transaction status
@@ -66,33 +209,88 @@ export class TransactionService {
     return tx;
   }
 
-  // ✅ Mark a transaction as successful
   async markSuccess(reference: string) {
     return this.updateStatus(reference, TransactionStatus.SUCCESS);
   }
 
-  // ✅ Mark a transaction as failed
   async markFailed(reference: string) {
     return this.updateStatus(reference, TransactionStatus.FAILED);
   }
 
-  // ✅ Get paginated transactions by business
   async findByBusiness(
-    businessId: string,
-    page: number = 1,
-    size: number = 10,
+    business: Types.ObjectId,
+    page = 1,
+    size = 10,
+    status?: string,
   ) {
     const { take, skip } = await Utils.getPagination(page, size);
 
+    const matchStage: any = {};
+    if (status && status !== 'all') matchStage.status = status.toLowerCase();
+
+    const pipeline: any[] = [
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'orders',
+          localField: 'order',
+          foreignField: '_id',
+          as: 'order',
+        },
+      },
+      { $unwind: '$order' },
+      {
+        $addFields: {
+          order: {
+            $mergeObjects: [
+              '$order',
+              {
+                items: {
+                  $filter: {
+                    input: '$order.items',
+                    as: 'item',
+                    cond: { $eq: ['$$item.business', business] },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      { $match: { 'order.items': { $ne: [] } } }, // only keep transactions that include this business
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: take },
+    ];
+
+    const [rows, count] = await Promise.all([
+      this.transactionModel.aggregate(pipeline),
+      this.transactionModel.aggregate([
+        ...pipeline.slice(0, -3),
+        { $count: 'total' },
+      ]),
+    ]);
+
+    const total = count[0]?.total || 0;
+    return Utils.getPagingData({ count: total, rows }, page, size);
+  }
+
+  async findByCustomer(customerId: string, page = 1, size = 10) {
+    const { take, skip } = await Utils.getPagination(page, size);
+    const filter = { initiator: customerId };
+
     const [transactions, total] = await Promise.all([
       this.transactionModel
-        .find({ business: new Types.ObjectId(businessId) })
+        .find(filter)
+        .populate([
+          { path: 'order', select: 'reference total_price status' },
+          { path: 'wallet', select: 'balance type' },
+        ])
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(take),
-      this.transactionModel.countDocuments({
-        business: new Types.ObjectId(businessId),
-      }),
+        .limit(take)
+        .lean(),
+      this.transactionModel.countDocuments(filter),
     ]);
 
     return Utils.getPagingData(
@@ -101,32 +299,7 @@ export class TransactionService {
       size,
     );
   }
-  async findByCustomer(
-    customerId: string,
-    page: number = 1,
-    size: number = 10,
-  ) {
-    const { take, skip } = await Utils.getPagination(page, size);
 
-    const [transactions, total] = await Promise.all([
-      this.transactionModel
-        .find({ initiator: new Types.ObjectId(customerId) })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(take),
-      this.transactionModel.countDocuments({
-        initiator: new Types.ObjectId(customerId),
-      }),
-    ]);
-
-    return Utils.getPagingData(
-      { count: total, rows: transactions },
-      page,
-      size,
-    );
-  }
-
-  // ✅ Find transaction by reference
   async findByReference(reference: string) {
     const tx = await this.transactionModel.findOne({ reference });
     if (!tx) throw new NotFoundException('Transaction not found');
