@@ -28,8 +28,6 @@ export class RolesGuard implements CanActivate {
     private readonly jwtService: JwtService,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
-    @InjectModel(TeamMember.name)
-    private readonly teamMemberModel: Model<TeamMemberDocument>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -75,15 +73,9 @@ export class RolesGuard implements CanActivate {
       .exec();
 
     if (!user) throw new UnauthorizedException('User not found');
-
     const normalizedRequiredRoles = requiredRoles.map((r) =>
       r.toString().toLowerCase(),
     );
-
-    // ✅ Step 1: Allow if @Roles includes the user's UserType
-    if (normalizedRequiredRoles.includes(user.type.toLowerCase())) {
-      return true;
-    }
 
     // ✅ Step 2: Check Platform roles
     if (user.type === UserType.PLATFORM) {
@@ -101,7 +93,6 @@ export class RolesGuard implements CanActivate {
 
       return true;
     }
-
     // ✅ Step 3: Check Vendor roles (team members)
     if (user.type === UserType.VENDOR) {
       const business: any = user.business;
@@ -111,19 +102,15 @@ export class RolesGuard implements CanActivate {
         throw new ForbiddenException('No active team members found for vendor');
       }
 
-      const hasRole = members.some((tm) => {
-        const role = tm.role as any as RoleDocument | undefined;
-        return (
-          role && normalizedRequiredRoles.includes(role.name.toLowerCase())
-        );
+      const hasRole = members.some((tm: any) => {
+        const role = tm.role.type as string;
+        return role && normalizedRequiredRoles.includes(role.toLowerCase());
       });
-
       if (!hasRole) {
         throw new ForbiddenException(
           `Access denied — requires one of: ${requiredRoles.join(', ')}`,
         );
       }
-
       request.team_members = members;
       request.business = business;
       return true;

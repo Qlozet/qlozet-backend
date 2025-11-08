@@ -15,15 +15,13 @@ import {
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
+import { Type } from 'class-transformer';
 
 @Injectable()
 export class ProductService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
-
-    @InjectModel(Discount.name)
-    private readonly discountModel: Model<DiscountDocument>,
   ) {}
 
   /**
@@ -31,7 +29,7 @@ export class ProductService {
    */
   async create(
     createProductDto: CreateProductDto,
-    vendor: string,
+    business: Types.ObjectId,
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
     let totalPrice = 0;
@@ -42,9 +40,10 @@ export class ProductService {
     } else if (kind === 'fabric') {
       totalPrice = this.computeFabricPrice(createProductDto);
     }
+    console.log(business, 'UY');
     const createdProduct = new this.productModel({
       ...createProductDto,
-      vendor,
+      business,
       kind,
       base_price: totalPrice,
     });
@@ -80,12 +79,7 @@ export class ProductService {
     const { take, skip } = await Utils.getPagination(page, size);
 
     const [rows, count] = await Promise.all([
-      this.productModel
-        .find(filter)
-        .skip(skip)
-        .limit(take)
-        .populate('vendor', 'name email')
-        .exec(),
+      this.productModel.find(filter).skip(skip).limit(take).exec(),
       this.productModel.countDocuments(filter),
     ]);
 

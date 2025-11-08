@@ -53,8 +53,8 @@ export class Product extends Document {
   @Prop({ type: ClothingSchema, default: null })
   clothing?: Clothing;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  vendor: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  business: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;

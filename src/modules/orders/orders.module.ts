@@ -30,9 +30,14 @@ import {
   TransactionSchema,
 } from '../transactions/schema/transaction.schema';
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
+import { JwtService } from '@nestjs/jwt';
+import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
+import { TransactionService } from '../transactions/transactions.service';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
+    HttpModule,
     MongooseModule.forFeature([
       { name: Role.name, schema: RoleSchema },
       { name: Permission.name, schema: PermissionSchema },
@@ -48,9 +53,16 @@ import { Address, AddressSchema } from '../ums/schemas/address.schema';
       { name: Variant.name, schema: VariantSchema },
       { name: Address.name, schema: AddressSchema },
       { name: Clothing.name, schema: ClothingSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
     ]),
   ],
   controllers: [OrderController],
-  providers: [OrderService, OrderValidationService, PriceCalculationService],
+  providers: [
+    OrderService,
+    OrderValidationService,
+    PriceCalculationService,
+    JwtService,
+    TransactionService,
+  ],
 })
 export class OrdersModule {}

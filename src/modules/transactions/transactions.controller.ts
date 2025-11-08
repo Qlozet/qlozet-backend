@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Req,
   Query,
+  Post,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,6 +21,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TransactionService } from './transactions.service';
 import { UserType, VendorRole } from '../ums/schemas';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @ApiTags('Transactions')
 @ApiBearerAuth('access-token')
@@ -28,7 +30,15 @@ import { UserType, VendorRole } from '../ums/schemas';
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
-  @Roles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @Public()
+  @Post('paystack/webhook')
+  @ApiOperation({ summary: 'Handle Paystack webhook' })
+  @ApiResponse({ status: 200, description: 'Webhook received successfully' })
+  async handlePaystackWebhook(@Req() req: any) {
+    return this.transactionService.handlePaystackWebhook(req.body);
+  }
+
+  @Roles('vendor')
   @Get('vendor')
   @ApiOperation({ summary: 'Get paginated transactions by business ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -39,12 +49,14 @@ export class TransactionController {
     @Query('page') page = 1,
     @Query('size') size = 10,
     @Req() req: any,
+    @Query('status') status?: string,
   ) {
     try {
       return await this.transactionService.findByBusiness(
-        req.business._id,
+        req.business?._id,
         +page,
         +size,
+        status,
       );
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
@@ -63,8 +75,8 @@ export class TransactionController {
     @Req() req: any,
   ) {
     try {
-      return await this.transactionService.findByBusiness(
-        req.user._id,
+      return await this.transactionService.findByCustomer(
+        req.user.id,
         +page,
         +size,
       );

@@ -16,13 +16,6 @@ export enum TransactionStatus {
 
 @Schema({ timestamps: true })
 export class Transaction extends Document {
-  @Prop({
-    type: MongooseSchema.Types.ObjectId,
-    ref: 'Business',
-    required: true,
-  })
-  business: Types.ObjectId;
-
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Wallet', default: null })
   wallet?: Types.ObjectId;
 

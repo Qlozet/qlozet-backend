@@ -48,7 +48,11 @@ export class ProductsController {
     @Body() clothingDto: CreateClothingDto,
     @Req() req: any,
   ) {
-    return this.productService.create(clothingDto, req.user.id, 'clothing');
+    return this.productService.create(
+      clothingDto,
+      req.business?._id,
+      'clothing',
+    );
   }
 
   // ---------------- FABRIC ----------------
@@ -57,7 +61,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'Create a new fabric product' })
   @ApiResponse({ status: 201, description: 'Fabric product created' })
   async createFabric(@Body() fabricDto: CreateFabricDto, @Req() req: any) {
-    return this.productService.create(fabricDto, req.user.id, 'fabric');
+    return this.productService.create(fabricDto, req.business?._id, 'fabric');
   }
 
   // ---------------- ACCESSORY ----------------
@@ -69,7 +73,11 @@ export class ProductsController {
     @Body() accessoryDto: CreateAccessoryDto,
     @Req() req: any,
   ) {
-    return this.productService.create(accessoryDto, req.user.id, 'accessory');
+    return this.productService.create(
+      accessoryDto,
+      req.business?._id,
+      'accessory',
+    );
   }
   @Get()
   @Roles(UserType.VENDOR, 'customer', UserType.ADMIN)
