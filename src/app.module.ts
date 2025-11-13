@@ -18,6 +18,8 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { SupportsModule } from './modules/supports/supports.module';
 import { CartModule } from './modules/cart/cart.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { WebhookModule } from './modules/webhook/webhook.module';
+import { WalletsModule } from './modules/wallets/wallets.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { OrdersModule } from './modules/orders/orders.module';
     SupportsModule,
     CartModule,
     OrdersModule,
+    WebhookModule,
+    WalletsModule,
   ],
   controllers: [AppController],
   providers: [

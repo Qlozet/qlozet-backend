@@ -63,6 +63,8 @@ export class ProductService {
     size: number = 10,
     kind?: string,
     search?: string,
+    sortBy?: 'rating' | 'date' | 'relevance',
+    order: 'asc' | 'desc' = 'desc',
   ) {
     const filter: any = {};
 
@@ -74,12 +76,40 @@ export class ProductService {
         { 'accessory.name': { $regex: search, $options: 'i' } },
         { 'fabric.name': { $regex: search, $options: 'i' } },
       ];
+      filter.$or.push(
+        { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
+        { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
+        { 'fabric.taxonomy.categories': { $regex: search, $options: 'i' } },
+        { 'clothing.taxonomy.attributes': { $regex: search, $options: 'i' } },
+        { 'accessory.taxonomy.attributes': { $regex: search, $options: 'i' } },
+        { 'fabric.taxonomy.attributes': { $regex: search, $options: 'i' } },
+      );
     }
 
     const { take, skip } = await Utils.getPagination(page, size);
 
+    // Determine sort order
+    const sortOrder = order === 'asc' ? 1 : -1;
+    let sort: Record<string, 1 | -1> = {};
+
+    switch (sortBy) {
+      case 'rating':
+        sort = { average_rating: sortOrder }; // ascending or descending rating
+        break;
+      case 'date':
+        sort = { createdAt: sortOrder }; // ascending or descending date
+        break;
+      case 'relevance':
+        sort = search
+          ? { average_rating: -1, createdAt: -1 }
+          : { createdAt: -1 };
+        break;
+      default:
+        sort = { createdAt: -1 };
+    }
+
     const [rows, count] = await Promise.all([
-      this.productModel.find(filter).skip(skip).limit(take).exec(),
+      this.productModel.find(filter).sort(sort).skip(skip).limit(take).exec(),
       this.productModel.countDocuments(filter),
     ]);
 
@@ -264,5 +294,58 @@ export class ProductService {
     ]);
 
     return Utils.getPagingData({ count, rows }, page, size);
+  }
+  async rateProduct(
+    productId: string,
+    userId: string,
+    value: number,
+    comment?: string,
+  ): Promise<ProductDocument> {
+    if (value < 1 || value > 5) {
+      throw new BadRequestException('Rating value must be between 1 and 5');
+    }
+
+    const product = await this.productModel.findById(productId);
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const existingRating = product.ratings.find((r) =>
+      r.user.equals(new Types.ObjectId(userId)),
+    );
+
+    if (existingRating) {
+      existingRating.value = value;
+      existingRating.comment = comment;
+    } else {
+      product.ratings.push({
+        user: new Types.ObjectId(userId),
+        value,
+        comment,
+      });
+    }
+
+    // Recalculate average rating
+    const totalRatings = product.ratings.length;
+    const totalValue = product.ratings.reduce((sum, r) => sum + r.value, 0);
+    product.average_rating = parseFloat((totalValue / totalRatings).toFixed(1));
+
+    await product.save();
+
+    return product;
+  }
+  async getProductRating(productId: string) {
+    const product = await this.productModel
+      .findById(productId)
+      .select('average_rating ratings')
+      .populate('ratings.user', 'name email');
+
+    if (!product) throw new NotFoundException('Product not found');
+
+    return {
+      average: product.average_rating,
+      total_reviews: product.ratings.length,
+      ratings: product.ratings,
+    };
   }
 }

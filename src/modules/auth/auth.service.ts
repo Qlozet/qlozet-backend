@@ -25,7 +25,6 @@ import { JwtService } from '@nestjs/jwt';
 import { UserRole, VendorRole } from '../ums/schemas/role.schema';
 import { JwtPayload, Tokens } from 'src/common/types';
 import { MailService } from '../notifications/mail/mail.service';
-import { UserService } from '../ums/services/users.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { TeamMember, TeamMemberDocument } from '../ums/schemas/team.schema';
 import { sanitizeUser } from '../../common/utils/sanitization';

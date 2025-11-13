@@ -19,7 +19,7 @@ import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
 
 interface CreateTransactionDto {
-  initiator: Types.ObjectId;
+  initiator?: Types.ObjectId;
   amount: number;
   type: TransactionType;
   wallet?: Types.ObjectId;
@@ -152,47 +152,6 @@ export class TransactionService {
         transaction.status === TransactionStatus.SUCCESS
           ? 'Payment verified successfully'
           : 'Payment failed or incomplete',
-    };
-  }
-
-  async handlePaystackWebhook(payload: any) {
-    const { event, data } = payload;
-    const transaction = await this.findByReference(data.reference).catch(
-      () => null,
-    );
-    if (!transaction)
-      return { status: 'ignored', message: 'Transaction not found' };
-
-    switch (event) {
-      case 'charge.success':
-        transaction.status = TransactionStatus.SUCCESS;
-        break;
-      case 'charge.failed':
-        transaction.status = TransactionStatus.FAILED;
-        break;
-      case 'transfer.success':
-        transaction.status = TransactionStatus.SUCCESS;
-        break;
-      case 'transfer.failed':
-        transaction.status = TransactionStatus.FAILED;
-        break;
-      default:
-        break;
-    }
-
-    transaction.metadata = {
-      ...transaction.metadata,
-      webhook: data,
-      last_event: event,
-      processed_at: new Date().toISOString(),
-    };
-
-    await transaction.save();
-
-    return {
-      status: 'success',
-      received: true,
-      reference: transaction.reference,
     };
   }
 
