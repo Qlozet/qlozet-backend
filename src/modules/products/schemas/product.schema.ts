@@ -61,6 +61,24 @@ export class Product extends Document {
 
   @Prop({ type: [Types.ObjectId], ref: 'Collection', default: [] })
   collections: Types.ObjectId[];
+  @Prop({
+    type: [
+      {
+        user: { type: Types.ObjectId, ref: 'User', required: true },
+        value: { type: Number, required: true, min: 1, max: 5 },
+        comment: { type: String },
+      },
+    ],
+    default: [],
+  })
+  ratings: {
+    user: Types.ObjectId;
+    value: number;
+    comment?: string;
+  }[];
+
+  @Prop({ type: Number, default: 0 })
+  average_rating: number;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

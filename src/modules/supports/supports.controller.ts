@@ -28,7 +28,6 @@ import { VendorRole } from '../ums/schemas';
 @ApiTags('Supports')
 @Controller('supports')
 @ApiBearerAuth('access-token')
-@ApiTags('SupportController')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class SupportController {

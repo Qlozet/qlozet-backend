@@ -34,7 +34,7 @@ import {
   UpdateRoleDto,
 } from './dto/roles.dto';
 import { AddressDto } from './dto/address.dto';
-import { UserType } from '../auth/dto/base-login.dto';
+import { UpdatePreferencesDto } from './dto/users.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -181,5 +181,43 @@ export class UserController {
     const userId = req.user._id;
     const address = await this.userService.getUserAddress(userId);
     return { address };
+  }
+
+  // ==============================
+  // USER PROFILE
+  // ==============================
+
+  @Get('me')
+  async getMyProfile(@Req() req) {
+    const userId = req.user.id;
+    return this.userService.getSanitizedUser(userId);
+  }
+
+  @Patch('me/profile')
+  async updateMyProfile(@Req() req, @Body() profileData: Partial<any>) {
+    const userId = req.user.id;
+    const updatedUser = await this.userService.updateProfile(
+      userId,
+      profileData,
+    );
+    return { message: 'Profile updated successfully', data: updatedUser };
+  }
+
+  // ==============================
+  // USER PREFERENCES
+  // ==============================
+
+  @Roles('customer')
+  @Patch('me/preferences')
+  async updatePreferences(
+    @Req() req,
+    @Body() preferences: UpdatePreferencesDto,
+  ) {
+    const userId = req.user.id;
+    const updatedUser = await this.userService.updatePreferences(
+      userId,
+      preferences,
+    );
+    return { message: 'Preferences updated successfully', data: updatedUser };
   }
 }

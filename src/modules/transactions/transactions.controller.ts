@@ -1,13 +1,12 @@
 import {
   Controller,
   Get,
-  Param,
   UseGuards,
   HttpException,
   HttpStatus,
   Req,
   Query,
-  Post,
+  Param,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,8 +19,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TransactionService } from './transactions.service';
-import { UserType, VendorRole } from '../ums/schemas';
-import { Public } from 'src/common/decorators/public.decorator';
+import { UserType } from '../ums/schemas';
 
 @ApiTags('Transactions')
 @ApiBearerAuth('access-token')
@@ -29,14 +27,6 @@ import { Public } from 'src/common/decorators/public.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
-
-  @Public()
-  @Post('paystack/webhook')
-  @ApiOperation({ summary: 'Handle Paystack webhook' })
-  @ApiResponse({ status: 200, description: 'Webhook received successfully' })
-  async handlePaystackWebhook(@Req() req: any) {
-    return this.transactionService.handlePaystackWebhook(req.body);
-  }
 
   @Roles('vendor')
   @Get('vendor')
@@ -82,6 +72,18 @@ export class TransactionController {
       );
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+  @Roles(UserType.CUSTOMER, 'vendor')
+  @Get('reference/:reference')
+  @ApiOperation({ summary: 'Get transaction by reference' })
+  @ApiResponse({ status: 200, description: 'Transaction found' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async getByReference(@Param('reference') reference: string) {
+    try {
+      return this.transactionService.findByReference(reference);
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.NOT_FOUND);
     }
   }
 }

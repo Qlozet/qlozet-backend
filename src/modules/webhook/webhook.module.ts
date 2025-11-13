@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common';
-import { WalletsService } from './wallets.service';
-import { WalletsController } from './wallets.controller';
-import { Wallet, WalletSchema } from './schema/wallet.schema';
-import { MongooseModule } from '@nestjs/mongoose';
+import { WebhookService } from './webhook.service';
+import { WebhookController } from './webhook.controller';
 import { TransactionService } from '../transactions/transactions.service';
+import { WalletsService } from '../wallets/wallets.service';
 import {
   Transaction,
   TransactionSchema,
 } from '../transactions/schema/transaction.schema';
+import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
-import { JwtService } from '@nestjs/jwt';
+import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 
 @Module({
   imports: [
@@ -19,7 +19,7 @@ import { JwtService } from '@nestjs/jwt';
       { name: Wallet.name, schema: WalletSchema },
     ]),
   ],
-  controllers: [WalletsController],
-  providers: [WalletsService, TransactionService, JwtService],
+  controllers: [WebhookController],
+  providers: [WebhookService, TransactionService, WalletsService],
 })
-export class WalletsModule {}
+export class WebhookModule {}
