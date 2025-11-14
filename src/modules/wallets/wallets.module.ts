@@ -10,6 +10,7 @@ import {
 } from '../transactions/schema/transaction.schema';
 import { HttpModule } from '@nestjs/axios';
 import { JwtService } from '@nestjs/jwt';
+import { Role, RoleSchema } from '../ums/schemas/role.schema';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { JwtService } from '@nestjs/jwt';
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
       { name: Wallet.name, schema: WalletSchema },
+      { name: Role.name, schema: RoleSchema },
     ]),
   ],
   controllers: [WalletsController],

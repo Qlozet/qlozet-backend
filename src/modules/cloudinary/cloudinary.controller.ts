@@ -53,12 +53,12 @@ export class UploadController {
   async uploadProfileImage(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file uploaded');
 
-    const result = await this.cloudinaryService.uploadImage(file, 'profiles');
+    const result = await this.cloudinaryService.uploadFile(file, 'profiles');
     return {
       message: 'Profile image uploaded successfully',
       data: {
-        imageUrl: result.imageUrl,
-        publicId: result.imagePublicId,
+        imageUrl: result.fileUrl,
+        publicId: result.filePublicId,
       },
     };
   }
@@ -90,12 +90,12 @@ export class UploadController {
   async uploadProductImage(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file uploaded');
 
-    const result = await this.cloudinaryService.uploadImage(file, 'products');
+    const result = await this.cloudinaryService.uploadFile(file, 'products');
     return {
       message: 'Product image uploaded successfully',
       data: {
-        imageUrl: result.imageUrl,
-        publicId: result.imagePublicId,
+        imageUrl: result.fileUrl,
+        publicId: result.filePublicId,
       },
     };
   }

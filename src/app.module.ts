@@ -20,6 +20,7 @@ import { CartModule } from './modules/cart/cart.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
+import { MeasurementModule } from './modules/measurement/measurement.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
     CartModule,
     OrdersModule,
     WebhookModule,
+    MeasurementModule,
     WalletsModule,
   ],
   controllers: [AppController],

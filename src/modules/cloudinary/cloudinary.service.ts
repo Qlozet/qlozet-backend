@@ -4,10 +4,10 @@ import { MulterFile } from 'src/common/types/upload';
 
 @Injectable()
 export class CloudinaryService {
-  async uploadImage(
+  async uploadFile(
     file: MulterFile,
     folderName: string,
-  ): Promise<{ imageUrl: string; imagePublicId: string }> {
+  ): Promise<{ fileUrl: string; filePublicId: string }> {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -21,7 +21,7 @@ export class CloudinaryService {
           if (!result) {
             return reject(new Error('Upload result is undefined'));
           }
-          resolve({ imageUrl: result.url, imagePublicId: result.public_id });
+          resolve({ fileUrl: result.url, filePublicId: result.public_id });
         },
       );
 
@@ -29,7 +29,25 @@ export class CloudinaryService {
     });
   }
 
-  async deleteImage(publicId: string): Promise<void> {
+  async uploadMeshPrediction(
+    buffer: Buffer,
+    folderName: string,
+    originalName?: string,
+  ): Promise<{ imageUrl: string; imagePublicId: string }> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: folderName, resource_type: 'auto', public_id: originalName },
+        (error, result) => {
+          if (error) return reject(error);
+          if (!result) return reject(new Error('Upload result is undefined'));
+          resolve({ imageUrl: result.url, imagePublicId: result.public_id });
+        },
+      );
+
+      uploadStream.end(buffer);
+    });
+  }
+  async deleteFile(publicId: string): Promise<void> {
     await cloudinary.uploader.destroy(publicId);
   }
 }

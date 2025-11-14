@@ -19,6 +19,8 @@ import {
 import { WalletsService } from './wallets.service';
 import { JwtAuthGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserType } from '../ums/schemas';
 
 @ApiTags('Wallets')
 @ApiBearerAuth('access-token')
@@ -45,11 +47,16 @@ export class WalletsController {
   }
 
   // Get wallet balance
+  @Roles(UserType.CUSTOMER, UserType.VENDOR)
   @Get('balance')
   @ApiOperation({ summary: 'Get wallet balance' })
   async getBalance(@Req() req) {
-    const customerId = req.user._id;
-    const wallet = await this.walletsService.getOrCreateWallet(customerId);
+    const business = req?.business?._id;
+    const customerId = req.user.id;
+    const wallet = await this.walletsService.getOrCreateWallet(
+      customerId,
+      business,
+    );
     return {
       walletId: wallet._id,
       balance: wallet.balance,
