@@ -56,7 +56,6 @@ export class OrderService {
 
     const normalizedItems = processedItems.map((item) => {
       const selections = item.selections || {};
-      console.log(item.business, 'item.business');
       return {
         product: item.product_id,
         business: item.business,

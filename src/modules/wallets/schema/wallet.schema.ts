@@ -5,8 +5,10 @@ export type WalletDocument = Wallet & Document;
 
 @Schema({ timestamps: true })
 export class Wallet {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
   business: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  customer: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })
   balance: number;

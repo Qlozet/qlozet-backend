@@ -30,6 +30,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 import { ProductService } from './products.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { RateProductDto } from './dto/rate-product.dto';
+import { FindAllProductsDto } from './dto/find-all-products.dto';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -99,7 +101,8 @@ export class ProductsController {
   @ApiQuery({
     name: 'kind',
     required: false,
-    description: 'Filter by product kind (clothing, accessory, fabric)',
+    description:
+      'Filter by product kind (clothing, accessory, fabric), sort and pagination',
     type: String,
   })
   @ApiQuery({
@@ -112,17 +115,15 @@ export class ProductsController {
     status: 200,
     description: 'Paginated list of products',
   })
-  async findAll(
-    @Query('page') page = 1,
-    @Query('size') size = 10,
-    @Query('kind') kind?: string,
-    @Query('search') search?: string,
-  ) {
+  async findAll(@Query() query: FindAllProductsDto) {
+    const { page, size, kind, search, sortBy, order } = query;
     return this.productService.findAll(
       Number(page),
       Number(size),
       kind,
       search,
+      sortBy,
+      order,
     );
   }
   @Get('by-vendor')
@@ -188,5 +189,37 @@ export class ProductsController {
     console.log(req.user.id, ' req.user.id');
     await this.productService.delete(id, req.user.id);
     return { message: 'Product deleted successfully' };
+  }
+  @Post(':id/rate')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Rate a product (1–5 stars)' })
+  async rateProduct(
+    @Param('id') id: string,
+    @Body() dto: RateProductDto,
+    @Req() req,
+  ) {
+    const userId = req.user.id;
+    const product = await this.productService.rateProduct(
+      id,
+      userId,
+      dto.value,
+      dto.comment,
+    );
+    return {
+      message: 'Product rated successfully',
+      data: product.toJSON(),
+    };
+  }
+
+  // ✅ Get Rating Summary for a Product
+  @Get(':id/ratings')
+  @ApiOperation({ summary: 'Get product rating summary and reviews' })
+  async getProductRatings(@Param('id') id: string) {
+    const ratingSummary = await this.productService.getProductRating(id);
+    return {
+      message: 'Product ratings fetched successfully',
+      data: ratingSummary,
+    };
   }
 }

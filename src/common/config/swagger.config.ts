@@ -10,15 +10,16 @@ export const SetupSwagger = (app: INestApplication) => {
     .setVersion('1.0.0')
     .addTag('Auth', 'Authentication endpoints')
     .addTag('Users', 'Users management endpoints')
-    .addTag('Vendors', 'Vendor management endpoints')
     .addTag('Products', 'Product management endpoints')
     .addTag('Orders', 'Order management endpoints')
     .addTag('Customers', 'Customer management endpoints')
+    .addTag('Measurements', 'Customer Measurement management endpoints')
     .addTag('Uploads', 'Image upload endpoints (profile & product)')
     .addTag('Discounts', 'Discount management endpoints')
     .addTag('Collections', 'Product collection management endpoints')
     .addTag('Business', 'Business management endpoints')
     .addTag('Transactions', 'Transaction management endpoints')
+    .addTag('Wallets', 'Wallets management endpoints')
     .addTag('Supports', 'Support management endpoints')
     .addBearerAuth(
       {

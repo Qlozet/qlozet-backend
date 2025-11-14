@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export enum TransactionType {
+  FUND = 'fund',
   CREDIT = 'credit',
   DEBIT = 'debit',
   REFUND = 'refund',
