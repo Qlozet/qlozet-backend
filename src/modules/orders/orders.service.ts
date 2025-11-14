@@ -1,7 +1,7 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
-import { Order, OrderDocument } from './schemas/orders.schema';
+import { Order, OrderDocument, OrderStatus } from './schemas/orders.schema';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -481,5 +481,114 @@ export class OrderService {
     ]);
 
     return Utils.getPagingData({ count: total, rows: orders }, page, size);
+  }
+  async getAdminDashboardMetrics() {
+    const [totalOrders, ordersDelivered, ordersInTransit, topProducts] =
+      await Promise.all([
+        this.orderModel.countDocuments(), // total orders
+        this.orderModel.countDocuments({ status: OrderStatus.COMPLETED }), // delivered
+        this.orderModel.countDocuments({ status: OrderStatus.PROCESSING }), // in transit
+        this.orderModel.aggregate([
+          { $unwind: '$items' },
+          {
+            $group: {
+              _id: '$items.product',
+              totalOrdered: {
+                $sum: {
+                  $sum: [
+                    '$items.variant_selections.quantity',
+                    '$items.fabric_selections.quantity',
+                    '$items.accessory_selections.quantity',
+                  ],
+                },
+              },
+            },
+          },
+          { $sort: { totalOrdered: -1 } },
+          { $limit: 5 }, // top 5 must-purchase products
+          {
+            $lookup: {
+              from: 'products',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'product',
+            },
+          },
+          { $unwind: '$product' },
+          {
+            $project: {
+              _id: 0,
+              product_id: '$_id',
+              name: '$product.name',
+              totalOrdered: 1,
+            },
+          },
+        ]),
+      ]);
+
+    return {
+      total_orders: totalOrders,
+      orders_delivered: ordersDelivered,
+      orders_in_transit: ordersInTransit,
+      must_purchase_products: topProducts,
+    };
+  }
+  async getVendorDashboardMetrics(businessId: Types.ObjectId) {
+    const [totalOrders, ordersDelivered, ordersInTransit, topProducts] =
+      await Promise.all([
+        this.orderModel.countDocuments({ 'items.business': businessId }), // total orders for this business
+        this.orderModel.countDocuments({
+          'items.business': businessId,
+          status: OrderStatus.COMPLETED,
+        }), // delivered
+        this.orderModel.countDocuments({
+          'items.business': businessId,
+          status: 'processing',
+        }), // in transit
+        this.orderModel.aggregate([
+          { $unwind: '$items' },
+          { $match: { 'items.business': businessId } },
+          {
+            $group: {
+              _id: '$items.product',
+              totalOrdered: {
+                $sum: {
+                  $sum: [
+                    '$items.variant_selections.quantity',
+                    '$items.fabric_selections.quantity',
+                    '$items.accessory_selections.quantity',
+                  ],
+                },
+              },
+            },
+          },
+          { $sort: { totalOrdered: -1 } },
+          { $limit: 5 },
+          {
+            $lookup: {
+              from: 'products',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'product',
+            },
+          },
+          { $unwind: '$product' },
+          {
+            $project: {
+              _id: 0,
+              product_id: '$_id',
+              name: '$product.name',
+              totalOrdered: 1,
+            },
+          },
+        ]),
+      ]);
+
+    return {
+      total_orders: totalOrders,
+      orders_delivered: ordersDelivered,
+      orders_in_transit: ordersInTransit,
+      must_purchase_products: topProducts,
+    };
   }
 }

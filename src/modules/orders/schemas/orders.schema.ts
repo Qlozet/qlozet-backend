@@ -2,6 +2,16 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
+export enum OrderStatus {
+  PENDING = 'pending',
+  IN_REVIEW = 'in_review',
+  PROCESSING = 'processing',
+  IN_TRANSIT = 'in_transit',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  RETURNED = 'returned',
+}
+
 export type OrderDocument = Order & Document;
 
 /** ------------------ Sub-schemas for selections ------------------ */
@@ -97,10 +107,10 @@ export class Order {
 
   @Prop({
     type: String,
-    enum: ['pending', 'processing', 'completed', 'cancelled'],
+    enum: Object.values(OrderStatus),
     default: 'pending',
   })
-  status: string;
+  status: OrderStatus;
 
   @Prop({ type: String })
   tracking_number?: string;

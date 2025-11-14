@@ -1,5 +1,5 @@
-import { Business } from './business.schema';
-import { BusinessDocument } from './business.schema';
+import { Business } from '../../business/schemas/business.schema';
+import { BusinessDocument } from '../../business/schemas/business.schema';
 import { User } from './user.schema';
 import { UserDocument } from './user.schema';
 import { Role } from './role.schema';

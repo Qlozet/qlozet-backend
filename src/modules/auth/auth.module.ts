@@ -7,7 +7,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
-import { Business, BusinessSchema } from '../ums/schemas/business.schema';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import {
   JwtAuthGuard,
   PermissionsGuard,
