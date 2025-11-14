@@ -46,7 +46,7 @@ export class BusinessController {
     @Req() req: any,
   ): Promise<Warehouse> {
     try {
-      return await this.businessService.create(dto, req.user.id);
+      return await this.businessService.createWarehouse(dto, req.user.id);
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
@@ -77,7 +77,7 @@ export class BusinessController {
   @ApiOperation({ summary: 'Get all warehouses' })
   @ApiResponse({ status: 200, description: 'List of all warehouses' })
   async findAll(): Promise<Warehouse[]> {
-    return this.businessService.findAll();
+    return this.businessService.findAllWarehouse();
   }
 
   @Get(':id')
@@ -86,7 +86,7 @@ export class BusinessController {
   @ApiResponse({ status: 200, description: 'Warehouse found' })
   @ApiResponse({ status: 404, description: 'Warehouse not found' })
   async findOne(@Param('id') id: string): Promise<Warehouse> {
-    return this.businessService.findOne(id);
+    return this.businessService.findOneWarehouse(id);
   }
 
   @Put(':id')
@@ -98,7 +98,7 @@ export class BusinessController {
     @Param('id') id: string,
     @Body() dto: CreateWarehouseDto,
   ): Promise<Warehouse> {
-    return this.businessService.update(id, dto);
+    return this.businessService.updateWarehouse(id, dto);
   }
 
   @Delete(':id')
@@ -106,6 +106,6 @@ export class BusinessController {
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
   @ApiResponse({ status: 200, description: 'Warehouse deleted successfully' })
   async delete(@Param('id') id: string): Promise<{ message: string }> {
-    return this.businessService.delete(id);
+    return this.businessService.deleteWarehouse(id);
   }
 }

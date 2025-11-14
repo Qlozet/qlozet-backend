@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { UserSchema, User } from '../ums/schemas/user.schema';
-import { Business, BusinessSchema } from '../ums/schemas/business.schema';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '../ums/schemas';
 import { RoleSchema } from '../ums/schemas/role.schema';

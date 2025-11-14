@@ -21,6 +21,7 @@ export const SetupSwagger = (app: INestApplication) => {
     .addTag('Transactions', 'Transaction management endpoints')
     .addTag('Wallets', 'Wallets management endpoints')
     .addTag('Supports', 'Support management endpoints')
+    .addTag('Admin', 'Admin management endpoints')
     .addBearerAuth(
       {
         type: 'http',

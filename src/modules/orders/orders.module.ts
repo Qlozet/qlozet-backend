@@ -64,5 +64,12 @@ import { HttpModule } from '@nestjs/axios';
     JwtService,
     TransactionService,
   ],
+  exports: [
+    OrderService,
+    OrderValidationService,
+    PriceCalculationService,
+    JwtService,
+    TransactionService,
+  ],
 })
 export class OrdersModule {}
