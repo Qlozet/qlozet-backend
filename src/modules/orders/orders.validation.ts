@@ -1,18 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import {
-  Product,
-  ProductDocument,
-  Fabric,
-  FabricDocument,
-  Variant,
-  VariantDocument,
-  Style,
-  StyleDocument,
-  Accessory,
-  AccessoryDocument,
-} from '../products/schemas';
+import { Product, ProductDocument } from '../products/schemas';
 import { ProductKind, ClothingType } from './schemas/orders.interfaces';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
 
@@ -82,7 +71,10 @@ export class OrderValidationService {
       }
 
       /** ---------------- VARIANT PRICING ---------------- */
-      if (color_variant_selections?.length) {
+      if (
+        Array.isArray(color_variant_selections) &&
+        color_variant_selections?.length
+      ) {
         for (const cv of color_variant_selections) {
           const color = clothing.color_variants?.find(
             (vDoc) => String(vDoc._id) === String(cv.variant_id),
@@ -113,7 +105,7 @@ export class OrderValidationService {
       }
 
       /** ---------------- FABRIC PRICING ---------------- */
-      if (fabric_selections?.length) {
+      if (Array.isArray(fabric_selections) && fabric_selections?.length > 0) {
         for (const f of fabric_selections) {
           const fabric = clothing.fabrics?.find(
             (fab) => String(fab._id) === String(f.fabric_id),
@@ -138,7 +130,7 @@ export class OrderValidationService {
       }
 
       /** ---------------- STYLE PRICING ---------------- */
-      if (style_selections?.length) {
+      if (Array.isArray(style_selections) && style_selections?.length > 0) {
         for (const s of style_selections) {
           const style = clothing.styles?.find(
             (st) => String(st._id) === String(s.style_id),
@@ -157,7 +149,10 @@ export class OrderValidationService {
       }
 
       /** ---------------- ACCESSORY PRICING ---------------- */
-      if (accessory_selections?.length) {
+      if (
+        Array.isArray(accessory_selections) &&
+        accessory_selections?.length > 0
+      ) {
         for (const a of accessory_selections) {
           const accessory = clothing.accessories?.find(
             (acc) => String(acc._id) === String(a.accessory_id),
@@ -200,7 +195,6 @@ export class OrderValidationService {
         throw new BadRequestException(
           'Fabric product must include fabric selections',
         );
-      console.log(item.selections, 'item.selections');
       if (
         (item.selections?.color_variant_selections?.length ?? 0) > 0 ||
         (item.selections?.style_selections?.length ?? 0) > 0 ||
@@ -213,7 +207,6 @@ export class OrderValidationService {
 
       for (const f of fabricSelections) {
         const fabric = product.fabric;
-        console.log(f.fabric_id, 'f.fabric_id');
         if (!fabric)
           throw new BadRequestException(`Fabric not found: ${f.fabric_id}`);
 

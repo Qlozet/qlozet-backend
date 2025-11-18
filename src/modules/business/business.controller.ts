@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Req,
@@ -16,6 +17,7 @@ import {
 import { BusinessService } from './business.service';
 import {
   ApiBearerAuth,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -26,6 +28,9 @@ import { Warehouse } from './schemas/warehouse.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRole } from '../ums/schemas';
+import { ValidatedAddressResponseDto } from '../logistics/dto/shipping.dto';
+import { CreateBusinessAddressDto } from './dto/create-address.dto';
+import { UserType } from '../auth/dto/base-login.dto';
 
 @ApiTags('Business')
 @ApiBearerAuth('access-token')
@@ -73,14 +78,14 @@ export class BusinessController {
     }
   }
 
-  @Get()
+  @Get('warehouse')
   @ApiOperation({ summary: 'Get all warehouses' })
   @ApiResponse({ status: 200, description: 'List of all warehouses' })
   async findAll(): Promise<Warehouse[]> {
     return this.businessService.findAllWarehouse();
   }
 
-  @Get(':id')
+  @Get(':id/warehouse')
   @ApiOperation({ summary: 'Get a warehouse by ID' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
   @ApiResponse({ status: 200, description: 'Warehouse found' })
@@ -89,7 +94,7 @@ export class BusinessController {
     return this.businessService.findOneWarehouse(id);
   }
 
-  @Put(':id')
+  @Put(':id/warehouse')
   @ApiOperation({ summary: 'Update warehouse details' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
   @ApiResponse({ status: 200, description: 'Warehouse updated successfully' })
@@ -101,11 +106,25 @@ export class BusinessController {
     return this.businessService.updateWarehouse(id, dto);
   }
 
-  @Delete(':id')
+  @Delete(':id/warehouse')
   @ApiOperation({ summary: 'Delete a warehouse' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
   @ApiResponse({ status: 200, description: 'Warehouse deleted successfully' })
   async delete(@Param('id') id: string): Promise<{ message: string }> {
     return this.businessService.deleteWarehouse(id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Patch('address')
+  @ApiOperation({ summary: 'Add or update business address' })
+  @ApiOkResponse({
+    description: 'Business address updated successfully',
+    type: ValidatedAddressResponseDto,
+  })
+  async updateBusinessAddress(
+    @Body() dto: CreateBusinessAddressDto,
+    @Req() req: any,
+  ) {
+    return this.businessService.updateBusinessAddress(req.business, dto);
   }
 }

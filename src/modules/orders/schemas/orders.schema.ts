@@ -94,7 +94,7 @@ export class Order {
   items: OrderItem[];
 
   @Prop({ type: AddressSchema })
-  addresses: Address;
+  address: Address;
 
   @Prop({ type: Number, required: true })
   subtotal: number;

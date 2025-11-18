@@ -65,7 +65,7 @@ export class TeamService {
           email: dto.email,
           phone_number: dto.phone_number,
           hashed_password: hashedPassword,
-          business: business._id,
+          business: business.id,
           role: dto.role,
           type: UserType.VENDOR,
           email_verified: true,
@@ -83,7 +83,7 @@ export class TeamService {
 
       // ✅ Check if user already a team member
       const existingTeamMember = await this.teamMemberModel
-        .findOne({ business: business._id, user: user._id })
+        .findOne({ business: business.id, user: user._id })
         .session(session);
 
       if (existingTeamMember) {
@@ -94,7 +94,7 @@ export class TeamService {
 
       // ✅ Create team member record
       const teamMember = new this.teamMemberModel({
-        business: business._id,
+        business: business.id,
         role: dto.role,
         user: user._id,
         email: dto.email,
@@ -111,7 +111,7 @@ export class TeamService {
 
       // ✅ Add to business
       await this.businessModel.findByIdAndUpdate(
-        business._id,
+        business.id,
         { $addToSet: { team_members: teamMember._id } },
         { session },
       );

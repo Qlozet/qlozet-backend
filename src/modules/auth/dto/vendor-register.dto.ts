@@ -43,14 +43,6 @@ export class VendorRegisterDto {
   })
   business_phone_number?: string;
 
-  @ApiProperty({
-    description: 'Business physical address',
-    example: '123 Fashion Street, Lagos Island, Lagos',
-  })
-  @IsString()
-  @IsNotEmpty({ message: 'business_address is required' })
-  business_address: string;
-
   @ApiPropertyOptional({
     description: 'Website URL of the business (optional)',
     example: 'https://fashionstore.com',

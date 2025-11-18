@@ -11,12 +11,12 @@ export enum BusinessStatus {
 export type BusinessDocument = Business & Document;
 
 @Schema({ timestamps: true })
-export class Business {
+export class Business extends Document {
   @Prop({ required: true, trim: true })
   business_name: string;
 
   @Prop({ required: false, unique: true, lowercase: true, trim: true })
-  business_email?: string;
+  business_email: string;
 
   @Prop({ required: false })
   business_phone_number?: string;
@@ -25,10 +25,10 @@ export class Business {
   business_address: string;
 
   @Prop()
-  address_line_2?: string;
+  address_code?: string;
 
   @Prop()
-  billing_address_line_2?: string;
+  address_line_2?: string;
 
   @Prop()
   time_zone?: string;
@@ -44,6 +44,9 @@ export class Business {
 
   @Prop()
   zip_code?: string;
+
+  @Prop({ default: false })
+  address_completed: boolean;
 
   @Prop()
   bvn?: string;

@@ -14,7 +14,7 @@ export class Address {
   phone_number?: string;
 
   @Prop({ required: true })
-  street: string;
+  address: string;
 
   @Prop({ required: true })
   city: string;
@@ -27,6 +27,9 @@ export class Address {
 
   @Prop({ required: true })
   postal_code?: string;
+
+  @Prop()
+  address_code?: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;

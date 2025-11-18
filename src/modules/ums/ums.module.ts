@@ -25,10 +25,13 @@ import {
 import { AdminController } from './admin.controlller';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { OrdersModule } from '../orders/orders.module';
+import { LogisticsService } from '../logistics/logistics.service';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
     OrdersModule,
+    HttpModule,
     MongooseModule.forFeature([
       { name: Role.name, schema: RoleSchema },
       { name: Permission.name, schema: PermissionSchema },
@@ -54,6 +57,7 @@ import { OrdersModule } from '../orders/orders.module';
     JwtService,
     AdminService,
     BusinessService,
+    LogisticsService,
   ],
   exports: [RolesService, PermissionService, SeedService, UserService],
 })

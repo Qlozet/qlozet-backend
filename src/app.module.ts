@@ -21,9 +21,13 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { MeasurementModule } from './modules/measurement/measurement.module';
+import { LogisticsService } from './modules/logistics/logistics.service';
+import { HttpModule } from '@nestjs/axios';
+import { LogisticsModule } from './modules/logistics/logistics.module';
 
 @Module({
   imports: [
+    HttpModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -64,6 +68,7 @@ import { MeasurementModule } from './modules/measurement/measurement.module';
     WebhookModule,
     MeasurementModule,
     WalletsModule,
+    LogisticsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -72,6 +77,7 @@ import { MeasurementModule } from './modules/measurement/measurement.module';
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
+    LogisticsService,
   ],
 })
 export class AppModule {}

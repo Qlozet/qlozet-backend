@@ -23,17 +23,27 @@ import { generateUniqueQlozetReference } from '../../common/utils/generateString
 import { TransactionType } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { AddressDocument } from '../ums/schemas/address.schema';
-import { OrderItemSelectionsDto } from './dto/selection.dto';
+import {
+  AccessorySelectionDto,
+  FabricSelectionDto,
+  OrderItemSelectionsDto,
+  VariantSelectionDto,
+} from './dto/selection.dto';
 import { TransactionService } from '../transactions/transactions.service';
-import { User } from '../ums/schemas';
+import { Business, User } from '../ums/schemas';
+import { LogisticsService } from '../logistics/logistics.service';
+import { UserService } from '../ums/services';
+import { ProductService } from '../products/products.service';
 
 @Injectable()
 export class OrderService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
-    private validationService: OrderValidationService,
-    private transactionService: TransactionService,
-    private priceCalculationService: PriceCalculationService,
+    private readonly validationService: OrderValidationService,
+    private readonly transactionService: TransactionService,
+    private readonly priceCalculationService: PriceCalculationService,
+    private readonly logisticService: LogisticsService,
+    private readonly productService: ProductService,
     @InjectModel('Product') private productModel: Model<ProductDocument>,
     @InjectModel('Style') private styleModel: Model<StyleDocument>,
     @InjectModel('Fabric') private fabricModel: Model<FabricDocument>,
@@ -74,7 +84,7 @@ export class OrderService {
     const order = new this.orderModel({
       reference: orderReference,
       customer: new Types.ObjectId(customer.id),
-      addresses: shippingAddress,
+      address: shippingAddress,
       items: normalizedItems,
       status: 'pending',
       subtotal,
@@ -115,8 +125,30 @@ export class OrderService {
       },
     };
   }
+  async getProductDetails(
+    product: ProductDocument,
+  ): Promise<{ name: string; description?: string }> {
+    switch (product.kind) {
+      case ProductKind.ACCESSORY:
+        return {
+          name: product.accessory?.name ?? 'Unknown Accessory',
+          description: product.accessory?.description,
+        };
+      case ProductKind.CLOTHING:
+        return {
+          name: product.clothing?.name ?? 'Unknown Clothing',
+          description: product.clothing?.description,
+        };
+      case ProductKind.FABRIC:
+        return {
+          name: product.fabric?.name ?? 'Unknown Fabric',
+          description: product.fabric?.description,
+        };
+      default:
+        return { name: 'Unknown Product', description: undefined };
+    }
+  }
 
-  // processOrderItems (fixed)
   private async processOrderItems(
     items: ProcessedOrderItemDto[],
   ): Promise<ProcessedOrderItem[]> {
@@ -128,7 +160,6 @@ export class OrderService {
             `Product not found: ${item.product_id}`,
           );
         }
-        console.log(product.business, 'product.business');
         const rawSelections = this.normalizeSelections(item.selections);
 
         const styleSelections =
@@ -179,11 +210,11 @@ export class OrderService {
             ? this.discountModel.findById(product.applied_discount)
             : null,
         ]);
-
+        const { name } = await this.getProductDetails(product);
         const selections = this.normalizeSelections(item.selections);
-
         const itemForPricing: ProcessedOrderItem = {
           ...item,
+          product_name: name,
           business: product?.business,
           selections,
           total_price: 0,
@@ -205,6 +236,7 @@ export class OrderService {
 
         return {
           product_id: item.product_id,
+          product_name: name,
           business: product?.business,
           product_kind: product.kind as ProductKind,
           clothing_type: product.clothing?.type as ClothingType,
@@ -314,13 +346,6 @@ export class OrderService {
     return sanitized;
   }
 
-  private async updateInventory(items: ProcessedOrderItem[]): Promise<void> {
-    for (const item of items) {
-      // Update inventory based on item type and selections
-      await this.updateItemInventory(item);
-    }
-  }
-
   private async updateItemInventory(item: ProcessedOrderItem): Promise<void> {
     switch (item.product_kind) {
       case ProductKind.FABRIC:
@@ -428,9 +453,6 @@ export class OrderService {
           .lean(),
         this.orderModel.countDocuments(filter),
       ]);
-
-      console.log(`Found ${orders.length} orders for business ${business}`);
-
       return Utils.getPagingData(
         {
           count: total,
@@ -589,6 +611,79 @@ export class OrderService {
       orders_delivered: ordersDelivered,
       orders_in_transit: ordersInTransit,
       must_purchase_products: topProducts,
+    };
+  }
+
+  async cancelOrder(reference: string) {
+    const orderReference =
+      await this.transactionService.refundPaystackPayment(reference);
+
+    const updateResult = await this.orderModel.updateOne(
+      { reference: orderReference },
+      { $set: { status: OrderStatus.CANCELLED } },
+    );
+
+    return {
+      message: 'Order cancelled and refunded successfully',
+      data: updateResult,
+    };
+  }
+
+  async confirmOrder(orderReference: string, business: Business) {
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    const shippingAddress = order.address;
+    if (!shippingAddress || !shippingAddress.address_code) {
+      throw new BadRequestException(
+        'Shipping address not found or address_code missing',
+      );
+    }
+
+    if (!business.address_code) {
+      throw new BadRequestException('Business address_code is missing');
+    }
+    const transaction =
+      await this.transactionService.findByReference(orderReference);
+    if (!transaction || transaction.status !== 'success') {
+      throw new BadRequestException(
+        'Cannot confirm order: payment not completed',
+      );
+    }
+
+    const now = new Date();
+    const pickupDate = now.toISOString().split('T')[0]; // yyyy-mm-dd
+
+    const shippingItems = await Promise.all(
+      order.items.map(async (item) => {
+        const product = await this.productModel.findById(item.product).lean();
+        if (!product) throw new BadRequestException();
+        const { name, description } = await this.getProductDetails(product);
+        return {
+          name,
+          description: description ?? name,
+          unit_weight: 1,
+          unit_amount: order.total,
+          quantity: 1,
+        };
+      }),
+    );
+
+    const data = {
+      sender_address_code: shippingAddress.address_code,
+      reciever_address_code: business.address_code,
+      pickup_date: pickupDate,
+      package_items: shippingItems,
+      service_type: 'pickup',
+      package_dimension: { length: 12, width: 10, height: 10 },
+    };
+    await this.logisticService.createShipment(data);
+    order.status = OrderStatus.PROCESSING;
+    await order.save();
+
+    return {
+      message: 'Order confirmed and shipment created successfully',
+      data: order,
     };
   }
 }

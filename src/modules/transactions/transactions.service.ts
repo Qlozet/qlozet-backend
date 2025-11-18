@@ -264,4 +264,51 @@ export class TransactionService {
     if (!tx) throw new NotFoundException('Transaction not found');
     return tx;
   }
+  async refundPaystackPayment(reference: string) {
+    const transaction = await this.transactionModel.findOne({ reference });
+    if (!transaction) throw new NotFoundException('Transaction not found');
+
+    if (transaction.status !== TransactionStatus.SUCCESS) {
+      throw new BadRequestException(
+        'Only successful transactions can be refunded.',
+      );
+    }
+
+    if (transaction.metadata?.refund?.status === 'success') {
+      throw new BadRequestException(
+        'This transaction has already been refunded.',
+      );
+    }
+
+    const PAYSTACK_SECRET = this.configService.get<string>(
+      'PAYSTACK_SECRET_KEY',
+    );
+
+    const payload: any = { transaction: reference };
+    payload.amount = transaction.amount * 100; // convert to kobo
+
+    const response: any = await firstValueFrom(
+      this.httpService.post('https://api.paystack.co/refund', payload, {
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+        },
+      }),
+    );
+
+    const refundData = response.data.data;
+
+    transaction.metadata = {
+      ...transaction.metadata,
+      refund: {
+        ...refundData,
+        refunded_amount: transaction.amount,
+        refunded_at: new Date().toISOString(),
+      },
+    };
+
+    transaction.status = TransactionStatus.REVERSED;
+    await transaction.save();
+
+    return transaction?.metadata?.order_reference;
+  }
 }
