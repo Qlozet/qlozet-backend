@@ -34,6 +34,8 @@ import { JwtService } from '@nestjs/jwt';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { TransactionService } from '../transactions/transactions.service';
 import { HttpModule } from '@nestjs/axios';
+import { LogisticsService } from '../logistics/logistics.service';
+import { ProductService } from '../products/products.service';
 
 @Module({
   imports: [
@@ -63,6 +65,8 @@ import { HttpModule } from '@nestjs/axios';
     PriceCalculationService,
     JwtService,
     TransactionService,
+    LogisticsService,
+    ProductService,
   ],
   exports: [
     OrderService,

@@ -228,7 +228,7 @@ export class PriceCalculationService {
 
   // ========== CLOTHING ==========
 
-  private async calculateClothingTotal(
+  async calculateClothingTotal(
     item: ProcessedOrderItem,
     product: ProductDocument,
   ): Promise<number> {
@@ -260,7 +260,7 @@ export class PriceCalculationService {
 
   // ========== FABRIC ==========
 
-  private async calculateFabricTotal(
+  async calculateFabricTotal(
     item: ProcessedOrderItem,
     product: ProductDocument,
   ): Promise<number> {
@@ -270,7 +270,7 @@ export class PriceCalculationService {
     return 0;
   }
 
-  private async calculateFabricCost(
+  async calculateFabricCost(
     selections: FabricSelectionDto[],
     product: ProductDocument,
   ): Promise<number> {
@@ -335,7 +335,7 @@ export class PriceCalculationService {
 
   // ========== ACCESSORIES / VARIANTS ==========
 
-  private async calculateAccessoryTotal(
+  async calculateAccessoryTotal(
     selections: AccessorySelectionDto[],
     product: ProductDocument,
   ): Promise<number> {
@@ -431,7 +431,7 @@ export class PriceCalculationService {
     return this.round(total);
   }
 
-  private async calculateColorVariantCost(
+  async calculateColorVariantCost(
     selections: VariantSelectionDto[],
     product: ProductDocument,
   ): Promise<number> {

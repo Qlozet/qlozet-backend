@@ -25,7 +25,7 @@ export class AddressDto {
   })
   @IsString()
   @IsNotEmpty()
-  street: string;
+  address: string;
 
   @ApiProperty({
     description: 'City',
@@ -40,8 +40,8 @@ export class AddressDto {
     example: 'NY',
   })
   @IsString()
-  @IsOptional()
-  state?: string;
+  @IsNotEmpty()
+  state: string;
 
   @ApiProperty({
     description: 'Country',
@@ -58,4 +58,16 @@ export class AddressDto {
   @IsString()
   @IsNotEmpty()
   postal_code: string;
+
+  @ApiProperty({
+    example: 10.5231,
+    description: 'Latitude coordinate of the user address',
+  })
+  latitude: number;
+
+  @ApiProperty({
+    example: 7.4383,
+    description: 'Longitude coordinate of the user address',
+  })
+  longitude: number;
 }

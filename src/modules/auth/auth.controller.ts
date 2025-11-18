@@ -41,7 +41,6 @@ export class AuthController {
           business_name: 'Fashion Store Ltd',
           business_email: 'business@fashionstore.com',
           business_phone_number: '+2348012345678',
-          business_address: '123 Fashion Street, Lagos Island, Lagos',
           personal_name: 'John Doe',
           personal_email: 'kendo@fashionstore.com',
           personal_phone_number: '+2348012345679',

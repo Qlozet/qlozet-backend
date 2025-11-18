@@ -8,9 +8,12 @@ import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Business, BusinessSchema } from './schemas/business.schema';
+import { LogisticsService } from '../logistics/logistics.service';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
+    HttpModule,
     MongooseModule.forFeature([
       { name: Business.name, schema: BusinessSchema },
       { name: Warehouse.name, schema: WarehouseSchema },
@@ -20,6 +23,6 @@ import { Business, BusinessSchema } from './schemas/business.schema';
     ]),
   ],
   controllers: [BusinessController],
-  providers: [BusinessService, JwtService],
+  providers: [BusinessService, JwtService, LogisticsService],
 })
 export class BusinessModule {}

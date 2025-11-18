@@ -21,10 +21,13 @@ import { UserService } from '../ums/services';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import { AddressSchema, Address } from '../ums/schemas/address.schema';
+import { LogisticsService } from '../logistics/logistics.service';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
     PassportModule,
+    HttpModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -54,6 +57,7 @@ import { AddressSchema, Address } from '../ums/schemas/address.schema';
     JwtAuthGuard,
     RolesGuard,
     PermissionsGuard,
+    LogisticsService,
   ],
   exports: [
     AuthService,

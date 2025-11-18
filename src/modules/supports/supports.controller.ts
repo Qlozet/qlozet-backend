@@ -52,10 +52,7 @@ export class SupportController {
     description: 'Failed to create ticket in Zoho Desk.',
   })
   async createTicket(@Body() dto: CreateTicketDto, @Req() req: any) {
-    const ticket = await this.supportService.createTicket(
-      dto,
-      req.business._id,
-    );
+    const ticket = await this.supportService.createTicket(dto, req.business.id);
     return {
       message: 'Ticket created successfully',
       data: ticket,
@@ -65,7 +62,7 @@ export class SupportController {
   @Get('business')
   @ApiOperation({ summary: 'Get all support tickets for a business' })
   async getTicketsByBusiness(@Req() req: any) {
-    return this.supportService.getTicketsByBusiness(req.business._id);
+    return this.supportService.getTicketsByBusiness(req.business.id);
   }
   @Public()
   @Post('generate-code')

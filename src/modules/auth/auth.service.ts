@@ -63,7 +63,6 @@ export class AuthService {
         business_name,
         business_email,
         business_phone_number,
-        business_address,
         password,
         display_picture_url,
         business_logo_url,
@@ -119,7 +118,6 @@ export class AuthService {
         business_name,
         business_email,
         business_phone_number,
-        business_address,
         display_picture_url: display_picture_url ?? '',
         business_logo_url: business_logo_url ?? '',
         cover_image_url: cover_image_url ?? '',
@@ -138,7 +136,7 @@ export class AuthService {
       const ownerMember = await this.teamMemberModel.create(
         [
           {
-            business: business._id,
+            business: business.id,
             user: vendorUser._id,
             role: ownerRole._id,
             full_name: vendorUser.full_name,
@@ -154,13 +152,13 @@ export class AuthService {
 
       // Add owner to business.team_members
       await this.businessModel.findByIdAndUpdate(
-        business._id,
+        business.id,
         { $push: { team_members: ownerMember[0]._id } },
         { session },
       );
 
       const wallet = new this.walletModel({
-        business: business._id,
+        business: business.id,
         balance: 0,
         currency: 'NGN',
       });

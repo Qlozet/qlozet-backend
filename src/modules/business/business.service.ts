@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,6 +10,8 @@ import { Warehouse, WarehouseDocument } from './schemas/warehouse.schema';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { Business, BusinessDocument } from './schemas/business.schema';
 import { Utils } from 'src/common/utils/pagination';
+import { CreateBusinessAddressDto } from './dto/create-address.dto';
+import { LogisticsService } from '../logistics/logistics.service';
 
 @Injectable()
 export class BusinessService {
@@ -18,6 +21,7 @@ export class BusinessService {
     @InjectModel(Warehouse.name)
     private warehouseModel: Model<WarehouseDocument>,
     @InjectConnection() private readonly connection: Connection,
+    private readonly logisticService: LogisticsService,
   ) {}
 
   async createWarehouse(
@@ -312,6 +316,35 @@ export class BusinessService {
     }
 
     return result[0]; // single business
+  }
+
+  async updateBusinessAddress(
+    business: Business,
+    dto: CreateBusinessAddressDto,
+  ) {
+    try {
+      const validateAddress = await this.logisticService.validateAddress({
+        ...dto,
+        name: business.business_name,
+        phone: business.business_phone_number as string,
+        email: business.business_email,
+      });
+      return this.businessModel.findByIdAndUpdate(
+        business.id,
+        {
+          ...dto,
+          business_address: validateAddress.formatted_address,
+          address_code: validateAddress.address_code,
+          address_completed: true,
+        },
+        { new: true },
+      );
+    } catch (err) {
+      throw new HttpException(
+        err.message || err?.response?.data || 'Unable to update address',
+        err?.response?.status || 500,
+      );
+    }
   }
 
   async updateBusinessStatus(

@@ -89,7 +89,7 @@ export class UserController {
   @Get('team/members')
   @ApiOperation({ summary: 'Get all team members' })
   async getTeamMembers(@Req() req: any): Promise<TeamMember[]> {
-    return this.teamService.listTeamMembers(req.business._id);
+    return this.teamService.listTeamMembers(req.business.id);
   }
 
   // ==============================

@@ -93,4 +93,17 @@ export class OrderController {
       status,
     );
   }
+  // @Roles(UserType.VENDOR)
+  // @Post('confirm/:reference')
+  // @ApiOperation({ summary: 'Confirm an order and create shipment' })
+  // async confirmOrder(@Param('reference') reference: string, @Req() req) {
+  //   const business = req.business;
+  //   return this.orderService.confirmOrder(reference, business);
+  // }
+  @Roles(UserType.VENDOR)
+  @Post('reject/:reference')
+  @ApiOperation({ summary: 'Reject an order and refund customer' })
+  async rejectOrder(@Param('reference') reference: string) {
+    return this.orderService.cancelOrder(reference);
+  }
 }

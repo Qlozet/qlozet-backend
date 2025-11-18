@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  HttpException,
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -12,6 +13,7 @@ import { UserDocument, User } from '../schemas';
 import { MailService } from '../../notifications/mail/mail.service';
 import { Address, AddressDocument } from '../schemas/address.schema';
 import { AddressDto } from '../dto/address.dto';
+import { LogisticsService } from 'src/modules/logistics/logistics.service';
 
 @Injectable()
 export class UserService {
@@ -22,6 +24,7 @@ export class UserService {
     @InjectModel(Address.name)
     private readonly addressModel: Model<AddressDocument>,
     private readonly mailService: MailService,
+    private readonly logisticService: LogisticsService,
   ) {}
 
   /**
@@ -383,22 +386,46 @@ export class UserService {
     return this.sanitizeUser(user);
   }
   async upsertUserAddress(user: UserDocument, dto: AddressDto) {
-    const existing = await this.addressModel.findOne({ user: user.id });
+    try {
+      const validated = await this.logisticService.validateAddress({
+        ...dto,
+        name: dto.address,
+        email: user.email,
+        phone: dto?.phone_number ?? user.phone_number,
+      });
 
-    if (existing) {
-      Object.assign(existing, dto);
-      await existing.save();
-      return existing.toJSON();
+      const existing = await this.addressModel.findOne({ customer: user.id });
+
+      if (existing) {
+        Object.assign(existing, {
+          ...dto,
+          address: validated.formatted_address,
+          address_code: validated.address_code,
+        });
+
+        await existing.save();
+        return existing.toJSON();
+      }
+
+      // Create a new address
+      const newAddress = new this.addressModel({
+        customer: user.id,
+        ...(!dto.full_name && { full_name: user.full_name }),
+        ...(!dto.phone_number && { phone_number: user.phone_number }),
+        ...dto,
+        address: validated.formatted_address,
+        address_code: validated.address_code,
+      });
+
+      return (await newAddress.save()).toJSON();
+    } catch (err) {
+      console.error('Upsert user address failed:', err.message);
+
+      throw new HttpException(
+        err?.message || err?.response?.data || 'Unable to update address',
+        err?.response?.status || 500,
+      );
     }
-
-    // Create new address
-    const newAddress = new this.addressModel({
-      customer: user.id,
-      ...(!dto.full_name && { full_name: user.full_name }),
-      ...(!dto.phone_number && { full_name: user.phone_number }),
-      ...dto,
-    });
-    return (await newAddress.save()).toJSON();
   }
 
   async getUserAddress(userId: Types.ObjectId) {
