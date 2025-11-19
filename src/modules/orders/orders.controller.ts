@@ -87,10 +87,10 @@ export class OrderController {
     @Query('status') status?: string,
   ) {
     return this.orderService.findVendorOrders(
-      req.business?._id,
       Number(page),
       Number(size),
       status,
+      req.business?._id,
     );
   }
   // @Roles(UserType.VENDOR)
