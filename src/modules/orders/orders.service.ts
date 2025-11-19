@@ -1,4 +1,9 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { Order, OrderDocument, OrderStatus } from './schemas/orders.schema';
@@ -428,17 +433,17 @@ export class OrderService {
     // For customize clothing, no inventory update needed as it's made-to-order
   }
   async findVendorOrders(
-    business: Types.ObjectId,
     page: number = 1,
     size: number = 10,
     status?: string,
+    business?: Types.ObjectId,
   ) {
     try {
       const { skip, take } = await Utils.getPagination(page, size);
-      const filter: any = {
-        'items.business': business,
-      };
-
+      const filter: any = {};
+      if (business) {
+        filter['items.business'] = business;
+      }
       if (status && status !== 'all') {
         filter.status = status;
       }
@@ -462,8 +467,7 @@ export class OrderService {
         size,
       );
     } catch (error) {
-      console.error('Error in findVendorOrders:', error);
-      throw error;
+      throw new InternalServerErrorException();
     }
   }
 

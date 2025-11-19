@@ -22,6 +22,7 @@ import { TeamService } from './services/team.service';
 import { BusinessService } from '../business/business.service';
 import { OrderService } from '../orders/orders.service';
 import { Types } from 'mongoose';
+import { FetchCustomersDto } from './dto/fetch-customer.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -136,7 +137,7 @@ export class AdminController {
     return this.businessService.setInReview(id);
   }
   /** ---------------- Admin Dashboard ---------------- */
-  @Get('admin/dashboard')
+  @Get('dashboard')
   @ApiOperation({ summary: 'Get admin dashboard metrics' })
   async getAdminDashboard() {
     return this.orderService.getAdminDashboardMetrics();
@@ -150,5 +151,30 @@ export class AdminController {
     return this.orderService.getVendorDashboardMetrics(
       new Types.ObjectId(businessId),
     );
+  }
+
+  @Get('vendor/orders')
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Optional order status filter',
+  })
+  async findVendorOrders(
+    @Query('page')
+    page = 1,
+    @Query('size') size = 10,
+    @Query('status') status?: string,
+  ) {
+    return this.orderService.findVendorOrders(
+      Number(page),
+      Number(size),
+      status,
+    );
+  }
+
+  @Get('customer')
+  @ApiOperation({ summary: 'Fetch customers with filters' })
+  async fetchCustomers(@Query() filters: FetchCustomersDto) {
+    return this.userService.fetchCustomers(filters.page, filters.size, filters);
   }
 }

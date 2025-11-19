@@ -9,11 +9,12 @@ import {
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
-import { UserDocument, User } from '../schemas';
+import { UserDocument, User, UserType } from '../schemas';
 import { MailService } from '../../notifications/mail/mail.service';
 import { Address, AddressDocument } from '../schemas/address.schema';
 import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
+import { Utils } from 'src/common/utils/pagination';
 
 @Injectable()
 export class UserService {
@@ -26,6 +27,67 @@ export class UserService {
     private readonly mailService: MailService,
     private readonly logisticService: LogisticsService,
   ) {}
+
+  async fetchCustomers(
+    page = 1,
+    size = 10,
+    filters?: {
+      search?: string;
+      state?: string;
+      city?: string;
+      gender?: string;
+      startDate?: string;
+      endDate?: string;
+      status?: string;
+    },
+  ) {
+    const query: any = { type: UserType.CUSTOMER };
+
+    if (filters?.search) {
+      const s = filters.search.trim();
+      query.$or = [
+        { first_name: new RegExp(s, 'i') },
+        { last_name: new RegExp(s, 'i') },
+        { email: new RegExp(s, 'i') },
+        { phone: new RegExp(s, 'i') },
+      ];
+    }
+
+    if (filters?.state) {
+      query['address.state'] = new RegExp(`^${filters.state}$`, 'i');
+    }
+
+    if (filters?.city) {
+      query['address.city'] = new RegExp(`^${filters.city}$`, 'i');
+    }
+
+    if (filters?.gender) {
+      query.gender = filters.gender;
+    }
+
+    if (filters?.status) {
+      query.status = filters.status;
+    }
+
+    if (filters?.startDate || filters?.endDate) {
+      query.createdAt = {};
+      if (filters.startDate) {
+        query.createdAt.$gte = new Date(filters.startDate);
+      }
+      if (filters.endDate) {
+        query.createdAt.$lte = new Date(filters.endDate);
+      }
+    }
+
+    const { take, skip } = await Utils.getPagination(page, size);
+
+    const [rows, count] = await Promise.all([
+      this.userModel.find(query).skip(skip).limit(take).sort({ createdAt: -1 }),
+      this.userModel.countDocuments(query),
+    ]);
+
+    return Utils.getPagingData({ count, rows }, page, size);
+  }
 
   /**
    * Find user by ID
