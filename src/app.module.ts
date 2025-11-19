@@ -24,6 +24,7 @@ import { MeasurementModule } from './modules/measurement/measurement.module';
 import { LogisticsService } from './modules/logistics/logistics.service';
 import { HttpModule } from '@nestjs/axios';
 import { LogisticsModule } from './modules/logistics/logistics.module';
+import { TicketModule } from './modules/ticket/ticket.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { LogisticsModule } from './modules/logistics/logistics.module';
     MeasurementModule,
     WalletsModule,
     LogisticsModule,
+    TicketModule,
   ],
   controllers: [AppController],
   providers: [

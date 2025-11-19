@@ -27,6 +27,12 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { OrdersModule } from '../orders/orders.module';
 import { LogisticsService } from '../logistics/logistics.service';
 import { HttpModule } from '@nestjs/axios';
+import { TicketService } from '../ticket/ticket.service';
+import { Ticket, TicketSchema } from '../ticket/schema/ticket.schema';
+import {
+  TicketReply,
+  TicketReplySchema,
+} from '../ticket/schema/reply-ticket.schema';
 
 @Module({
   imports: [
@@ -42,6 +48,8 @@ import { HttpModule } from '@nestjs/axios';
       { name: Address.name, schema: AddressSchema },
       { name: Warehouse.name, schema: WarehouseSchema },
       { name: Order.name, schema: OrderSchema },
+      { name: Ticket.name, schema: TicketSchema },
+      { name: TicketReply.name, schema: TicketReplySchema },
     ]),
     ProductModule,
   ],
@@ -58,6 +66,7 @@ import { HttpModule } from '@nestjs/axios';
     AdminService,
     BusinessService,
     LogisticsService,
+    TicketService,
   ],
   exports: [RolesService, PermissionService, SeedService, UserService],
 })
