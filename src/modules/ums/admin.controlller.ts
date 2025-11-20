@@ -1,15 +1,20 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
+  Req,
   UseGuards,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -23,6 +28,18 @@ import { BusinessService } from '../business/business.service';
 import { OrderService } from '../orders/orders.service';
 import { Types } from 'mongoose';
 import { FetchCustomersDto } from './dto/fetch-customer.dto';
+import {
+  AssignTicketDto,
+  CreateTicketDto,
+  TicketFilterDto,
+} from '../ticket/dto/ticket.dto';
+import { TicketService } from '../ticket/ticket.service';
+import {
+  CreateTicketReplyDto,
+  TicketReplyResponseDto,
+} from '../ticket/dto/ticket-reply.dto';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserType } from './schemas';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -33,7 +50,7 @@ export class AdminController {
   constructor(
     private readonly userService: UserService,
     private readonly teamService: TeamService,
-    private readonly rolesService: RolesService,
+    private readonly ticketService: TicketService,
     private readonly businessService: BusinessService,
     private readonly orderService: OrderService,
   ) {}
@@ -176,5 +193,46 @@ export class AdminController {
   @ApiOperation({ summary: 'Fetch customers with filters' })
   async fetchCustomers(@Query() filters: FetchCustomersDto) {
     return this.userService.fetchCustomers(filters.page, filters.size, filters);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('tickets')
+  @ApiOperation({ summary: 'Get paginated tickets with filters' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  async findAll(
+    @Query() filters: TicketFilterDto,
+    @Query('page') page: number = 1,
+    @Query('size') size: number = 10,
+  ) {
+    return this.ticketService.findAll(filters, page, size);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('assigned/:team_id')
+  @ApiOperation({ summary: 'Get all tickets assigned to a support team' })
+  async getAssignedTickets(
+    @Param('team_id') team_id: Types.ObjectId,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+    @Query() query: any,
+  ) {
+    return this.ticketService.findAssignedTickets(team_id, query, page, size);
+  }
+
+  @Patch(':id/assign')
+  @ApiOperation({ summary: 'Assign ticket to a support team' })
+  assign(@Param('id') id: string, @Body() dto: AssignTicketDto) {
+    return this.ticketService.assign(id, dto);
+  }
+  @Post(':ticket_id/reply')
+  @ApiOperation({ summary: 'Reply to a ticket (vendor/admin/support)' })
+  @ApiCreatedResponse({ type: TicketReplyResponseDto })
+  async replyToTicket(
+    @Param('ticket_id') ticket_id: Types.ObjectId,
+    @Req() req,
+    @Body() dto: CreateTicketReplyDto,
+  ) {
+    return this.ticketService.createReply(ticket_id, req.user.id, dto);
   }
 }
