@@ -6,11 +6,24 @@ import {
   HttpStatus,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiOkResponse,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { VendorRegisterDto, CustomerRegistrationDto } from './dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
-import { LoginDto } from './dto/login.dto';
+import {
+  LoginCustomerResponseDto,
+  LoginCustomerResponseWrapperDto,
+  LoginDto,
+  LoginVendorResponseDto,
+  LoginVendorResponseWrapperDto,
+  VendorUserDto,
+} from './dto/login.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { PasswordResetRequestDto } from './dto/password-reset-request.dto';
@@ -18,6 +31,8 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { PasswordResetDto } from './dto/password-reset.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ApiResponseWrapper } from 'src/common/decorators/api-response.decorator';
+import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -111,9 +126,8 @@ export class AuthController {
   @Post('login/vendor')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Vendor login',
-    description: 'Authenticate vendor and return access token.',
+  @ApiOkResponse({
+    type: LoginVendorResponseWrapperDto,
   })
   @ApiBody({
     description: 'Vendor login credentials.',
@@ -126,14 +140,6 @@ export class AuthController {
       required: ['email', 'password'],
     },
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Login successful. Access token returned.',
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Invalid credentials.',
-  })
   async loginVendor(@Body() loginDto: LoginDto) {
     return this.authService.loginVendor(loginDto.email, loginDto.password);
   }
@@ -141,6 +147,9 @@ export class AuthController {
   @Post('login/customer')
   @Public()
   @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    type: LoginCustomerResponseWrapperDto,
+  })
   @ApiOperation({
     summary: 'Customer login',
     description: 'Authenticate customer and return access token.',
@@ -155,18 +164,6 @@ export class AuthController {
       },
       required: ['email', 'password'],
     },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Login successful. Access token returned.',
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Invalid credentials.',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Customer not found.',
   })
   async loginCustomer(@Body() loginDto: LoginDto) {
     return this.authService.loginCustomer(loginDto.email, loginDto.password);

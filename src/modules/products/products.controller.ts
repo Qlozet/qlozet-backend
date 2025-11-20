@@ -20,11 +20,13 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiQuery,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 import {
   CreateAccessoryDto,
   CreateClothingDto,
   CreateFabricDto,
+  ProductListResponseDto,
 } from './dto/product.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
@@ -83,6 +85,7 @@ export class ProductsController {
   }
   @Get()
   @Roles(UserType.VENDOR, 'customer', UserType.ADMIN)
+  @ApiOkResponse({ type: ProductListResponseDto })
   @ApiOperation({
     summary: 'Get all products with pagination and optional filters/search',
   })

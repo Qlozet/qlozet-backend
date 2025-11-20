@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ApiBaseResponse } from '../dto/response.decorator';
+import { LoginVendorResponseDto } from 'src/modules/auth/dto/login.dto';
 
 export const SetupSwagger = (app: INestApplication) => {
   const config = new DocumentBuilder()
@@ -41,7 +43,9 @@ export const SetupSwagger = (app: INestApplication) => {
     )
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, config, {
+    // extraModels: [ApiBaseResponse, LoginVendorResponseDto],
+  });
 
   SwaggerModule.setup('api-docs', app, document, {
     swaggerOptions: {
