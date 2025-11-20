@@ -15,7 +15,6 @@ import { UmsModule } from './modules/ums/ums.module';
 import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { BusinessModule } from './modules/business/business.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
-import { SupportsModule } from './modules/supports/supports.module';
 import { CartModule } from './modules/cart/cart.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
@@ -63,7 +62,6 @@ import { TicketModule } from './modules/ticket/ticket.module';
     CloudinaryModule,
     BusinessModule,
     TransactionsModule,
-    SupportsModule,
     CartModule,
     OrdersModule,
     WebhookModule,
