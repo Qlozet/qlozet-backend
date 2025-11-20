@@ -21,7 +21,7 @@ export class Business extends Document {
   @Prop({ required: false })
   business_phone_number?: string;
 
-  @Prop({ required: true })
+  @Prop({ required: false })
   business_address: string;
 
   @Prop()
