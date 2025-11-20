@@ -222,13 +222,8 @@ export class AuthService {
       if (!role) {
         throw new BadRequestException('Customer role not found');
       }
-
-      // Hash password
       const hashed_password = await bcrypt.hash(password, 10);
-
-      // Generate email verification token
       const email_verification_token = this.generateVerificationToken();
-      // Create new customer
       const newUser = new this.userModel({
         full_name,
         email,
@@ -514,13 +509,6 @@ export class AuthService {
       const vendor = await this.userModel
         .findOne({ email, type: UserType.VENDOR })
         .select('+hashed_password')
-        .populate({
-          path: 'business',
-          populate: {
-            path: 'team_members',
-            populate: { path: 'role', select: 'name permissions' },
-          },
-        })
         .exec();
 
       if (!vendor) {
@@ -613,9 +601,7 @@ export class AuthService {
     try {
       const user = await this.userModel
         .findOne({ email, type: UserType.CUSTOMER })
-        .select('+hashed_password')
-        .populate('role');
-
+        .select('+hashed_password');
       if (!user) {
         throw new UnauthorizedException('Invalid credentials');
       }
