@@ -20,25 +20,23 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 
 import { Types } from 'mongoose';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { UserService } from 'src/modules/ums/services';
-import { TeamService } from 'src/modules/ums/services/team.service';
-import { TicketService } from 'src/modules/ticket/ticket.service';
-import { BusinessService } from 'src/modules/business/business.service';
-import { OrderService } from 'src/modules/orders/orders.service';
-import { FetchCustomersDto } from 'src/modules/ums/dto/fetch-customer.dto';
-import { UserType } from 'src/modules/ums/schemas';
-import {
-  AssignTicketDto,
-  TicketFilterDto,
-} from 'src/modules/ticket/dto/ticket.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserService } from '../ums/services';
+import { TicketService } from '../ticket/ticket.service';
+import { BusinessService } from '../business/business.service';
+import { OrderService } from '../orders/orders.service';
+import { FetchCustomersDto } from '../ums/dto/fetch-customer.dto';
+import { UserType } from '../ums/schemas';
+import { AssignTicketDto, TicketFilterDto } from '../ticket/dto/ticket.dto';
 import {
   CreateTicketReplyDto,
   TicketReplyResponseDto,
-} from 'src/modules/ticket/dto/ticket-reply.dto';
+} from '../ticket/dto/ticket-reply.dto';
+import { PlatformService } from './platform.service';
+import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -48,10 +46,10 @@ import {
 export class PlatformController {
   constructor(
     private readonly userService: UserService,
-    private readonly teamService: TeamService,
     private readonly ticketService: TicketService,
     private readonly businessService: BusinessService,
     private readonly orderService: OrderService,
+    private readonly platformService: PlatformService,
   ) {}
 
   // ------------------------------------------------------
@@ -233,5 +231,17 @@ export class PlatformController {
     @Body() dto: CreateTicketReplyDto,
   ) {
     return this.ticketService.createReply(ticket_id, req.user.id, dto);
+  }
+  @Roles(UserType.PLATFORM)
+  @Patch('settings')
+  @ApiOperation({ summary: 'Update platform settings' })
+  async updateSettings(@Body() dto: UpdatePlatformSettingsDto) {
+    return this.platformService.update(dto);
+  }
+  @Roles(UserType.PLATFORM)
+  @Get('settings')
+  @ApiOperation({ summary: 'Get current platform settings' })
+  async getSettings() {
+    return this.platformService.getSettings();
   }
 }

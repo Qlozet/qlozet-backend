@@ -13,11 +13,24 @@ export class PlatformService {
     private readonly model: Model<PlatformSettingsDocument>,
   ) {}
 
+  async create(): Promise<PlatformSettingsDocument> {
+    return await this.model.create({
+      payout_cycle: 'weekly',
+      minimum_payout: 2000,
+      payout_delay_days: 7,
+      tailored_order_upfront: 0,
+      platform_commission_percent: 10,
+      payment_handling_fee_flat: 0,
+      payment_handling_fee_percent: 0,
+      tax_percent: 0.75, // newly added tax field
+    });
+  }
   // Get platform payout settings
   async getSettings(): Promise<PlatformSettingsDocument> {
     const settings = await this.model.findOne();
     if (!settings) {
-      throw new NotFoundException('Platform settings not found');
+      return this.create();
+      // throw new NotFoundException('Platform settings not found');
     }
     return settings;
   }
