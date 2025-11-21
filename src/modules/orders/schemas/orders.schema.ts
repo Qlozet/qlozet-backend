@@ -117,6 +117,21 @@ export class Order {
 
   @Prop({ type: String })
   courier_name?: string;
+  @Prop({ type: Number, default: 0 })
+  vendor_earnings?: number; // After commission removed
+
+  @Prop({ type: Number, default: 0 })
+  platform_commission?: number;
+
+  @Prop({ type: Date, default: null })
+  payout_eligible_at?: Date; // completedAt + payout_delay_days
+
+  @Prop({
+    type: String,
+    enum: ['pending', 'eligible', 'paid'],
+    default: 'pending',
+  })
+  payout_status?: 'pending' | 'eligible' | 'paid';
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

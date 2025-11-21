@@ -14,7 +14,6 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
-  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -22,31 +21,31 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { RolesService, UserService } from './services';
-import { TeamService } from './services/team.service';
-import { BusinessService } from '../business/business.service';
-import { OrderService } from '../orders/orders.service';
+
 import { Types } from 'mongoose';
-import { FetchCustomersDto } from './dto/fetch-customer.dto';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserService } from 'src/modules/ums/services';
+import { TeamService } from 'src/modules/ums/services/team.service';
+import { TicketService } from 'src/modules/ticket/ticket.service';
+import { BusinessService } from 'src/modules/business/business.service';
+import { OrderService } from 'src/modules/orders/orders.service';
+import { FetchCustomersDto } from 'src/modules/ums/dto/fetch-customer.dto';
+import { UserType } from 'src/modules/ums/schemas';
 import {
   AssignTicketDto,
-  CreateTicketDto,
   TicketFilterDto,
-} from '../ticket/dto/ticket.dto';
-import { TicketService } from '../ticket/ticket.service';
+} from 'src/modules/ticket/dto/ticket.dto';
 import {
   CreateTicketReplyDto,
   TicketReplyResponseDto,
-} from '../ticket/dto/ticket-reply.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { UserType } from './schemas';
+} from 'src/modules/ticket/dto/ticket-reply.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
-export class AdminController {
+export class PlatformController {
   constructor(
     private readonly userService: UserService,
     private readonly teamService: TeamService,

@@ -35,10 +35,12 @@ import {
   VariantSelectionDto,
 } from './dto/selection.dto';
 import { TransactionService } from '../transactions/transactions.service';
-import { Business, User } from '../ums/schemas';
+import { User } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { UserService } from '../ums/services';
 import { ProductService } from '../products/products.service';
+import { PaymentService } from '../payment/payment.service';
+import { Business } from '../business/schemas/business.schema';
 
 @Injectable()
 export class OrderService {
@@ -46,9 +48,9 @@ export class OrderService {
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private readonly validationService: OrderValidationService,
     private readonly transactionService: TransactionService,
+    private readonly paymentService: PaymentService,
     private readonly priceCalculationService: PriceCalculationService,
     private readonly logisticService: LogisticsService,
-    private readonly productService: ProductService,
     @InjectModel('Product') private productModel: Model<ProductDocument>,
     @InjectModel('Style') private styleModel: Model<StyleDocument>,
     @InjectModel('Fabric') private fabricModel: Model<FabricDocument>,
@@ -111,8 +113,8 @@ export class OrderService {
       },
     });
 
-    const paymentInit = await this.transactionService.initializePaystackPayment(
-      transaction.id,
+    const paymentInit = await this.paymentService.initializePaystackPayment(
+      transaction.reference,
       customer.email,
     );
 
