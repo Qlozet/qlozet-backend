@@ -17,6 +17,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
+import { BusinessService } from '../business/business.service';
 
 interface CreateTransactionDto {
   initiator?: Types.ObjectId;
@@ -37,6 +38,7 @@ export class TransactionService {
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
     private readonly httpService: HttpService,
+    private readonly businessService: BusinessService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -64,96 +66,6 @@ export class TransactionService {
   }
 
   // ✅ Initialize Paystack Payment
-  async initializePaystackPayment(transactionId: string, email: string) {
-    const transaction = await this.transactionModel.findById(transactionId);
-    if (!transaction) throw new NotFoundException('Transaction not found');
-
-    const PAYSTACK_SECRET = this.configService.get<string>(
-      'PAYSTACK_SECRET_KEY',
-    );
-    const FRONTEND_URL = this.configService.get<string>('FRONTEND_URL');
-
-    const payload = {
-      email,
-      amount: transaction.amount * 100, // Paystack uses kobo
-      reference: transaction.reference,
-      currency: transaction.currency,
-      callback_url: `${FRONTEND_URL}/payment/verify`,
-    };
-
-    const response: any = await firstValueFrom(
-      this.httpService.post(
-        'https://api.paystack.co/transaction/initialize',
-        payload,
-        {
-          headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
-        },
-      ),
-    );
-
-    const { authorization_url, reference, access_code } = response.data.data;
-
-    transaction.metadata = {
-      ...transaction.metadata,
-      paystack: {
-        authorization_url,
-        access_code,
-        reference,
-        initialized_at: new Date().toISOString(),
-      },
-    };
-    await transaction.save();
-
-    return {
-      success: true,
-      message: 'Payment initialized successfully',
-      data: {
-        paymentUrl: authorization_url,
-        reference,
-        access_code,
-        amount: transaction.amount,
-      },
-    };
-  }
-
-  // ✅ Verify Paystack Payment
-  async verifyPaystackPayment(reference: string) {
-    const PAYSTACK_SECRET = this.configService.get<string>(
-      'PAYSTACK_SECRET_KEY',
-    );
-    const verifyUrl = `https://api.paystack.co/transaction/verify/${reference}`;
-
-    const response: any = await firstValueFrom(
-      this.httpService.get(verifyUrl, {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
-      }),
-    );
-
-    const data = response.data.data;
-    const transaction = await this.transactionModel.findOne({ reference });
-
-    if (!transaction) throw new NotFoundException('Transaction not found');
-
-    if (data.status === 'success') {
-      transaction.status = TransactionStatus.SUCCESS;
-      transaction.metadata = { ...transaction.metadata, paystack: data };
-      await transaction.save();
-    } else {
-      transaction.status = TransactionStatus.FAILED;
-      await transaction.save();
-    }
-
-    return {
-      success: true,
-      status: transaction.status,
-      reference,
-      amount: transaction.amount,
-      message:
-        transaction.status === TransactionStatus.SUCCESS
-          ? 'Payment verified successfully'
-          : 'Payment failed or incomplete',
-    };
-  }
 
   // ✅ Update transaction status
   async updateStatus(

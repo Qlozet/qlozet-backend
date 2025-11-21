@@ -8,6 +8,7 @@ import { Model, Types } from 'mongoose';
 import { Wallet, WalletDocument } from './schema/wallet.schema';
 import { TransactionService } from '../transactions/transactions.service';
 import { TransactionType } from '../transactions/schema/transaction.schema';
+import { PaymentService } from '../payment/payment.service';
 
 @Injectable()
 export class WalletsService {
@@ -15,6 +16,7 @@ export class WalletsService {
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<WalletDocument>,
     private readonly transactionService: TransactionService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   async getOrCreateWallet(
@@ -59,7 +61,7 @@ export class WalletsService {
       description: `Funding wallet`,
     });
 
-    const result = await this.transactionService.initializePaystackPayment(
+    const result = await this.paymentService.initializePaystackPayment(
       transaction.id,
       email,
     );

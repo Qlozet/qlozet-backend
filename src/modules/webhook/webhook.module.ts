@@ -3,23 +3,22 @@ import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
-import {
-  Transaction,
-  TransactionSchema,
-} from '../transactions/schema/transaction.schema';
-import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
-import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
+import { BusinessModule } from '../business/business.module';
+import { PaymentService } from '../payment/payment.service';
+import { PlatformService } from '../platform/platform.service';
+
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [
-    HttpModule,
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-      { name: Wallet.name, schema: WalletSchema },
-    ]),
-  ],
+  imports: [BusinessModule, HttpModule, DatabaseModule],
   controllers: [WebhookController],
-  providers: [WebhookService, TransactionService, WalletsService],
+  providers: [
+    WebhookService,
+    TransactionService,
+    WalletsService,
+    PaymentService,
+    PlatformService,
+  ],
 })
 export class WebhookModule {}

@@ -236,10 +236,8 @@ export class BusinessService {
 
   async findBusinessById(businessId: string) {
     const result = await this.businessModel.aggregate([
-      // Match only the specific business
       { $match: { _id: new Types.ObjectId(businessId) } },
 
-      // 1️⃣ Vendor info (only name and email)
       {
         $lookup: {
           from: 'users',

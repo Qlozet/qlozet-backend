@@ -32,25 +32,10 @@ import { DiscountController } from './discount.controller';
 import { CollectionService } from './collection.service';
 import { CollectionController } from './collection.controller';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [
-    MongooseModule.forFeature([
-      { name: Variant.name, schema: VariantSchema },
-      { name: Discount.name, schema: DiscountSchema },
-      { name: Style.name, schema: StyleSchema },
-      { name: Taxonomy.name, schema: TaxonomySchema },
-      { name: Product.name, schema: ProductSchema },
-      { name: Fabric.name, schema: FabricSchema },
-      { name: Accessory.name, schema: AccessorySchema },
-      { name: User.name, schema: UserSchema },
-      { name: Business.name, schema: BusinessSchema },
-      { name: Role.name, schema: RoleSchema },
-      { name: Collection.name, schema: CollectionSchema },
-      { name: TeamMember.name, schema: TeamMemberSchema },
-      { name: Clothing.name, schema: ClothingSchema },
-    ]),
-  ],
+  imports: [DatabaseModule],
   controllers: [ProductsController, DiscountController, CollectionController],
   providers: [JwtService, ProductService, DiscountService, CollectionService],
   exports: [DiscountService],

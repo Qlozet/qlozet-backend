@@ -202,6 +202,26 @@ export class Business extends Document {
     default: [],
   })
   team_members?: Types.ObjectId[];
+  @Prop({ type: Number, default: 0 })
+  pending_payout_balance: number; // Money waiting for payout
+
+  @Prop({ type: Number, default: 0 })
+  lifetime_earned?: number;
+
+  @Prop({ type: Number, default: 0 })
+  lifetime_paid_out?: number;
+
+  @Prop({ type: Date, default: null })
+  last_payout_date?: Date;
+
+  @Prop({ type: Date, default: null })
+  next_payout_date?: Date;
+
+  @Prop({ type: [String], default: [] })
+  payout_history?: string[]; // store payout ref IDs for audit
+
+  @Prop({ default: null })
+  transfer_recipient_code?: number;
 }
 
 export const BusinessSchema = SchemaFactory.createForClass(Business);

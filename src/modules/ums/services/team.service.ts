@@ -14,8 +14,10 @@ import { MailService } from '../../notifications/mail/mail.service';
 import { InviteTeamMemberDto } from '../dto/team.dto';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
-import { Business, BusinessDocument } from '../schemas';
-import { sanitizeUser } from '../../../common/utils/sanitization';
+import {
+  BusinessDocument,
+  Business,
+} from '../../business/schemas/business.schema';
 
 @Injectable()
 export class TeamService {
@@ -26,7 +28,7 @@ export class TeamService {
     private teamMemberModel: Model<TeamMemberDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Role.name) private roleModel: Model<RoleDocument>,
-    @InjectModel(TeamMember.name)
+    @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly mailService: MailService,

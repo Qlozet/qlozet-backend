@@ -11,17 +11,29 @@ import {
 import { HttpModule } from '@nestjs/axios';
 import { JwtService } from '@nestjs/jwt';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
+import { PaymentService } from '../payment/payment.service';
+import { BusinessModule } from '../business/business.module';
+import { PlatformService } from '../platform/platform.service';
+import {
+  PlatformSettingsSchema,
+  PlatformSettings,
+} from '../platform/schema/platformSettings.schema';
+import { BusinessSchema, Business } from '../business/schemas/business.schema';
+import {
+  WarehouseSchema,
+  Warehouse,
+} from '../business/schemas/warehouse.schema';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [
-    HttpModule,
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-      { name: Wallet.name, schema: WalletSchema },
-      { name: Role.name, schema: RoleSchema },
-    ]),
-  ],
+  imports: [BusinessModule, HttpModule, DatabaseModule],
   controllers: [WalletsController],
-  providers: [WalletsService, TransactionService, JwtService],
+  providers: [
+    WalletsService,
+    TransactionService,
+    JwtService,
+    PaymentService,
+    PlatformService,
+  ],
 })
 export class WalletsModule {}

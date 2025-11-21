@@ -13,6 +13,7 @@ import {
   Query,
   Delete,
   Patch,
+  Put,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -35,6 +36,8 @@ import {
 } from './dto/roles.dto';
 import { AddressDto } from './dto/address.dto';
 import { UpdatePreferencesDto } from './dto/users.dto';
+import { UpdatePlatformSettingsDto } from '../platform/dto/update-settings.dto';
+import { PlatformService } from '../platform/platform.service';
 
 @ApiTags('Users')
 @Controller('users')
@@ -46,6 +49,7 @@ export class UserController {
     private readonly userService: UserService,
     private readonly teamService: TeamService,
     private readonly rolesService: RolesService,
+    private readonly platformService: PlatformService,
   ) {}
 
   @Roles(VendorRole.OWNER)
@@ -203,10 +207,6 @@ export class UserController {
     return { message: 'Profile updated successfully', data: updatedUser };
   }
 
-  // ==============================
-  // USER PREFERENCES
-  // ==============================
-
   @Roles('customer')
   @Patch('me/preferences')
   async updatePreferences(
@@ -219,5 +219,24 @@ export class UserController {
       preferences,
     );
     return { message: 'Preferences updated successfully', data: updatedUser };
+  }
+  @Get('platform-settings')
+  @ApiOperation({ summary: 'Get current payout settings' })
+  @ApiResponse({
+    status: 200,
+    description: 'Current payout settings retrieved successfully',
+  })
+  async getSettings() {
+    return await this.platformService.getSettings();
+  }
+
+  @Put('platform-settings')
+  @ApiOperation({ summary: 'Update payout settings' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payout settings updated successfully',
+  })
+  async update(@Body() dto: UpdatePlatformSettingsDto) {
+    return await this.platformService.update(dto);
   }
 }

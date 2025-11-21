@@ -14,8 +14,6 @@ import {
   UserDocument,
   User,
   UserType,
-  Business,
-  BusinessDocument,
   Role,
   RoleDocument,
 } from '../ums/schemas';
@@ -29,6 +27,10 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { TeamMember, TeamMemberDocument } from '../ums/schemas/team.schema';
 import { sanitizeUser } from '../../common/utils/sanitization';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
+import {
+  BusinessDocument,
+  Business,
+} from '../business/schemas/business.schema';
 
 @Injectable()
 export class AuthService {

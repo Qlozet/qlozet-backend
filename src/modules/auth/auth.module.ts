@@ -18,16 +18,15 @@ import { PermissionSchema } from '../ums/schemas/permission.schema';
 import { PermissionService } from '../ums/services/permissions.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
-import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
-import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
-import { AddressSchema, Address } from '../ums/schemas/address.schema';
 import { LogisticsService } from '../logistics/logistics.service';
 import { HttpModule } from '@nestjs/axios';
+import { DatabaseModule } from '../../database/database.module';
 
 @Module({
   imports: [
     PassportModule,
     HttpModule,
+    DatabaseModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -38,15 +37,6 @@ import { HttpModule } from '@nestjs/axios';
       }),
       inject: [ConfigService],
     }),
-    MongooseModule.forFeature([
-      { name: User.name, schema: UserSchema },
-      { name: Role.name, schema: RoleSchema },
-      { name: Business.name, schema: BusinessSchema },
-      { name: Permission.name, schema: PermissionSchema },
-      { name: TeamMember.name, schema: TeamMemberSchema },
-      { name: Wallet.name, schema: WalletSchema },
-      { name: Address.name, schema: AddressSchema },
-    ]),
   ],
   controllers: [AuthController],
   providers: [

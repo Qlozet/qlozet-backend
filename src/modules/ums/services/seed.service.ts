@@ -14,9 +14,11 @@ import {
   Permission,
   PermissionDocument,
   PermissionModule,
-  Business,
-  BusinessDocument,
 } from '../schemas';
+import {
+  BusinessDocument,
+  Business,
+} from '../../business/schemas/business.schema';
 
 @Injectable()
 export class SeedService {

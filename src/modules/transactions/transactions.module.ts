@@ -9,19 +9,19 @@ import { Role, RoleSchema } from '../ums/schemas/role.schema';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { HttpModule, HttpService } from '@nestjs/axios';
 import { PaystackWebhookMiddleware } from 'src/common/guards/paystack.guard';
+import { BusinessService } from '../business/business.service';
+import { BusinessModule } from '../business/business.module';
+import { BusinessSchema, Business } from '../business/schemas/business.schema';
+import {
+  WarehouseSchema,
+  Warehouse,
+} from '../business/schemas/warehouse.schema';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [
-    HttpModule,
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-      { name: User.name, schema: UserSchema },
-      { name: Role.name, schema: RoleSchema },
-      { name: TeamMember.name, schema: TeamMemberSchema },
-    ]),
-  ],
+  imports: [HttpModule, BusinessModule, DatabaseModule],
   controllers: [TransactionController],
-  providers: [TransactionService, JwtService],
+  providers: [TransactionService, JwtService, BusinessService],
 })
 export class TransactionsModule {
   configure(consumer: MiddlewareConsumer) {

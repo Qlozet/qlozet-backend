@@ -14,45 +14,42 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
-  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { RolesService, UserService } from './services';
-import { TeamService } from './services/team.service';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+
+import { Types } from 'mongoose';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserService } from '../ums/services';
+import { TicketService } from '../ticket/ticket.service';
 import { BusinessService } from '../business/business.service';
 import { OrderService } from '../orders/orders.service';
-import { Types } from 'mongoose';
-import { FetchCustomersDto } from './dto/fetch-customer.dto';
-import {
-  AssignTicketDto,
-  CreateTicketDto,
-  TicketFilterDto,
-} from '../ticket/dto/ticket.dto';
-import { TicketService } from '../ticket/ticket.service';
+import { FetchCustomersDto } from '../ums/dto/fetch-customer.dto';
+import { UserType } from '../ums/schemas';
+import { AssignTicketDto, TicketFilterDto } from '../ticket/dto/ticket.dto';
 import {
   CreateTicketReplyDto,
   TicketReplyResponseDto,
 } from '../ticket/dto/ticket-reply.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { UserType } from './schemas';
+import { PlatformService } from './platform.service';
+import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
-export class AdminController {
+export class PlatformController {
   constructor(
     private readonly userService: UserService,
-    private readonly teamService: TeamService,
     private readonly ticketService: TicketService,
     private readonly businessService: BusinessService,
     private readonly orderService: OrderService,
+    private readonly platformService: PlatformService,
   ) {}
 
   // ------------------------------------------------------
@@ -234,5 +231,17 @@ export class AdminController {
     @Body() dto: CreateTicketReplyDto,
   ) {
     return this.ticketService.createReply(ticket_id, req.user.id, dto);
+  }
+  @Roles(UserType.PLATFORM)
+  @Patch('settings')
+  @ApiOperation({ summary: 'Update platform settings' })
+  async updateSettings(@Body() dto: UpdatePlatformSettingsDto) {
+    return this.platformService.update(dto);
+  }
+  @Roles(UserType.PLATFORM)
+  @Get('settings')
+  @ApiOperation({ summary: 'Get current platform settings' })
+  async getSettings() {
+    return this.platformService.getSettings();
   }
 }

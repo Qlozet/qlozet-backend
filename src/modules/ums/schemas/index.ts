@@ -1,5 +1,3 @@
-import { Business } from '../../business/schemas/business.schema';
-import { BusinessDocument } from '../../business/schemas/business.schema';
 import { User } from './user.schema';
 import { UserDocument } from './user.schema';
 import { Role } from './role.schema';
@@ -12,8 +10,6 @@ import { PermissionModule } from './permission.schema';
 import { UserType } from './user.schema';
 import { Permission } from './permission.schema';
 export {
-  Business,
-  BusinessDocument,
   User,
   UserDocument,
   Role,
