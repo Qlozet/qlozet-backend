@@ -13,6 +13,7 @@ import { PaymentService } from '../payment/payment.service';
 import { BusinessService } from '../business/business.service';
 import { PlatformService } from '../platform/platform.service';
 import { DatabaseModule } from 'src/database/database.module';
+import { CurrencyService } from '../currency/currency.service';
 
 @Module({
   imports: [HttpModule, DatabaseModule],
@@ -28,6 +29,7 @@ import { DatabaseModule } from 'src/database/database.module';
     PaymentService,
     BusinessService,
     PlatformService,
+    CurrencyService,
   ],
   exports: [
     OrderService,
@@ -40,6 +42,7 @@ import { DatabaseModule } from 'src/database/database.module';
     PaymentService,
     BusinessService,
     PlatformService,
+    CurrencyService,
   ],
 })
 export class OrdersModule {}

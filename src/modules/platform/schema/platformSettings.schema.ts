@@ -30,6 +30,32 @@ export class PlatformSettings extends Document {
 
   @Prop({ type: Number, default: 0 })
   tax_percent: number;
+  @Prop({ type: Number, default: 25 })
+  image_token_price: number;
+
+  @Prop({ type: Number, default: 45 })
+  video_token_price: number;
+  @Prop({
+    type: {
+      usd: {
+        amount: { type: Number, default: 0.01 },
+        currency: { type: String, default: 'USD' },
+      },
+      ngn: {
+        amount: { type: Number, default: 15 },
+        currency: { type: String, default: 'NGN' },
+        last_updated: { type: Date, default: new Date() },
+      },
+    },
+    default: {
+      usd: { amount: 0.01, currency: 'USD' },
+      ngn: { amount: 15, currency: 'NGN', last_updated: new Date() },
+    },
+  })
+  token_price: {
+    usd: { amount: number; currency: string };
+    ngn: { amount: number; currency: string; last_updated: Date };
+  };
 }
 
 export type PlatformSettingsDocument = PlatformSettings & Document;

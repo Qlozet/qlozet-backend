@@ -2,8 +2,6 @@ import { Injectable } from '@nestjs/common';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const SPACE_ID = 'Qlozet/hybrid_body_measurement_mask';
-
 @Injectable()
 export class GradioService {
   private client: any = null;
@@ -11,13 +9,13 @@ export class GradioService {
   /**
    * Get or initialize Gradio Client
    */
-  async getClient(): Promise<any> {
+  async getClient(spaceId: string): Promise<any> {
     if (this.client) return this.client;
 
     // Dynamic import for ESM module
     const { Client } = await import('@gradio/client');
 
-    this.client = await Client.connect(SPACE_ID, {
+    this.client = await Client.connect(spaceId, {
       token: `hf_${process.env.HUGGING_FACE_TOKEN}`,
     });
     return this.client;
@@ -59,14 +57,14 @@ export class GradioService {
   /**
    * Example method to run Gradio inference
    */
-  async runInference(fileBuffer: Buffer): Promise<any> {
-    const client = await this.getClient();
-    const blob = this.bufferToBlob(fileBuffer);
+  // async runInference(fileBuffer: Buffer): Promise<any> {
+  //   const client = await this.getClient();
+  //   const blob = this.bufferToBlob(fileBuffer);
 
-    // Adjust method name depending on your Gradio space inputs
-    const result = await client.predict('/predict', {
-      image: blob,
-    });
-    return result;
-  }
+  //   // Adjust method name depending on your Gradio space inputs
+  //   const result = await client.predict('/predict', {
+  //     image: blob,
+  //   });
+  //   return result;
+  // }
 }

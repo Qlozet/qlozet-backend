@@ -24,6 +24,8 @@ import {
   Warehouse,
 } from '../business/schemas/warehouse.schema';
 import { DatabaseModule } from 'src/database/database.module';
+import { TokenService } from './token.service';
+import { CurrencyService } from '../currency/currency.service';
 
 @Module({
   imports: [BusinessModule, HttpModule, DatabaseModule],
@@ -34,6 +36,17 @@ import { DatabaseModule } from 'src/database/database.module';
     JwtService,
     PaymentService,
     PlatformService,
+    TokenService,
+    CurrencyService,
+  ],
+  exports: [
+    WalletsService,
+    TransactionService,
+    JwtService,
+    PaymentService,
+    PlatformService,
+    TokenService,
+    CurrencyService,
   ],
 })
 export class WalletsModule {}

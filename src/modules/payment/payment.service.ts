@@ -207,7 +207,7 @@ export class PaymentService {
         'Vendor does not have a transfer recipient',
       );
     }
-    const { vendorEarnings, commission, totalGatewayFee, tax } =
+    const { vendorEarnings, commission, tax } =
       await this.platformService.compute(amount);
     const transaction = await this.transactionService.create({
       initiator: businessId as unknown as Types.ObjectId, // vendor as initiator
@@ -218,7 +218,6 @@ export class PaymentService {
       metadata: {
         totalAmount: amount,
         commission,
-        totalGatewayFee,
         tax,
         vendorEarnings,
       },

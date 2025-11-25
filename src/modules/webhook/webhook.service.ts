@@ -35,10 +35,12 @@ export class WebhookService {
     switch (event) {
       case 'charge.success':
         walletUpdated = await this.handleChargeSuccess(transaction);
+        transaction.status = TransactionStatus.SUCCESS;
         break;
 
       case 'transfer.success':
         walletUpdated = await this.handleTransferSuccess(transaction);
+        transaction.status = TransactionStatus.SUCCESS;
         break;
 
       case 'charge.failed':

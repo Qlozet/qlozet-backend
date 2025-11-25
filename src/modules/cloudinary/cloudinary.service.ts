@@ -4,6 +4,29 @@ import { MulterFile } from 'src/common/types/upload';
 
 @Injectable()
 export class CloudinaryService {
+  async uploadBase64(base64: string, folderName: string) {
+    return new Promise((resolve, reject) => {
+      const buffer = Buffer.from(base64, 'base64');
+
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: folderName,
+          resource_type: 'image',
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          if (!result) return reject(new Error('Upload result is undefined'));
+          resolve({
+            fileUrl: result.secure_url,
+            filePublicId: result.public_id,
+          });
+        },
+      );
+
+      uploadStream.end(buffer);
+    });
+  }
+
   async uploadFile(
     file: MulterFile,
     folderName: string,

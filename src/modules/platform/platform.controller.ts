@@ -244,4 +244,10 @@ export class PlatformController {
   async getSettings() {
     return this.platformService.getSettings();
   }
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Update platform token price' })
+  @Post('refresh-token-price')
+  async refreshTokenPrice() {
+    return this.platformService.updateNgnTokenPrice();
+  }
 }
