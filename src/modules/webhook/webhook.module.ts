@@ -9,6 +9,8 @@ import { PaymentService } from '../payment/payment.service';
 import { PlatformService } from '../platform/platform.service';
 
 import { DatabaseModule } from 'src/database/database.module';
+import { CurrencyService } from '../currency/currency.service';
+import { JobStatusService } from '../measurement/job-status.service';
 
 @Module({
   imports: [BusinessModule, HttpModule, DatabaseModule],
@@ -19,6 +21,8 @@ import { DatabaseModule } from 'src/database/database.module';
     WalletsService,
     PaymentService,
     PlatformService,
+    CurrencyService,
+    JobStatusService,
   ],
 })
 export class WebhookModule {}

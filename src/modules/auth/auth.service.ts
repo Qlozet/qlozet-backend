@@ -31,6 +31,7 @@ import {
   BusinessDocument,
   Business,
 } from '../business/schemas/business.schema';
+import { Token, TokenDocument } from '../wallets/schema/token.schema';
 
 @Injectable()
 export class AuthService {
@@ -38,6 +39,7 @@ export class AuthService {
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Token.name) private readonly tokenModel: Model<TokenDocument>,
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
@@ -54,91 +56,88 @@ export class AuthService {
    * Register a new vendor
    */
   async registerVendor(data: VendorRegisterDto) {
+    const {
+      personal_name,
+      personal_phone_number,
+      personal_email,
+      business_name,
+      business_email,
+      business_phone_number,
+      password,
+      display_picture_url,
+      business_logo_url,
+      cover_image_url,
+      ...businessData
+    } = data;
+
+    const existingBusiness = await this.businessModel.findOne({
+      $or: [{ business_email }, { business_phone_number }],
+    });
+    if (existingBusiness)
+      throw new ConflictException('Business already exists.');
+
+    const existingUser = await this.userModel.findOne({
+      $or: [{ email: personal_email }, { phone_number: personal_phone_number }],
+    });
+    if (existingUser) throw new ConflictException('User already exists.');
+
+    const ownerRole = await this.roleModel.findOne({ name: VendorRole.OWNER });
+    if (!ownerRole) throw new BadRequestException('Vendor role not found.');
+
     const session = await this.connection.startSession();
     session.startTransaction();
 
     try {
-      const {
-        personal_name,
-        personal_phone_number,
-        personal_email,
-        business_name,
-        business_email,
-        business_phone_number,
-        password,
-        display_picture_url,
-        business_logo_url,
-        cover_image_url,
-        ...businessData
-      } = data;
-
-      // Check existing business
-      const existingBusiness = await this.businessModel.findOne({
-        $or: [{ business_email }, { business_phone_number }],
-      });
-      if (existingBusiness)
-        throw new ConflictException('Business already exists.');
-
-      // Check existing user
-      const existingUser = await this.userModel.findOne({
-        $or: [
-          { email: personal_email },
-          { phone_number: personal_phone_number },
-        ],
-      });
-      if (existingUser) throw new ConflictException('User already exists.');
-
-      // Get owner role
-      const ownerRole = await this.roleModel.findOne({
-        name: VendorRole.OWNER,
-      });
-      if (!ownerRole) throw new BadRequestException('Vendor role not found.');
-
       const hashed_password = await bcrypt.hash(password, 10);
       const email_verification_token = this.generateVerificationToken();
 
-      // Create Vendor User
-      const vendorUser = new this.userModel({
-        full_name: personal_name,
-        email: personal_email,
-        phone_number: personal_phone_number,
-        hashed_password,
-        role: ownerRole._id,
-        type: UserType.VENDOR,
-        email_verified: false,
-        email_verification_token,
-        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        status: 'active',
-        profilePicture: display_picture_url || '',
-        last_verification_email_sent: new Date(),
-      });
-
-      await vendorUser.save({ session });
-
-      // Create Business
-      const business = new this.businessModel({
-        business_name,
-        business_email,
-        business_phone_number,
-        display_picture_url: display_picture_url ?? '',
-        business_logo_url: business_logo_url ?? '',
-        cover_image_url: cover_image_url ?? '',
-        created_by: {
-          id: vendorUser._id,
-          name: vendorUser.full_name,
-          email: vendorUser.email,
-        },
-        ...businessData,
-        team_members: [],
-      });
-
-      await business.save({ session });
-
-      // Create TeamMember for owner
-      const ownerMember = await this.teamMemberModel.create(
+      const [vendorUser] = await this.userModel.create(
         [
           {
-            business: business.id,
+            full_name: personal_name,
+            email: personal_email,
+            phone_number: personal_phone_number,
+            hashed_password,
+            role: ownerRole._id,
+            type: UserType.VENDOR,
+            email_verified: false,
+            email_verification_token,
+            email_verification_expires: new Date(
+              Date.now() + 24 * 60 * 60 * 1000,
+            ),
+            status: 'active',
+            profilePicture: display_picture_url || '',
+            last_verification_email_sent: new Date(),
+          },
+        ],
+        { session },
+      );
+
+      const [business] = await this.businessModel.create(
+        [
+          {
+            business_name,
+            business_email,
+            business_phone_number,
+            display_picture_url: display_picture_url ?? '',
+            business_logo_url: business_logo_url ?? '',
+            cover_image_url: cover_image_url ?? '',
+            created_by: {
+              id: vendorUser._id,
+              name: vendorUser.full_name,
+              email: vendorUser.email,
+            },
+            ...businessData,
+            team_members: [],
+          },
+        ],
+        { session },
+      );
+
+      const [ownerMember] = await this.teamMemberModel.create(
+        [
+          {
+            business: business._id,
             user: vendorUser._id,
             role: ownerRole._id,
             full_name: vendorUser.full_name,
@@ -152,31 +151,45 @@ export class AuthService {
         { session },
       );
 
-      // Add owner to business.team_members
       await this.businessModel.findByIdAndUpdate(
-        business.id,
-        { $push: { team_members: ownerMember[0]._id } },
+        business._id,
+        { $push: { team_members: ownerMember._id } },
         { session },
       );
 
-      const wallet = new this.walletModel({
-        business: business.id,
-        balance: 0,
-        currency: 'NGN',
-      });
-      await wallet.save({ session });
+      await this.walletModel.create(
+        [
+          {
+            business: business._id,
+            balance: 0,
+            currency: 'NGN',
+          },
+        ],
+        { session },
+      );
+
+      await this.tokenModel.create(
+        [
+          {
+            business: business._id,
+            tokens: 250,
+          },
+        ],
+        { session },
+      );
 
       await session.commitTransaction();
 
-      // Send verification and generate token
       const token = await this.generateToken({
         id: vendorUser._id,
         email: vendorUser.email,
       });
+
       await this.userModel.findByIdAndUpdate(vendorUser._id, {
         refreshToken: token.refresh_token,
-        business: business.id,
+        business: business._id,
       });
+
       await this.sendVerificationEmail(vendorUser);
 
       return {
@@ -204,56 +217,77 @@ export class AuthService {
     data: { user: any };
     message: string;
   }> {
+    const { full_name, email, phone_number, password, dob, ...customerData } =
+      data;
+
+    const existingUser = await this.userModel.findOne({
+      $or: [{ email }, { phone_number }],
+    });
+    if (existingUser)
+      throw new ConflictException('Email or phone number already in use');
+
+    const role = await this.roleModel.findOne({ name: UserRole.CUSTOMER });
+    if (!role) throw new BadRequestException('Customer role not found');
+
     const session = await this.connection.startSession();
     session.startTransaction();
 
     try {
-      const { full_name, email, phone_number, password, dob, ...customerData } =
-        data;
-
-      // Check if user already exists
-      const existingUser = await this.userModel.findOne({
-        $or: [{ email }, { phone_number }],
-      });
-      if (existingUser) {
-        throw new ConflictException('Email or phone number already in use');
-      }
-
-      // Find customer role using enum
-      const role = await this.roleModel.findOne({ name: UserRole.CUSTOMER });
-      if (!role) {
-        throw new BadRequestException('Customer role not found');
-      }
       const hashed_password = await bcrypt.hash(password, 10);
       const email_verification_token = this.generateVerificationToken();
-      const newUser = new this.userModel({
-        full_name,
-        email,
-        phone_number,
-        hashed_password,
-        role: role._id,
-        type: UserType.CUSTOMER,
-        email_verified: false,
-        email_verification_token,
-        email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
-        status: 'active',
-        dob: dob ? new Date(dob) : undefined,
-        last_verification_email_sent: new Date(),
-        ...customerData,
-      });
 
-      await newUser.save({ session });
+      const [newUser] = await this.userModel.create(
+        [
+          {
+            full_name,
+            email,
+            phone_number,
+            hashed_password,
+            role: role._id,
+            type: UserType.CUSTOMER,
+            email_verified: false,
+            email_verification_token,
+            email_verification_expires: new Date(
+              Date.now() + 24 * 60 * 60 * 1000,
+            ),
+            status: 'active',
+            dob: dob ? new Date(dob) : undefined,
+            last_verification_email_sent: new Date(),
+            ...customerData,
+          },
+        ],
+        { session },
+      );
+
+      await this.walletModel.create(
+        [
+          {
+            customer: newUser._id,
+            balance: 0,
+            currency: 'NGN',
+          },
+        ],
+        { session },
+      );
+
+      await this.tokenModel.create(
+        [
+          {
+            user: newUser._id,
+            tokens: 100,
+          },
+        ],
+        { session },
+      );
+
       await session.commitTransaction();
 
-      // Send verification email only initially
       await this.sendVerificationEmail(newUser);
 
       this.logger.log(`Customer registered successfully: ${email}`);
 
       return {
-        data: {
-          user: sanitizeUser(newUser),
-        },
+        data: { user: sanitizeUser(newUser) },
         message:
           'Customer registered successfully. Please check your email to verify your account.',
       };
@@ -270,6 +304,7 @@ export class AuthService {
       ) {
         throw error;
       }
+
       throw new InternalServerErrorException(
         'Registration failed. Please try again.',
       );
@@ -367,6 +402,8 @@ export class AuthService {
     requiresProfileCompletion?: boolean;
   }> {
     try {
+      const session = await this.connection.startSession();
+      session.startTransaction();
       const user = await this.userModel.findOne({
         email_verification_token: token,
         email_verification_expires: { $gt: new Date() },
@@ -385,8 +422,9 @@ export class AuthService {
       user.status = 'active';
       user.email_verified_at = new Date();
 
-      await user.save();
+      await user.save({ session });
 
+      await session.commitTransaction();
       // Send welcome email AFTER successful verification
       await this.sendWelcomeEmail(user, business);
 

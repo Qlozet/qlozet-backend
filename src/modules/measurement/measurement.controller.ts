@@ -23,6 +23,14 @@ import { AutoMaskSwaggerDto } from './dto/auto-mask-predict.dto';
 import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
 import { Public } from 'src/common/decorators/public.decorator';
 import * as multer from 'multer';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import {
+  GarmentConfigDto,
+  GenerateOutfitRequestDto,
+} from './dto/generate-outfit.dto';
+import { JobStatusService } from './job-status.service';
+import { OutfitQueueService } from './outfit-queue.service';
 
 @Controller('measurements')
 @ApiTags('Measurements')
@@ -30,9 +38,13 @@ import * as multer from 'multer';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class MeasurementController {
-  constructor(private readonly measurement: MeasurementService) {}
+  constructor(
+    private readonly measurement: MeasurementService,
+    private readonly jobService: JobStatusService,
+    private readonly outfitService: OutfitQueueService,
+  ) {}
 
-  @Public()
+  @Roles('customer')
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Run predict with front and side images',
@@ -69,7 +81,7 @@ export class MeasurementController {
     }
   }
 
-  @Public()
+  @Roles('customer')
   @ApiConsumes('multipart/form-data')
   @Post('auto-mask-predict')
   @UseInterceptors(
@@ -87,6 +99,7 @@ export class MeasurementController {
       side?: Express.Multer.File[];
     },
     @Body() body: AutoMaskSwaggerDto,
+    @Req() req: any,
   ) {
     try {
       const bg = files.bg?.[0];
@@ -102,6 +115,8 @@ export class MeasurementController {
         front,
         side as Express.Multer.File,
         body,
+        req.business?.id,
+        req.user?.id,
       );
     } catch (error) {
       throw new HttpException(
@@ -111,7 +126,7 @@ export class MeasurementController {
     }
   }
 
-  @Public()
+  @Roles('customer')
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: VideoPipelineSwaggerDto })
   @Post('video-pipeline')
@@ -150,20 +165,18 @@ export class MeasurementController {
   async videoPipeline(
     @UploadedFile() video: Express.Multer.File,
     @Body() body: VideoPipelineSwaggerDto,
+    @Req() req: any,
   ) {
     try {
       if (!video) {
         throw new BadRequestException('Video file is required');
       }
-
-      console.log('Received video:', {
-        originalname: video.originalname,
-        size: video.size,
-        mimetype: video.mimetype,
-        bufferLength: video.buffer?.length,
-      });
-
-      return this.measurement.videoPipeline(video, body);
+      return this.measurement.videoPipeline(
+        video,
+        body,
+        req.business?.id,
+        req.user?.id,
+      );
     } catch (error) {
       console.error('Video pipeline controller error:', error);
       throw new HttpException(
@@ -173,7 +186,7 @@ export class MeasurementController {
     }
   }
 
-  @Public()
+  @Roles('customer')
   @Post('avatar')
   @UseInterceptors(FileInterceptor('pred_json'))
   async avatar(
@@ -192,5 +205,92 @@ export class MeasurementController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Public()
+  @Post('generate')
+  @ApiBody({
+    description: 'Generate outfit using image URLs',
+    schema: {
+      type: 'object',
+      properties: {
+        config: {
+          type: 'object',
+          description: 'Garment configuration object',
+          example: {
+            garmentType: 'dress',
+            gender: 'female',
+            view: 'front',
+            occasion: 'wedding',
+            aestheticKeywords: ['elegant', 'modern'],
+            fit: 'tailored',
+            fitNotes: 'Slightly loose at waist',
+            fabricRefId: 'fabric_12345',
+            embroideryRefId: 'embro_98765',
+            hasStrictEmbroidery: false,
+            measurementProfile: {
+              height: 165,
+              bust: 90,
+              waist: 70,
+              hips: 95,
+            },
+            constructionSelections: {
+              neckline: 'V-neck',
+              sleeve_style: 'short sleeve',
+            },
+            inspirationImageUrls: [
+              'https://example.com/image1.jpg',
+              'https://example.com/image2.jpg',
+            ],
+            silhouetteImageUrl: 'https://example.com/silhouette.jpg',
+          },
+        },
+        userPrompt: {
+          type: 'string',
+          description: 'Optional user prompt',
+          example: 'Make it elegant and modern',
+        },
+        reference_image_urls: {
+          type: 'array',
+          description: 'Image URLs instead of uploaded files',
+          items: { type: 'string', format: 'url' },
+          example: [
+            'https://res.cloudinary.com/.../img1.jpg',
+            'https://res.cloudinary.com/.../img2.jpg',
+          ],
+        },
+        webhook_url: {
+          type: 'string',
+          format: 'url',
+          example: 'https://frontend.example.com/webhook',
+        },
+      },
+    },
+  })
+  async generateOutfit(
+    @Body('config') config: GarmentConfigDto,
+    @Body('userPrompt') userPrompt?: string,
+    @Body('reference_image_urls') reference_image_urls?: string[],
+    @Body('webhook_url') webhook_url?: string,
+  ) {
+    const payload: GenerateOutfitRequestDto = {
+      config,
+      user_prompt: userPrompt,
+      reference_image_urls,
+    };
+
+    const jobId = await this.outfitService.queueGeneration({
+      payload,
+      webhook_url: webhook_url,
+    });
+
+    await this.jobService.create(jobId, payload, webhook_url);
+    return {
+      data: {
+        jobId,
+        status: 'queued',
+      },
+      message: 'Generation started. You will receive a webhook when complete.',
+    };
   }
 }

@@ -8,6 +8,7 @@ import {
   HttpStatus,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,13 +22,17 @@ import { JwtAuthGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
+import { TokenService } from './token.service';
 
 @ApiTags('Wallets')
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard)
 @Controller('wallets')
 export class WalletsController {
-  constructor(private readonly walletsService: WalletsService) {}
+  constructor(
+    private readonly walletsService: WalletsService,
+    private readonly tokenService: TokenService,
+  ) {}
 
   // Fund wallet
   @Post('fund')
@@ -62,5 +67,13 @@ export class WalletsController {
       balance: wallet.balance,
       currency: wallet.currency,
     };
+  }
+
+  @Get('price')
+  async price(
+    @Query('tokens') tokens: number,
+    @Query('currency') currency: string = 'USD',
+  ) {
+    return this.tokenService.getTokenPurchasePrice(Number(tokens), currency);
   }
 }

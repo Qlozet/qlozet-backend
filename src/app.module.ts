@@ -25,6 +25,10 @@ import { HttpModule } from '@nestjs/axios';
 import { LogisticsModule } from './modules/logistics/logistics.module';
 import { TicketModule } from './modules/ticket/ticket.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { CurrencyService } from './modules/currency/currency.service';
+import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bullmq';
+console.log(process.env.REDIS_URL);
 @Module({
   imports: [
     HttpModule,
@@ -32,6 +36,13 @@ import { PlatformModule } from './modules/platform/platform.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    BullModule.forRoot({
+      connection: {
+        url: process.env.REDIS_URL,
+      },
+    }),
+
+    ScheduleModule.forRoot({}),
     MailerModule.forRoot({
       transport: {
         host: process.env.MAIL_HOST,
@@ -79,6 +90,7 @@ import { PlatformModule } from './modules/platform/platform.module';
       useClass: JwtAuthGuard,
     },
     LogisticsService,
+    CurrencyService,
   ],
 })
 export class AppModule {}

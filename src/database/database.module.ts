@@ -56,6 +56,16 @@ import {
   Transaction,
 } from '../modules/transactions/schema/transaction.schema';
 import { CartSchema, Cart } from '../modules/cart/schema/cart.schema';
+import {
+  Token,
+  TokenSchema,
+  TokenTransaction,
+  TokenTransactionSchema,
+} from 'src/modules/wallets/schema/token.schema';
+import {
+  JobStatus,
+  JobStatusSchema,
+} from 'src/common/schemas/job-status.schema';
 
 @Module({
   exports: [MongooseModule],
@@ -98,6 +108,9 @@ import { CartSchema, Cart } from '../modules/cart/schema/cart.schema';
       { name: Address.name, schema: AddressSchema },
       { name: Clothing.name, schema: ClothingSchema },
       { name: Collection.name, schema: CollectionSchema },
+      { name: Token.name, schema: TokenSchema },
+      { name: TokenTransaction.name, schema: TokenTransactionSchema },
+      { name: JobStatus.name, schema: JobStatusSchema },
     ]),
   ],
 })
