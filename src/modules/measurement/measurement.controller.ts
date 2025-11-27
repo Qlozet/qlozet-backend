@@ -12,10 +12,19 @@ import {
   HttpException,
   HttpStatus,
   BadRequestException,
+  Get,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { MeasurementService } from './measurement.service';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { RunPredictBodyDto, RunPredictSwaggerDto } from './dto/run-predict.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -24,13 +33,19 @@ import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
 import { Public } from 'src/common/decorators/public.decorator';
 import * as multer from 'multer';
 import { Roles } from 'src/common/decorators/roles.decorator';
-import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import {
   GarmentConfigDto,
   GenerateOutfitRequestDto,
 } from './dto/generate-outfit.dto';
-import { JobStatusService } from './job-status.service';
 import { OutfitQueueService } from './outfit-queue.service';
+import { PlatformService } from '../platform/platform.service';
+import { TokenService } from '../wallets/token.service';
+import { UserService } from '../ums/services';
+import {
+  ActiveMeasurementSetDto,
+  AddMeasurementSetDto,
+} from './dto/user-measurement.dto';
+import { EditGarmentDto } from './dto/edit-image.dto';
 
 @Controller('measurements')
 @ApiTags('Measurements')
@@ -40,8 +55,10 @@ import { OutfitQueueService } from './outfit-queue.service';
 export class MeasurementController {
   constructor(
     private readonly measurement: MeasurementService,
-    private readonly jobService: JobStatusService,
     private readonly outfitService: OutfitQueueService,
+    private readonly platformService: PlatformService,
+    private readonly tokenService: TokenService,
+    private readonly userService: UserService,
   ) {}
 
   @Roles('customer')
@@ -67,7 +84,6 @@ export class MeasurementController {
       if (!front) {
         throw new BadRequestException('Front image is required');
       }
-
       return await this.measurement.runPredict(
         front,
         side as Express.Multer.File,
@@ -82,42 +98,26 @@ export class MeasurementController {
   }
 
   @Roles('customer')
-  @ApiConsumes('multipart/form-data')
   @Post('auto-mask-predict')
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'bg', maxCount: 1 },
-      { name: 'front', maxCount: 1 },
-      { name: 'side', maxCount: 1 },
-    ]),
-  )
-  async autoMask(
-    @UploadedFiles()
-    files: {
-      bg?: Express.Multer.File[];
-      front?: Express.Multer.File[];
-      side?: Express.Multer.File[];
-    },
-    @Body() body: AutoMaskSwaggerDto,
-    @Req() req: any,
-  ) {
+  async autoMask(@Body() body: AutoMaskSwaggerDto, @Req() req: any) {
     try {
-      const bg = files.bg?.[0];
-      const front = files.front?.[0];
-      const side = files.side?.[0];
+      const business = req.business?.id;
+      const customer = req.user?.id;
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
 
-      if (!front) {
-        throw new BadRequestException('Front image is required');
+      if (tokenBalance < settings.image_measurement_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
       }
-
-      return await this.measurement.autoMaskPredict(
-        bg as Express.Multer.File,
-        front,
-        side as Express.Multer.File,
-        body,
-        req.business?.id,
-        req.user?.id,
-      );
+      return this.outfitService.queueAutoMask({
+        ...body,
+        business: req.business?.id,
+        customer: req.user?.id,
+      });
     } catch (error) {
       throw new HttpException(
         error.message || 'Auto mask prediction failed',
@@ -127,56 +127,26 @@ export class MeasurementController {
   }
 
   @Roles('customer')
-  @ApiConsumes('multipart/form-data')
   @ApiBody({ type: VideoPipelineSwaggerDto })
   @Post('video-pipeline')
-  @UseInterceptors(
-    FileInterceptor('video', {
-      storage: multer.memoryStorage(),
-      limits: {
-        fileSize: 100 * 1024 * 1024, // 100MB limit
-      },
-      fileFilter: (req, file, callback) => {
-        // Validate video file types
-        const allowedMimeTypes = [
-          'video/mp4',
-          'video/avi',
-          'video/mov',
-          'video/wmv',
-          'video/flv',
-          'video/webm',
-          'video/quicktime',
-        ];
-
-        if (allowedMimeTypes.includes(file.mimetype)) {
-          callback(null, true);
-        } else {
-          callback(
-            new HttpException(
-              `Unsupported file type: ${file.mimetype}. Allowed types: ${allowedMimeTypes.join(', ')}`,
-              HttpStatus.BAD_REQUEST,
-            ),
-            false,
-          );
-        }
-      },
-    }),
-  )
-  async videoPipeline(
-    @UploadedFile() video: Express.Multer.File,
-    @Body() body: VideoPipelineSwaggerDto,
-    @Req() req: any,
-  ) {
+  async videoPipeline(@Body() body: VideoPipelineSwaggerDto, @Req() req: any) {
     try {
-      if (!video) {
-        throw new BadRequestException('Video file is required');
+      const business = req.business?.id;
+      const customer = req.user?.id;
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
+      if (tokenBalance < settings.video_measurement_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
       }
-      return this.measurement.videoPipeline(
-        video,
-        body,
-        req.business?.id,
-        req.user?.id,
-      );
+      return this.outfitService.queueVideoPipeline({
+        ...body,
+        business,
+        customer,
+      });
     } catch (error) {
       console.error('Video pipeline controller error:', error);
       throw new HttpException(
@@ -198,7 +168,10 @@ export class MeasurementController {
         throw new BadRequestException('Prediction JSON file is required');
       }
 
-      return await this.measurement.generateAvatar(json, ui_gender);
+      return await this.measurement.generateAvatar({
+        ui_gender,
+        pred_json: json,
+      });
     } catch (error) {
       throw new HttpException(
         error.message || 'Avatar generation failed',
@@ -208,7 +181,7 @@ export class MeasurementController {
   }
 
   @Public()
-  @Post('generate')
+  @Post('generate-outfit')
   @ApiBody({
     description: 'Generate outfit using image URLs',
     schema: {
@@ -259,38 +232,71 @@ export class MeasurementController {
             'https://res.cloudinary.com/.../img2.jpg',
           ],
         },
-        webhook_url: {
-          type: 'string',
-          format: 'url',
-          example: 'https://frontend.example.com/webhook',
-        },
       },
     },
   })
   async generateOutfit(
     @Body('config') config: GarmentConfigDto,
+    @Req() req: any,
     @Body('userPrompt') userPrompt?: string,
     @Body('reference_image_urls') reference_image_urls?: string[],
-    @Body('webhook_url') webhook_url?: string,
   ) {
+    const business = req.business?.id;
+    const customer = req.user?.id;
+    const [settings, tokenBalance] = await Promise.all([
+      this.platformService.getSettings(),
+      this.tokenService.balance(business, customer),
+    ]);
+    if (tokenBalance < settings.outfit_generation_token_price) {
+      throw new BadRequestException(
+        'Insufficient tokens, please fund your wallet',
+      );
+    }
     const payload: GenerateOutfitRequestDto = {
       config,
       user_prompt: userPrompt,
       reference_image_urls,
     };
 
-    const jobId = await this.outfitService.queueGeneration({
-      payload,
-      webhook_url: webhook_url,
-    });
+    return this.outfitService.queueOutfitGeneration(payload);
+  }
 
-    await this.jobService.create(jobId, payload, webhook_url);
-    return {
-      data: {
-        jobId,
-        status: 'queued',
-      },
-      message: 'Generation started. You will receive a webhook when complete.',
-    };
+  @Public()
+  @Post('edit-garment-image')
+  async editGarmentImage(@Body() payload: EditGarmentDto, @Req() req: any) {
+    const business = req.business?.id;
+    const customer = req.user?.id;
+
+    const [settings, tokenBalance] = await Promise.all([
+      this.platformService.getSettings(),
+      this.tokenService.balance(business, customer),
+    ]);
+    if (tokenBalance < settings.edit_garment_token_price) {
+      throw new BadRequestException(
+        'Insufficient tokens, please fund your wallet',
+      );
+    }
+    return this.outfitService.queueEditGarmentGeneration({
+      ...payload,
+      business,
+      customer,
+    });
+    // return this.measurement.editGarmentWithImageEditor(payload);
+  }
+
+  @Post('users')
+  @ApiOperation({ summary: 'Add a new measurement set for a user' })
+  @ApiParam({ name: 'id', description: 'User ID' })
+  @ApiResponse({ status: 201, type: ActiveMeasurementSetDto })
+  async addMeasurement(@Body() dto: AddMeasurementSetDto, @Req() req: any) {
+    return this.userService.addMeasurementSet(req.user.id, dto);
+  }
+  @Get('users/active-measurements')
+  @ApiOperation({ summary: 'Get active measurement set for a user' })
+  @ApiResponse({ status: 200, type: ActiveMeasurementSetDto })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 400, description: 'No active measurement set found' })
+  async getActiveMeasurements(@Req() req: any) {
+    return this.userService.getActiveMeasurementSet(req.user.id);
   }
 }

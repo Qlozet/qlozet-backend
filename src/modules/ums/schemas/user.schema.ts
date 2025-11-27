@@ -102,6 +102,30 @@ export class User extends Document {
   @Prop({ type: Boolean, default: false })
   is_email_preference_selected: boolean;
   @Prop({
+    type: [
+      {
+        name: { type: String, default: 'default' },
+        createdAt: { type: Date, default: () => new Date() },
+        active: { type: Boolean, default: true },
+        unit: { type: String, enum: ['cm', 'inch'], default: 'cm' },
+        measurements: {
+          type: Map,
+          of: Number,
+          default: {},
+        },
+      },
+    ],
+    default: [],
+  })
+  measurementSets?: {
+    name: string;
+    createdAt: Date;
+    active: boolean;
+    unit: 'cm' | 'inch';
+    measurements: Record<string, number>;
+  }[];
+
+  @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'Business',
     default: null,

@@ -28,7 +28,6 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { CurrencyService } from './modules/currency/currency.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
-console.log(process.env.REDIS_URL);
 @Module({
   imports: [
     HttpModule,
@@ -39,6 +38,7 @@ console.log(process.env.REDIS_URL);
     BullModule.forRoot({
       connection: {
         url: process.env.REDIS_URL,
+        connectTimeout: 30000,
       },
     }),
 

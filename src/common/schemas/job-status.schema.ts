@@ -13,7 +13,7 @@ export enum JobState {
 @Schema({ timestamps: true })
 export class JobStatus {
   @Prop({ required: true })
-  jobId: string;
+  job_id: string;
 
   @Prop({ type: Object, default: {} })
   payload: any;
@@ -23,9 +23,6 @@ export class JobStatus {
 
   @Prop({ type: Object })
   result?: any;
-
-  @Prop({ type: String })
-  webhook_url?: string;
 
   @Prop({ type: String })
   error?: string;

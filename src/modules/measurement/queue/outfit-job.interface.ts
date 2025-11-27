@@ -1,42 +1,31 @@
+import { AutoMaskSwaggerDto } from '../dto/auto-mask-predict.dto';
+import { AvatarDto } from '../dto/avatar.dto';
+import { EditGarmentDto } from '../dto/edit-image.dto';
 import { GenerateOutfitRequestDto } from '../dto/generate-outfit.dto';
+import { VideoPipelineSwaggerDto } from '../dto/video-pipeline.dto';
 
-export interface GenerateOutfitJobData {
+export interface GenerateOutfitJobData extends GenerateOutfitRequestDto {
   type: 'generateOutfit';
-  payload: GenerateOutfitRequestDto;
-  webhook_url?: string;
 }
 
-export interface VideoPipelineJobData {
+export interface VideoPipelineJobData extends VideoPipelineSwaggerDto {
   type: 'videoPipeline';
-  payload: any; // Replace with proper DTO if you have one
-  files: { video: Express.Multer.File };
-  business?: string;
-  customer?: string;
-  webhook_url?: string;
 }
 
-export interface AutoMaskJobData {
+export interface AutoMaskJobData extends AutoMaskSwaggerDto {
   type: 'autoMask';
-  payload: any;
-  files: {
-    bg: Express.Multer.File;
-    front: Express.Multer.File;
-    side: Express.Multer.File;
-  };
-  business?: string;
-  customer?: string;
-  webhook_url?: string;
 }
 
-export interface AvatarJobData {
+export interface AvatarJobData extends AvatarDto {
   type: 'avatar';
-  payload: { ui_gender?: string };
-  files: { predJson: Express.Multer.File };
-  webhook_url?: string;
+}
+export interface EditGarmentJobData extends EditGarmentDto {
+  type: 'editGarment';
 }
 
 export type OutfitJobData =
   | GenerateOutfitJobData
   | VideoPipelineJobData
   | AutoMaskJobData
-  | AvatarJobData;
+  | AvatarJobData
+  | EditGarmentJobData;

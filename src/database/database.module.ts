@@ -74,6 +74,8 @@ import {
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         uri: configService.get<string>('MONGO_URI'),
+        bufferCommands: false,
+        serverSelectionTimeoutMS: 30000,
       }),
       inject: [ConfigService],
     }),

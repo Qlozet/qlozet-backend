@@ -10,12 +10,25 @@ import { BullModule } from '@nestjs/bullmq';
 import { JobStatusService } from './job-status.service';
 import { OutfitQueueService } from './outfit-queue.service';
 import { OutfitProcessor } from './queue/outfit.processor';
+import { UserService } from '../ums/services';
+import { UmsModule } from '../ums/ums.module';
 
 @Module({
   imports: [
     DatabaseModule,
     WalletsModule,
-    BullModule.registerQueue({ name: 'outfit-generation' }),
+    UmsModule,
+    BullModule.registerQueue({
+      name: 'outfit-generation',
+      defaultJobOptions: {
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    }),
   ],
   controllers: [MeasurementController],
   providers: [
