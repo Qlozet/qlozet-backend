@@ -37,10 +37,10 @@ export const TokenTransactionSchema =
 @Schema({ timestamps: true })
 export class Token {
   @Prop({ type: Types.ObjectId, ref: 'User', default: null })
-  customer: Types.ObjectId;
+  customer: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
-  business: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  business: Types.ObjectId | null;
 
   @Prop({ required: true, default: 0 })
   tokens: number;
@@ -57,11 +57,11 @@ export class Token {
   @Prop({
     type: [
       {
-        type: { type: String, enum: TokenTransactionType },
-        amount: Number,
-        feature: String,
+        type: { type: String, enum: TokenTransactionType, required: true },
+        amount: { type: Number, required: true },
+        feature: { type: String },
         timestamp: { type: Date, default: Date.now },
-        metadata: MongooseSchema.Types.Mixed,
+        metadata: { type: MongooseSchema.Types.Mixed },
       },
     ],
     default: [],
@@ -77,7 +77,3 @@ export class Token {
 
 export type TokenDocument = Token & Document;
 export const TokenSchema = SchemaFactory.createForClass(Token);
-
-TokenSchema.index({ user: 1 }, { unique: true, sparse: true });
-TokenSchema.index({ business: 1 }, { unique: true, sparse: true });
-TokenSchema.index({ expiresAt: 1 });

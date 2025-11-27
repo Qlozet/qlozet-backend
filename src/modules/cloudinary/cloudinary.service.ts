@@ -27,6 +27,17 @@ export class CloudinaryService {
     });
   }
 
+  getCloudinaryPublicId(fileUrl: string): string {
+    const parts = fileUrl.split('/upload/');
+    if (parts.length < 2) throw new Error('Invalid Cloudinary URL');
+
+    let path = parts[1]; // v123456/folder/file.png
+    path = path.replace(/^v\d+\//, ''); // remove version
+    path = path.replace(/\.[^/.]+$/, ''); // remove extension
+
+    return path;
+  }
+
   async uploadFile(
     file: MulterFile,
     folderName: string,
@@ -71,6 +82,16 @@ export class CloudinaryService {
     });
   }
   async deleteFile(publicId: string): Promise<void> {
-    await cloudinary.uploader.destroy(publicId);
+    if (!publicId) return;
+
+    try {
+      const result = await cloudinary.uploader.destroy(publicId);
+      console.log(result, 'delete');
+      if (result.result !== 'ok' && result.result !== 'not found') {
+        console.warn(`Failed to delete Cloudinary file: ${publicId}`, result);
+      }
+    } catch (err) {
+      console.error(`Cloudinary delete error for ${publicId}:`, err);
+    }
   }
 }

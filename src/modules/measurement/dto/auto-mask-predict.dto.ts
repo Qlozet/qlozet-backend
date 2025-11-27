@@ -14,17 +14,25 @@ export class AutoMaskPredictBodyDto {
 }
 export class AutoMaskSwaggerDto {
   @ApiProperty({
-    type: 'string',
-    format: 'binary',
-    description: 'Background image',
+    type: String,
+    description: 'URL of the background image',
+    example: 'https://example.com/image-bg.jpg',
   })
-  bg: any;
+  bg: string;
 
-  @ApiProperty({ type: 'string', format: 'binary', description: 'Front image' })
-  front: any;
+  @ApiProperty({
+    type: String,
+    description: 'URL of the front image',
+    example: 'https://example.com/image-front.jpg',
+  })
+  front: string;
 
-  @ApiProperty({ type: 'string', format: 'binary', description: 'Side image' })
-  side: any;
+  @ApiProperty({
+    type: String,
+    description: 'URL of the side image',
+    example: 'https://example.com/image-side.jpg',
+  })
+  side: string;
 
   @ApiProperty({ type: 'string', required: false, description: 'Notes' })
   notes?: string;
@@ -34,4 +42,6 @@ export class AutoMaskSwaggerDto {
   height_cm?: string;
   @ApiProperty({ type: 'string', required: false, description: 'Notes' })
   gender?: string;
+  business?: string;
+  customer?: string;
 }

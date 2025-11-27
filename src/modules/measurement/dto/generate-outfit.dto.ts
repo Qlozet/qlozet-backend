@@ -146,11 +146,4 @@ export class GenerateOutfitRequestDto {
     ],
   })
   reference_image_urls?: string[];
-  @ApiPropertyOptional({
-    description:
-      'Webhook URL to notify frontend when job is completed or failed',
-    format: 'url',
-    example: 'https://frontend.example.com/webhook',
-  })
-  webhook_url?: string;
 }

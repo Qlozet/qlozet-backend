@@ -15,6 +15,7 @@ import { Address, AddressDocument } from '../schemas/address.schema';
 import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
+import { AddMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 
 @Injectable()
 export class UserService {
@@ -494,5 +495,81 @@ export class UserService {
     const address = await this.addressModel.findOne({ user: userId });
     if (!address) throw new NotFoundException('No address found for this user');
     return address;
+  }
+
+  async getActiveMeasurementSet(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('full_name email phone_number measurementSets');
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.measurementSets || user.measurementSets.length === 0) {
+      throw new BadRequestException('User has no measurement sets');
+    }
+
+    const activeSet = user.measurementSets.find((set) => set.active);
+
+    if (!activeSet) {
+      throw new BadRequestException('No active measurement set found');
+    }
+
+    return {
+      full_name: user.full_name,
+      email: user.email,
+      phone_number: user.phone_number,
+      ...activeSet,
+    };
+  }
+  async setActiveMeasurementSet(userId: string, setName: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.measurementSets || user.measurementSets.length === 0)
+      throw new BadRequestException('User has no measurement sets');
+
+    let found = false;
+
+    user.measurementSets.forEach((set) => {
+      if (set.name === setName) {
+        set.active = true;
+        found = true;
+      } else {
+        set.active = false;
+      }
+    });
+
+    if (!found)
+      throw new BadRequestException(`Measurement set "${setName}" not found`);
+
+    await user.save();
+
+    return user.measurementSets.find((s) => s.active);
+  }
+  async addMeasurementSet(userId: string, dto: AddMeasurementSetDto) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    user.measurementSets = user.measurementSets || [];
+    if (user.measurementSets.some((set) => set.name === dto.name)) {
+      throw new BadRequestException(
+        `Measurement set name "${dto.name}" already exists`,
+      );
+    }
+    const isFirstSet =
+      !user.measurementSets || user.measurementSets.length === 0;
+
+    const newSet = {
+      name: dto.name || `set-${Date.now()}`,
+      createdAt: new Date(),
+      active: isFirstSet,
+      unit: dto.unit,
+      measurements: { ...dto.measurements },
+    };
+
+    user.measurementSets = user.measurementSets || [];
+    user.measurementSets.push(newSet);
+
+    await user.save();
+    return newSet;
   }
 }

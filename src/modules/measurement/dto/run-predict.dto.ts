@@ -17,6 +17,8 @@ export class RunPredictBodyDto {
   @IsOptional()
   @IsString()
   notes?: string;
+  business?: string;
+  customer?: string;
 }
 
 export class RunPredictSwaggerDto {

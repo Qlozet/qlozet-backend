@@ -13,11 +13,10 @@ export class JobStatusService {
     @InjectModel(JobStatus.name) private jobModel: Model<JobStatusDocument>,
   ) {}
 
-  async create(jobId: string, payload: any, webhookUrl?: string) {
+  async create(job_id: string, payload: any) {
     const job = new this.jobModel({
-      jobId,
+      job_id,
       payload,
-      webhookUrl,
       status: JobState.QUEUED,
     });
     return job.save();
@@ -30,13 +29,13 @@ export class JobStatusService {
     error?: string,
   ) {
     return this.jobModel.findOneAndUpdate(
-      { jobId },
+      { job_id: jobId },
       { status, result, error },
       { new: true },
     );
   }
 
-  async findByJobId(jobId: string) {
-    return this.jobModel.findOne({ jobId });
+  async findByJobId(job_id: string) {
+    return this.jobModel.findOne({ job_id });
   }
 }

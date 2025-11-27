@@ -49,6 +49,7 @@
     "helmet": "^8.1.0",
     "mongoose": "^8.18.2",
     "nest-commander": "^3.20.0",
+    "redis": "^5.10.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

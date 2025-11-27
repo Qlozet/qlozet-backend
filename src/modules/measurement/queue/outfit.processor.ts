@@ -1,6 +1,5 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import axios from 'axios';
 import { MeasurementService } from '../measurement.service';
 import { JobStatusService } from '../job-status.service';
 import { OutfitJobData } from './outfit-job.interface';
@@ -26,37 +25,33 @@ export class OutfitProcessor extends WorkerHost {
     let result: any;
 
     switch (job.data.type) {
+      case 'editGarment':
+        result = await this.measurement.editGarmentWithImageEditor(job.data);
+        break;
       case 'generateOutfit':
-        result = await this.measurement.generateOutfitImageFromConfig(
-          job.data.payload,
-        );
+        result = await this.measurement.generateOutfitImageFromConfig(job.data);
         break;
 
       case 'videoPipeline':
-        result = await this.measurement.videoPipeline(
-          job.data.files.video,
-          job.data.payload,
-          job.data.business,
-          job.data.customer,
+        const videoMeasurement = await this.measurement.videoPipeline(job.data);
+        const videoDataArray = videoMeasurement[4].data;
+        result = Object.fromEntries(
+          videoDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
         );
         break;
 
       case 'autoMask':
-        result = await this.measurement.autoMaskPredict(
-          job.data.files.bg,
-          job.data.files.front,
-          job.data.files.side,
-          job.data.payload,
-          job.data.business,
-          job.data.customer,
+        const maskMeasurement = await this.measurement.autoMaskPredict(
+          job.data,
+        );
+        const maskDataArray = maskMeasurement.data;
+        result = Object.fromEntries(
+          maskDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
         );
         break;
 
       case 'avatar':
-        result = await this.measurement.generateAvatar(
-          job.data.files.predJson,
-          job.data.payload.ui_gender,
-        );
+        result = await this.measurement.generateAvatar(job.data);
         break;
 
       default:
@@ -65,20 +60,6 @@ export class OutfitProcessor extends WorkerHost {
     }
 
     await this.jobStatusService.updateStatus(jobId, JobState.COMPLETED, result);
-
-    if (job.data.webhook_url) {
-      try {
-        await axios.post(job.data.webhook_url, {
-          jobId,
-          status: JobState.COMPLETED,
-          data: result,
-        });
-      } catch (err) {
-        this.logger.error(
-          `Failed to send webhook for job ${jobId}: ${err.message}`,
-        );
-      }
-    }
 
     return result;
   }

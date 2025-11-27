@@ -15,12 +15,14 @@ import {
 } from './schema/token.schema';
 import { CurrencyService } from '../currency/currency.service';
 import { WalletsService } from './wallets.service';
+import { PlatformService } from '../platform/platform.service';
 
 @Injectable()
 export class TokenService {
   constructor(
     private readonly currencyService: CurrencyService,
     private readonly walletService: WalletsService,
+    private readonly platformService: PlatformService,
     @InjectModel(Token.name) private tokenModel: Model<TokenDocument>,
     @InjectModel(TokenTransaction.name)
     private transactionModel: Model<TokenTransactionDocument>,
@@ -88,12 +90,19 @@ export class TokenService {
     }
   }
 
-  async spend(type: 'video' | 'image', business?: string, customer?: string) {
-    const tokenCostMap = { image: 25, video: 45 };
-    const amount = tokenCostMap[type];
+  async spend(
+    type: 'video' | 'image' | 'edit',
+    business?: string,
+    customer?: string,
+  ) {
+    const settings = await this.platformService.getSettings();
 
-    if (!amount || amount <= 0)
-      throw new BadRequestException('Invalid token type');
+    const amount =
+      type === 'image'
+        ? settings.image_measurement_token_price
+        : type === 'video'
+          ? settings.video_measurement_token_price
+          : settings.edit_garment_token_price;
 
     const session = await startSession();
     session.startTransaction();

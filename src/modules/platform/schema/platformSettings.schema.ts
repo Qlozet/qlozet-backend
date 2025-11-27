@@ -16,9 +16,6 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 7 })
   payout_delay_days: number;
 
-  @Prop({ type: Number, default: 0 })
-  tailored_order_upfront: number; // percentage (e.g. 50 = 50%)
-
   @Prop({ type: Number, default: 10 })
   platform_commission_percent: number;
 
@@ -31,10 +28,19 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 0 })
   tax_percent: number;
   @Prop({ type: Number, default: 25 })
-  image_token_price: number;
+  image_measurement_token_price: number;
 
   @Prop({ type: Number, default: 45 })
-  video_token_price: number;
+  video_measurement_token_price: number;
+
+  @Prop({ type: Number, default: 45 })
+  outfit_generation_token_price: number;
+
+  @Prop({ type: Number, default: 45 })
+  edit_garment_token_price: number;
+
+  @Prop({ type: Number, default: 0 })
+  tailored_order_upfront_percent: number;
   @Prop({
     type: {
       usd: {

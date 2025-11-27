@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 15000);
 @Injectable()
 export class GradioService {
   private client: any = null;
