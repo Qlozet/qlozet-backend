@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { Model } from 'mongoose';
+import * as crypto from 'crypto';
 export function generateSimpleSKU(productName: string): string {
   const cleanName = productName
     .replace(/[^a-zA-Z0-9]/g, '')
@@ -35,4 +36,15 @@ export async function generateUniqueQlozetReference(
   }
 
   return reference;
+}
+
+export function createHash(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+export function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+export function generateVerificationToken(): string {
+  return randomBytes(32).toString('hex');
 }

@@ -32,6 +32,11 @@ import {
   Business,
 } from '../business/schemas/business.schema';
 import { Token, TokenDocument } from '../wallets/schema/token.schema';
+import {
+  createHash,
+  generateOtp,
+  generateVerificationToken,
+} from 'src/common/utils/generateString';
 
 @Injectable()
 export class AuthService {
@@ -89,7 +94,8 @@ export class AuthService {
 
     try {
       const hashed_password = await bcrypt.hash(password, 10);
-      const email_verification_token = this.generateVerificationToken();
+      const otp = generateOtp();
+      const email_verification_token = createHash(otp);
 
       const [vendorUser] = await this.userModel.create(
         [
@@ -190,7 +196,7 @@ export class AuthService {
         business: business._id,
       });
 
-      await this.sendVerificationEmail(vendorUser);
+      await this.sendVerificationEmail(vendorUser, otp);
 
       return {
         data: {
@@ -233,8 +239,9 @@ export class AuthService {
     session.startTransaction();
 
     try {
+      const otp = generateOtp();
+      const email_verification_token = createHash(otp);
       const hashed_password = await bcrypt.hash(password, 10);
-      const email_verification_token = this.generateVerificationToken();
 
       const [newUser] = await this.userModel.create(
         [
@@ -282,7 +289,7 @@ export class AuthService {
 
       await session.commitTransaction();
 
-      await this.sendVerificationEmail(newUser);
+      await this.sendVerificationEmail(newUser, otp);
 
       this.logger.log(`Customer registered successfully: ${email}`);
 
@@ -316,7 +323,7 @@ export class AuthService {
   /**
    * Send verification email
    */
-  private async sendVerificationEmail(user: UserDocument) {
+  private async sendVerificationEmail(user: UserDocument, code: string) {
     try {
       const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${user.email_verification_token}&type=${user.type}`;
 
@@ -324,7 +331,7 @@ export class AuthService {
         user.email,
         user.full_name,
         verificationLink,
-        user.email_verification_token as string,
+        code,
       );
 
       // Update email tracking fields
@@ -389,9 +396,6 @@ export class AuthService {
   /**
    * Generate email verification token
    */
-  private generateVerificationToken(): string {
-    return randomBytes(32).toString('hex');
-  }
 
   /**
    * Verify email address
@@ -402,10 +406,14 @@ export class AuthService {
     requiresProfileCompletion?: boolean;
   }> {
     try {
+      let submittedHashed = token;
+      if (submittedHashed.length === 6) {
+        submittedHashed = createHash(submittedHashed);
+      }
       const session = await this.connection.startSession();
       session.startTransaction();
       const user = await this.userModel.findOne({
-        email_verification_token: token,
+        email_verification_token: submittedHashed,
         email_verification_expires: { $gt: new Date() },
       });
 
@@ -456,6 +464,8 @@ export class AuthService {
       if (user.email_verified) {
         throw new BadRequestException('Email is already verified.');
       }
+      const otp = generateOtp();
+      const email_verification_token = createHash(otp);
       const now = new Date();
       if (
         user.email_verification_expires &&
@@ -481,7 +491,7 @@ export class AuthService {
         !user.email_verification_expires ||
         user.email_verification_expires <= new Date(Date.now() + 60 * 60 * 1000)
       ) {
-        user.email_verification_token = this.generateVerificationToken();
+        user.email_verification_token = email_verification_token;
         user.email_verification_expires = new Date(
           Date.now() + 24 * 60 * 60 * 1000,
         ); // 24 hours
@@ -492,7 +502,7 @@ export class AuthService {
 
       await user.save();
 
-      this.sendVerificationEmail(user);
+      this.sendVerificationEmail(user, otp);
 
       this.logger.log(`Verification email resent to: ${email}`);
 
@@ -862,7 +872,7 @@ export class AuthService {
       return { message: 'If the email exists, a reset link has been sent' };
     }
 
-    const resetToken = this.generateVerificationToken();
+    const resetToken = generateVerificationToken();
 
     // Use passwordResetCode field from schema
     user.password_reset_code = {
