@@ -3,71 +3,71 @@
 
 <head>
     <meta charset="utf-8">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-        }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .button {
-            display: inline-block;
-            padding: 12px 24px;
-            background-color: #28a745;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            margin: 20px 0;
-        }
-
-        .code {
-            font-size: 24px;
-            font-weight: bold;
-            text-align: center;
-            margin: 20px 0;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
-        }
-    </style>
+    <meta name="x-apple-disable-message-reformatting">
 </head>
 
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Verify Your Email Address</h1>
+<body style="margin:0; padding:0; font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width:600px; margin:0 auto; padding:20px;">
+
+        <div style="text-align:center; margin-bottom:30px;">
+            <h1 style="margin:0; font-size:24px; font-weight:bold;">Verify Your Email Address</h1>
         </div>
 
         <p>Hello <strong>{{name}}</strong>,</p>
 
         <p>Welcome to {{companyName}}! Please verify your email address to complete your registration.</p>
 
-        <div style="text-align: center;">
-            <a href="{{verificationLink}}" class="button">Verify Email Address</a>
+        <!-- FULLY CLICKABLE EMAIL-SAFE BUTTON -->
+        <div style="text-align:center; margin:30px 0;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+                <tr>
+                    <td style="background-color:#28a745; border-radius:6px;">
+                        <a href="{{verificationLink}}" style="
+                                display:inline-block;
+                                padding:14px 28px;
+                                color:#ffffff;
+                                text-decoration:none;
+                                font-size:16px;
+                                font-weight:bold;
+                                border-radius:6px;
+                                background-color:#28a745;
+                                mso-padding-alt:0;
+                            ">
+                            Verify Email Address
+                        </a>
+                    </td>
+                </tr>
+            </table>
         </div>
 
         <p>Or use this verification code:</p>
-        <div class="code">{{verificationCode}}</div>
+
+        <div style="
+            font-size:24px;
+            font-weight:bold;
+            text-align:center;
+            margin:20px 0;
+            padding:10px;
+            background-color:#f8f9fa;
+            border-radius:4px;
+        ">
+            {{verificationCode}}
+        </div>
 
         <p>If the button doesn't work, copy and paste this link into your browser:</p>
-        <p><a href="{{verificationLink}}">{{verificationLink}}</a></p>
+
+        <p>
+            <a href="{{verificationLink}}" style="color:#007bff;">
+                {{verificationLink}}
+            </a>
+        </p>
 
         <p>This verification link will expire in 24 hours.</p>
 
-        <div class="footer">
+        <div style="text-align:center; margin-top:40px; font-size:12px; color:#666;">
             <p>&copy; {{year}} {{companyName}}. All rights reserved.</p>
         </div>
+
     </div>
 </body>
 
