@@ -17,11 +17,12 @@ import {
   Warehouse,
 } from '../business/schemas/warehouse.schema';
 import { DatabaseModule } from 'src/database/database.module';
+import { ProductModule } from '../products/products.module';
 
 @Module({
-  imports: [HttpModule, BusinessModule, DatabaseModule],
+  imports: [HttpModule, BusinessModule, DatabaseModule, ProductModule],
   controllers: [TransactionController],
-  providers: [TransactionService, JwtService, BusinessService],
+  providers: [TransactionService, JwtService],
 })
 export class TransactionsModule {
   configure(consumer: MiddlewareConsumer) {

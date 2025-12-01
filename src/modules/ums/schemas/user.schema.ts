@@ -134,6 +134,8 @@ export class User extends Document {
     default: null,
   })
   business: Types.ObjectId;
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Business', default: [] })
+  following_businesses?: Types.ObjectId[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

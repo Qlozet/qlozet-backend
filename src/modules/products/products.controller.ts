@@ -225,4 +225,10 @@ export class ProductsController {
       data: ratingSummary,
     };
   }
+  @Roles('customer')
+  @Post(':id/wishlist')
+  async toggleWishlist(@Param('id') id: string, @Req() req: any) {
+    const result = await this.productService.toggleWishlist(req.user.id, id);
+    return result;
+  }
 }

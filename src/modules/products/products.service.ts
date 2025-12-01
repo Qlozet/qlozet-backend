@@ -6,22 +6,21 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import {
-  Discount,
-  DiscountDocument,
-  Product,
-  ProductDocument,
-} from './schemas';
+import { Product, ProductDocument } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
 import { Type } from 'class-transformer';
+import { UserService } from '../ums/services';
+import { UserDocument } from '../ums/schemas';
 
 @Injectable()
 export class ProductService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Product.name)
+    private readonly userModel: Model<UserDocument>,
   ) {}
 
   /**
@@ -295,6 +294,29 @@ export class ProductService {
 
     return Utils.getPagingData({ count, rows }, page, size);
   }
+  async getLatestProducts(page: number = 1, size: number = 10) {
+    const { take, skip } = await Utils.getPagination(page, size);
+    const [rows, count] = await Promise.all([
+      this.productModel
+        .find()
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(take)
+        .populate('business', 'business_name business_logo_url')
+        .select('kind base_price average_rating business')
+        .exec(),
+      this.productModel.countDocuments(),
+    ]);
+
+    const products = rows.map((p) => ({
+      id: p._id,
+      kind: p.kind,
+      base_price: p.base_price,
+      average_rating: p.average_rating,
+      business: p.business,
+    }));
+    return Utils.getPagingData({ count, rows: products }, page, size);
+  }
   async rateProduct(
     productId: string,
     userId: string,
@@ -347,5 +369,29 @@ export class ProductService {
       total_reviews: product.ratings.length,
       ratings: product.ratings,
     };
+  }
+  async toggleWishlist(userId: string, productId: string) {
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.wishlist) user.wishlist = [];
+
+    const index = user.wishlist.findIndex((p) => p.toString() === productId);
+
+    if (index === -1) {
+      user.wishlist.push(new Types.ObjectId(productId));
+      await user.save();
+      return { message: 'Product added to wishlist', data: user.wishlist };
+    } else {
+      user.wishlist.splice(index, 1);
+      await user.save();
+      return {
+        message: 'Product removed from wishlist',
+        data: user.wishlist,
+      };
+    }
   }
 }
