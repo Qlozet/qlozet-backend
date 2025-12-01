@@ -35,7 +35,7 @@ import {
   UpdateRoleDto,
 } from './dto/roles.dto';
 import { AddressDto } from './dto/address.dto';
-import { UpdatePreferencesDto } from './dto/users.dto';
+import { UpdateUserDto } from './dto/users.dto';
 import { UpdatePlatformSettingsDto } from '../platform/dto/update-settings.dto';
 import { PlatformService } from '../platform/platform.service';
 
@@ -198,7 +198,7 @@ export class UserController {
   }
 
   @Patch('me/profile')
-  async updateMyProfile(@Req() req, @Body() profileData: Partial<any>) {
+  async updateMyProfile(@Req() req, @Body() profileData: UpdateUserDto) {
     const userId = req.user.id;
     const updatedUser = await this.userService.updateProfile(
       userId,
@@ -207,19 +207,6 @@ export class UserController {
     return { message: 'Profile updated successfully', data: updatedUser };
   }
 
-  @Roles('customer')
-  @Patch('me/preferences')
-  async updatePreferences(
-    @Req() req,
-    @Body() preferences: UpdatePreferencesDto,
-  ) {
-    const userId = req.user.id;
-    const updatedUser = await this.userService.updatePreferences(
-      userId,
-      preferences,
-    );
-    return { message: 'Preferences updated successfully', data: updatedUser };
-  }
   @Get('platform-settings')
   @ApiOperation({ summary: 'Get current payout settings' })
   @ApiResponse({

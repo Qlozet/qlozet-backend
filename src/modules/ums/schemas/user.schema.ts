@@ -29,6 +29,9 @@ export class User extends Document {
   @Prop({ type: Date })
   dob?: Date;
 
+  @Prop({ required: false })
+  gender: string;
+
   @Prop({ default: false })
   email_verified: boolean;
 

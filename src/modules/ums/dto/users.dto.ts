@@ -1,50 +1,42 @@
-import { IsOptional, IsBoolean, IsArray, IsString } from 'class-validator';
+import { IsOptional, IsArray, IsString, IsDate, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-export class UpdatePreferencesDto {
-  @ApiPropertyOptional({
-    description: 'Preferred body fit types',
-    type: [String],
-    example: ['slim', 'regular'],
-  })
+export class UpdateUserDto {
+  @ApiPropertyOptional({ example: '+2348012345678' })
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  bodyFit?: string[];
+  @IsString()
+  phone_number?: string;
+
+  @ApiPropertyOptional({ example: '1999-05-12' })
+  @IsOptional()
+  @IsDate()
+  dob?: Date;
+
+  @ApiPropertyOptional({ example: 'female', enum: ['male', 'female'] })
+  @IsOptional()
+  @IsEnum(['male', 'female'])
+  gender?: 'male' | 'female';
 
   @ApiPropertyOptional({
-    description: 'User preferred wears style',
-    example: 'casual',
+    example:
+      'https://res.cloudinary.com/demo/image/upload/v123456789/profile.jpg',
   })
   @IsOptional()
   @IsString()
-  wearsPreference?: string;
+  profile_picture?: string;
 
-  @ApiPropertyOptional({
-    description: 'User aesthetic preferences',
-    type: [String],
-    example: ['minimalist', 'vintage'],
-  })
+  @ApiPropertyOptional({ example: 'modest wear' })
+  @IsOptional()
+  @IsString()
+  wears_preference?: string;
+
+  @ApiPropertyOptional({ example: ['elegant', 'minimalist'] })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  aestheticPreferences?: string[];
+  aesthetic_preferences?: string[];
 
-  @ApiPropertyOptional({
-    description: 'Email notification preferences',
-    type: [String],
-    example: ['promotions', 'new-arrivals'],
-  })
+  @ApiPropertyOptional({ example: ['slim', 'tall'] })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  emailPreferences?: string[];
-
-  @ApiPropertyOptional({
-    description: 'Whether the email preferences have been selected',
-    example: true,
-  })
-  @IsOptional()
-  @IsBoolean()
-  isEmailPreferenceSelected?: boolean;
+  body_fit?: string[];
 }
