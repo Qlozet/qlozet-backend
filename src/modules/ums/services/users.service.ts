@@ -16,6 +16,7 @@ import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
 import { AddMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
+import { UpdateUserDto } from '../dto/users.dto';
 
 @Injectable()
 export class UserService {
@@ -228,27 +229,13 @@ export class UserService {
   /**
    * Update user profile
    */
-  async updateProfile(
-    userId: string,
-    profileData: Partial<User>,
-  ): Promise<UserDocument> {
-    return this.update(userId, profileData);
-  }
-
-  /**
-   * Update user preferences
-   */
-  async updatePreferences(
-    userId: string,
-    preferences: {
-      bodyFit?: string[];
-      wearsPreference?: string;
-      aestheticPreferences?: string[];
-      emailPreferences?: string[];
-      isEmailPreferenceSelected?: boolean;
-    },
-  ) {
-    // return this.update(userId, preferences);
+  async updateProfile(userId: string, dto: UpdateUserDto) {
+    const data = await this.userModel.findByIdAndUpdate(
+      userId,
+      { $set: dto },
+      { new: true },
+    );
+    return data?.toJSON();
   }
 
   /**
