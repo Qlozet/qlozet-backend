@@ -12,6 +12,10 @@ import { Business, BusinessDocument } from './schemas/business.schema';
 import { Utils } from 'src/common/utils/pagination';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { LogisticsService } from '../logistics/logistics.service';
+import { User, UserDocument } from '../ums/schemas';
+import { PaginationQueryType } from 'src/common/types/pagination.type';
+import { Product, ProductDocument } from '../products/schemas';
+import { ProductService } from '../products/products.service';
 
 @Injectable()
 export class BusinessService {
@@ -22,6 +26,8 @@ export class BusinessService {
     private warehouseModel: Model<WarehouseDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly logisticService: LogisticsService,
+    private readonly productService: ProductService,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   async createWarehouse(
@@ -371,5 +377,184 @@ export class BusinessService {
   }
   async setInReview(businessId: string) {
     return this.updateBusinessStatus(businessId, 'in-review');
+  }
+  async followBusiness(userId: string, businessId: string) {
+    const session = await this.businessModel.startSession();
+    session.startTransaction();
+
+    try {
+      const business = await this.businessModel
+        .findById(businessId)
+        .session(session);
+      if (!business) throw new NotFoundException('Business not found');
+
+      const user = await this.userModel.findById(userId).session(session);
+      if (!user) throw new NotFoundException('User not found');
+
+      if (business.followers?.includes(new Types.ObjectId(userId))) {
+        return { message: 'Followed successfully' };
+      }
+
+      await this.businessModel.updateOne(
+        { _id: businessId },
+        { $addToSet: { followers: userId } },
+        { session },
+      );
+
+      await this.userModel.updateOne(
+        { _id: userId },
+        { $addToSet: { following_businesses: businessId } },
+        { session },
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return { message: 'Followed successfully' };
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  }
+
+  async unfollowBusiness(userId: string, businessId: string) {
+    const session = await this.businessModel.startSession();
+    session.startTransaction();
+
+    try {
+      const business = await this.businessModel
+        .findById(businessId)
+        .session(session);
+      if (!business) throw new NotFoundException('Business not found');
+
+      await this.businessModel.updateOne(
+        { _id: businessId },
+        { $pull: { followers: userId } },
+        { session },
+      );
+
+      await this.userModel.updateOne(
+        { _id: userId },
+        { $pull: { following_businesses: businessId } },
+        { session },
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return { message: 'Unfollowed successfully' };
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  }
+  async getFollowersCount(businessId: string) {
+    const business = await this.businessModel.findById(businessId);
+
+    if (!business) throw new NotFoundException('Business not found');
+
+    return { followers: business.followers?.length };
+  }
+  async getUserFollowingBusinesses(userId: string, dto: PaginationQueryType) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('following_businesses');
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const followingIds = user.following_businesses || [];
+    const { take, skip } = await Utils.getPagination(
+      Number(dto?.page),
+      Number(dto.size),
+    );
+
+    const [businesses, count] = await Promise.all([
+      this.businessModel
+        .find({ _id: { $in: followingIds } })
+        .skip(skip)
+        .limit(take)
+        .lean(),
+      this.businessModel.countDocuments({
+        _id: { $in: followingIds },
+      }),
+    ]);
+
+    return Utils.getPagingData(
+      {
+        count,
+        rows: businesses,
+      },
+      Number(dto?.page),
+      Number(dto.size),
+    );
+  }
+  async getRandomBusinesses(limit = 5) {
+    const businesses = await this.businessModel.aggregate([
+      { $match: { is_active: true } }, // TODO FETCH BY status: 'approved'
+      { $sample: { size: Number(limit) } },
+      {
+        $lookup: {
+          from: 'products', // MongoDB collection name
+          localField: '_id',
+          foreignField: 'business',
+          as: 'products',
+        },
+      },
+      {
+        $addFields: {
+          total_number_of_ratings: {
+            $sum: {
+              $map: {
+                input: '$products',
+                as: 'p',
+                in: { $size: { $ifNull: ['$$p.ratings', []] } },
+              },
+            },
+          },
+          cumulative_rating: {
+            $cond: [
+              { $gt: [{ $size: '$products' }, 0] },
+              { $avg: '$products.average_rating' },
+              0,
+            ],
+          },
+          total_products: { $size: '$products' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          business_name: 1,
+          business_logo_url: 1,
+          description: 1,
+          total_items_sold: 1,
+          city: 1,
+          country: 1,
+          cumulative_rating: 1,
+          total_products: 1,
+          total_number_of_ratings: 1,
+        },
+      },
+    ]);
+
+    return businesses;
+  }
+
+  async getFeed(
+    page: number = 1,
+    size: number = 10,
+    business_limit: number = 5,
+  ) {
+    const [businesses, products] = await Promise.all([
+      this.getRandomBusinesses(business_limit),
+      this.productService.getLatestProducts(page, size),
+    ]);
+
+    return {
+      businesses,
+      latest_products: products,
+    };
   }
 }

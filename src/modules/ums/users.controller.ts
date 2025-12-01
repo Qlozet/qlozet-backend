@@ -19,6 +19,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -38,6 +39,8 @@ import { AddressDto } from './dto/address.dto';
 import { UpdateUserDto } from './dto/users.dto';
 import { UpdatePlatformSettingsDto } from '../platform/dto/update-settings.dto';
 import { PlatformService } from '../platform/platform.service';
+import { BusinessService } from '../business/business.service';
+import { PaginationQueryType } from 'src/common/types/pagination.type';
 
 @ApiTags('Users')
 @Controller('users')
@@ -50,6 +53,7 @@ export class UserController {
     private readonly teamService: TeamService,
     private readonly rolesService: RolesService,
     private readonly platformService: PlatformService,
+    private readonly businessService: BusinessService,
   ) {}
 
   @Roles(VendorRole.OWNER)
@@ -225,5 +229,35 @@ export class UserController {
   })
   async update(@Body() dto: UpdatePlatformSettingsDto) {
     return await this.platformService.update(dto);
+  }
+
+  @Roles('customer')
+  @Get('me/following-businesses')
+  async getFollowing(@Req() req, @Query() dto: PaginationQueryType) {
+    return this.businessService.getUserFollowingBusinesses(req.user.id, dto);
+  }
+  @Roles('customer')
+  @Post(':business_id/follow')
+  async follow(@Param('business_id') businessId: string, @Req() req) {
+    return this.businessService.followBusiness(req.user.id, businessId);
+  }
+
+  @Roles('customer')
+  @Delete(':business_id/unfollow')
+  async unfollow(@Param('business_id') businessId: string, @Req() req) {
+    return this.businessService.unfollowBusiness(req.user.id, businessId);
+  }
+  @Get('feed')
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 20 })
+  @ApiQuery({ name: 'business_limit', required: false, example: 5 })
+  async getHomeFeed(
+    @Query() dto: PaginationQueryType & { business_limit: number },
+  ) {
+    return this.businessService.getFeed(
+      Number(dto?.page),
+      Number(dto.size),
+      dto.business_limit,
+    );
   }
 }
