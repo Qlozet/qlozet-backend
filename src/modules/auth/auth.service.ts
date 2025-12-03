@@ -405,47 +405,53 @@ export class AuthService {
     userType: UserType;
     requiresProfileCompletion?: boolean;
   }> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
     try {
-      let submittedHashed = code;
-      if (submittedHashed.length === 6) {
-        submittedHashed = createHash(submittedHashed);
-      }
-      const session = await this.connection.startSession();
-      session.startTransaction();
-      const user = await this.userModel.findOne({
-        email_verification_token: submittedHashed,
-        email_verification_expires: { $gt: new Date() },
-      });
+      const submittedHashed = code.length === 6 ? createHash(code) : code;
+
+      const user = await this.userModel.findOne(
+        {
+          email_verification_token: submittedHashed,
+          email_verification_expires: { $gt: new Date() },
+        },
+        null,
+        { session },
+      );
 
       if (!user) {
         throw new BadRequestException('Invalid or expired verification token');
       }
 
-      let business;
-
-      // Update user email verification status
-      user.email_verified = true;
-      user.email_verification_token = undefined;
-      user.email_verification_expires = undefined;
-      user.status = 'active';
-      user.email_verified_at = new Date();
+      Object.assign(user, {
+        email_verified: true,
+        email_verification_token: undefined,
+        email_verification_expires: undefined,
+        status: 'active',
+        email_verified_at: new Date(),
+      });
 
       await user.save({ session });
-
       await session.commitTransaction();
+      session.endSession();
 
-      const token = await this.generateToken({
+      const tokens = await this.generateToken({
         id: user._id,
         email: user.email,
       });
-      const hashedRt = await bcrypt.hash(token.refresh_token, 10);
+
+      const hashedRt = await bcrypt.hash(tokens.refresh_token, 10);
+
       await this.userModel.findByIdAndUpdate(user._id, {
         refreshToken: hashedRt,
       });
-      // Send welcome email AFTER successful verification
-      await this.sendWelcomeEmail(user, business);
 
-      this.logger.log(`Email verified successfully for: ${user.email}`);
+      this.sendWelcomeEmail(user).catch((err) => {
+        this.logger.error(`Welcome email failed for ${user.email}:`, err);
+      });
+
+      this.logger.log(`Email verified successfully: ${user.email}`);
 
       return {
         message: 'Email verified successfully! Welcome to our platform.',
@@ -453,6 +459,8 @@ export class AuthService {
         requiresProfileCompletion: user.type === UserType.VENDOR,
       };
     } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
       this.logger.error('Email verification failed:', error);
       throw error;
     }
