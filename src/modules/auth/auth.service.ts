@@ -400,13 +400,13 @@ export class AuthService {
   /**
    * Verify email address
    */
-  async verifyEmail(token: string): Promise<{
+  async verifyEmail(code: string): Promise<{
     message: string;
     userType: UserType;
     requiresProfileCompletion?: boolean;
   }> {
     try {
-      let submittedHashed = token;
+      let submittedHashed = code;
       if (submittedHashed.length === 6) {
         submittedHashed = createHash(submittedHashed);
       }
@@ -433,6 +433,15 @@ export class AuthService {
       await user.save({ session });
 
       await session.commitTransaction();
+
+      const token = await this.generateToken({
+        id: user._id,
+        email: user.email,
+      });
+      const hashedRt = await bcrypt.hash(token.refresh_token, 10);
+      await this.userModel.findByIdAndUpdate(user._id, {
+        refreshToken: hashedRt,
+      });
       // Send welcome email AFTER successful verification
       await this.sendWelcomeEmail(user, business);
 
