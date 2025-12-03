@@ -400,11 +400,7 @@ export class AuthService {
   /**
    * Verify email address
    */
-  async verifyEmail(code: string): Promise<{
-    message: string;
-    userType: UserType;
-    requiresProfileCompletion?: boolean;
-  }> {
+  async verifyEmail(code: string) {
     const session = await this.connection.startSession();
     session.startTransaction();
 
@@ -436,12 +432,12 @@ export class AuthService {
       await session.commitTransaction();
       session.endSession();
 
-      const tokens = await this.generateToken({
+      const token = await this.generateToken({
         id: user._id,
         email: user.email,
       });
 
-      const hashedRt = await bcrypt.hash(tokens.refresh_token, 10);
+      const hashedRt = await bcrypt.hash(token.refresh_token, 10);
 
       await this.userModel.findByIdAndUpdate(user._id, {
         refreshToken: hashedRt,
@@ -455,8 +451,10 @@ export class AuthService {
 
       return {
         message: 'Email verified successfully! Welcome to our platform.',
-        userType: user.type,
-        requiresProfileCompletion: user.type === UserType.VENDOR,
+        data: {
+          user: sanitizeUser(user),
+          token,
+        },
       };
     } catch (error) {
       await session.abortTransaction();
