@@ -6,12 +6,19 @@ export class RunPredictBodyDto {
   @ApiProperty({ description: 'User height in cm', required: false })
   @IsOptional()
   @IsNumber()
-  height?: number;
+  height_cm?: number;
 
   @ApiProperty({ description: 'User weight in kg', required: false })
   @IsOptional()
   @IsNumber()
   weight?: number;
+
+  @ApiProperty({
+    description: 'Gender',
+    enum: ['male', 'female'],
+    example: 'female',
+  })
+  gender: 'male' | 'female';
 
   @ApiProperty({ description: 'Additional notes', required: false })
   @IsOptional()

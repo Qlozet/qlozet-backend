@@ -8,6 +8,7 @@ import { GenerateOutfitRequestDto } from './dto/generate-outfit.dto';
 import { JobStatusService } from './job-status.service';
 import { createClient } from 'redis';
 import { EditGarmentDto } from './dto/edit-image.dto';
+import { RunPredictBodyDto } from './dto/run-predict.dto';
 
 @Injectable()
 export class OutfitQueueService {
@@ -20,7 +21,7 @@ export class OutfitQueueService {
   async queueEditGarmentGeneration(payload: EditGarmentDto) {
     const jobId = randomUUID();
     await this.queue.add(
-      'generateOutfit',
+      'editGarment',
       {
         type: 'editGarment',
         ...payload,
@@ -38,6 +39,29 @@ export class OutfitQueueService {
         status: 'queued',
       },
       message: 'Generation started. Use the jobId to check the status.',
+    };
+  }
+  async queueRunPrediction(payload: RunPredictBodyDto) {
+    const jobId = randomUUID();
+    await this.queue.add(
+      'runPrediction',
+      {
+        type: 'runPrediction',
+        ...payload,
+      },
+      {
+        jobId,
+      },
+    );
+
+    // Save job record
+    await this.jobService.create(jobId, payload);
+    return {
+      data: {
+        jobId,
+        status: 'queued',
+      },
+      message: 'Prediction started. Use the jobId to check the status.',
     };
   }
   async queueOutfitGeneration(payload: GenerateOutfitRequestDto) {

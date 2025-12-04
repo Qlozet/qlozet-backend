@@ -39,6 +39,9 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 45 })
   edit_garment_token_price: number;
 
+  @Prop({ type: Number, default: 45 })
+  run_prediction_token_price: number;
+
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
   @Prop({
