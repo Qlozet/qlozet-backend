@@ -91,18 +91,20 @@ export class TokenService {
   }
 
   async spend(
-    type: 'video' | 'image' | 'edit',
+    type: 'video' | 'image' | 'edit' | 'prediction',
     business?: string,
     customer?: string,
   ) {
     const settings = await this.platformService.getSettings();
 
-    const amount =
-      type === 'image'
-        ? settings.image_measurement_token_price
-        : type === 'video'
-          ? settings.video_measurement_token_price
-          : settings.edit_garment_token_price;
+    const priceMap = {
+      image: settings.image_measurement_token_price,
+      video: settings.video_measurement_token_price,
+      prediction: settings.run_prediction_token_price,
+      edit: settings.edit_garment_token_price,
+    };
+
+    const amount = priceMap[type] ?? settings.edit_garment_token_price;
 
     const session = await startSession();
     session.startTransaction();

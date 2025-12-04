@@ -61,34 +61,34 @@ export class MeasurementController {
     private readonly userService: UserService,
   ) {}
 
-  @Roles('customer')
-  @ApiConsumes('multipart/form-data')
+  @Public()
+  // @Roles('customer')
+  // @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Run predict with front and side images',
-    type: RunPredictSwaggerDto,
+    type: RunPredictBodyDto,
   })
   @Post('run-predict')
-  @UseInterceptors(FilesInterceptor('files'))
-  async runPredict(
-    @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: RunPredictBodyDto,
-  ) {
+  // @UseInterceptors(FilesInterceptor('files'))
+  async runPredict(@Body() body: RunPredictBodyDto, @Req() req: any) {
     try {
-      if (!files || files.length === 0) {
-        throw new BadRequestException('No files uploaded');
-      }
+      const business = req.business?.id;
+      const customer = req.user?.id;
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
 
-      const front = files.find((f) => f.fieldname === 'front_image');
-      const side = files.find((f) => f.fieldname === 'side_image');
-
-      if (!front) {
-        throw new BadRequestException('Front image is required');
+      if (tokenBalance < settings.run_prediction_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
       }
-      return await this.measurement.runPredict(
-        front,
-        side as Express.Multer.File,
-        body,
-      );
+      return this.outfitService.queueRunPrediction({
+        ...body,
+        business: req.business?.id,
+        customer: req.user?.id,
+      });
     } catch (error) {
       throw new HttpException(
         error.message || 'Prediction failed',

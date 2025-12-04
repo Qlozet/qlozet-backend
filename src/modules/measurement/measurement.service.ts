@@ -23,6 +23,7 @@ import {
 } from './dto/auto-mask-predict.dto';
 import { AvatarDto } from './dto/avatar.dto';
 import { EditGarmentDto } from './dto/edit-image.dto';
+import { RunPredictBodyDto } from './dto/run-predict.dto';
 
 @Injectable()
 export class MeasurementService {
@@ -68,32 +69,39 @@ export class MeasurementService {
     }
   }
 
-  async runPredict(
-    frontFile: Express.Multer.File,
-    sideFile: Express.Multer.File,
-    body: any,
-  ) {
-    if (!frontFile) throw new BadRequestException('Front image is required');
-    const client = await this.gradio.getClient(this.hbm);
+  async runPrediction(body: RunPredictBodyDto) {
+    const { business, customer } = body;
+    try {
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
 
-    const result = await client.predict('/run_predict', {
-      model_choice: body.model_choice || 'Hybrid (CNN+Tabular)',
-      front_image: this.gradio.bufferToBlob(
-        frontFile.buffer,
-        frontFile.mimetype,
-      ),
-      side_image: sideFile
-        ? this.gradio.bufferToBlob(sideFile.buffer, sideFile.mimetype)
-        : null,
-      height_cm: Number(body.height_cm) || 175,
-      weight: Number(body.weight) || 0,
-      gender: body.gender || '',
-    });
+      if (tokenBalance < settings.run_prediction_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
+      }
+      const client = await this.gradio.getClient(this.hbm);
 
-    return {
-      predictions_table: result.data[0],
-      predictions_json: result.data[1],
-    };
+      const result = await client.predict('//run_predict', {
+        model_choice: 'Tabular (LightGBM)',
+        front_image: null,
+        side_image: null,
+        height_cm: Number(body.height_cm) || 175,
+        weight: Number(body.weight) || 0,
+        gender: body.gender || '',
+      });
+
+      await this.tokenService.spend('prediction', business, customer);
+      this.logger.log('Prediction completed successfully');
+      return result.data[0];
+    } catch (error) {
+      this.logger.error('Prediction failed', error?.stack || error);
+      throw new Error(
+        `Prediction Error: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   async autoMaskPredict(params: AutoMaskSwaggerDto) {
