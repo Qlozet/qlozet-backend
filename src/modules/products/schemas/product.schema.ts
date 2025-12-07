@@ -44,6 +44,9 @@ export class Product extends Document {
   @Prop({ required: true, min: 0 })
   base_price: number;
 
+  @Prop({ enum: ['active', 'draft', 'archived'], default: 'draft' })
+  status: 'active' | 'draft' | 'archived';
+
   @Prop({ type: FabricSchema, default: null })
   fabric?: Fabric;
 
@@ -55,6 +58,8 @@ export class Product extends Document {
 
   @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
+  @Prop({ type: Date, default: null })
+  scheduled_activation_date?: Date;
 
   @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;

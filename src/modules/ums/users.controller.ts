@@ -260,4 +260,14 @@ export class UserController {
       dto.business_limit,
     );
   }
+  @Get('vendors/top-week')
+  async topVendors(
+    @Query() dto: PaginationQueryType & { business_limit: number },
+  ) {
+    return this.businessService.getTopVendorsOfWeek();
+  }
+  @Get('vendors/new-week')
+  async newVendors() {
+    return this.businessService.getNewVendorsOfWeek();
+  }
 }

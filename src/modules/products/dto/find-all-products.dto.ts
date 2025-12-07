@@ -30,6 +30,16 @@ export class FindAllProductsDto {
   search?: string;
 
   @ApiPropertyOptional({
+    description: 'Filter by product status',
+    enum: ['active', 'draft', 'archived'],
+  })
+  @IsOptional()
+  @IsEnum(['active', 'draft', 'archived'], {
+    message: 'status must be either active, draft, or archived',
+  })
+  status?: 'active' | 'draft' | 'archived';
+
+  @ApiPropertyOptional({
     description: 'Sort by rating, date, or relevance',
     enum: ['rating', 'date', 'relevance'],
   })

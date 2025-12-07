@@ -76,7 +76,6 @@ export class RolesGuard implements CanActivate {
     const normalizedRequiredRoles = requiredRoles.map((r) =>
       r.toString().toLowerCase(),
     );
-
     // ✅ Step 2: Check Platform roles
     if (user.type === UserType.PLATFORM) {
       const role = (user as any).role as RoleDocument | undefined;

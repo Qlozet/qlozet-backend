@@ -3,6 +3,8 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -10,12 +12,13 @@ import { Product, ProductDocument } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
-import { Type } from 'class-transformer';
-import { UserService } from '../ums/services';
+
 import { UserDocument } from '../ums/schemas';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class ProductService {
+  private readonly logger = new Logger(ProductService.name);
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
@@ -26,30 +29,57 @@ export class ProductService {
   /**
    * Create a product and compute its price dynamically based on type
    */
-  async create(
-    createProductDto: CreateProductDto,
+  async upsert(
+    dto: CreateProductDto,
     business: Types.ObjectId,
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
+    // 1. Compute price based on kind
     let totalPrice = 0;
     if (kind === 'clothing') {
-      totalPrice = this.computeClothingPrice(createProductDto);
+      totalPrice = this.computeClothingPrice(dto);
     } else if (kind === 'accessory') {
-      totalPrice = this.computeAccessoryPrice(createProductDto);
+      totalPrice = this.computeAccessoryPrice(dto);
     } else if (kind === 'fabric') {
-      totalPrice = this.computeFabricPrice(createProductDto);
+      totalPrice = this.computeFabricPrice(dto);
     }
-    console.log(business, 'UY');
-    const createdProduct = new this.productModel({
-      ...createProductDto,
+    if (dto.product_id) {
+      const existing = await this.productModel.findById(dto.product_id);
+
+      if (existing) {
+        if (existing.business.toString() !== business.toString()) {
+          throw new ForbiddenException(
+            'You do not have permission to update this product',
+          );
+        }
+
+        const { product_id, ...safeData } = dto;
+
+        Object.assign(existing, {
+          ...safeData,
+          base_price: totalPrice,
+          kind,
+        });
+
+        await existing.save();
+
+        return {
+          data: existing.toJSON(),
+          message: 'Product updated successfully',
+        };
+      }
+    }
+
+    // 3. Otherwise create new product
+    const created = await this.productModel.create({
+      ...dto,
       business,
       kind,
       base_price: totalPrice,
     });
 
-    await createdProduct.save();
     return {
-      data: createdProduct.toJSON(),
+      data: created.toJSON(),
       message: 'Product created successfully',
     };
   }
@@ -62,27 +92,32 @@ export class ProductService {
     size: number = 10,
     kind?: string,
     search?: string,
+    status?: 'active' | 'draft' | 'archived',
     sortBy?: 'rating' | 'date' | 'relevance',
     order: 'asc' | 'desc' = 'desc',
   ) {
     const filter: any = {};
 
     if (kind) filter.kind = kind;
-
+    const validStatuses = ['active', 'draft', 'archived'];
+    if (status && validStatuses.includes(status.toLowerCase())) {
+      filter.status = status.toLowerCase();
+    }
+    console.log(filter);
     if (search) {
       filter.$or = [
         { 'clothing.name': { $regex: search, $options: 'i' } },
         { 'accessory.name': { $regex: search, $options: 'i' } },
         { 'fabric.name': { $regex: search, $options: 'i' } },
-      ];
-      filter.$or.push(
+
         { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
         { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
         { 'fabric.taxonomy.categories': { $regex: search, $options: 'i' } },
+
         { 'clothing.taxonomy.attributes': { $regex: search, $options: 'i' } },
         { 'accessory.taxonomy.attributes': { $regex: search, $options: 'i' } },
         { 'fabric.taxonomy.attributes': { $regex: search, $options: 'i' } },
-      );
+      ];
     }
 
     const { take, skip } = await Utils.getPagination(page, size);
@@ -114,7 +149,7 @@ export class ProductService {
 
     return Utils.getPagingData({ count, rows }, page, size);
   }
-
+  // trending this week, top vendors, new vendors
   /**
    * Get a product by ID
    */
@@ -392,6 +427,99 @@ export class ProductService {
         message: 'Product removed from wishlist',
         data: user.wishlist,
       };
+    }
+  }
+  async getTrendingProductsThisWeek() {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    return await this.productModel
+      .find({
+        createdAt: { $gte: sevenDaysAgo }, // Active this week
+      })
+      .sort({
+        average_rating: -1, // Highly rated first
+        'ratings.length': -1, // More engagement
+        createdAt: -1, // New → trending
+      })
+      .limit(20)
+      .populate('business', 'business_name business_logo_url')
+      .exec();
+  }
+  async updateStatus(
+    productId: string,
+    business: string,
+    status: 'active' | 'draft' | 'archived',
+  ) {
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (product.business.toString() !== business.toString()) {
+      throw new ForbiddenException(
+        'You do not have permission to update this product',
+      );
+    }
+    product.status = status;
+
+    // If manually updated, clear scheduled activation
+    product.scheduled_activation_date = undefined;
+
+    await product.save();
+
+    return {
+      message: `Product status updated to ${status}`,
+      data: product,
+    };
+  }
+
+  async scheduleActivation(
+    productId: string,
+    businessId: string,
+    activationDate: Date,
+  ) {
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (new Date(activationDate) <= new Date()) {
+      throw new BadRequestException('Activation date must be in the future');
+    }
+    if (product.business.toString() != businessId) {
+      throw new ForbiddenException(
+        'You are not allowed to modify this product',
+      );
+    }
+    product.scheduled_activation_date = activationDate;
+    await product.save();
+
+    return {
+      message: 'Product scheduled for automatic activation',
+      data: product,
+    };
+  }
+  // Runs every 1 minute
+  @Cron('*/1 * * * *')
+  async activateScheduledProducts() {
+    const now = new Date();
+    this.logger.log(
+      `Running scheduled activation check at ${now.toISOString()}`,
+    );
+
+    const result = await this.productModel.updateMany(
+      {
+        scheduled_activation_date: { $lte: now },
+        status: { $ne: 'active' },
+      },
+      {
+        $set: { status: 'active', scheduled_activation_date: null },
+      },
+    );
+
+    if (result.modifiedCount > 0) {
+      this.logger.log(
+        `Activated ${result.modifiedCount} product(s) scheduled for activation.`,
+      );
+    } else {
+      this.logger.log('No products to activate at this time.');
     }
   }
 }

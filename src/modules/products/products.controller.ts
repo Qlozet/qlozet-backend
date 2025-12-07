@@ -11,12 +11,12 @@ import {
   Param,
   Delete,
   Query,
+  Patch,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
-  ApiBody,
   ApiBearerAuth,
   ApiParam,
   ApiQuery,
@@ -34,6 +34,10 @@ import { ProductService } from './products.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { RateProductDto } from './dto/rate-product.dto';
 import { FindAllProductsDto } from './dto/find-all-products.dto';
+import {
+  ScheduleActivationDto,
+  UpdateStatusDto,
+} from './dto/update-status.dto';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -52,7 +56,7 @@ export class ProductsController {
     @Body() clothingDto: CreateClothingDto,
     @Req() req: any,
   ) {
-    return this.productService.create(
+    return this.productService.upsert(
       clothingDto,
       req.business?._id,
       'clothing',
@@ -65,7 +69,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'Create a new fabric product' })
   @ApiResponse({ status: 201, description: 'Fabric product created' })
   async createFabric(@Body() fabricDto: CreateFabricDto, @Req() req: any) {
-    return this.productService.create(fabricDto, req.business?._id, 'fabric');
+    return this.productService.upsert(fabricDto, req.business?._id, 'fabric');
   }
 
   // ---------------- ACCESSORY ----------------
@@ -77,7 +81,7 @@ export class ProductsController {
     @Body() accessoryDto: CreateAccessoryDto,
     @Req() req: any,
   ) {
-    return this.productService.create(
+    return this.productService.upsert(
       accessoryDto,
       req.business?._id,
       'accessory',
@@ -119,12 +123,13 @@ export class ProductsController {
     description: 'Paginated list of products',
   })
   async findAll(@Query() query: FindAllProductsDto) {
-    const { page, size, kind, search, sortBy, order } = query;
+    const { page, size, kind, search, status, sortBy, order } = query;
     return this.productService.findAll(
       Number(page),
       Number(size),
       kind,
       search,
+      status,
       sortBy,
       order,
     );
@@ -230,5 +235,40 @@ export class ProductsController {
   async toggleWishlist(@Param('id') id: string, @Req() req: any) {
     const result = await this.productService.toggleWishlist(req.user.id, id);
     return result;
+  }
+
+  @Roles('customer')
+  @Get('/trending/week')
+  async getTrendingProductsThisWeek() {
+    return this.productService.getTrendingProductsThisWeek();
+  }
+
+  @Roles(UserType.VENDOR)
+  @Patch(':product_id/status')
+  async updateStatus(
+    @Param('product_id') productId: string,
+    @Body() dto: UpdateStatusDto,
+    @Req() req: any,
+  ) {
+    return this.productService.updateStatus(
+      productId,
+      req.business.id,
+      dto.status,
+    );
+  }
+
+  // Schedule automatic activation
+  @Roles(UserType.VENDOR)
+  @Patch(':product_id/schedule-activation')
+  async scheduleActivation(
+    @Param('product_id') productId: string,
+    @Body() dto: ScheduleActivationDto,
+    @Req() req: any,
+  ) {
+    return this.productService.scheduleActivation(
+      productId,
+      req.business.id,
+      new Date(dto.activation_date),
+    );
   }
 }
