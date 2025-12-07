@@ -557,4 +557,30 @@ export class BusinessService {
       latest_products: products,
     };
   }
+  async getTopVendorsOfWeek() {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    return await this.businessModel
+      .find({
+        createdAt: { $lte: new Date() }, // all vendors
+        is_active: true,
+        status: { $in: ['approved', 'verified'] }, // only active vendors
+      })
+      .sort({ total_items_sold: -1 }) // or earnings / success_rate
+      .limit(10)
+      .exec();
+  }
+  async getNewVendorsOfWeek() {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    return await this.businessModel
+      .find({
+        createdAt: { $gte: sevenDaysAgo },
+        is_active: true,
+      })
+      .sort({ createdAt: -1 })
+      .exec();
+  }
 }

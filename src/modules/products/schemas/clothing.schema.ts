@@ -31,9 +31,6 @@ export class Clothing {
   @Prop({ type: TaxonomySchema, required: true })
   taxonomy: Taxonomy;
 
-  @Prop({ enum: ['active', 'draft', 'archived'], default: 'draft' })
-  status: 'active' | 'draft' | 'archived';
-
   @Prop({ type: [ProductImageSchema], default: [] })
   images?: ProductImage[];
 

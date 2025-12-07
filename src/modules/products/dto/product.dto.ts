@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsEnum,
+  IsMongoId,
   IsNotEmpty,
   IsObject,
   IsOptional,
@@ -48,8 +49,15 @@ export class ColorDto {
   variants?: VariantDto[];
 }
 
-// ---------- ROOT PRODUCT FIELDS ----------
 export class CreateProductDto {
+  @ApiPropertyOptional({
+    description: 'Provide this only if you want to update an existing product',
+    example: '677f5c19c918d2e4a8c55123',
+  })
+  @IsOptional()
+  @IsMongoId()
+  product_id?: string;
+
   @ApiPropertyOptional({
     type: Object,
     description: 'SEO metadata',
