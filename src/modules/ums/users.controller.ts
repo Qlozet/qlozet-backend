@@ -18,6 +18,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -249,24 +250,129 @@ export class UserController {
   }
   @Get('feed')
   @ApiQuery({ name: 'page', required: false, example: 1 })
-  @ApiQuery({ name: 'size', required: false, example: 20 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
   @ApiQuery({ name: 'business_limit', required: false, example: 5 })
-  async getHomeFeed(
-    @Query() dto: PaginationQueryType & { business_limit: number },
-  ) {
-    return this.businessService.getFeed(
-      Number(dto?.page),
-      Number(dto.size),
-      dto.business_limit,
-    );
-  }
+  @ApiOkResponse({
+    description: 'Home feed with random businesses and latest products',
+    schema: {
+      example: {
+        businesses: [
+          {
+            _id: '675ab92d9f1c2a0012cd421f',
+            business_name: 'African Fashion Hub',
+            business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+            description: 'Leading African fashion store.',
+            city: 'Lagos',
+            country: 'Nigeria',
+            total_items_sold: 120,
+            cumulative_rating: 4.5,
+            total_number_of_ratings: 25,
+            total_products: 12,
+          },
+          {
+            _id: '675ab93f9f1c2a0012cd4220',
+            business_name: 'Elegant Styles',
+            business_logo_url: 'https://res.cloudinary.com/qlozet/logo2.png',
+            description: 'Modern elegant clothing and accessories.',
+            city: 'Abuja',
+            country: 'Nigeria',
+            total_items_sold: 95,
+            cumulative_rating: 4.8,
+            total_number_of_ratings: 15,
+            total_products: 8,
+          },
+        ],
+        latest_products: {
+          total_items: 4,
+          data: [
+            {
+              id: '690f83584d38e9188cc62f36',
+              kind: 'accessory',
+              base_price: 200000,
+              average_rating: 0,
+              business: {
+                _id: '675ab92d9f1c2a0012cd421f',
+                business_name: 'African Fashion Hub',
+                business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+              },
+            },
+          ],
+          total_pages: 1,
+          current_page: 1,
+          has_next_page: false,
+          has_previous_page: false,
+          page_size: 10,
+        },
+      },
+    },
+  })
   @Get('vendors/top-week')
-  async topVendors(
-    @Query() dto: PaginationQueryType & { business_limit: number },
-  ) {
+  @ApiOkResponse({
+    description: 'Top vendors of the week sorted by total_items_sold',
+    schema: {
+      example: [
+        {
+          _id: '675ab92d9f1c2a0012cd421f',
+          business_name: 'African Fashion Hub',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+          total_items_sold: 120,
+          earnings: 5000000,
+          success_rate: 98,
+          is_active: true,
+          status: 'approved',
+          createdAt: '2025-12-01T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+        {
+          _id: '675ab93f9f1c2a0012cd4220',
+          business_name: 'Elegant Styles',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo2.png',
+          total_items_sold: 95,
+          earnings: 3200000,
+          success_rate: 95,
+          is_active: true,
+          status: 'verified',
+          createdAt: '2025-12-02T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+      ],
+    },
+  })
+  async topVendors() {
     return this.businessService.getTopVendorsOfWeek();
   }
   @Get('vendors/new-week')
+  @ApiOkResponse({
+    description: 'Top vendors of the week sorted by total_items_sold',
+    schema: {
+      example: [
+        {
+          _id: '675ab92d9f1c2a0012cd421f',
+          business_name: 'African Fashion Hub',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+          total_items_sold: 120,
+          earnings: 5000000,
+          success_rate: 98,
+          is_active: true,
+          status: 'approved',
+          createdAt: '2025-12-01T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+        {
+          _id: '675ab93f9f1c2a0012cd4220',
+          business_name: 'Elegant Styles',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo2.png',
+          total_items_sold: 95,
+          earnings: 3200000,
+          success_rate: 95,
+          is_active: true,
+          status: 'verified',
+          createdAt: '2025-12-02T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+      ],
+    },
+  })
   async newVendors() {
     return this.businessService.getNewVendorsOfWeek();
   }
