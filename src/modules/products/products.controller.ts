@@ -239,6 +239,25 @@ export class ProductsController {
 
   @Roles('customer')
   @Get('/trending/week')
+  @ApiOkResponse({
+    description: 'Trending products this week',
+    schema: {
+      example: [
+        {
+          id: '690f834c4d38e9188cc62f1a',
+          kind: 'clothing',
+          base_price: 616320,
+          average_rating: 4.8,
+          business: {
+            _id: '69049d408ac6f362e6cf2cfa',
+            business_name: 'Qlozet Fashion',
+            business_logo_url: 'https://res.cloudinary.com/.../logo.png',
+          },
+          createdAt: '2025-11-08T17:52:12.060Z',
+        },
+      ],
+    },
+  })
   async getTrendingProductsThisWeek() {
     return this.productService.getTrendingProductsThisWeek();
   }
