@@ -376,13 +376,6 @@ export class PriceCalculationService {
           }
         }
 
-        // Check accessory stock
-        if ((accessory.stock ?? 0) < (s.quantity ?? 0)) {
-          throw new BadRequestException(
-            `Not enough stock for accessory "${accessory.name}". Remaining: ${accessory.stock}`,
-          );
-        }
-
         total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
 
@@ -399,29 +392,23 @@ export class PriceCalculationService {
 
         const variants = accessory.variants;
         if (s.variant_id && variants.length > 0) {
-          for (const v of variants) {
-            if (String(v._id) !== String(s.variant_id)) {
-              throw new BadRequestException(
-                `Selected variant not found for accessory "${accessory.name}" in clothing`,
-              );
-            }
-
-            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
-              throw new BadRequestException(
-                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}" in clothing. Remaining: ${v.stock}`,
-              );
-            }
-
-            total += (accessory.price ?? 0) * (s.quantity ?? 1);
-            continue;
-          }
-        }
-
-        // Check accessory stock
-        if ((accessory.stock ?? 0) < (s.quantity ?? 0)) {
-          throw new BadRequestException(
-            `Not enough stock for accessory "${accessory.name}" in clothing. Remaining: ${accessory.stock}`,
+          const variant = variants.find(
+            (v) => String(v._id) === String(s.variant_id),
           );
+
+          if (!variant) {
+            throw new BadRequestException(
+              `Selected variant not found for accessory "${accessory.name}" in clothing`,
+            );
+          }
+
+          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
+            throw new BadRequestException(
+              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}" in clothing. Remaining: ${variant.stock}`,
+            );
+          }
+
+          total += (accessory.price ?? 0) * (s.quantity ?? 1);
         }
 
         total += (accessory.price ?? 0) * (s.quantity ?? 1);

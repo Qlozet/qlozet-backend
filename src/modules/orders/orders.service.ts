@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
-import { Order, OrderDocument, OrderStatus } from './schemas/orders.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderItem,
+  OrderStatus,
+} from './schemas/orders.schema';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -353,87 +358,6 @@ export class OrderService {
     return sanitized;
   }
 
-  private async updateItemInventory(item: ProcessedOrderItem): Promise<void> {
-    switch (item.product_kind) {
-      case ProductKind.FABRIC:
-        await this.updateFabricInventory(item);
-        break;
-      case ProductKind.ACCESSORY:
-        await this.updateAccessoryInventory(item);
-        break;
-      case ProductKind.CLOTHING:
-        await this.updateClothingInventory(item);
-        break;
-    }
-  }
-
-  private async updateFabricInventory(item: ProcessedOrderItem): Promise<void> {
-    if (item.selections.fabric_selection) {
-      // const fabric = await this.fabricModel.findById(
-      //   item.selections.fabric_selection.fabric_id,
-      // );
-      // if (fabric && fabric.yard_length !== undefined) {
-      //   fabric.yard_length -= item.selections.fabric_selection.yardage;
-      //   await fabric.save();
-      // }
-    }
-  }
-
-  private async updateAccessoryInventory(
-    item: ProcessedOrderItem,
-  ): Promise<void> {
-    const accessories = item.selections.accessory_selection;
-
-    if (accessories && accessories?.length > 0) {
-      for (let accessory of accessories) {
-        const isAccessoryExist = await this.accessoryModel.findById(
-          accessory?.accessory_id,
-        );
-        // if (isAccessoryExist) {
-        //   if (item.selections.accessory_selection.variant_id) {
-        //     const variant = accessory.accessory.variants.find(
-        //       (v: any) =>
-        //         v._id.toString() ===
-        //         item.selections.accessory_selection!.variant_id!.toString(),
-        //     );
-        //     if (variant && variant.stock !== undefined) {
-        //       variant.stock -= item.selections.accessory_selection.quantity;
-        //       await accessory.save();
-        //     }
-        //   }
-        // }
-      }
-    }
-  }
-
-  private async updateClothingInventory(
-    item: ProcessedOrderItem,
-  ): Promise<void> {
-    if (
-      item.clothing_type === ClothingType.NON_CUSTOMIZE &&
-      item.selections.variant_selection
-    ) {
-      for (const variant of item.selections.variant_selection) {
-        const clothing = await this.productModel.findById(item.product_id);
-        if (clothing && clothing.clothing?.color_variants) {
-          const colorVariant = clothing.clothing.color_variants.find(
-            (v: any) => v._id.toString() === variant.variant_id.toString(),
-          );
-          if (!colorVariant)
-            throw new BadRequestException(
-              `Color variant not found: ${variant.variant_id}`,
-            );
-          for (const v of colorVariant?.variants) {
-            if (v && v.stock !== undefined) {
-              v.stock -= variant.quantity;
-              await clothing.save();
-            }
-          }
-        }
-      }
-    }
-    // For customize clothing, no inventory update needed as it's made-to-order
-  }
   async findVendorOrders(
     page: number = 1,
     size: number = 10,

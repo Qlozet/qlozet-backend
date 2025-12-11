@@ -10,6 +10,7 @@ import { BusinessService } from '../business/business.service';
 import { Order } from '../orders/schemas/orders.schema';
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
+import { ProductService } from '../products/products.service';
 
 @Injectable()
 export class WebhookService {
@@ -17,12 +18,12 @@ export class WebhookService {
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
     private readonly businessService: BusinessService,
+    private readonly productService: ProductService,
 
     @InjectModel('Order') private orderModel: Model<Order>,
   ) {}
   async handlePaystackWebhook(payload: any) {
     const { event, data } = payload;
-
     const transaction = await this.transactionService
       .findByReference(data.reference)
       .catch(() => null);
@@ -83,6 +84,14 @@ export class WebhookService {
         transaction.amount,
       );
       walletUpdated = true;
+    }
+
+    if (transaction.order && transaction.channel === 'checkout') {
+      await this.orderModel.updateOne(
+        { _id: transaction.order._id },
+        { status: 'processing' },
+      );
+      await this.productService.updateInventory(transaction.order._id);
     }
 
     return walletUpdated;

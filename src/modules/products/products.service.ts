@@ -6,15 +6,27 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Product, ProductDocument } from './schemas';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
+import {
+  Accessory,
+  AccessoryDocument,
+  Fabric,
+  FabricDocument,
+  Product,
+  ProductDocument,
+} from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
 
 import { UserDocument } from '../ums/schemas';
 import { Cron } from '@nestjs/schedule';
+import {
+  Order,
+  OrderDocument,
+  OrderItem,
+} from '../orders/schemas/orders.schema';
 
 @Injectable()
 export class ProductService {
@@ -24,6 +36,13 @@ export class ProductService {
     private readonly productModel: Model<ProductDocument>,
     @InjectModel(Product.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(Accessory.name)
+    private readonly accessoryModel: Model<AccessoryDocument>,
+    @InjectModel(Fabric.name)
+    private readonly fabricModel: Model<FabricDocument>,
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<OrderDocument>,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -103,7 +122,6 @@ export class ProductService {
     if (status && validStatuses.includes(status.toLowerCase())) {
       filter.status = status.toLowerCase();
     }
-    console.log(filter);
     if (search) {
       filter.$or = [
         { 'clothing.name': { $regex: search, $options: 'i' } },
@@ -182,7 +200,6 @@ export class ProductService {
 
     const isCustomize = clothing?.type === ClothingType.CUSTOMIZE;
     let total = 0;
-    console.log(isCustomize, 'TYPE');
     // --- CUSTOMIZE ---
     if (isCustomize) {
       const hasFabric =
@@ -244,6 +261,7 @@ export class ProductService {
           const accessoryTotal = variantStock
             ? variantStock * basePrice
             : basePrice;
+          console.log(accessoryTotal, 'accessoryTotal');
           return sum + accessoryTotal;
         }, 0);
       }
@@ -522,4 +540,195 @@ export class ProductService {
       this.logger.log('No products to activate at this time.');
     }
   }
+
+  async updateInventory(orderId: Types.ObjectId) {
+    const session = await this.connection.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        const order = await this.orderModel.findById(orderId).session(session);
+
+        if (!order?.items || order.items.length === 0) return;
+
+        for (const item of order.items) {
+          await this.updateFabric(item, session);
+          await this.updateAccessory(item, session);
+        }
+      });
+    } catch (err) {
+      this.logger.error('updateInventory failed', err.stack || err.message);
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async updateFabric(item: OrderItem, session, quantityMultiplier = 1) {
+    let fabric;
+    let isEmbedded = false;
+    const fabricSelection = item.fabric_selections;
+    if (Array.isArray(fabricSelection) && fabricSelection.length > 0) {
+      for (let selection of fabricSelection) {
+        fabric = await this.fabricModel.findById(selection.fabric_id);
+        if (!fabric) {
+          const product = await this.productModel.findById(item.product);
+          if (!product) throw new BadRequestException('Product not found');
+
+          fabric = product.clothing?.fabrics?.find(
+            (f) => String(f._id) === String(selection.fabric_id),
+          ) as FabricDocument | undefined;
+
+          if (!fabric) {
+            throw new BadRequestException(
+              `Fabric ${selection.fabric_id} not found in product or standalone`,
+            );
+          }
+          isEmbedded = true;
+        }
+        const totalYards =
+          (selection.yardage ?? 0) *
+          (selection.quantity ?? 1) *
+          quantityMultiplier;
+        if (fabric.yard_length < totalYards) {
+          throw new BadRequestException(
+            `Not enough fabric (${fabric.name}) available`,
+          );
+        }
+        fabric.yard_length -= totalYards;
+        if (isEmbedded) {
+          await this.productModel
+            .updateOne(
+              {
+                _id: item.product,
+                'clothing.fabrics._id': fabric._id,
+              },
+              {
+                $set: {
+                  'clothing.fabrics.$.yard_length': fabric.yard_length,
+                },
+              },
+            )
+            .session(session);
+          return;
+        }
+        await fabric.save({ session });
+      }
+    }
+  }
+  async updateAccessory(
+    item: OrderItem,
+    session?: any,
+    quantityMultiplier = 1,
+  ) {
+    const accessorySelections = item.accessory_selections || [];
+
+    for (const selection of accessorySelections) {
+      let accessoryVariant: any;
+      let isEmbedded = false;
+
+      if (this.accessoryModel) {
+        const accessory = await this.accessoryModel
+          .findById(selection.accessory_id)
+          .session(session);
+        if (accessory) {
+          accessoryVariant = accessory.variants.find(
+            (v: any) => String(v._id) === String(selection.variant_id),
+          );
+        }
+      }
+      if (!accessoryVariant) {
+        const product = await this.productModel
+          .findById(item.product)
+          .session(session);
+        if (!product) throw new BadRequestException('Product not found');
+
+        const embeddedAccessory = product.clothing?.accessories?.find(
+          (a) => String(a._id) === String(selection.accessory_id),
+        );
+        if (embeddedAccessory) {
+          accessoryVariant = embeddedAccessory.variants.find(
+            (v) => String(v._id) === String(selection.variant_id),
+          );
+          isEmbedded = true;
+        }
+      }
+
+      if (!accessoryVariant) {
+        throw new BadRequestException(
+          `Accessory variant ${selection.variant_id} not found in standalone or embedded accessory`,
+        );
+      }
+
+      // 3️⃣ Calculate total quantity needed
+      const totalQuantity = (selection.quantity ?? 1) * quantityMultiplier;
+      if ((accessoryVariant.stock ?? 0) < totalQuantity) {
+        throw new BadRequestException(
+          `Not enough stock for accessory variant (${accessoryVariant._id})`,
+        );
+      }
+
+      // 4️⃣ Decrement stock
+      accessoryVariant.stock -= totalQuantity;
+
+      // 5️⃣ Save changes
+      if (isEmbedded) {
+        await this.productModel
+          .updateOne(
+            {
+              _id: item.product,
+              'clothing.accessories._id': accessoryVariant._id,
+            },
+            {
+              $set: {
+                'clothing.accessories.$.variants.$[v].stock':
+                  accessoryVariant.stock,
+              },
+            },
+            { arrayFilters: [{ 'v._id': accessoryVariant._id }] },
+          )
+          .session(session);
+      } else {
+        await accessoryVariant.save?.({ session });
+      }
+    }
+  }
+  // async updateStyles(item: OrderItem, session?: any, quantityMultiplier = 1) {
+  //   const styleSelections = item.style_selections || [];
+  //   if (styleSelections.length === 0) return;
+  //   const product = await this.productModel
+  //     .findById(item.product)
+  //     .session(session);
+  //   if (!product || !product.clothing)
+  //     throw new BadRequestException('Product or clothing not found');
+
+  //   const clothing = product.clothing;
+  //   if (clothing.type !== 'customize') return;
+  //   for (const selection of styleSelections) {
+  //     if (Array.isArray(clothing?.styles) && clothing?.styles.length > 0) {
+  //       const style = clothing?.styles.find(
+  //         (s) => String(s._id) === String(selection.style_id),
+  //       );
+  //       if (!style)
+  //         throw new BadRequestException(
+  //           `Style ${selection.style_id} not found`,
+  //         );
+
+  //       await this.productModel
+  //         .updateOne(
+  //           {
+  //             _id: item.product,
+  //             'clothing.styles._id': style._id,
+  //           },
+  //           {
+  //             $set: {
+  //               'clothing.accessories.$.variants.$[v].stock':
+  //                 accessoryVariant.stock,
+  //             },
+  //           },
+  //           { arrayFilters: [{ 'v._id': accessoryVariant._id }] },
+  //         )
+  //         .session(session);
+  //     }
+  //   }
+  // }
 }

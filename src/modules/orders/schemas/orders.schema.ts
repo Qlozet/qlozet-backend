@@ -59,7 +59,7 @@ class AccessorySelection {
 
 /** ------------------ Sub-schema for each item ------------------ */
 @Schema({ _id: false })
-class OrderItem {
+export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   product: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'Business', default: null })

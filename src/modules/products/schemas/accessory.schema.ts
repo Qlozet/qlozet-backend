@@ -59,9 +59,6 @@ export class Accessory {
 
   @Prop({ default: true })
   in_stock: boolean;
-
-  @Prop({ min: 0, default: 0 })
-  stock: number;
 }
 
 export const AccessorySchema = SchemaFactory.createForClass(Accessory);
