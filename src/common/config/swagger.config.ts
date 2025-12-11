@@ -53,6 +53,59 @@ export const SetupSwagger = (app: INestApplication) => {
       displayRequestDuration: true, // ⏱️ Shows how long each request takes
     },
     customSiteTitle: 'Qlozet API Documentation',
-    customCss: '.topbar { display: none }', // Optional: hide default Swagger banner
+    customCss: `
+  /* Main UI */
+  body { background-color: #121212 !important; }
+  .swagger-ui .topbar { background-color: #1f1f1f !important; }
+  .swagger-ui .info { color: #fff !important; }
+  .swagger-ui .opblock { background: #1e1e1e !important; }
+  .swagger-ui .opblock-summary { background: #2c2c2c !important; }
+  .swagger-ui .opblock-summary-method { filter: brightness(0.9); }
+  .swagger-ui * { color: #e7e7e7 !important; }
+
+  /* Authorize modal */
+  .swagger-ui .dialog-ux,
+  .swagger-ui .modal-ux,
+  .swagger-ui .auth-container .wrapper,
+  .swagger-ui .auth-btn-wrapper {
+    background: #1e1e1e !important;
+    color: #ffffff !important;
+  }
+
+  .swagger-ui .dialog-ux .modal-ux-inner {
+    background: #1e1e1e !important;
+    border: 1px solid #333 !important;
+    box-shadow: 0 0 10px #000 !important;
+  }
+
+  /* Buttons */
+  .swagger-ui .btn,
+  .swagger-ui .opblock-summary-control {
+    background: #4a4a4a !important;
+    color: #fff !important;
+    border: 1px solid #666 !important;
+  }
+
+  .swagger-ui .btn:hover,
+  .swagger-ui .opblock-summary-control:hover {
+    background: #5a5a5a !important;
+  }
+
+  /* Inputs and labels */
+  .swagger-ui input {
+    background: #2e2e2e !important;
+    color: #fff !important;
+    border: 1px solid #555 !important;
+  }
+
+  .swagger-ui label {
+    color: #fff !important;
+  }
+
+  .swagger-ui .close-modal {
+    color: #eee !important;
+  }
+`,
+    // Optional: hide default Swagger banner
   });
 };
