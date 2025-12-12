@@ -19,27 +19,42 @@ export class WalletsService {
     private readonly paymentService: PaymentService,
   ) {}
 
-  async getOrCreateWallet(
-    customerId?: string,
-    businessId?: string,
-  ): Promise<WalletDocument> {
-    if (!customerId && !businessId)
-      throw new BadRequestException('customerId or businessId is required');
-
-    const filter: any = {};
-    if (customerId) filter.customer = customerId;
-    if (businessId) filter.business = businessId;
-
-    let wallet = await this.walletModel.findOne(filter);
-    if (!wallet) {
-      wallet = new this.walletModel({
-        customer: customerId ?? undefined,
-        business: businessId ?? undefined,
-        balance: 0,
-        currency: 'NGN',
-      });
-      await wallet.save();
+  async getOrCreateWallet(business?: string, customer?: string) {
+    if (!business && !customer) {
+      throw new BadRequestException('business or customer is required');
     }
+
+    // 1️⃣ Search wallet by business first
+    let wallet: any | null = null;
+
+    if (business) {
+      wallet = await this.walletModel.find({
+        business: new Types.ObjectId(business),
+      });
+    }
+
+    // 2️⃣ If not found and customer is provided, search by customer
+    if (!wallet && customer) {
+      wallet = await this.walletModel.findOne({
+        customer: new Types.ObjectId(customer),
+      });
+    }
+
+    // 3️⃣ Return if found
+    if (wallet) {
+      return wallet;
+    }
+
+    // 4️⃣ Create wallet
+    wallet = new this.walletModel({
+      business: business ?? null,
+      customer: customer ?? null,
+      balance: 0,
+      pending_balance: 0,
+      currency: 'NGN',
+    });
+
+    await wallet.save();
     return wallet;
   }
 

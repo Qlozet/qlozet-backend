@@ -3,8 +3,6 @@ import { WebhookService } from './webhook.service';
 import { Public } from 'src/common/decorators/public.decorator';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JobStatusService } from '../measurement/job-status.service';
-import { JobState } from 'src/common/schemas/job-status.schema';
-import { JobWebhookDto } from 'src/common/dto/job-webhook.dto';
 
 @Controller('webhook')
 export class WebhookController {
@@ -13,7 +11,7 @@ export class WebhookController {
     private readonly jobService: JobStatusService,
   ) {}
   @Public()
-  @Post('paystack/webhook')
+  @Post('paystack')
   @ApiOperation({ summary: 'Handle Paystack webhook' })
   @ApiResponse({ status: 200, description: 'Webhook received successfully' })
   async handlePaystackWebhook(@Req() req: any) {

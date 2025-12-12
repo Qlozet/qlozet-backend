@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,6 +12,7 @@ import { Type } from 'class-transformer';
 import { ProductImageDto } from './product-image.dto';
 import { VariantDto } from './variant.dto';
 import { ColorDto } from './product.dto';
+import { Types } from 'mongoose';
 
 export class FabricDto {
   @ApiProperty({
@@ -123,4 +125,24 @@ export class FabricDto {
   @ValidateNested({ each: true })
   @Type(() => VariantDto)
   variants: VariantDto[];
+}
+export class UpdateFabricStockDto {
+  @ApiProperty({ example: 5 })
+  @IsNumber()
+  @Min(0)
+  new_yard_length: number;
+}
+
+export class FabricParamDto {
+  @ApiProperty({
+    description: 'ID of the product',
+    example: '690f834c4d38e9188cc62f1b',
+  })
+  product_id: string;
+
+  @ApiProperty({
+    description: 'ID of the fabric',
+    example: '690f834c4d38e9188cc62f22',
+  })
+  fabric_id: string;
 }

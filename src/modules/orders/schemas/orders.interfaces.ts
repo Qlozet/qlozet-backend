@@ -23,13 +23,6 @@ export enum MeasurementUnit {
   CM = 'cm',
 }
 
-// SELECTION INTERFACES FOR EACH PRODUCT TYPE
-export interface ColorVariantSelection {
-  color_variant_id: Types.ObjectId;
-  quantity: number;
-  size?: string; // For non-customize clothing
-}
-
 export interface FabricSelection {
   fabric_id: Types.ObjectId;
   yardage: number;
@@ -39,7 +32,7 @@ export interface FabricSelection {
 }
 
 export interface NormalizedSelections {
-  variant_selection?: VariantSelectionDto[];
+  color_variant_selection?: VariantSelectionDto[];
   style_selection?: StyleSelectionDto[];
   fabric_selection?: FabricSelectionDto[];
   accessory_selection?: AccessorySelectionDto[];
@@ -71,7 +64,7 @@ export interface ProcessedOrderItem {
 
   // Selections based on product kind and clothing type
   selections: {
-    variant_selection?: VariantSelectionDto[];
+    color_variant_selection?: VariantSelectionDto[];
     style_selection?: StyleSelectionDto[];
     fabric_selection?: FabricSelectionDto[];
     accessory_selection?: AccessorySelectionDto[];

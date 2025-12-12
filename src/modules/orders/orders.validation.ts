@@ -162,20 +162,25 @@ export class OrderValidationService {
               `Accessory not found: ${a.accessory_id}`,
             );
 
-          if ((accessory.stock ?? 0) < (a.quantity ?? 0))
-            throw new BadRequestException(
-              `Not enough stock for accessory "${accessory.name}". Remaining: ${accessory.stock}`,
-            );
-
           let price = accessory.price ?? 0;
           const variants = accessory.variants;
+          console.log(JSON.stringify(accessory.variants.length));
           if (a.variant_id && variants.length > 0) {
+            let found = false;
+
             for (const v of variants) {
-              if (String(v._id) !== String(a.variant_id))
-                throw new BadRequestException(
-                  `Selected variant not found for accessory "${accessory.name}"`,
-                );
-              price += price ?? 0;
+              console.log(v._id?.toString() === a.variant_id.toString());
+              if (v._id?.toString() === a.variant_id.toString()) {
+                found = true;
+                price += price ?? 0; // whatever your pricing logic is
+                break;
+              }
+            }
+
+            if (!found) {
+              throw new BadRequestException(
+                `Selected variant not found for accessory "${accessory.name}"`,
+              );
             }
           }
 

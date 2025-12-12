@@ -22,9 +22,12 @@ class VariantSelection {
 
   @Prop({ type: String })
   size?: string;
-
-  @Prop({ type: Number, min: 1, default: 1 })
-  quantity?: number;
+  @Prop({ type: Number, min: 1 })
+  price: number;
+  @Prop({ type: Number, min: 1 })
+  quantity: number;
+  @Prop({ type: Number, min: 1 })
+  total_amount: number;
 }
 
 @Schema({ _id: false })
@@ -36,13 +39,25 @@ class FabricSelection {
   yardage: number;
 
   @Prop({ type: Number, min: 1 })
+  price: number;
+
+  @Prop({ type: Number, min: 1 })
   quantity: number;
+
+  @Prop({ type: Number, min: 1 })
+  total_amount: number;
 }
 
 @Schema()
 class StyleSelection {
   @Prop({ type: Types.ObjectId, ref: 'Style', required: true })
   style_id: Types.ObjectId;
+  @Prop({ type: Number, min: 1 })
+  price: number;
+  @Prop({ type: Number, min: 1 })
+  quantity: number;
+  @Prop({ type: Number, min: 1 })
+  total_amount: number;
 }
 
 @Schema({ _id: false })
@@ -52,21 +67,24 @@ class AccessorySelection {
 
   @Prop({ type: Types.ObjectId, ref: 'Variant', required: true })
   variant_id: Types.ObjectId;
-
-  @Prop({ type: Number, min: 1, default: 1 })
-  quantity?: number;
+  @Prop({ type: Number, min: 1 })
+  price: number;
+  @Prop({ type: Number, min: 1 })
+  quantity: number;
+  @Prop({ type: Number, min: 1 })
+  total_amount: number;
 }
 
 /** ------------------ Sub-schema for each item ------------------ */
 @Schema({ _id: false })
-class OrderItem {
+export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   product: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
   business: Types.ObjectId;
 
   @Prop({ type: [VariantSelection], default: [] })
-  variant_selections?: VariantSelection[];
+  color_variant_selections?: VariantSelection[];
 
   @Prop({ type: [FabricSelection], default: [] })
   fabric_selections?: FabricSelection[];
