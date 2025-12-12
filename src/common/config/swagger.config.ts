@@ -92,7 +92,8 @@ export const SetupSwagger = (app: INestApplication) => {
   }
 
   /* Inputs and labels */
-  .swagger-ui input {
+  .swagger-ui input,
+  .swagger-ui select {
     background: #2e2e2e !important;
     color: #fff !important;
     border: 1px solid #555 !important;
@@ -105,7 +106,22 @@ export const SetupSwagger = (app: INestApplication) => {
   .swagger-ui .close-modal {
     color: #eee !important;
   }
+
+  /* FIX: Request body textarea (was white) */
+  .swagger-ui textarea {
+    background: #2e2e2e !important;
+    color: #fff !important;
+    border: 1px solid #555 !important;
+  }
+
+  /* Sometimes body uses a <pre> container */
+  .swagger-ui .opblock-body pre {
+    background: #2e2e2e !important;
+    color: #fff !important;
+    border: 1px solid #444 !important;
+  }
 `,
+
     // Optional: hide default Swagger banner
   });
 };

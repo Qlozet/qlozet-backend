@@ -66,6 +66,10 @@ import {
   JobStatus,
   JobStatusSchema,
 } from 'src/common/schemas/job-status.schema';
+import {
+  BusinessEarning,
+  BusinessEarningSchema,
+} from 'src/modules/business/schemas/business-earnings.schema';
 
 @Module({
   exports: [MongooseModule],
@@ -84,6 +88,7 @@ import {
       { name: Product.name, schema: ProductSchema },
       { name: User.name, schema: UserSchema },
       { name: Business.name, schema: BusinessSchema },
+      { name: BusinessEarning.name, schema: BusinessEarningSchema },
       { name: Role.name, schema: RoleSchema },
       { name: Permission.name, schema: PermissionSchema },
       { name: Business.name, schema: BusinessSchema },

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   HttpException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -14,20 +15,34 @@ import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { LogisticsService } from '../logistics/logistics.service';
 import { User, UserDocument } from '../ums/schemas';
 import { PaginationQueryType } from 'src/common/types/pagination.type';
-import { Product, ProductDocument } from '../products/schemas';
 import { ProductService } from '../products/products.service';
+import { Order, OrderDocument } from '../orders/schemas/orders.schema';
+import {
+  BusinessEarning,
+  BusinessEarningDocument,
+} from './schemas/business-earnings.schema';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
 
 @Injectable()
 export class BusinessService {
+  private readonly logger = new Logger(BusinessService.name);
   constructor(
     @InjectModel(Business.name)
     private businessModel: Model<BusinessDocument>,
     @InjectModel(Warehouse.name)
     private warehouseModel: Model<WarehouseDocument>,
+    @InjectModel(PlatformSettings.name)
+    private platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly logisticService: LogisticsService,
     private readonly productService: ProductService,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
+    @InjectModel(BusinessEarning.name)
+    private businessEarningsModel: Model<BusinessEarningDocument>,
   ) {}
 
   async createWarehouse(
@@ -541,6 +556,66 @@ export class BusinessService {
 
     return businesses;
   }
+  // in product.service.ts or a dedicated service like business-earnings.service.ts
+  async recordBusinessEarnings(orderId: Types.ObjectId) {
+    this.logger.log(`Recording business earnings for order: ${orderId}`);
+
+    const order = await this.orderModel.findById(orderId);
+    if (!order?.items || order.items.length === 0) {
+      this.logger.warn(`Order ${orderId} has no items. Skipping earnings.`);
+      return;
+    }
+
+    const platformSettings = await this.platformSettingsModel.findOne().lean();
+    const commissionPercent =
+      platformSettings?.platform_commission_percent ?? 10;
+    this.logger.log(`Using platform commission: ${commissionPercent}%`);
+
+    for (const item of order.items) {
+      const businessId = item.business;
+      this.logger.log(`Processing item for business: ${businessId}`);
+
+      const colorVariantsTotal = (item.color_variant_selections || []).reduce(
+        (sum, cv) => sum + cv.price * cv.quantity,
+        0,
+      );
+      const stylesTotal = (item.style_selections || []).reduce(
+        (sum, s) => sum + s.price * s.quantity,
+        0,
+      );
+      const fabricsTotal = (item.fabric_selections || []).reduce(
+        (sum, f) => sum + f.price * f.quantity,
+        0,
+      );
+      const accessoriesTotal = (item.accessory_selections || []).reduce(
+        (sum, a) => sum + a.price * a.quantity,
+        0,
+      );
+
+      const gross =
+        colorVariantsTotal + stylesTotal + fabricsTotal + accessoriesTotal;
+      const commission = gross * (commissionPercent / 100);
+      const net = gross - commission;
+
+      this.logger.log(
+        `Item totals for business ${businessId}: gross=${gross}, commission=${commission}, net=${net}`,
+      );
+
+      await this.businessEarningsModel.create({
+        business: businessId,
+        order: order._id,
+        amount: gross,
+        commission,
+        net_amount: net,
+        released: false,
+        release_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+
+      this.logger.log(`Business earnings recorded for business ${businessId}`);
+    }
+
+    this.logger.log(`Finished recording earnings for order: ${orderId}`);
+  }
 
   async getFeed(
     page: number = 1,
@@ -561,26 +636,81 @@ export class BusinessService {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    return await this.businessModel
-      .find({
-        createdAt: { $lte: new Date() }, // all vendors
-        is_active: true,
-        status: { $in: ['approved', 'verified'] }, // only active vendors
-      })
-      .sort({ total_items_sold: -1 }) // or earnings / success_rate
+    const vendors = await this.businessModel
+      .find(
+        {
+          createdAt: { $lte: new Date() },
+          is_active: true,
+          status: { $in: ['approved', 'verified'] },
+        },
+        {
+          business_name: 1,
+          business_logo_url: 1,
+          total_items_sold: 1,
+          earnings: 1,
+          success_rate: 1,
+          createdAt: 1,
+        },
+      )
+      .sort({ total_items_sold: -1 })
       .limit(10)
+      .lean()
       .exec();
+
+    return vendors.map((v) => ({
+      id: v._id,
+      business_name: v.business_name,
+      business_logo_url: v.business_logo_url,
+      total_items_sold: v.total_items_sold,
+      earnings: v.earnings,
+      success_rate: v.success_rate,
+      createdAt: v.createdAt,
+    }));
   }
+
   async getNewVendorsOfWeek() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    return await this.businessModel
-      .find({
-        createdAt: { $gte: sevenDaysAgo },
-        is_active: true,
-      })
+    const vendors = await this.businessModel
+      .find(
+        {
+          createdAt: { $gte: sevenDaysAgo },
+          is_active: true,
+          status: { $in: ['approved', 'verified'] },
+        },
+        {
+          business_name: 1,
+          business_logo_url: 1,
+          total_items_sold: 1,
+          earnings: 1,
+          success_rate: 1,
+          createdAt: 1,
+        },
+      )
       .sort({ createdAt: -1 })
+      .lean()
       .exec();
+
+    return vendors.map((v) => ({
+      id: v._id,
+      business_name: v.business_name,
+      business_logo_url: v.business_logo_url,
+      total_items_sold: v.total_items_sold,
+      earnings: v.earnings,
+      success_rate: v.success_rate,
+      createdAt: v.createdAt,
+    }));
+  }
+  async cancelPendingEarnings(orderId: Types.ObjectId) {
+    await this.businessEarningsModel.updateMany(
+      { order: orderId, released: false },
+      { released: true, net_amount: 0, released_at: new Date() },
+    );
+  }
+  async getUpcomingEarnings(businessId: string) {
+    return this.businessEarningsModel
+      .find({ business: new Types.ObjectId(businessId), released: false })
+      .select('net_amount release_date order');
   }
 }

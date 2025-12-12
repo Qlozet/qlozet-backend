@@ -127,4 +127,10 @@ export class BusinessController {
   ) {
     return this.businessService.updateBusinessAddress(req.business, dto);
   }
+
+  @Roles(UserType.VENDOR)
+  @Get('earnings/upcoming')
+  async getUpcomingEarnings(@Req() req: any) {
+    return this.businessService.getUpcomingEarnings(req.business.id);
+  }
 }

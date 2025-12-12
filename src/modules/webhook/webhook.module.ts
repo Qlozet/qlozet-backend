@@ -11,9 +11,10 @@ import { PlatformService } from '../platform/platform.service';
 import { DatabaseModule } from 'src/database/database.module';
 import { CurrencyService } from '../currency/currency.service';
 import { JobStatusService } from '../measurement/job-status.service';
+import { ProductModule } from '../products/products.module';
 
 @Module({
-  imports: [BusinessModule, HttpModule, DatabaseModule],
+  imports: [BusinessModule, HttpModule, DatabaseModule, ProductModule],
   controllers: [WebhookController],
   providers: [
     WebhookService,

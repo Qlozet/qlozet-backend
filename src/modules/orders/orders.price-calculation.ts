@@ -139,7 +139,7 @@ export class PriceCalculationService {
   ): NormalizedSelections {
     if (!selections) {
       return {
-        variant_selection: [],
+        color_variant_selection: [],
         style_selection: [],
         fabric_selection: [],
         accessory_selection: [],
@@ -147,8 +147,10 @@ export class PriceCalculationService {
     }
 
     return {
-      variant_selection:
-        selections.variant_selection ?? selections.variant_selection ?? [],
+      color_variant_selection:
+        selections.color_variant_selection ??
+        selections.color_variant_selection ??
+        [],
       style_selection:
         selections.style_selection ?? selections.style_selection ?? [],
       fabric_selection:
@@ -244,9 +246,9 @@ export class PriceCalculationService {
         selections.accessory_selection,
         product,
       );
-    if (selections.variant_selection)
+    if (selections.color_variant_selection)
       total += await this.calculateColorVariantCost(
-        selections.variant_selection,
+        selections.color_variant_selection,
         product,
       );
     if (selections.style_selection)
@@ -254,7 +256,6 @@ export class PriceCalculationService {
         selections.style_selection,
         product,
       );
-    console.log(total, 'TOTAL');
     return this.round(total);
   }
 

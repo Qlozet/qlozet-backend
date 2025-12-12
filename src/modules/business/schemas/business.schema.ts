@@ -222,6 +222,11 @@ export class Business extends Document {
 
   @Prop({ default: null })
   transfer_recipient_code?: number;
+  @Prop()
+  createdAt?: Date;
+
+  @Prop()
+  updatedAt?: Date;
 }
 
 export const BusinessSchema = SchemaFactory.createForClass(Business);

@@ -10,23 +10,17 @@ import {
   Req,
   Query,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-  ApiBody,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody } from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
-import { JwtAuthGuard } from '../../common/guards';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
 import { TokenService } from './token.service';
 
 @ApiTags('Wallets')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('wallets')
 export class WalletsController {
   constructor(
@@ -56,17 +50,12 @@ export class WalletsController {
   @Get('balance')
   @ApiOperation({ summary: 'Get wallet balance' })
   async getBalance(@Req() req) {
-    const business = req?.business?._id;
+    const business = req?.business?.id;
     const customerId = req.user.id;
-    const wallet = await this.walletsService.getOrCreateWallet(
-      customerId,
-      business,
+    return this.walletsService.getOrCreateWallet(
+      business ?? undefined,
+      business ? undefined : customerId,
     );
-    return {
-      walletId: wallet._id,
-      balance: wallet.balance,
-      currency: wallet.currency,
-    };
   }
 
   @Get('price')

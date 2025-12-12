@@ -76,6 +76,7 @@ export class RolesGuard implements CanActivate {
     const normalizedRequiredRoles = requiredRoles.map((r) =>
       r.toString().toLowerCase(),
     );
+    console.log(user.type, 'user.type');
     // ✅ Step 2: Check Platform roles
     if (user.type === UserType.PLATFORM) {
       const role = (user as any).role as RoleDocument | undefined;
@@ -92,9 +93,11 @@ export class RolesGuard implements CanActivate {
 
       return true;
     }
+
     // ✅ Step 3: Check Vendor roles (team members)
     if (user.type === UserType.VENDOR) {
       const business: any = user.business;
+      console.log(business, 'business');
       const members: TeamMemberDocument[] = business?.team_members || [];
 
       if (!members?.length) {
@@ -110,6 +113,7 @@ export class RolesGuard implements CanActivate {
           `Access denied — requires one of: ${requiredRoles.join(', ')}`,
         );
       }
+
       request.team_members = members;
       request.business = business;
       return true;

@@ -1,3 +1,4 @@
+import { Length } from 'class-validator';
 import {
   Injectable,
   Inject,
@@ -22,8 +23,10 @@ import {
   ProductKind,
 } from './schemas/orders.interfaces';
 import {
+  Accessory,
   AccessoryDocument,
   DiscountDocument,
+  Fabric,
   FabricDocument,
   ProductDocument,
   StyleDocument,
@@ -37,6 +40,7 @@ import {
   AccessorySelectionDto,
   FabricSelectionDto,
   OrderItemSelectionsDto,
+  StyleSelectionDto,
   VariantSelectionDto,
 } from './dto/selection.dto';
 import { TransactionService } from '../transactions/transactions.service';
@@ -84,7 +88,7 @@ export class OrderService {
         note: item.note,
         product_kind: item.product_kind,
         clothing_type: item.clothing_type,
-        variant_selections: selections.variant_selection || [],
+        color_variant_selections: selections.color_variant_selection || [],
         fabric_selections: selections.fabric_selection || [],
         style_selections: selections.style_selection || [],
         accessory_selections: selections.accessory_selection || [],
@@ -172,7 +176,10 @@ export class OrderService {
             `Product not found: ${item.product_id}`,
           );
         }
-        const rawSelections = this.normalizeSelections(item.selections);
+        const rawSelections = await this.normalizeSelections(
+          item.selections,
+          product,
+        );
 
         const styleSelections =
           rawSelections.style_selection ?? rawSelections.style_selection ?? [];
@@ -184,9 +191,9 @@ export class OrderService {
           rawSelections.accessory_selection ??
           rawSelections.accessory_selection ??
           [];
-        const variantSelections =
-          rawSelections.variant_selection ??
-          rawSelections.variant_selection ??
+        const colorVariantSelections =
+          rawSelections.color_variant_selection ??
+          rawSelections.color_variant_selection ??
           [];
 
         const [
@@ -223,7 +230,7 @@ export class OrderService {
             : null,
         ]);
         const { name } = await this.getProductDetails(product);
-        const selections = this.normalizeSelections(item.selections);
+        const selections = await this.normalizeSelections(item.selections);
         const itemForPricing: ProcessedOrderItem = {
           ...item,
           product_name: name,
@@ -240,7 +247,7 @@ export class OrderService {
 
         // Build the final selections shape that matches ProcessedOrderItem interface:
         const finalSelections = {
-          variant_selection: variantSelections,
+          color_variant_selection: colorVariantSelections,
           style_selection: styleSelections,
           fabric_selection: fabricSelections,
           accessory_selection: accessorySelections,
@@ -280,31 +287,107 @@ export class OrderService {
     );
   }
 
-  private normalizeSelections(
+  private async normalizeSelections(
     selections?: OrderItemSelectionsDto,
-  ): NormalizedSelections {
-    if (!selections) {
+    product?: ProductDocument,
+  ): Promise<NormalizedSelections> {
+    if (!selections || !product) {
       return {
-        variant_selection: [],
+        color_variant_selection: [],
         style_selection: [],
         fabric_selection: [],
         accessory_selection: [],
       };
     }
 
+    const clothing = product.clothing;
+
+    // --- Color Variants ---
+    const normalizedColorVariants: VariantSelectionDto[] = [];
+    for (const cvs of selections.color_variant_selections || []) {
+      const colorVariant = clothing?.color_variants?.find((cv) =>
+        cv.variants.some((v) => v._id?.equals(cvs.variant_id)),
+      );
+      if (!colorVariant) continue;
+
+      const variant = colorVariant.variants.find((v) =>
+        v._id?.equals(cvs.variant_id),
+      );
+      if (!variant) continue;
+
+      const quantity = cvs.quantity ?? 1;
+      normalizedColorVariants.push({
+        variant_id: new Types.ObjectId(variant._id),
+        size: variant.size,
+        price: variant.price,
+        quantity,
+        total_amount: variant.price * quantity,
+      });
+    }
+
+    // --- Styles ---
+    const normalizedStyles: StyleSelectionDto[] = [];
+    for (const ss of selections.style_selections || []) {
+      const style = clothing?.styles?.find((s) => s._id?.equals(ss.style_id));
+      if (!style) continue;
+
+      const quantity = ss.quantity ?? 1;
+      normalizedStyles.push({
+        style_id: new Types.ObjectId(style._id),
+        price: style.price,
+        quantity,
+        total_amount: style.price * quantity,
+      });
+    }
+
+    // --- Fabrics ---
+    const normalizedFabrics: FabricSelectionDto[] = [];
+    for (const fs of selections.fabric_selections || []) {
+      let fabric: Fabric | null | undefined =
+        clothing?.fabrics?.find((f) => f._id?.equals(fs.fabric_id)) ??
+        (await this.fabricModel.findById(fs.fabric_id));
+
+      if (!fabric) continue;
+
+      const quantity = (fs.quantity ?? 1) * (fs.yardage ?? 1);
+      normalizedFabrics.push({
+        fabric_id: new Types.ObjectId(fabric._id),
+        price: fabric.price_per_yard,
+        quantity,
+        yardage: fs.yardage,
+        total_amount: fabric.price_per_yard * quantity,
+      });
+    }
+
+    // --- Accessories ---
+    const normalizedAccessories: AccessorySelectionDto[] = [];
+    for (const as of selections.accessory_selections || []) {
+      const accessory: Accessory | undefined | null =
+        clothing?.accessories?.find((a) => a._id?.equals(as.accessory_id)) ??
+        (await this.accessoryModel.findById(as.accessory_id));
+
+      if (!accessory) continue;
+
+      const accessoryVariant = accessory.variants.find((av) =>
+        av._id?.equals(as.variant_id),
+      );
+      if (!accessoryVariant) continue;
+
+      const quantity = as.quantity ?? 1;
+      normalizedAccessories.push({
+        accessory_id: new Types.ObjectId(accessory._id),
+        variant_id: new Types.ObjectId(accessoryVariant._id),
+        price: accessory.price,
+        quantity,
+        total_amount: accessory.price * quantity,
+      });
+    }
+
     return {
-      variant_selection:
-        selections.color_variant_selections ??
-        selections.color_variant_selections ??
-        [],
-      style_selection:
-        selections.style_selections ?? selections.style_selections ?? [],
-      fabric_selection:
-        selections.fabric_selections ?? selections.fabric_selections ?? [],
-      accessory_selection:
-        selections.accessory_selections ??
-        selections.accessory_selections ??
-        [],
+      color_variant_selection: normalizedColorVariants,
+      style_selection: normalizedStyles,
+      fabric_selection: normalizedFabrics,
+      accessory_selection: normalizedAccessories,
     };
   }
 

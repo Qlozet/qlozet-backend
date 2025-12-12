@@ -27,6 +27,7 @@ import {
   OrderDocument,
   OrderItem,
 } from '../orders/schemas/orders.schema';
+import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 
 @Injectable()
 export class ProductService {
@@ -451,19 +452,65 @@ export class ProductService {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    return await this.productModel
-      .find({
-        createdAt: { $gte: sevenDaysAgo }, // Active this week
-      })
-      .sort({
-        average_rating: -1, // Highly rated first
-        'ratings.length': -1, // More engagement
-        createdAt: -1, // New → trending
-      })
-      .limit(20)
-      .populate('business', 'business_name business_logo_url')
-      .exec();
+    const trendingProducts = await this.productModel.aggregate([
+      {
+        $match: {
+          status: 'active', // only active products
+          createdAt: { $lte: new Date() },
+        },
+      },
+      {
+        $addFields: {
+          recent_ratings: {
+            $filter: {
+              input: { $ifNull: ['$ratings', []] },
+              as: 'r',
+              cond: { $gte: ['$$r.createdAt', sevenDaysAgo] }, // last 7 days
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          recent_ratings_count: { $size: '$recent_ratings' },
+        },
+      },
+      {
+        $sort: {
+          average_rating: -1, // highest rated first
+          recent_ratings_count: -1, // most engagement recently
+          createdAt: -1, // newest first
+        },
+      },
+      { $limit: 20 },
+      {
+        $lookup: {
+          from: 'businesses',
+          localField: 'business',
+          foreignField: '_id',
+          as: 'business',
+        },
+      },
+      { $unwind: { path: '$business', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          id: '$_id',
+          kind: 1,
+          base_price: 1,
+          average_rating: 1,
+          createdAt: 1,
+          business: {
+            _id: '$business._id',
+            business_name: '$business.business_name',
+            business_logo_url: '$business.business_logo_url',
+          },
+        },
+      },
+    ]);
+
+    return trendingProducts;
   }
+
   async updateStatus(
     productId: string,
     business: string,
@@ -482,11 +529,11 @@ export class ProductService {
     // If manually updated, clear scheduled activation
     product.scheduled_activation_date = undefined;
 
-    await product.save();
+    const updatedProduct = await product.save();
 
     return {
       message: `Product status updated to ${status}`,
-      data: product,
+      data: updatedProduct.toJSON(),
     };
   }
 
@@ -555,6 +602,7 @@ export class ProductService {
           await this.updateAccessory(item, session);
         }
       });
+      console.log('INVENTORY UPDATED');
     } catch (err) {
       this.logger.error('updateInventory failed', err.stack || err.message);
       throw err;
@@ -564,57 +612,107 @@ export class ProductService {
   }
 
   async updateFabric(item: OrderItem, session, quantityMultiplier = 1) {
-    let fabric;
-    let isEmbedded = false;
-    const fabricSelection = item.fabric_selections;
-    if (Array.isArray(fabricSelection) && fabricSelection.length > 0) {
-      for (let selection of fabricSelection) {
-        fabric = await this.fabricModel.findById(selection.fabric_id);
+    const fabricSelections = item.fabric_selections || [];
+
+    for (const selection of fabricSelections) {
+      // Calculate total yardage needed
+      const totalYards =
+        (selection.yardage ?? 0) *
+        (selection.quantity ?? 1) *
+        quantityMultiplier;
+
+      // Fetch fabric (standalone or embedded)
+      let fabric: any = await this.fabricModel
+        .findById(selection.fabric_id)
+        .session(session);
+      let isEmbedded = false;
+
+      if (!fabric) {
+        const product = await this.productModel
+          .findById(item.product)
+          .session(session);
+        if (!product) throw new BadRequestException('Product not found');
+
+        fabric = product.clothing?.fabrics?.find(
+          (f) => String(f._id) === String(selection.fabric_id),
+        ) as FabricDocument | undefined;
+
         if (!fabric) {
-          const product = await this.productModel.findById(item.product);
-          if (!product) throw new BadRequestException('Product not found');
-
-          fabric = product.clothing?.fabrics?.find(
-            (f) => String(f._id) === String(selection.fabric_id),
-          ) as FabricDocument | undefined;
-
-          if (!fabric) {
-            throw new BadRequestException(
-              `Fabric ${selection.fabric_id} not found in product or standalone`,
-            );
-          }
-          isEmbedded = true;
-        }
-        const totalYards =
-          (selection.yardage ?? 0) *
-          (selection.quantity ?? 1) *
-          quantityMultiplier;
-        if (fabric.yard_length < totalYards) {
           throw new BadRequestException(
-            `Not enough fabric (${fabric.name}) available`,
+            `Fabric ${selection.fabric_id} not found in product or standalone`,
           );
         }
-        fabric.yard_length -= totalYards;
-        if (isEmbedded) {
-          await this.productModel
-            .updateOne(
-              {
-                _id: item.product,
-                'clothing.fabrics._id': fabric._id,
-              },
-              {
-                $set: {
-                  'clothing.fabrics.$.yard_length': fabric.yard_length,
-                },
-              },
-            )
-            .session(session);
-          return;
-        }
-        await fabric.save({ session });
+        isEmbedded = true;
       }
+
+      // Check if enough yardage
+      if (fabric.yard_length < totalYards) {
+        throw new BadRequestException(
+          `Not enough fabric (${fabric.name}) available`,
+        );
+      }
+
+      // Update yardage using the separate function
+      const newYardLength = fabric.yard_length - totalYards;
+      await this.updateFabricStock(
+        item.product,
+        fabric._id.toString(),
+        newYardLength,
+        session,
+      );
     }
   }
+
+  async updateFabricStock(
+    productId: Types.ObjectId,
+    fabricId: Types.ObjectId,
+    newYardLength: number,
+    session?: any,
+  ) {
+    let fabric;
+    let isEmbedded = false;
+
+    // Try to find the standalone fabric
+    fabric = await this.fabricModel.findById(fabricId).session(session);
+
+    // If not standalone, check embedded in product
+    if (!fabric) {
+      const product = await this.productModel
+        .findById(productId)
+        .session(session);
+      if (!product) throw new BadRequestException('Product not found');
+
+      fabric = product.clothing?.fabrics?.find(
+        (f) => String(f._id) === String(fabricId),
+      ) as FabricDocument | undefined;
+
+      if (!fabric) {
+        throw new BadRequestException(
+          `Fabric ${fabricId} not found in product or standalone`,
+        );
+      }
+      isEmbedded = true;
+    }
+
+    // Update yard length
+    fabric.yard_length = newYardLength;
+
+    // Save changes
+    if (isEmbedded) {
+      await this.productModel
+        .updateOne(
+          { _id: productId, 'clothing.fabrics._id': fabric._id },
+          { $set: { 'clothing.fabrics.$.yard_length': fabric.yard_length } },
+        )
+        .session(session);
+    } else {
+      await fabric.save({ session });
+    }
+
+    console.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
+    return { fabricId, newYardLength };
+  }
+
   async updateAccessory(
     item: OrderItem,
     session?: any,
@@ -671,64 +769,95 @@ export class ProductService {
       accessoryVariant.stock -= totalQuantity;
 
       // 5️⃣ Save changes
-      if (isEmbedded) {
-        await this.productModel
-          .updateOne(
-            {
-              _id: item.product,
-              'clothing.accessories._id': accessoryVariant._id,
-            },
-            {
-              $set: {
-                'clothing.accessories.$.variants.$[v].stock':
-                  accessoryVariant.stock,
-              },
-            },
-            { arrayFilters: [{ 'v._id': accessoryVariant._id }] },
-          )
-          .session(session);
-      } else {
-        await accessoryVariant.save?.({ session });
-      }
+      await this.updateAccessoryVariantStock(
+        {
+          product_id: item.product,
+          accessory_id: selection.accessory_id,
+          variant_id: selection.variant_id,
+          new_stock: accessoryVariant.stock,
+        },
+
+        session,
+      );
     }
   }
-  // async updateStyles(item: OrderItem, session?: any, quantityMultiplier = 1) {
-  //   const styleSelections = item.style_selections || [];
-  //   if (styleSelections.length === 0) return;
-  //   const product = await this.productModel
-  //     .findById(item.product)
-  //     .session(session);
-  //   if (!product || !product.clothing)
-  //     throw new BadRequestException('Product or clothing not found');
+  async updateAccessoryVariantStock(
+    dto: UpdateAccessoryVariantStockDto,
+    session: any,
+  ) {
+    const { product_id, accessory_id, variant_id, new_stock } = dto;
+    this.logger.log(
+      `Updating accessory stock → product=${product_id}, accessory=${accessory_id}, variant=${variant_id}, newStock=${new_stock}`,
+    );
 
-  //   const clothing = product.clothing;
-  //   if (clothing.type !== 'customize') return;
-  //   for (const selection of styleSelections) {
-  //     if (Array.isArray(clothing?.styles) && clothing?.styles.length > 0) {
-  //       const style = clothing?.styles.find(
-  //         (s) => String(s._id) === String(selection.style_id),
-  //       );
-  //       if (!style)
-  //         throw new BadRequestException(
-  //           `Style ${selection.style_id} not found`,
-  //         );
+    // 1️⃣ Try standalone accessory first
+    let accessory: any = null;
 
-  //       await this.productModel
-  //         .updateOne(
-  //           {
-  //             _id: item.product,
-  //             'clothing.styles._id': style._id,
-  //           },
-  //           {
-  //             $set: {
-  //               'clothing.accessories.$.variants.$[v].stock':
-  //                 accessoryVariant.stock,
-  //             },
-  //           },
-  //           { arrayFilters: [{ 'v._id': accessoryVariant._id }] },
-  //         )
-  //         .session(session);
-  //     }
-  //   }
-  // }
+    if (this.accessoryModel) {
+      accessory = await this.accessoryModel
+        .findOne({ _id: accessory_id, 'variants._id': variant_id })
+        .session(session);
+    }
+
+    if (accessory) {
+      this.logger.log(`Standalone accessory found. Updating variant stock...`);
+
+      await this.accessoryModel.updateOne(
+        {
+          _id: accessory_id,
+          'variants._id': variant_id,
+        },
+        {
+          $set: { 'variants.$.stock': new_stock },
+        },
+        { session },
+      );
+
+      this.logger.log(`Standalone accessory variant updated successfully`);
+
+      return { type: 'standalone', new_stock };
+    }
+
+    // 2️⃣ Not standalone → Check embedded inside product.clothing.accessories
+    this.logger.log(`Checking embedded accessory inside product...`);
+
+    const embeddedAccessory = await this.productModel.findOne(
+      {
+        _id: product_id,
+        'clothing.accessories._id': accessory_id,
+        'clothing.accessories.variants._id': variant_id,
+      },
+      null,
+      { session },
+    );
+
+    if (!embeddedAccessory) {
+      throw new BadRequestException(
+        `Accessory variant ${variant_id} not found in both standalone and embedded`,
+      );
+    }
+
+    this.logger.log(`Embedded accessory found. Updating variant stock...`);
+
+    // Perform the update
+    await this.productModel.updateOne(
+      {
+        _id: product_id,
+        'clothing.accessories._id': accessory_id,
+      },
+      {
+        $set: {
+          'clothing.accessories.$.variants.$[variant].stock': new_stock,
+        },
+      },
+      {
+        session,
+        arrayFilters: [{ 'variant._id': variant_id }],
+      },
+    );
+
+    this.logger.log(`Embedded accessory variant updated successfully`);
+
+    return { type: 'embedded', new_stock };
+  }
 }

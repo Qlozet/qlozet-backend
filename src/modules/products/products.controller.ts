@@ -21,6 +21,7 @@ import {
   ApiParam,
   ApiQuery,
   ApiOkResponse,
+  ApiBody,
 } from '@nestjs/swagger';
 import {
   CreateAccessoryDto,
@@ -38,6 +39,9 @@ import {
   ScheduleActivationDto,
   UpdateStatusDto,
 } from './dto/update-status.dto';
+import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
+import { Types } from 'mongoose';
+import { FabricParamDto, UpdateFabricStockDto } from './dto/fabric.dto';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -85,6 +89,37 @@ export class ProductsController {
       accessoryDto,
       req.business?._id,
       'accessory',
+    );
+  }
+  @Patch(':product_id/accessories/:accessoryId/variants')
+  @ApiOperation({ summary: 'Update accessory variant stock' })
+  @ApiParam({ name: 'product_id', required: true })
+  @ApiParam({ name: 'accessory_id', required: true })
+  @ApiBody({
+    type: UpdateAccessoryVariantStockDto,
+  })
+  async updateAccessoryVariantStock(
+    @Param('product_id') product_id: Types.ObjectId,
+    @Param('accessory_id') accessory_id: Types.ObjectId,
+    @Body() body: UpdateAccessoryVariantStockDto,
+  ) {
+    return this.productService.updateAccessoryVariantStock(
+      { ...body, accessory_id, product_id },
+      null,
+    );
+  }
+  @Patch(':product_id/fabrics/:fabric_id/stock')
+  @ApiOperation({ summary: 'Update fabric yard length stock' })
+  async updateFabricStock(
+    @Param() params: FabricParamDto,
+    @Body() body: UpdateFabricStockDto,
+  ) {
+    const { product_id, fabric_id } = params;
+    return this.productService.updateFabricStock(
+      new Types.ObjectId(product_id),
+      new Types.ObjectId(fabric_id),
+      body.new_yard_length,
+      null, // optional session
     );
   }
   @Get()
@@ -194,7 +229,6 @@ export class ProductsController {
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async delete(@Param('id') id: string, @Req() req: any) {
-    console.log(req.user.id, ' req.user.id');
     await this.productService.delete(id, req.user.id);
     return { message: 'Product deleted successfully' };
   }

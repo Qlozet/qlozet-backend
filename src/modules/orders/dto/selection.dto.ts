@@ -25,6 +25,8 @@ export class VariantSelectionDto {
   @IsPositive()
   @IsOptional()
   quantity: number;
+  price: number;
+  total_amount: number;
 }
 
 /** -------------------- FABRIC SELECTION -------------------- */
@@ -40,12 +42,17 @@ export class FabricSelectionDto {
   @IsPositive()
   @IsOptional()
   quantity: number;
+  price: number;
+  total_amount: number;
 }
 
 /** -------------------- STYLE SELECTION -------------------- */
 export class StyleSelectionDto {
   @IsMongoId()
   style_id: Types.ObjectId;
+  quantity: number;
+  price: number;
+  total_amount: number;
 }
 
 /** -------------------- ACCESSORY SELECTION -------------------- */
@@ -60,6 +67,8 @@ export class AccessorySelectionDto {
   @IsPositive()
   @IsOptional()
   quantity: number;
+  price: number;
+  total_amount: number;
 }
 
 /** -------------------- ORDER ITEM SELECTIONS -------------------- */

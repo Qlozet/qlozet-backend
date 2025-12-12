@@ -91,6 +91,7 @@ export class WebhookService {
         { _id: transaction.order._id },
         { status: 'processing' },
       );
+      await this.businessService.recordBusinessEarnings(transaction.order._id);
       await this.productService.updateInventory(transaction.order._id);
     }
 
