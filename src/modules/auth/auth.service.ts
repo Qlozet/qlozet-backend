@@ -25,7 +25,10 @@ import { JwtPayload, Tokens } from 'src/common/types';
 import { MailService } from '../notifications/mail/mail.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { TeamMember, TeamMemberDocument } from '../ums/schemas/team.schema';
-import { sanitizeUser } from '../../common/utils/sanitization';
+import {
+  sanitizeBusiness,
+  sanitizeUser,
+} from '../../common/utils/sanitization';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 import {
   BusinessDocument,
@@ -200,8 +203,8 @@ export class AuthService {
 
       return {
         data: {
-          business,
           user: sanitizeUser(vendorUser),
+          business: sanitizeBusiness(business),
         },
         message: 'Vendor registered successfully. Check email to verify.',
       };

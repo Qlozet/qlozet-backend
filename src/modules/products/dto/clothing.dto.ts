@@ -198,6 +198,7 @@ export class ClothingDto {
       },
     ],
   })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FabricDto)

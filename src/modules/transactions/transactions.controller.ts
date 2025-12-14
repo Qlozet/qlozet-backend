@@ -63,12 +63,14 @@ export class TransactionController {
     @Query('page') page = 1,
     @Query('size') size = 10,
     @Req() req: any,
+    @Query('status') status?: string,
   ) {
     try {
       return await this.transactionService.findByCustomer(
         req.user.id,
         +page,
         +size,
+        status,
       );
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);

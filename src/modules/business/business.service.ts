@@ -25,6 +25,7 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
+import { sanitizeBusiness } from 'src/common/utils/sanitization';
 
 @Injectable()
 export class BusinessService {
@@ -475,14 +476,19 @@ export class BusinessService {
   async getUserFollowingBusinesses(userId: string, dto: PaginationQueryType) {
     const user = await this.userModel
       .findById(userId)
-      .select('following_businesses');
+      .select('following_businesses')
+      .lean();
 
     if (!user) throw new NotFoundException('User not found');
 
-    const followingIds = user.following_businesses || [];
+    // Only extract the IDs for the query
+    const followingIds = (user.following_businesses || []).map(
+      (b: any) => b._id,
+    );
+
     const { take, skip } = await Utils.getPagination(
       Number(dto?.page),
-      Number(dto.size),
+      Number(dto?.size),
     );
 
     const [businesses, count] = await Promise.all([
@@ -496,22 +502,32 @@ export class BusinessService {
       }),
     ]);
 
+    // Sanitize after fetching from DB
+    const sanitizedBusinesses = businesses.map(sanitizeBusiness);
+
     return Utils.getPagingData(
       {
         count,
-        rows: businesses,
+        rows: sanitizedBusinesses,
       },
       Number(dto?.page),
-      Number(dto.size),
+      Number(dto?.size),
     );
   }
+
   async getRandomBusinesses(limit = 5) {
-    const businesses = await this.businessModel.aggregate([
-      { $match: { is_active: true } }, // TODO FETCH BY status: 'approved'
-      { $sample: { size: Number(limit) } },
+    return this.businessModel.aggregate([
+      {
+        $match: {
+          status: { $in: ['approved', 'verified'] },
+          is_active: true,
+        },
+      },
+      { $sample: { size: limit } },
+      { $limit: limit }, // 👈 force limit
       {
         $lookup: {
-          from: 'products', // MongoDB collection name
+          from: 'products',
           localField: '_id',
           foreignField: 'business',
           as: 'products',
@@ -553,9 +569,8 @@ export class BusinessService {
         },
       },
     ]);
-
-    return businesses;
   }
+
   // in product.service.ts or a dedicated service like business-earnings.service.ts
   async recordBusinessEarnings(orderId: Types.ObjectId) {
     this.logger.log(`Recording business earnings for order: ${orderId}`);

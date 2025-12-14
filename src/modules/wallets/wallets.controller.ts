@@ -34,7 +34,7 @@ export class WalletsController {
   @ApiOperation({ summary: 'Fund wallet via Paystack' })
   @ApiBody({ type: FundWalletDto })
   async fundWallet(@Body() dto: FundWalletDto, @Req() req: any) {
-    const business = req.business.id;
+    const business = req.business?.id;
     const user = req.user;
     const result = await this.walletsService.fundWallet(
       dto.amount,

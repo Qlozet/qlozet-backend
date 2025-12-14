@@ -189,7 +189,7 @@ export class UserController {
   async getMyAddress(@Req() req) {
     const userId = req.user._id;
     const address = await this.userService.getUserAddress(userId);
-    return { address };
+    return address;
   }
 
   // ==============================
@@ -306,6 +306,17 @@ export class UserController {
       },
     },
   })
+  async getFeed(
+    @Query('page') page: string,
+    @Query('size') size: string,
+    @Query('business_limit') business_limit: string,
+  ) {
+    return this.businessService.getFeed(
+      Number(page),
+      Number(size),
+      Number(business_limit),
+    );
+  }
   @Get('vendors/top-week')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',

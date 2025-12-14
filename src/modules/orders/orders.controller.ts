@@ -12,6 +12,7 @@ import {
   Req,
   NotFoundException,
   UseGuards,
+  Patch,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -101,8 +102,8 @@ export class OrderController {
   //   return this.orderService.confirmOrder(reference, business);
   // }
   @Roles(UserType.VENDOR)
-  @Post('reject/:reference')
-  @ApiOperation({ summary: 'Reject an order and refund customer' })
+  @Patch('cancel/:reference')
+  @ApiOperation({ summary: 'Cancel an order and refund customer' })
   async rejectOrder(@Param('reference') reference: string) {
     return this.orderService.cancelOrder(reference);
   }

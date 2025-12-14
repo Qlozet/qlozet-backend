@@ -62,7 +62,7 @@ export class ProductsController {
   ) {
     return this.productService.upsert(
       clothingDto,
-      req.business?._id,
+      req.business?.id,
       'clothing',
     );
   }
@@ -73,7 +73,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'Create a new fabric product' })
   @ApiResponse({ status: 201, description: 'Fabric product created' })
   async createFabric(@Body() fabricDto: CreateFabricDto, @Req() req: any) {
-    return this.productService.upsert(fabricDto, req.business?._id, 'fabric');
+    return this.productService.upsert(fabricDto, req.business?.id, 'fabric');
   }
 
   // ---------------- ACCESSORY ----------------
@@ -87,7 +87,7 @@ export class ProductsController {
   ) {
     return this.productService.upsert(
       accessoryDto,
-      req.business?._id,
+      req.business?.id,
       'accessory',
     );
   }
@@ -203,7 +203,7 @@ export class ProductsController {
     @Query('size') size = 10,
   ) {
     return this.productService.findByVendor(
-      req.user.id,
+      req.business?.id,
       kind,
       Number(page),
       Number(size),
