@@ -96,11 +96,17 @@ export class TransactionService {
   ) {
     const { take, skip } = await Utils.getPagination(page, size);
 
-    const matchStage: any = {};
-    if (status && status !== 'all') matchStage.status = status.toLowerCase();
+    const businessId =
+      typeof business === 'string' ? new Types.ObjectId(business) : business;
 
-    const pipeline: any[] = [
+    const matchStage: any = {};
+    if (status && status !== 'all') {
+      matchStage.status = status.toLowerCase();
+    }
+
+    const basePipeline: any[] = [
       { $match: matchStage },
+
       {
         $lookup: {
           from: 'orders',
@@ -110,57 +116,102 @@ export class TransactionService {
         },
       },
       { $unwind: '$order' },
+
+      // keep only transactions that have items for this business
       {
         $addFields: {
-          order: {
-            $mergeObjects: [
-              '$order',
-              {
-                items: {
-                  $filter: {
-                    input: '$order.items',
-                    as: 'item',
-                    cond: { $eq: ['$$item.business', business] },
-                  },
-                },
-              },
-            ],
+          orderItemsForBusiness: {
+            $filter: {
+              input: '$order.items',
+              as: 'item',
+              cond: { $eq: ['$$item.business', businessId] },
+            },
           },
         },
       },
-      { $match: { 'order.items': { $ne: [] } } }, // only keep transactions that include this business
+      { $match: { 'orderItemsForBusiness.0': { $exists: true } } },
+
+      // project only minimal order object
+      {
+        $project: {
+          __v: 0,
+          metadata: 0,
+          'order.items': 0, // remove full items
+          'order.address': 0,
+          'order.subtotal': 0,
+          'order.shipping_fee': 0,
+          'order.total': 0,
+          'order.vendor_earnings': 0,
+          'order.platform_commission': 0,
+          'order.payout_eligible_at': 0,
+          'order.payout_status': 0,
+          'order.createdAt': 0,
+          'order.updatedAt': 0,
+          orderItemsForBusiness: 0, // remove helper field
+        },
+      },
+    ];
+
+    const dataPipeline = [
+      ...basePipeline,
       { $sort: { createdAt: -1 } },
       { $skip: skip },
       { $limit: take },
     ];
 
+    const countPipeline = [...basePipeline, { $count: 'total' }];
+
     const [rows, count] = await Promise.all([
-      this.transactionModel.aggregate(pipeline),
-      this.transactionModel.aggregate([
-        ...pipeline.slice(0, -3),
-        { $count: 'total' },
-      ]),
+      this.transactionModel.aggregate(dataPipeline),
+      this.transactionModel.aggregate(countPipeline),
     ]);
 
     const total = count[0]?.total || 0;
+
     return Utils.getPagingData({ count: total, rows }, page, size);
   }
 
-  async findByCustomer(customerId: string, page = 1, size = 10) {
+  async findByCustomer(
+    customerId: string,
+    page = 1,
+    size = 10,
+    status?: string,
+  ) {
     const { take, skip } = await Utils.getPagination(page, size);
-    const filter = { initiator: customerId };
+
+    const filter: any = { initiator: customerId };
+    if (status) filter.status = status;
 
     const [transactions, total] = await Promise.all([
       this.transactionModel
         .find(filter)
+        .select({
+          _id: 1,
+          type: 1,
+          amount: 1,
+          status: 1,
+          reference: 1,
+          description: 1,
+          currency: 1,
+          payment_method: 1,
+          channel: 1,
+          createdAt: 1,
+        })
         .populate([
-          { path: 'order', select: 'reference total_price status' },
-          { path: 'wallet', select: 'balance type' },
+          {
+            path: 'order',
+            select: 'reference status total_price',
+          },
+          {
+            path: 'wallet',
+            select: 'balance type',
+          },
         ])
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(take)
         .lean(),
+
       this.transactionModel.countDocuments(filter),
     ]);
 
@@ -172,7 +223,18 @@ export class TransactionService {
   }
 
   async findByReference(reference: string) {
-    const tx = await this.transactionModel.findOne({ reference });
+    const tx = await this.transactionModel.findOne({ reference }).select({
+      _id: 1,
+      type: 1,
+      amount: 1,
+      status: 1,
+      reference: 1,
+      description: 1,
+      currency: 1,
+      payment_method: 1,
+      channel: 1,
+      createdAt: 1,
+    });
     if (!tx) throw new NotFoundException('Transaction not found');
     return tx;
   }

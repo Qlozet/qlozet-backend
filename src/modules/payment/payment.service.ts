@@ -47,6 +47,7 @@ export class PaymentService {
   }
 
   async initializePaystackPayment(txReference: string, email: string) {
+    console.log(txReference);
     const transaction =
       await this.transactionService.findByReference(txReference);
     if (!transaction) throw new NotFoundException('Transaction not found');

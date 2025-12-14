@@ -558,7 +558,7 @@ export class ProductService {
 
     return {
       message: 'Product scheduled for automatic activation',
-      data: product,
+      data: product.toJSON().scheduled_activation_date,
     };
   }
   // Runs every 1 minute

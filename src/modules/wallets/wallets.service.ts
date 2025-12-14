@@ -77,7 +77,7 @@ export class WalletsService {
     });
 
     const result = await this.paymentService.initializePaystackPayment(
-      transaction.id,
+      transaction.reference,
       email,
     );
 
