@@ -775,4 +775,46 @@ export class BusinessService {
       size,
     );
   }
+  async getEarningsChart(businessId: string): Promise<any> {
+    const data = await this.businessEarningsModel.aggregate([
+      {
+        $match: {
+          business: new Types.ObjectId(businessId),
+          released: true, // only consider released earnings
+        },
+      },
+      {
+        $project: {
+          dayOfWeek: { $dayOfWeek: '$release_date' }, // 1=Sun, 2=Mon, ... 7=Sat
+          net_amount: 1,
+        },
+      },
+      {
+        $group: {
+          _id: '$dayOfWeek',
+          totalEarnings: { $sum: '$net_amount' },
+        },
+      },
+    ]);
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const earningsByDay = dayLabels.map((label, index) => {
+      const record = data.find((d) => d._id === index + 1);
+      return { label, value: record ? record.totalEarnings : 0 };
+    });
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Earnings',
+        series: [
+          {
+            key: 'earnings',
+            name: 'Earnings',
+            color: '#c4b5a0',
+            data: earningsByDay,
+          },
+        ],
+      },
+    };
+  }
 }

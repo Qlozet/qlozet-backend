@@ -143,4 +143,9 @@ export class BusinessController {
   async getBusinessProfile(@Req() req: any) {
     return this.businessService.findBusinessById(req.business?.id);
   }
+  @Roles(UserType.VENDOR)
+  @Get('earnings-chart')
+  async getEarningChart(@Req() req: any) {
+    return this.businessService.getEarningsChart(req.business?.id);
+  }
 }

@@ -8,6 +8,7 @@ import {
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import {
+  ALLOWED_STATUSES,
   Order,
   OrderDocument,
   OrderItem,
@@ -50,6 +51,7 @@ import { UserService } from '../ums/services';
 import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { Business } from '../business/schemas/business.schema';
+import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 
 @Injectable()
 export class OrderService {
@@ -66,6 +68,8 @@ export class OrderService {
     @InjectModel('Accessory') private accessoryModel: Model<AccessoryDocument>,
     @InjectModel('Discount') private discountModel: Model<DiscountDocument>,
     @InjectModel('Address') private addressModel: Model<AddressDocument>,
+    @InjectModel('BusinessEarning')
+    private businessEarningsModel: Model<BusinessEarningDocument>,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -697,6 +701,472 @@ export class OrderService {
     return {
       message: 'Order confirmed and shipment created successfully',
       data: order,
+    };
+  }
+
+  async getChart(): Promise<any> {
+    const [ordersByGender, ordersByLocation, ordersByProduct] =
+      await Promise.all([
+        this.getOrdersByGenderChart(),
+        this.getOrdersByLocationChart(),
+        this.getOrdersByProductChart(),
+      ]);
+
+    return {
+      charts: {
+        ordersByGender: ordersByGender.data,
+        ordersByLocation: ordersByLocation.data,
+        ordersByProduct: ordersByProduct.data,
+      },
+    };
+  }
+
+  async getOrdersByGenderChart(): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      {
+        // Join with the users collection to get customer details
+        $lookup: {
+          from: 'users', // MongoDB collection name
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' }, // Flatten the array
+      {
+        $group: {
+          _id: '$customer_info.gender', // Group by gender
+          count: { $sum: 1 }, // Count orders per gender
+        },
+      },
+    ]);
+
+    // Transform to chart JSON format
+    const chartData = {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Gender',
+        series: [
+          {
+            key: 'gender',
+            name: 'Gender Distribution',
+            data: data.map((d) => ({
+              label: d._id || 'Unknown',
+              value: d.count,
+              color: d._id === 'Male' ? '#3d2817' : '#d4c5b9',
+            })),
+          },
+        ],
+      },
+    };
+
+    return chartData;
+  }
+  async getOrdersByLocationChart(): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' },
+      {
+        $group: {
+          _id: {
+            location: '$customer_info.address.city',
+            gender: '$customer_info.gender',
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Extract unique locations
+    const locations = Array.from(
+      new Set(data.map((d) => d._id.location || d._id.gender || 'Unknown')),
+    );
+
+    // Helper to generate series
+    const generateSeries = (gender: string, color: string) => ({
+      key: gender.toLowerCase(),
+      name: gender,
+      color,
+      data: locations.map((loc) => {
+        const record = data.find(
+          (d) => d._id.location === loc && d._id.gender === gender,
+        );
+        return { label: loc, value: record ? record.count : 0 };
+      }),
+    });
+
+    // Ensure both Male and Female series exist, even if no orders
+    const maleSeries = generateSeries('Male', '#3d2817');
+    const femaleSeries = generateSeries('Female', '#9C8578');
+
+    return {
+      data: {
+        chartType: 'stacked_bar',
+        title: 'Orders by Location',
+        series: [maleSeries, femaleSeries],
+      },
+    };
+  }
+  async getOrdersByProductChart(): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      // Join with users to get gender
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' },
+
+      // Unwind each order's items
+      { $unwind: '$items' },
+
+      // Join with products to get product name
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product_info',
+        },
+      },
+      { $unwind: '$product_info' },
+
+      // Group by product name and gender
+      {
+        $group: {
+          _id: {
+            product: '$product_info.clothing.name', // or use .fabric.name/.accessory.name depending on product type
+            gender: '$customer_info.gender',
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Extract unique product names
+    const products = Array.from(
+      new Set(data.map((d) => d._id.product || 'Unknown')),
+    );
+
+    // Prepare male and female series
+    const maleSeries = {
+      key: 'male',
+      name: 'Male',
+      color: '#3d2817',
+      data: products.map((prod) => {
+        const record = data.find(
+          (d) => d._id.product === prod && d._id.gender === 'Male',
+        );
+        return { label: prod, value: record ? record.count : 0 };
+      }),
+    };
+
+    const femaleSeries = {
+      key: 'female',
+      name: 'Female',
+      color: '#9C8578',
+      data: products.map((prod) => {
+        const record = data.find(
+          (d) => d._id.product === prod && d._id.gender === 'Female',
+        );
+        return { label: prod, value: record ? record.count : 0 };
+      }),
+    };
+
+    return {
+      data: {
+        chartType: 'stacked_bar',
+        title: 'Orders by Product',
+        series: [maleSeries, femaleSeries],
+      },
+    };
+  }
+  async getBusinessChart(businessId: string): Promise<any> {
+    const [ordersByGender, ordersByLocation, ordersByProduct] =
+      await Promise.all([
+        this.getBusinessOrdersByGenderChart(businessId),
+        this.getBusinessOrdersByLocationChart(businessId),
+        this.getBusinessOrdersByProductChart(businessId),
+      ]);
+    const totalOrdersAgg = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      {
+        $match: {
+          'items.business': new Types.ObjectId(businessId),
+          status: { $in: ALLOWED_STATUSES },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id', // group back to order level
+        },
+      },
+      {
+        $count: 'totalOrders',
+      },
+    ]);
+
+    const totalOrders = totalOrdersAgg[0]?.totalOrders || 0;
+
+    // Total earnings and average per day
+    const earningsAgg = await this.businessEarningsModel.aggregate([
+      {
+        $match: {
+          business: new Types.ObjectId(businessId),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalEarnings: { $sum: '$net_amount' },
+        },
+      },
+    ]);
+
+    const totalEarnings = earningsAgg[0]?.totalEarnings || 0;
+    const avgOrdersAgg = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      {
+        $match: {
+          'items.business': new Types.ObjectId(businessId),
+          status: { $in: ALLOWED_STATUSES },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+          },
+          orders: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $project: {
+          dailyOrders: { $size: '$orders' },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          averageOrdersPerDay: { $avg: '$dailyOrders' },
+        },
+      },
+    ]);
+
+    const averageOrdersPerDay = Math.round(
+      avgOrdersAgg[0]?.averageOrdersPerDay || 0,
+    );
+
+    // Total returns
+    const totalReturnsAgg = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      {
+        $match: {
+          'items.business': new Types.ObjectId(businessId),
+          status: OrderStatus.RETURNED,
+        },
+      },
+      {
+        $group: { _id: '$_id' },
+      },
+      {
+        $count: 'totalReturns',
+      },
+    ]);
+
+    const totalReturns = totalReturnsAgg[0]?.totalReturns || 0;
+
+    // For simplicity, using static change percentages; ideally, calculate based on previous periods
+    const summary = {
+      totalOrders,
+      totalOrdersChange: '+24%',
+      totalEarnings,
+      totalEarningsChange: '+2.5%',
+      averageOrdersPerDay,
+      averageOrdersChange: '+2.5%',
+      totalReturns,
+      totalReturnsChange: '-2.6%',
+    };
+
+    return {
+      summary,
+      charts: {
+        ordersByGender: ordersByGender.data,
+        ordersByLocation: ordersByLocation.data,
+        ordersByProduct: ordersByProduct.data,
+      },
+    };
+  }
+
+  async getBusinessOrdersByGenderChart(businessId: string): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' }, // Unwind items to check business
+      { $match: { 'items.business': new Types.ObjectId(businessId) } }, // filter by business
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' },
+      {
+        $group: {
+          _id: '$customer_info.gender',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Gender',
+        series: [
+          {
+            key: 'gender',
+            name: 'Gender Distribution',
+            data: data.map((d) => ({
+              label: d._id || 'Unknown',
+              value: d.count,
+              color: d._id === 'Male' ? '#3d2817' : '#d4c5b9',
+            })),
+          },
+        ],
+      },
+    };
+  }
+
+  async getBusinessOrdersByLocationChart(businessId: string): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' },
+      {
+        $group: {
+          _id: {
+            location: '$customer_info.address.city',
+            gender: '$customer_info.gender',
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const locations = Array.from(
+      new Set(data.map((d) => d._id.location || d._id.gender || 'Unknown')),
+    );
+
+    const generateSeries = (gender: string, color: string) => ({
+      key: gender.toLowerCase(),
+      name: gender,
+      color,
+      data: locations.map((loc) => {
+        const record = data.find(
+          (d) => d._id.location === loc && d._id.gender === gender,
+        );
+        return { label: loc, value: record ? record.count : 0 };
+      }),
+    });
+
+    return {
+      data: {
+        chartType: 'stacked_bar',
+        title: 'Orders by Location',
+        series: [
+          generateSeries('Male', '#3d2817'),
+          generateSeries('Female', '#9C8578'),
+        ],
+      },
+    };
+  }
+
+  async getBusinessOrdersByProductChart(businessId: string): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'customer',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      { $unwind: '$customer_info' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product_info',
+        },
+      },
+      { $unwind: '$product_info' },
+      {
+        $group: {
+          _id: {
+            product: '$product_info.clothing.name',
+            gender: '$customer_info.gender',
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const products = Array.from(
+      new Set(data.map((d) => d._id.product || 'Unknown')),
+    );
+
+    const maleSeries = {
+      key: 'male',
+      name: 'Male',
+      color: '#3d2817',
+      data: products.map((prod) => {
+        const record = data.find(
+          (d) => d._id.product === prod && d._id.gender === 'Male',
+        );
+        return { label: prod, value: record ? record.count : 0 };
+      }),
+    };
+
+    const femaleSeries = {
+      key: 'female',
+      name: 'Female',
+      color: '#9C8578',
+      data: products.map((prod) => {
+        const record = data.find(
+          (d) => d._id.product === prod && d._id.gender === 'Female',
+        );
+        return { label: prod, value: record ? record.count : 0 };
+      }),
+    };
+
+    return {
+      data: {
+        chartType: 'stacked_bar',
+        title: 'Orders by Product',
+        series: [maleSeries, femaleSeries],
+      },
     };
   }
 }

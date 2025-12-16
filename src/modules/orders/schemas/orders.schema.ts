@@ -11,6 +11,7 @@ export enum OrderStatus {
   CANCELLED = 'cancelled',
   RETURNED = 'returned',
 }
+export const ALLOWED_STATUSES = [OrderStatus.PROCESSING, OrderStatus.COMPLETED];
 
 export type OrderDocument = Order & Document;
 
