@@ -23,14 +23,9 @@ import { TicketService } from './ticket.service';
 import {
   CreateTicketDto,
   UpdateTicketDto,
-  AssignTicketDto,
   TicketFilterDto,
 } from './dto/ticket.dto';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import {
-  CreateTicketReplyDto,
-  TicketReplyResponseDto,
-} from './dto/ticket-reply.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 
@@ -51,7 +46,7 @@ export class TicketController {
   }
 
   @Roles(UserType.VENDOR)
-  @Get('tickets')
+  @Get()
   @ApiOperation({ summary: 'Get paginated tickets with filters' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'size', required: false, example: 10 })

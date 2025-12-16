@@ -28,11 +28,11 @@ export class Collection {
 
   @Prop({
     type: Types.ObjectId,
-    ref: 'User',
+    ref: 'Business',
     required: true,
     index: true,
   })
-  vendor: Types.ObjectId;
+  business: Types.ObjectId;
 }
 
 export const CollectionSchema = SchemaFactory.createForClass(Collection);

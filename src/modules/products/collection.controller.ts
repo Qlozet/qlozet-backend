@@ -8,12 +8,14 @@ import {
   UsePipes,
   ValidationPipe,
   Req,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { CollectionService } from './collection.service';
 import { Collection } from './schemas/collection.schema';
@@ -38,7 +40,7 @@ export class CollectionController {
     @Body() dto: CreateCollectionDto,
     @Req() req: any,
   ): Promise<Collection> {
-    return this.collectionService.create(dto, req.user.id);
+    return this.collectionService.create(dto, req.business.id);
   }
 
   @Get()
@@ -58,12 +60,40 @@ export class CollectionController {
   async getProductsByCollection(@Param('collectionId') collectionId: string) {
     return this.collectionService.getProductsByCollection(collectionId);
   }
+  @Get(':collectionId')
+  @ApiOperation({ summary: 'Get collection by ID' })
+  async getCollectionById(@Param('collectionId') collectionId: string) {
+    return this.collectionService.getCollectionById(collectionId);
+  }
 
+  @Roles(UserType.VENDOR)
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by collection title or description',
+  })
+  @ApiQuery({
+    name: 'is_active',
+    required: false,
+    type: Boolean,
+    example: true,
+  })
+  @ApiQuery({
+    name: 'condition_match',
+    required: false,
+    enum: ['all', 'any'],
+    description: 'Condition matching rule',
+  })
   @Get('vendor/with-products')
   @ApiOperation({ summary: 'Get all vendor collections with their products' })
-  async getCollectionsWithProductsByVendor(@Req() req: any) {
+  async getCollectionsWithProductsByVendor(
+    @Query() query: any,
+    @Req() req: any,
+  ) {
     return this.collectionService.getCollectionsWithProductsByVendor(
-      req.user.id,
+      req.business?.id,
+      query,
     );
   }
 }

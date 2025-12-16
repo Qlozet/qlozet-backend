@@ -5,6 +5,8 @@ import { Model, Types } from 'mongoose';
 import { Discount, DiscountDocument } from './schemas/discount.schema';
 import { CreateDiscountDto } from './dto/discount.dto';
 import { Product, ProductDocument } from './schemas';
+import { Utils } from 'src/common/utils/pagination';
+import { ProductKind } from './schemas/product.schema';
 
 @Injectable()
 export class DiscountService {
@@ -18,32 +20,80 @@ export class DiscountService {
   ) {}
 
   /** 🔹 Get all discounts */
-  async findAll(): Promise<DiscountDocument[]> {
-    return this.discountModel.find().exec();
+  async findAll(
+    business: string,
+    query?: { page?: number; size?: number },
+  ): Promise<{
+    total_items: number;
+    data: DiscountDocument[];
+    total_pages: number;
+    current_page: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    page_size: number;
+  }> {
+    const { page = 1, size = 10 } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+
+    const filter = { business: new Types.ObjectId(business) };
+
+    const [discounts, totalCount] = await Promise.all([
+      this.discountModel.find(filter).skip(skip).limit(take).exec(),
+      this.discountModel.countDocuments(filter),
+    ]);
+
+    return Utils.getPagingData(
+      { count: totalCount, rows: discounts },
+      page,
+      size,
+    );
   }
 
-  /** 🔹 Get only active discounts */
-  async findActive(): Promise<DiscountDocument[]> {
+  async findActive(
+    business: string,
+    query?: { page?: number; size?: number },
+  ): Promise<{
+    total_items: number;
+    data: DiscountDocument[];
+    total_pages: number;
+    current_page: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    page_size: number;
+  }> {
+    const { page = 1, size = 10 } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+
     const now = new Date();
-    return this.discountModel
-      .find({
-        start_date: { $lte: now },
-        $or: [{ end_date: null }, { end_date: { $gte: now } }],
-        is_active: true,
-      })
-      .exec();
+    const filter = {
+      business: new Types.ObjectId(business),
+      start_date: { $lte: now },
+      $or: [{ end_date: null }, { end_date: { $gte: now } }],
+      is_active: true,
+    };
+
+    const [discounts, totalCount] = await Promise.all([
+      this.discountModel.find(filter).skip(skip).limit(take).exec(),
+      this.discountModel.countDocuments(filter),
+    ]);
+
+    return Utils.getPagingData(
+      { count: totalCount, rows: discounts },
+      page,
+      size,
+    );
   }
 
   /** 🔹 Create discount and trigger async apply */
   async create(
     createDiscountDto: CreateDiscountDto,
-    vendor: string,
+    business: string,
   ): Promise<DiscountDocument> {
     this.logger.log(`Creating discount: ${JSON.stringify(createDiscountDto)}`);
 
     const discount = new this.discountModel({
       ...createDiscountDto,
-      vendor,
+      business: new Types.ObjectId(business),
       condition_match: createDiscountDto.condition_match || 'all',
     });
 
@@ -198,23 +248,53 @@ export class DiscountService {
   }
 
   /** 🔹 Get all products with currently active discounts */
-  async getDiscountedProducts(): Promise<ProductDocument[]> {
+  async getDiscountedProducts(
+    business: string,
+    query?: { page?: number; size?: number },
+  ) {
+    const { page = 1, size = 10 } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
     const now = new Date();
+
+    // 1️⃣ Get all active discounts for this business
     const activeDiscounts = await this.discountModel
       .find({
+        business,
         is_active: true,
         start_date: { $lte: now },
         $or: [{ end_date: null }, { end_date: { $gte: now } }],
       })
       .select('_id')
+      .lean()
       .exec();
 
-    if (!activeDiscounts.length) return [];
+    if (!activeDiscounts.length) {
+      return Utils.getPagingData({ count: 0, rows: [] }, page, size);
+    }
 
     const discountIds = activeDiscounts.map((d) => d._id);
-    return this.productModel
-      .find({ applied_discounts: { $in: discountIds } })
-      .exec();
+
+    // 2️⃣ Find products that have these active discounts
+    const [products, totalCount] = await Promise.all([
+      this.productModel
+        .find({ business, applied_discounts: { $in: discountIds } })
+        .skip(skip)
+        .limit(take)
+        .populate('applied_discounts')
+        .lean()
+        .exec(),
+      this.productModel.countDocuments({
+        business,
+        applied_discounts: { $in: discountIds },
+      }),
+    ]);
+
+    // 3️⃣ Return paginated result
+    return Utils.getPagingData(
+      { count: totalCount, rows: products },
+      page,
+      size,
+    );
   }
 
   /** 🔹 Helper: safely get nested object fields (supports arrays) */
@@ -257,14 +337,34 @@ export class DiscountService {
 
   /** 🔹 Get discounted products per vendor */
   async getDiscountedProductsByVendor(
-    vendorId: string,
-  ): Promise<ProductDocument[]> {
-    return this.productModel
-      .find({
-        vendor: vendorId,
-        applied_discounts: { $exists: true, $ne: [] },
-      })
-      .populate('applied_discounts')
-      .exec();
+    business: string,
+    query?: { page?: number; size?: number; kind?: ProductKind },
+  ) {
+    const { page = 1, size = 10, kind } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+    const filter: any = {
+      business,
+      applied_discount: { $ne: null },
+    };
+    if (kind) filter.kind = kind;
+
+    // Get products and total count in parallel
+    const [products, totalCount] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .skip(skip)
+        .limit(take)
+        .populate('applied_discount')
+        .lean()
+        .exec(),
+      this.productModel.countDocuments(filter),
+    ]);
+
+    // Return paginated data
+    return Utils.getPagingData(
+      { count: totalCount, rows: products },
+      page,
+      size,
+    );
   }
 }

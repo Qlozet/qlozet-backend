@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { FilterQuery, Model, Types } from 'mongoose';
 import { Collection, CollectionDocument } from './schemas/collection.schema';
 import { CreateCollectionDto } from './dto/collection.dto';
 import { Product, ProductDocument } from './schemas';
+import { Utils } from '../../common/utils/pagination';
 
 @Injectable()
 export class CollectionService {
@@ -33,7 +34,7 @@ export class CollectionService {
    */
   async create(
     createCollectionDto: CreateCollectionDto,
-    vendor: string,
+    business: string,
   ): Promise<CollectionDocument> {
     console.log(
       '🟢 [CollectionService] Creating new collection:',
@@ -42,7 +43,7 @@ export class CollectionService {
 
     const collection = new this.collectionModel({
       ...createCollectionDto,
-      vendor,
+      business: new Types.ObjectId(business),
       condition_match: createCollectionDto.condition_match || 'all',
     });
 
@@ -149,41 +150,101 @@ export class CollectionService {
    */
   async getProductsByCollection(
     collectionId: string,
-  ): Promise<ProductDocument[]> {
-    return this.productModel
-      .find({ collections: collectionId })
-      .populate('collections')
-      .exec();
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    total_items: number;
+    data: ProductDocument[];
+    total_pages: number;
+    current_page: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    page_size: number;
+  }> {
+    const { take, skip } = await Utils.getPagination(page, limit);
+
+    const [products, totalCount] = await Promise.all([
+      this.productModel
+        .find({ collections: new Types.ObjectId(collectionId) })
+        .skip(skip)
+        .limit(take)
+        .populate('collections')
+        .exec(),
+      this.productModel.countDocuments({
+        collections: new Types.ObjectId(collectionId),
+      }),
+    ]);
+
+    return Utils.getPagingData(
+      { count: totalCount, rows: products },
+      page,
+      limit,
+    );
   }
 
   /**
    * Get all collections and their products by vendor
    */
   async getCollectionsWithProductsByVendor(
-    vendorId: string,
-  ): Promise<
-    { collection: CollectionDocument; products: ProductDocument[] }[]
-  > {
-    const collections = await this.collectionModel
-      .find({ vendor: vendorId })
-      .exec();
+    business: string,
+    query: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      is_active?: boolean;
+      condition_match?: 'all' | 'any';
+    },
+  ): Promise<{
+    total_items: number;
+    data: any[];
+    total_pages: number;
+    current_page: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    page_size: number;
+  }> {
+    const { page = 1, limit = 10, search, is_active, condition_match } = query;
+    const { take, skip } = await Utils.getPagination(page, limit);
 
-    // ✅ Explicitly type the result array
-    const result: {
-      collection: CollectionDocument;
-      products: ProductDocument[];
-    }[] = [];
+    const collectionFilter: FilterQuery<CollectionDocument> = {
+      business: new Types.ObjectId(business),
+    };
 
-    for (const collection of collections) {
-      const products = await this.productModel
-        .find({ vendor: vendorId, collections: collection._id })
-        .populate('collections')
-        .exec();
-
-      result.push({ collection, products });
+    if (typeof is_active === 'boolean') collectionFilter.is_active = is_active;
+    if (condition_match) collectionFilter.condition_match = condition_match;
+    if (search?.trim()) {
+      collectionFilter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
     }
 
-    return result;
+    const [collections, totalCount] = await Promise.all([
+      this.collectionModel
+        .find(collectionFilter)
+        .skip(skip)
+        .limit(take)
+        .sort({ createdAt: -1 })
+        .exec(),
+      this.collectionModel.countDocuments(collectionFilter),
+    ]);
+    const allProducts = await this.productModel
+      .find({ business, collections: { $in: collections.map((c) => c._id) } })
+      .populate('collections')
+      .exec();
+
+    const rows = collections.map((collection) => ({
+      ...collection.toObject(), // spread collection fields
+      products: allProducts.filter((p) =>
+        p.collections.some((c) => String(c._id) === String(collection._id)),
+      ),
+    }));
+
+    return Utils.getPagingData({ count: totalCount, rows }, page, limit);
+  }
+
+  async getCollectionById(id: string) {
+    return this.collectionModel.findById(id).lean();
   }
 
   /**
