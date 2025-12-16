@@ -59,11 +59,11 @@ export class Discount {
 
   @Prop({
     type: Types.ObjectId,
-    ref: 'User',
+    ref: 'Business',
     required: true,
     index: true,
   })
-  vendor: Types.ObjectId;
+  business: Types.ObjectId;
 }
 
 export const DiscountSchema = SchemaFactory.createForClass(Discount);

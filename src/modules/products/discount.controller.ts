@@ -8,6 +8,7 @@ import {
   UsePipes,
   ValidationPipe,
   Req,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -45,16 +46,18 @@ export class DiscountController {
     description: 'Discount created successfully',
     type: Discount,
   })
+  @Roles(UserType.VENDOR)
   async create(
     @Body() dto: CreateDiscountDto,
     @Req() req: any,
   ): Promise<Discount> {
-    return this.discountService.create(dto, req.user.id);
+    return this.discountService.create(dto, req.business?.id);
   }
 
   /**
    * Get all discounts
    */
+  @Roles(UserType.VENDOR)
   @Get()
   @ApiOperation({ summary: 'Get all discounts' })
   @ApiResponse({
@@ -62,8 +65,9 @@ export class DiscountController {
     description: 'List of all discounts',
     type: [Discount],
   })
-  async findAll(): Promise<Discount[]> {
-    return this.discountService.findAll();
+  async findAll(@Query() query: any, @Req() req: any) {
+    console.log(req.business?.id, 'req.business?.id');
+    return this.discountService.findAll(req.business?.id, query);
   }
 
   /**
@@ -76,8 +80,8 @@ export class DiscountController {
     description: 'List of active discounts',
     type: [Discount],
   })
-  async findActive(): Promise<Discount[]> {
-    return this.discountService.findActive();
+  async findActive(@Query() query: any, @Req() req: any) {
+    return this.discountService.findActive(req.business?.id, query);
   }
 
   /**
@@ -103,8 +107,11 @@ export class DiscountController {
     description: 'List of discounted products for the vendor',
     type: [Product],
   })
-  async getDiscountedProductsByVendor(@Req() req: any): Promise<Product[]> {
-    return this.discountService.getDiscountedProductsByVendor(req.user.id);
+  async getDiscountedProductsByVendor(@Query() query: any, @Req() req: any) {
+    return this.discountService.getDiscountedProductsByVendor(
+      req.business?.id,
+      query,
+    );
   }
 
   /**
@@ -118,7 +125,7 @@ export class DiscountController {
     description: 'List of products currently under discount',
     type: [Product],
   })
-  async getDiscountedProducts(): Promise<Product[]> {
-    return this.discountService.getDiscountedProducts();
+  async getDiscountedProducts(@Query() query: any, @Req() req: any) {
+    return this.discountService.getDiscountedProducts(req.business?.id, query);
   }
 }

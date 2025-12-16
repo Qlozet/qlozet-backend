@@ -89,8 +89,31 @@ export class BusinessService {
     }
   }
 
-  async findAllWarehouse(): Promise<Warehouse[]> {
-    return this.warehouseModel.find().populate('business', 'name email').exec();
+  async findAllWarehouse(
+    business: string,
+    query?: { page?: number; size?: number },
+  ) {
+    const { page = 1, size = 10 } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+    const filter = { business: new Types.ObjectId(business) };
+
+    const [warehouses, totalCount] = await Promise.all([
+      this.warehouseModel
+        .find(filter)
+        .skip(skip)
+        .limit(take)
+        .populate('business', 'name email')
+        .lean()
+        .exec(),
+      this.warehouseModel.countDocuments(filter),
+    ]);
+
+    // Return paginated result
+    return Utils.getPagingData(
+      { count: totalCount, rows: warehouses },
+      page,
+      size,
+    );
   }
 
   async findOneWarehouse(id: string): Promise<Warehouse> {
@@ -723,9 +746,33 @@ export class BusinessService {
       { released: true, net_amount: 0, released_at: new Date() },
     );
   }
-  async getUpcomingEarnings(businessId: string) {
-    return this.businessEarningsModel
-      .find({ business: new Types.ObjectId(businessId), released: false })
-      .select('net_amount release_date order');
+  async getUpcomingEarnings(
+    businessId: string,
+    query?: { page?: number; size?: number },
+  ) {
+    const { page = 1, size = 10 } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+
+    const filter = {
+      business: new Types.ObjectId(businessId),
+      released: false,
+    };
+
+    const [earnings, totalCount] = await Promise.all([
+      this.businessEarningsModel
+        .find(filter)
+        .select('net_amount release_date order')
+        .skip(skip)
+        .limit(take)
+        .lean()
+        .exec(),
+      this.businessEarningsModel.countDocuments(filter),
+    ]);
+
+    return Utils.getPagingData(
+      { count: totalCount, rows: earnings },
+      page,
+      size,
+    );
   }
 }

@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
   UseGuards,
   UsePipes,
@@ -40,7 +41,7 @@ import { UserType } from '../auth/dto/base-login.dto';
 export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
 
-  @Roles(VendorRole.OWNER)
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Post('warehouse')
   @ApiOperation({ summary: 'Create a new warehouse' })
   @ApiResponse({ status: 201, description: 'Warehouse successfully created' })
@@ -51,12 +52,12 @@ export class BusinessController {
     @Req() req: any,
   ): Promise<Warehouse> {
     try {
-      return await this.businessService.createWarehouse(dto, req.user.id);
+      return await this.businessService.createWarehouse(dto, req.business?.id);
     } catch (error) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
   }
-  @Roles(VendorRole.OWNER)
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Post('warehouse/:id/activate')
   @ApiOperation({ summary: 'Activate a warehouse (only one active at a time)' })
   @ApiResponse({ status: 200, description: 'Warehouse activated successfully' })
@@ -78,13 +79,15 @@ export class BusinessController {
     }
   }
 
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Get('warehouse')
   @ApiOperation({ summary: 'Get all warehouses' })
   @ApiResponse({ status: 200, description: 'List of all warehouses' })
-  async findAll(): Promise<Warehouse[]> {
-    return this.businessService.findAllWarehouse();
+  async findAll(@Query() query: any, @Req() req: any) {
+    return this.businessService.findAllWarehouse(req.business?.id, query);
   }
 
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Get(':id/warehouse')
   @ApiOperation({ summary: 'Get a warehouse by ID' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -94,6 +97,7 @@ export class BusinessController {
     return this.businessService.findOneWarehouse(id);
   }
 
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Put(':id/warehouse')
   @ApiOperation({ summary: 'Update warehouse details' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -106,6 +110,7 @@ export class BusinessController {
     return this.businessService.updateWarehouse(id, dto);
   }
 
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
   @Delete(':id/warehouse')
   @ApiOperation({ summary: 'Delete a warehouse' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -132,5 +137,10 @@ export class BusinessController {
   @Get('earnings/upcoming')
   async getUpcomingEarnings(@Req() req: any) {
     return this.businessService.getUpcomingEarnings(req.business.id);
+  }
+  @Roles(UserType.VENDOR)
+  @Get()
+  async getBusinessProfile(@Req() req: any) {
+    return this.businessService.findBusinessById(req.business?.id);
   }
 }
