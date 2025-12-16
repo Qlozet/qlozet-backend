@@ -107,4 +107,11 @@ export class OrderController {
   async rejectOrder(@Param('reference') reference: string) {
     return this.orderService.cancelOrder(reference);
   }
+
+  @Roles(UserType.VENDOR)
+  @Get('chart')
+  @ApiOperation({ summary: 'Get chart data' })
+  async getOrderChartData(@Req() req: any) {
+    return this.orderService.getBusinessChart(req.business?.id);
+  }
 }
