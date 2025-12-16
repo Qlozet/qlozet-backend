@@ -52,6 +52,7 @@ import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { Business } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
+import { percentageChange } from 'src/common/utils/percentageChange';
 
 @Injectable()
 export class OrderService {
@@ -892,110 +893,152 @@ export class OrderService {
     };
   }
   async getBusinessChart(businessId: string): Promise<any> {
+    const businessObjectId = new Types.ObjectId(businessId);
+
+    const now = new Date();
+    const currentStart = new Date(now);
+    currentStart.setDate(now.getDate() - 7);
+
+    const previousStart = new Date(now);
+    previousStart.setDate(now.getDate() - 14);
+
+    const previousEnd = new Date(now);
+    previousEnd.setDate(now.getDate() - 7);
+
     const [ordersByGender, ordersByLocation, ordersByProduct] =
       await Promise.all([
         this.getBusinessOrdersByGenderChart(businessId),
         this.getBusinessOrdersByLocationChart(businessId),
         this.getBusinessOrdersByProductChart(businessId),
       ]);
-    const totalOrdersAgg = await this.orderModel.aggregate([
+
+    /* ===================== ORDERS STATS (SINGLE QUERY) ===================== */
+    const ordersAgg = await this.orderModel.aggregate([
       { $unwind: '$items' },
       {
         $match: {
-          'items.business': new Types.ObjectId(businessId),
-          status: { $in: ALLOWED_STATUSES },
+          'items.business': businessObjectId,
+          status: { $in: [...ALLOWED_STATUSES, OrderStatus.RETURNED] },
         },
       },
       {
-        $group: {
-          _id: '$_id', // group back to order level
+        $facet: {
+          current: [
+            { $match: { createdAt: { $gte: currentStart } } },
+            {
+              $group: {
+                _id: '$_id',
+                createdAt: { $first: '$createdAt' },
+                status: { $first: '$status' },
+              },
+            },
+          ],
+          previous: [
+            {
+              $match: {
+                createdAt: { $gte: previousStart, $lt: previousEnd },
+              },
+            },
+            {
+              $group: {
+                _id: '$_id',
+                createdAt: { $first: '$createdAt' },
+                status: { $first: '$status' },
+              },
+            },
+          ],
         },
-      },
-      {
-        $count: 'totalOrders',
       },
     ]);
 
-    const totalOrders = totalOrdersAgg[0]?.totalOrders || 0;
+    const stats = ordersAgg[0] || {};
+    const currentOrders = stats.current || [];
+    const previousOrders = stats.previous || [];
 
-    // Total earnings and average per day
+    const totalOrders = currentOrders.length;
+    const previousTotalOrders = previousOrders.length;
+
+    const totalReturns = currentOrders.filter(
+      (o) => o.status === OrderStatus.RETURNED,
+    ).length;
+
+    const previousReturns = previousOrders.filter(
+      (o) => o.status === OrderStatus.RETURNED,
+    ).length;
+
+    const calcAvgPerDay = (orders: any[]) => {
+      if (!orders.length) return 0;
+
+      const days = new Set(
+        orders.map((o) => o.createdAt.toISOString().slice(0, 10)),
+      );
+
+      return Math.round(orders.length / days.size);
+    };
+
+    const averageOrdersPerDay = calcAvgPerDay(currentOrders);
+    const previousAverageOrdersPerDay = calcAvgPerDay(previousOrders);
+
+    /* ===================== EARNINGS STATS (SINGLE QUERY) ===================== */
     const earningsAgg = await this.businessEarningsModel.aggregate([
       {
         $match: {
-          business: new Types.ObjectId(businessId),
+          business: businessObjectId,
         },
       },
       {
-        $group: {
-          _id: null,
-          totalEarnings: { $sum: '$net_amount' },
-        },
-      },
-    ]);
-
-    const totalEarnings = earningsAgg[0]?.totalEarnings || 0;
-    const avgOrdersAgg = await this.orderModel.aggregate([
-      { $unwind: '$items' },
-      {
-        $match: {
-          'items.business': new Types.ObjectId(businessId),
-          status: { $in: ALLOWED_STATUSES },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
-          },
-          orders: { $addToSet: '$_id' },
-        },
-      },
-      {
-        $project: {
-          dailyOrders: { $size: '$orders' },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          averageOrdersPerDay: { $avg: '$dailyOrders' },
+        $facet: {
+          current: [
+            { $match: { createdAt: { $gte: currentStart } } },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: '$net_amount' },
+              },
+            },
+          ],
+          previous: [
+            {
+              $match: {
+                createdAt: { $gte: previousStart, $lt: previousEnd },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: '$net_amount' },
+              },
+            },
+          ],
         },
       },
     ]);
 
-    const averageOrdersPerDay = Math.round(
-      avgOrdersAgg[0]?.averageOrdersPerDay || 0,
-    );
+    const totalEarnings = earningsAgg[0]?.current[0]?.total || 0;
+    const previousEarnings = earningsAgg[0]?.previous[0]?.total || 0;
 
-    // Total returns
-    const totalReturnsAgg = await this.orderModel.aggregate([
-      { $unwind: '$items' },
-      {
-        $match: {
-          'items.business': new Types.ObjectId(businessId),
-          status: OrderStatus.RETURNED,
-        },
-      },
-      {
-        $group: { _id: '$_id' },
-      },
-      {
-        $count: 'totalReturns',
-      },
-    ]);
+    /* ===================== PERCENTAGE HELPER ===================== */
+    const percentChange = (current: number, previous: number) => {
+      if (previous === 0 && current === 0) return '0%';
+      if (previous === 0) return '+100%';
 
-    const totalReturns = totalReturnsAgg[0]?.totalReturns || 0;
+      const value = ((current - previous) / previous) * 100;
+      return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+    };
 
-    // For simplicity, using static change percentages; ideally, calculate based on previous periods
+    /* ===================== SUMMARY ===================== */
     const summary = {
       totalOrders,
-      totalOrdersChange: '+24%',
+      totalOrdersChange: percentChange(totalOrders, previousTotalOrders),
       totalEarnings,
-      totalEarningsChange: '+2.5%',
+      totalEarningsChange: percentChange(totalEarnings, previousEarnings),
       averageOrdersPerDay,
-      averageOrdersChange: '+2.5%',
+      averageOrdersChange: percentChange(
+        averageOrdersPerDay,
+        previousAverageOrdersPerDay,
+      ),
       totalReturns,
-      totalReturnsChange: '-2.6%',
+      totalReturnsChange: percentChange(totalReturns, previousReturns),
     };
 
     return {
