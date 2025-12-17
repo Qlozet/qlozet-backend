@@ -487,7 +487,8 @@ export class UserService {
   async getActiveMeasurementSet(userId: string) {
     const user = await this.userModel
       .findById(userId)
-      .select('full_name email phone_number measurementSets');
+      .select('full_name email phone_number measurementSets')
+      .lean();
     if (!user) throw new NotFoundException('User not found');
 
     if (!user.measurementSets || user.measurementSets.length === 0) {

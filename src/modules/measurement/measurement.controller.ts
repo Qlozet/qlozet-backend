@@ -13,6 +13,7 @@ import {
   HttpStatus,
   BadRequestException,
   Get,
+  Param,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { MeasurementService } from './measurement.service';
@@ -46,6 +47,8 @@ import {
   AddMeasurementSetDto,
 } from './dto/user-measurement.dto';
 import { EditGarmentDto } from './dto/edit-image.dto';
+import { JobStatusService } from './job-status.service';
+import { UserType } from '../ums/schemas';
 
 @Controller('measurements')
 @ApiTags('Measurements')
@@ -56,6 +59,7 @@ export class MeasurementController {
   constructor(
     private readonly measurement: MeasurementService,
     private readonly outfitService: OutfitQueueService,
+    private readonly jobService: JobStatusService,
     private readonly platformService: PlatformService,
     private readonly tokenService: TokenService,
     private readonly userService: UserService,
@@ -68,7 +72,7 @@ export class MeasurementController {
     description: 'Run predict with front and side images',
     type: RunPredictBodyDto,
   })
-  @Post('run-predict')
+  @Post('run-prediction')
   // @UseInterceptors(FilesInterceptor('files'))
   async runPredict(@Body() body: RunPredictBodyDto, @Req() req: any) {
     try {
@@ -98,7 +102,7 @@ export class MeasurementController {
   }
 
   @Roles('customer')
-  @Post('auto-mask-predict')
+  @Post('auto-mask-prediction')
   async autoMask(@Body() body: AutoMaskSwaggerDto, @Req() req: any) {
     try {
       const business = req.business?.id;
@@ -286,17 +290,22 @@ export class MeasurementController {
 
   @Post('users')
   @ApiOperation({ summary: 'Add a new measurement set for a user' })
-  @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 201, type: ActiveMeasurementSetDto })
   async addMeasurement(@Body() dto: AddMeasurementSetDto, @Req() req: any) {
     return this.userService.addMeasurementSet(req.user.id, dto);
   }
-  @Get('users/active-measurements')
+  @Roles(UserType.CUSTOMER)
+  @Get('users/active')
   @ApiOperation({ summary: 'Get active measurement set for a user' })
   @ApiResponse({ status: 200, type: ActiveMeasurementSetDto })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 400, description: 'No active measurement set found' })
   async getActiveMeasurements(@Req() req: any) {
     return this.userService.getActiveMeasurementSet(req.user.id);
+  }
+  @Public()
+  @Get('job/:job_id')
+  async getJobStatus(@Param('job_id') jobId: string) {
+    return await this.jobService.findByJobId(jobId);
   }
 }
