@@ -124,9 +124,20 @@ export class PriceCalculationService {
         total = 0;
     }
 
-    // --- Apply Discount (deduct from total) ---
-    const finalTotal = Math.max(total - discountValue, 0);
+    const totalAmount = Number(total) || 0;
+    const discountAmount = Number(discountValue) || 0;
 
+    const finalTotal =
+      discountAmount >= totalAmount
+        ? totalAmount
+        : totalAmount - discountAmount;
+    if (discountAmount >= totalAmount) {
+      this.logger?.warn(
+        `Discount ignored: ${discountAmount} >= ${totalAmount}`,
+      );
+    }
+
+    console.log(finalTotal, 'PPPP');
     this.logger.debug(
       `🧾 Product ${product._id} (${product.kind}) => Base total: ${total}, Discount: ${discountValue}, Final total: ${finalTotal}`,
     );
@@ -290,6 +301,12 @@ export class PriceCalculationService {
           );
         }
 
+        if (fabric.min_cut < s.yardage) {
+          throw new BadRequestException(
+            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${s.yardage} yards.`,
+          );
+        }
+
         // Check if there is enough yardage remaining
         if ((fabric.yard_length ?? 0) < s.yardage) {
           throw new BadRequestException(
@@ -315,7 +332,11 @@ export class PriceCalculationService {
             'Selected fabric not found in clothing',
           );
         }
-
+        if (fabric.min_cut < s.yardage) {
+          throw new BadRequestException(
+            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${s.yardage} yards.`,
+          );
+        }
         // Check remaining yardage
         if ((fabric.yard_length ?? 0) < s.yardage) {
           throw new BadRequestException(
@@ -357,29 +378,29 @@ export class PriceCalculationService {
         }
 
         // Handle single variant if specified
-        const variants = accessory.variants;
+        const variants = accessory.variants || [];
+
         if (s.variant_id && variants.length > 0) {
-          for (const v of variants) {
-            if (String(v._id) !== String(s.variant_id)) {
-              throw new BadRequestException(
-                `Selected variant not found for accessory "${accessory.name}"`,
-              );
-            }
+          const variant = variants.find(
+            (v) => String(v._id) === String(s.variant_id),
+          );
 
-            if ((v.stock ?? 0) < (s.quantity ?? 0)) {
-              throw new BadRequestException(
-                `Not enough stock for variant "${v._id}" of accessory "${accessory.name}". Remaining: ${v.stock}`,
-              );
-            }
-
-            total += (accessory.price ?? 0) * (s.quantity ?? 1);
-            continue; // already processed
+          if (!variant) {
+            throw new BadRequestException(
+              `Selected variant not found for accessory "${accessory.name}"`,
+            );
           }
+
+          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
+            throw new BadRequestException(
+              `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}". Remaining: ${variant.stock}`,
+            );
+          }
+
+          total += (accessory.price ?? 0) * (s.quantity ?? 1);
         }
-
-        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
-
+      console.log(total, '0000000');
       if (product.kind === ProductKind.CLOTHING) {
         accessory = product.clothing?.accessories?.find(
           (acc) => String(acc._id) === String(s.accessory_id),
@@ -427,7 +448,7 @@ export class PriceCalculationService {
 
     for (const s of selections) {
       const color = product.clothing?.color_variants?.find(
-        (v) => String(v._id) === String(s.variant_id),
+        (v) => String(v._id) === String(s.color_variant_id),
       );
 
       if (!color) {

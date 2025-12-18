@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Color, ColorSchema } from './product.schema';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
 
 export type VariantDocument = Variant & Document;
@@ -10,7 +9,6 @@ export class Variant {
   _id?: Types.ObjectId;
   @Prop()
   size: string;
-
   @Prop({ min: 0 })
   stock: number;
   @Prop({ min: 0 })

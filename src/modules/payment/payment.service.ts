@@ -7,6 +7,10 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
+  InternalServerErrorException,
+  BadGatewayException,
+  HttpException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -30,6 +34,8 @@ import { PlatformService } from '../platform/platform.service';
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
@@ -47,57 +53,89 @@ export class PaymentService {
   }
 
   async initializePaystackPayment(txReference: string, email: string) {
-    console.log(txReference);
-    const transaction =
-      await this.transactionService.findByReference(txReference);
-    if (!transaction) throw new NotFoundException('Transaction not found');
+    try {
+      const transaction =
+        await this.transactionService.findByReference(txReference);
 
-    const PAYSTACK_SECRET = this.configService.get<string>(
-      'PAYSTACK_SECRET_KEY',
-    );
-    const FRONTEND_URL = this.configService.get<string>('FRONTEND_URL');
+      if (!transaction) {
+        throw new NotFoundException('Transaction not found');
+      }
 
-    const payload = {
-      email,
-      amount: transaction.amount * 100, // Paystack uses kobo
-      reference: transaction.reference,
-      currency: transaction.currency,
-      callback_url: `${FRONTEND_URL}/payment/verify`,
-    };
+      const PAYSTACK_SECRET = this.configService.get<string>(
+        'PAYSTACK_SECRET_KEY',
+      );
+      const FRONTEND_URL = this.configService.get<string>('FRONTEND_URL');
 
-    const response: any = await firstValueFrom(
-      this.httpService.post(
-        'https://api.paystack.co/transaction/initialize',
-        payload,
-        {
-          headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+      if (!PAYSTACK_SECRET) {
+        throw new InternalServerErrorException(
+          'Paystack secret key not configured',
+        );
+      }
+
+      const payload = {
+        email,
+        amount: transaction.amount * 100, // Paystack uses kobo
+        reference: transaction.reference,
+        currency: transaction.currency,
+        callback_url: `${FRONTEND_URL}/payment/verify`,
+      };
+
+      const response: any = await firstValueFrom(
+        this.httpService.post(
+          'https://api.paystack.co/transaction/initialize',
+          payload,
+          {
+            headers: {
+              Authorization: `Bearer ${PAYSTACK_SECRET}`,
+            },
+          },
+        ),
+      );
+
+      const { authorization_url, reference, access_code } =
+        response?.data?.data || {};
+
+      if (!authorization_url || !reference || !access_code) {
+        throw new BadGatewayException(
+          'Invalid response received from Paystack',
+        );
+      }
+
+      transaction.metadata = {
+        ...transaction.metadata,
+        paystack: {
+          authorization_url,
+          access_code,
+          reference,
+          initialized_at: new Date().toISOString(),
         },
-      ),
-    );
+      };
 
-    const { authorization_url, reference, access_code } = response.data.data;
+      await transaction.save();
 
-    transaction.metadata = {
-      ...transaction.metadata,
-      paystack: {
-        authorization_url,
-        access_code,
-        reference,
-        initialized_at: new Date().toISOString(),
-      },
-    };
-    await transaction.save();
+      return {
+        success: true,
+        message: 'Payment initialized successfully',
+        data: {
+          paymentUrl: authorization_url,
+          reference,
+          access_code,
+          amount: transaction.amount,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger?.error(
+        'Paystack payment initialization failed',
+        error?.response?.data || error.stack || error,
+      );
 
-    return {
-      success: true,
-      message: 'Payment initialized successfully',
-      data: {
-        paymentUrl: authorization_url,
-        reference,
-        access_code,
-        amount: transaction.amount,
-      },
-    };
+      throw new BadGatewayException(
+        'Unable to initialize payment at this time. Please try again.',
+      );
+    }
   }
 
   async verifyPaystackPayment(reference: string) {

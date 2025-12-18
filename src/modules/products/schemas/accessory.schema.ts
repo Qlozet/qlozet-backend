@@ -2,20 +2,8 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
+import { Color, ColorSchema } from './color.schema';
 
-/** ---------------- COLOR SCHEMA ---------------- */
-@Schema()
-export class Color {
-  @Prop({ required: true })
-  name: string;
-
-  @Prop({ default: '' })
-  hex?: string;
-}
-
-export const ColorSchema = SchemaFactory.createForClass(Color);
-
-/** ---------------- ACCESSORY VARIANT ---------------- */
 @Schema()
 export class AccessoryVariant {
   _id?: Types.ObjectId;

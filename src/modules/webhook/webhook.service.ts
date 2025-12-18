@@ -76,26 +76,36 @@ export class WebhookService {
     transaction: TransactionDocument,
   ): Promise<boolean> {
     transaction.status = TransactionStatus.SUCCESS;
-    let walletUpdated = false;
 
-    if (transaction.wallet && transaction.type === TransactionType.FUND) {
+    const isWalletFunding =
+      transaction.type === TransactionType.FUND &&
+      transaction.wallet !== undefined;
+
+    if (isWalletFunding) {
       await this.walletsService.creditWallet(
-        transaction.wallet.toString(),
+        transaction.wallet!.toString(),
         transaction.amount,
       );
-      walletUpdated = true;
     }
 
-    if (transaction.order && transaction.channel === 'checkout') {
+    const isCheckoutOrder =
+      transaction.channel === 'checkout' && transaction.order !== undefined;
+
+    if (isCheckoutOrder) {
+      const orderId = transaction.order!._id;
+
       await this.orderModel.updateOne(
-        { _id: transaction.order._id },
+        { _id: orderId },
         { status: 'processing' },
       );
-      await this.businessService.recordBusinessEarnings(transaction.order._id);
-      await this.productService.updateInventory(transaction.order._id);
+
+      await Promise.all([
+        this.businessService.recordBusinessEarnings(orderId),
+        this.productService.updateInventory(orderId),
+      ]);
     }
 
-    return walletUpdated;
+    return isWalletFunding;
   }
 
   private async handleTransferSuccess(

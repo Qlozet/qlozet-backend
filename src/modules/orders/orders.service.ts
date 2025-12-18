@@ -1,9 +1,10 @@
 import { Length } from 'class-validator';
 import {
   Injectable,
-  Inject,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
+  HttpException,
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -47,15 +48,14 @@ import {
 import { TransactionService } from '../transactions/transactions.service';
 import { User } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
-import { UserService } from '../ums/services';
-import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { Business } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
-import { percentageChange } from 'src/common/utils/percentageChange';
 
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
+
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private readonly validationService: OrderValidationService,
@@ -74,78 +74,90 @@ export class OrderService {
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
-    const [, shippingAddress, processedItems] = await Promise.all([
-      this.validationService.validateCompleteOrder(orderData.items),
-      this.resolveShippingAddress(customer.id),
-      this.processOrderItems(orderData.items),
-    ]);
+    try {
+      const [, shippingAddress, processedItems] = await Promise.all([
+        this.validationService.validateCompleteOrder(orderData.items),
+        this.resolveShippingAddress(customer.id),
+        this.processOrderItems(orderData.items),
+      ]);
+      const [orderReference, { total, subtotal }] = await Promise.all([
+        generateUniqueQlozetReference(this.orderModel, 'ORD'),
+        this.priceCalculationService.calculateOrderTotal(processedItems),
+      ]);
+      const normalizedItems = processedItems.map((item) => {
+        const selections = item.selections || {};
 
-    const [orderReference, { total, subtotal }] = await Promise.all([
-      generateUniqueQlozetReference(this.orderModel, 'ORD'),
-      this.priceCalculationService.calculateOrderTotal(processedItems),
-    ]);
+        return {
+          product: item.product_id,
+          business: item.business,
+          note: item.note,
+          product_kind: item.product_kind,
+          clothing_type: item.clothing_type,
+          color_variant_selections: selections.color_variant_selection || [],
+          fabric_selections: selections.fabric_selection || [],
+          style_selections: selections.style_selection || [],
+          accessory_selections: selections.accessory_selection || [],
+          total_price: total ?? 0,
+          subtotal,
+        };
+      });
 
-    const normalizedItems = processedItems.map((item) => {
-      const selections = item.selections || {};
-      return {
-        product: item.product_id,
-        business: item.business,
-        note: item.note,
-        product_kind: item.product_kind,
-        clothing_type: item.clothing_type,
-        color_variant_selections: selections.color_variant_selection || [],
-        fabric_selections: selections.fabric_selection || [],
-        style_selections: selections.style_selection || [],
-        accessory_selections: selections.accessory_selection || [],
-        total_price: total ?? 0,
+      const order = new this.orderModel({
+        reference: orderReference,
+        customer: new Types.ObjectId(customer.id),
+        address: shippingAddress,
+        items: normalizedItems,
+        status: 'pending',
         subtotal,
-      };
-    });
+        shipping_fee: 0,
+        total,
+      });
 
-    const order = new this.orderModel({
-      reference: orderReference,
-      customer: new Types.ObjectId(customer.id),
-      address: shippingAddress,
-      items: normalizedItems,
-      status: 'pending',
-      subtotal,
-      shipping_fee: 0,
-      total,
-    });
-    const savedOrder = await order.save();
+      const savedOrder = await order.save();
 
-    const transaction = await this.transactionService.create({
-      initiator: new Types.ObjectId(customer.id),
-      order: savedOrder.id,
-      type: TransactionType.DEBIT,
-      amount: savedOrder.total,
-      description: `Order payment for order ${savedOrder.reference}`,
-      channel: 'checkout',
-      metadata: {
-        order_reference: savedOrder.reference,
-        items_count: savedOrder.items.length,
-      },
-    });
-
-    const paymentInit = await this.paymentService.initializePaystackPayment(
-      transaction.reference,
-      customer.email,
-    );
-
-    return {
-      message: 'Order created successfully. Redirect to payment.',
-      data: {
-        order: savedOrder,
-        transaction: {
-          reference: transaction.reference,
-          amount: transaction.amount,
-          status: transaction.status,
-          metadata: transaction.metadata,
+      const transaction = await this.transactionService.create({
+        initiator: new Types.ObjectId(customer.id),
+        order: savedOrder.id,
+        type: TransactionType.DEBIT,
+        amount: savedOrder.total,
+        description: `Order payment for order ${savedOrder.reference}`,
+        channel: 'checkout',
+        metadata: {
+          order_reference: savedOrder.reference,
+          items_count: savedOrder.items.length,
         },
-        payment: paymentInit.data,
-      },
-    };
+      });
+      console.log(transaction, 'transaction');
+      const paymentInit = await this.paymentService.initializePaystackPayment(
+        transaction.reference,
+        customer.email,
+      );
+
+      return {
+        message: 'Order created successfully. Redirect to payment.',
+        data: {
+          order: savedOrder,
+          transaction: {
+            reference: transaction.reference,
+            amount: transaction.amount,
+            status: transaction.status,
+            metadata: transaction.metadata,
+          },
+          payment: paymentInit.data,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger?.error('Create order failed', error.stack || error);
+
+      throw new InternalServerErrorException(
+        'Unable to create order at this time. Please try again.',
+      );
+    }
   }
+
   async getProductDetails(
     product: ProductDocument,
   ): Promise<{ name: string; description?: string }> {
@@ -306,23 +318,25 @@ export class OrderService {
     }
 
     const clothing = product.clothing;
+    const accessory = product.accessory;
+    const fabric = product.fabric;
 
     // --- Color Variants ---
     const normalizedColorVariants: VariantSelectionDto[] = [];
     for (const cvs of selections.color_variant_selections || []) {
       const colorVariant = clothing?.color_variants?.find((cv) =>
-        cv.variants.some((v) => v._id?.equals(cvs.variant_id)),
+        cv.variants.some((v) => v._id?.equals(cvs.color_variant_id)),
       );
       if (!colorVariant) continue;
 
       const variant = colorVariant.variants.find((v) =>
-        v._id?.equals(cvs.variant_id),
+        v._id?.equals(cvs.color_variant_id),
       );
       if (!variant) continue;
 
       const quantity = cvs.quantity ?? 1;
       normalizedColorVariants.push({
-        variant_id: new Types.ObjectId(variant._id),
+        color_variant_id: new Types.ObjectId(variant._id),
         size: variant.size,
         price: variant.price,
         quantity,
@@ -348,43 +362,47 @@ export class OrderService {
     // --- Fabrics ---
     const normalizedFabrics: FabricSelectionDto[] = [];
     for (const fs of selections.fabric_selections || []) {
-      let fabric: Fabric | null | undefined =
-        clothing?.fabrics?.find((f) => f._id?.equals(fs.fabric_id)) ??
-        (await this.fabricModel.findById(fs.fabric_id));
+      let isFabricExist =
+        clothing?.fabrics?.find((f) => f._id?.equals(fs.fabric_id)) ?? fabric;
 
-      if (!fabric) continue;
+      if (!isFabricExist) continue;
 
       const quantity = (fs.quantity ?? 1) * (fs.yardage ?? 1);
       normalizedFabrics.push({
-        fabric_id: new Types.ObjectId(fabric._id),
-        price: fabric.price_per_yard,
+        fabric_id: new Types.ObjectId(isFabricExist._id),
+        price: isFabricExist.price_per_yard,
         quantity,
         yardage: fs.yardage,
-        total_amount: fabric.price_per_yard * quantity,
+        total_amount: isFabricExist.price_per_yard * quantity,
       });
     }
 
     // --- Accessories ---
     const normalizedAccessories: AccessorySelectionDto[] = [];
     for (const as of selections.accessory_selections || []) {
-      const accessory: Accessory | undefined | null =
+      console.log('Accessory selection accessory_id:', accessory?._id);
+      console.log(
+        'Clothing accessory IDs:',
+        clothing?.accessories?.map((a) => a._id?.toString()),
+      );
+      const isAccessoryExist =
         clothing?.accessories?.find((a) => a._id?.equals(as.accessory_id)) ??
-        (await this.accessoryModel.findById(as.accessory_id));
+        accessory;
 
-      if (!accessory) continue;
+      if (!isAccessoryExist) continue;
 
-      const accessoryVariant = accessory.variants.find((av) =>
+      const accessoryVariant = isAccessoryExist.variants.find((av) =>
         av._id?.equals(as.variant_id),
       );
       if (!accessoryVariant) continue;
 
       const quantity = as.quantity ?? 1;
       normalizedAccessories.push({
-        accessory_id: new Types.ObjectId(accessory._id),
+        accessory_id: new Types.ObjectId(isAccessoryExist._id),
         variant_id: new Types.ObjectId(accessoryVariant._id),
-        price: accessory.price,
+        price: isAccessoryExist.price,
         quantity,
-        total_amount: accessory.price * quantity,
+        total_amount: isAccessoryExist.price * quantity,
       });
     }
 

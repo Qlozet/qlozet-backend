@@ -1,12 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
-import { Variant, VariantSchema } from './variant.schema';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Style, StyleSchema } from './style.schema';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
-import { Color, ColorSchema } from './product.schema';
+import { ColorVariant, ColorVariantSchema } from './color.schema';
 
 export enum ClothingType {
   CUSTOMIZE = 'customize',
@@ -40,8 +39,8 @@ export class Clothing {
   @Prop({ type: [AccessorySchema], default: [] })
   accessories?: Accessory[];
 
-  @Prop({ type: [ColorSchema], default: [] })
-  color_variants?: Color[];
+  @Prop({ type: [ColorVariantSchema], default: [] })
+  color_variants?: ColorVariant[];
 
   @Prop({ type: [FabricSchema], default: [] })
   fabrics?: Fabric[];

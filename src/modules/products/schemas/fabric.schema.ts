@@ -1,8 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { ProductImage, ProductImageSchema } from './product-image.schema';
 import { Types } from 'mongoose';
-import { Color, ColorSchema } from './product.schema';
 import { Variant, VariantSchema } from './variant.schema';
+import {
+  Color,
+  ColorSchema,
+  ColorVariant,
+  ColorVariantSchema,
+} from './color.schema';
 
 export type FabricDocument = Fabric & Document;
 @Schema({ timestamps: true })
@@ -28,7 +33,7 @@ export class Fabric {
   price_per_yard: number;
   @Prop({ type: [ProductImageSchema], default: [] })
   images?: ProductImage[];
-  @Prop({ type: [VariantSchema], default: null })
-  variants: Variant[];
+  // @Prop({ type: [VariantSchema], default: null })
+  // variants: Variant[];
 }
 export const FabricSchema = SchemaFactory.createForClass(Fabric);

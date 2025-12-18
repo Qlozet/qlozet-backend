@@ -3,26 +3,8 @@ import { Document, Types } from 'mongoose';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 import { Clothing, ClothingSchema } from './clothing.schema';
-import { Variant, VariantSchema } from './variant.schema';
 
 export type ProductDocument = Product & Document;
-
-export type ColorDocument = Color & Document;
-
-@Schema()
-export class Color {
-  _id?: Types.ObjectId;
-  @Prop()
-  name: string;
-
-  @Prop({ required: true, default: '' })
-  hex: string;
-
-  @Prop({ type: [VariantSchema], default: null })
-  variants: Variant[];
-}
-
-export const ColorSchema = SchemaFactory.createForClass(Color);
 
 export enum ProductKind {
   CLOTHING = 'clothing',

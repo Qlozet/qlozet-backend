@@ -15,7 +15,7 @@ import { Type } from 'class-transformer';
 /** -------------------- COLOR SELECTION -------------------- */
 export class VariantSelectionDto {
   @IsMongoId()
-  variant_id: Types.ObjectId;
+  color_variant_id: Types.ObjectId;
 
   @IsString()
   @IsOptional()

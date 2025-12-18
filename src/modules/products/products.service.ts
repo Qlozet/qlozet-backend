@@ -600,9 +600,10 @@ export class ProductService {
         for (const item of order.items) {
           await this.updateFabric(item, session);
           await this.updateAccessory(item, session);
+          await this.updateColorVariant(item, session);
         }
       });
-      console.log('INVENTORY UPDATED');
+      this.logger.log('INVENTORY UPDATED');
     } catch (err) {
       this.logger.error('updateInventory failed', err.stack || err.message);
       throw err;
@@ -709,7 +710,7 @@ export class ProductService {
       await fabric.save({ session });
     }
 
-    console.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
+    this.logger.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
     return { fabricId, newYardLength };
   }
 
@@ -722,8 +723,6 @@ export class ProductService {
 
     for (const selection of accessorySelections) {
       let accessoryVariant: any;
-      let isEmbedded = false;
-
       if (this.accessoryModel) {
         const accessory = await this.accessoryModel
           .findById(selection.accessory_id)
@@ -747,7 +746,6 @@ export class ProductService {
           accessoryVariant = embeddedAccessory.variants.find(
             (v) => String(v._id) === String(selection.variant_id),
           );
-          isEmbedded = true;
         }
       }
 
@@ -781,6 +779,57 @@ export class ProductService {
       );
     }
   }
+
+  async updateColorVariant(
+    item: OrderItem,
+    session?: any,
+    quantityMultiplier = 1,
+  ) {
+    const selections = item.color_variant_selections || [];
+    if (selections.length === 0) return;
+
+    const product = await this.productModel
+      .findById(item.product)
+      .session(session);
+
+    if (!product) {
+      throw new BadRequestException('Product not found');
+    }
+
+    const colorVariants = product.clothing?.color_variants || [];
+
+    for (const selection of selections) {
+      const colorVariant = colorVariants.find(
+        (cv) => String(cv._id) === String(selection.variant_id),
+      );
+
+      if (!colorVariant) {
+        throw new BadRequestException(
+          `Color variant ${selection.variant_id} not found`,
+        );
+      }
+
+      const variant = colorVariant.variants.find(
+        (v) => String(v._id) === String(selection.variant_id),
+      );
+
+      if (!variant) {
+        throw new BadRequestException(
+          `Variant ${selection.variant_id} not found for color ${colorVariant.name}`,
+        );
+      }
+      const totalQuantity = (selection.quantity ?? 1) * quantityMultiplier;
+
+      if ((variant.stock ?? 0) < totalQuantity) {
+        throw new BadRequestException(
+          `Not enough stock for ${colorVariant.name} (${variant.size})`,
+        );
+      }
+      variant.stock -= totalQuantity;
+    }
+    await product.save({ session });
+  }
+
   async updateAccessoryVariantStock(
     dto: UpdateAccessoryVariantStockDto,
     session: any,

@@ -20,7 +20,7 @@ export class OrderValidationService {
       throw new BadRequestException('Product ID is required');
 
     // Fetch product once
-    const product = await this.productModel.findById(item.product_id).lean();
+    const product = await this.productModel.findById(item.product_id);
     if (!product) throw new BadRequestException('Product not found');
 
     let totalPrice = 0;
@@ -77,11 +77,11 @@ export class OrderValidationService {
       ) {
         for (const cv of color_variant_selections) {
           const color = clothing.color_variants?.find(
-            (vDoc) => String(vDoc._id) === String(cv.variant_id),
+            (vDoc) => String(vDoc._id) === String(cv.color_variant_id),
           );
           if (!color)
             throw new BadRequestException(
-              `Color variant not found: ${cv.variant_id}`,
+              `Color variant not found: ${cv.color_variant_id}`,
             );
 
           for (const v of color.variants) {
@@ -164,12 +164,10 @@ export class OrderValidationService {
 
           let price = accessory.price ?? 0;
           const variants = accessory.variants;
-          console.log(JSON.stringify(accessory.variants.length));
           if (a.variant_id && variants.length > 0) {
             let found = false;
 
             for (const v of variants) {
-              console.log(v._id?.toString() === a.variant_id.toString());
               if (v._id?.toString() === a.variant_id.toString()) {
                 found = true;
                 price += price ?? 0; // whatever your pricing logic is
@@ -251,12 +249,20 @@ export class OrderValidationService {
         let price = accessory.price ?? 0;
         const variants = accessory.variants;
         if (a.variant_id && variants.length > 0) {
+          let found = false;
+
           for (const v of variants) {
-            if (String(v._id) !== String(a.variant_id))
-              throw new BadRequestException(
-                `Selected variant not found for accessory "${accessory.name}"`,
-              );
-            price += price ?? 0;
+            if (v._id?.toString() === a.variant_id.toString()) {
+              found = true;
+              price += price ?? 0;
+              break;
+            }
+          }
+
+          if (!found) {
+            throw new BadRequestException(
+              `Selected variant not found for accessory "${accessory.name}"`,
+            );
           }
         }
 
