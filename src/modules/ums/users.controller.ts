@@ -248,6 +248,7 @@ export class UserController {
   async unfollow(@Param('business_id') businessId: string, @Req() req) {
     return this.businessService.unfollowBusiness(req.user.id, businessId);
   }
+  @Roles('customer')
   @Get('feed')
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'size', required: false, example: 10 })
@@ -310,13 +311,16 @@ export class UserController {
     @Query('page') page: string,
     @Query('size') size: string,
     @Query('business_limit') business_limit: string,
+    @Req() req,
   ) {
     return this.businessService.getFeed(
+      req.user?.id,
       Number(page),
       Number(size),
       Number(business_limit),
     );
   }
+  @Roles('customer')
   @Get('vendors/top-week')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -349,9 +353,10 @@ export class UserController {
       ],
     },
   })
-  async topVendors() {
-    return this.businessService.getTopVendorsOfWeek();
+  async topVendors(@Req() req: any) {
+    return this.businessService.getTopVendorsOfWeek(req.user?.id);
   }
+  @Roles('customer')
   @Get('vendors/new-week')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -384,7 +389,7 @@ export class UserController {
       ],
     },
   })
-  async newVendors() {
-    return this.businessService.getNewVendorsOfWeek();
+  async newVendors(@Req() req: any) {
+    return this.businessService.getNewVendorsOfWeek(req.user?.id);
   }
 }

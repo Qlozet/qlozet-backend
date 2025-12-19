@@ -526,7 +526,10 @@ export class BusinessService {
     ]);
 
     // Sanitize after fetching from DB
-    const sanitizedBusinesses = businesses.map(sanitizeBusiness);
+    const sanitizedBusinesses = businesses.map((business) => ({
+      ...sanitizeBusiness(business),
+      following: true,
+    }));
 
     return Utils.getPagingData(
       {
@@ -538,7 +541,9 @@ export class BusinessService {
     );
   }
 
-  async getRandomBusinesses(limit = 5) {
+  async getRandomBusinesses(user: string, limit = 5) {
+    const userObjectId = new Types.ObjectId(user);
+
     return this.businessModel.aggregate([
       {
         $match: {
@@ -546,8 +551,11 @@ export class BusinessService {
           is_active: true,
         },
       },
+
       { $sample: { size: limit } },
-      { $limit: limit }, // 👈 force limit
+      { $limit: limit },
+
+      // Products lookup
       {
         $lookup: {
           from: 'products',
@@ -556,6 +564,8 @@ export class BusinessService {
           as: 'products',
         },
       },
+
+      // Computed fields
       {
         $addFields: {
           total_number_of_ratings: {
@@ -575,20 +585,34 @@ export class BusinessService {
             ],
           },
           total_products: { $size: '$products' },
+
+          // ✅ FOLLOWING FLAG (SOURCE OF TRUTH)
+          following: {
+            $in: [userObjectId, { $ifNull: ['$followers', []] }],
+          },
+
+          // Optional but very useful
+          followers_count: {
+            $size: { $ifNull: ['$followers', []] },
+          },
         },
       },
+
+      // Final response shape
       {
         $project: {
           _id: 1,
           business_name: 1,
           business_logo_url: 1,
           description: 1,
-          total_items_sold: 1,
           city: 1,
           country: 1,
+          total_items_sold: 1,
           cumulative_rating: 1,
           total_products: 1,
           total_number_of_ratings: 1,
+          following: 1,
+          followers_count: 1,
         },
       },
     ]);
@@ -656,12 +680,13 @@ export class BusinessService {
   }
 
   async getFeed(
+    user: string,
     page: number = 1,
     size: number = 10,
     business_limit: number = 5,
   ) {
     const [businesses, products] = await Promise.all([
-      this.getRandomBusinesses(business_limit),
+      this.getRandomBusinesses(user, business_limit),
       this.productService.getLatestProducts(page, size),
     ]);
 
@@ -670,9 +695,9 @@ export class BusinessService {
       latest_products: products,
     };
   }
-  async getTopVendorsOfWeek() {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  async getTopVendorsOfWeek(userId: string) {
+    const userObjectId = new Types.ObjectId(userId);
 
     const vendors = await this.businessModel
       .find(
@@ -688,6 +713,7 @@ export class BusinessService {
           earnings: 1,
           success_rate: 1,
           createdAt: 1,
+          followers: 1, // 👈 needed
         },
       )
       .sort({ total_items_sold: -1 })
@@ -703,12 +729,22 @@ export class BusinessService {
       earnings: v.earnings,
       success_rate: v.success_rate,
       createdAt: v.createdAt,
+
+      // ✅ FOLLOWING FLAG
+      following: (v.followers || []).some(
+        (f) => f.toString() === userObjectId.toString(),
+      ),
+
+      // optional but useful
+      followers_count: v.followers?.length || 0,
     }));
   }
 
-  async getNewVendorsOfWeek() {
+  async getNewVendorsOfWeek(userId: string) {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const userObjectId = new Types.ObjectId(userId);
 
     const vendors = await this.businessModel
       .find(
@@ -724,6 +760,7 @@ export class BusinessService {
           earnings: 1,
           success_rate: 1,
           createdAt: 1,
+          followers: 1, // 👈 needed
         },
       )
       .sort({ createdAt: -1 })
@@ -738,8 +775,16 @@ export class BusinessService {
       earnings: v.earnings,
       success_rate: v.success_rate,
       createdAt: v.createdAt,
+
+      // ✅ FOLLOWING FLAG
+      following: (v.followers || []).some(
+        (f) => f.toString() === userObjectId.toString(),
+      ),
+
+      followers_count: v.followers?.length || 0,
     }));
   }
+
   async cancelPendingEarnings(orderId: Types.ObjectId) {
     await this.businessEarningsModel.updateMany(
       { order: orderId, released: false },
