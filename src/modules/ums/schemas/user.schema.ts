@@ -41,7 +41,10 @@ export class User extends Document {
     default: null,
   })
   role?: Types.ObjectId;
-
+  @Prop({ default: '' })
+  address: string;
+  @Prop({ default: '' })
+  username: string;
   @Prop({ type: String, select: false })
   email_verification_token?: string;
 

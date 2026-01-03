@@ -97,7 +97,7 @@ export class UserService {
   async findById(userId: string): Promise<UserDocument> {
     const user = await this.userModel
       .findById(userId)
-      .populate('role')
+      // .populate('role')
       .populate('business');
 
     if (!user) {
