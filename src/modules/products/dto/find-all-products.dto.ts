@@ -1,62 +1,64 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsMongoId,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class FindAllProductsDto {
   @ApiPropertyOptional({
-    description: 'Page number (for pagination)',
-    default: 1,
+    description: 'Business ID to fetch products for a specific vendor',
   })
+  @IsOptional()
+  @IsMongoId()
+  business_id?: string;
+
+  @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @IsNumber()
   @Min(1)
   page?: number = 1;
 
-  @ApiPropertyOptional({ description: 'Number of items per page', default: 10 })
+  @ApiPropertyOptional({ default: 10 })
   @IsOptional()
   @IsNumber()
   @Min(1)
   size?: number = 10;
 
   @ApiPropertyOptional({
-    description: 'Product kind (e.g., clothing, fabric, accessory)',
+    description: 'Product kind (clothing, fabric, accessory)',
   })
   @IsOptional()
   @IsString()
   kind?: string;
 
-  @ApiPropertyOptional({ description: 'Search keyword to match product name' })
+  @ApiPropertyOptional({ description: 'Search keyword' })
   @IsOptional()
   @IsString()
   search?: string;
 
   @ApiPropertyOptional({
-    description: 'Filter by product status',
     enum: ['active', 'draft', 'archived'],
   })
   @IsOptional()
-  @IsEnum(['active', 'draft', 'archived'], {
-    message: 'status must be either active, draft, or archived',
-  })
+  @IsEnum(['active', 'draft', 'archived'])
   status?: 'active' | 'draft' | 'archived';
 
   @ApiPropertyOptional({
-    description: 'Sort by rating, date, or relevance',
     enum: ['rating', 'date', 'relevance'],
   })
   @IsOptional()
-  @IsEnum(['rating', 'date', 'relevance'], {
-    message: 'sortBy must be either rating, date, or relevance',
-  })
+  @IsEnum(['rating', 'date', 'relevance'])
   sortBy?: 'rating' | 'date' | 'relevance';
 
   @ApiPropertyOptional({
-    description: 'Sort order: asc (ascending) or desc (descending)',
     enum: ['asc', 'desc'],
     default: 'desc',
   })
   @IsOptional()
-  @IsEnum(['asc', 'desc'], {
-    message: 'order must be either asc or desc',
-  })
+  @IsEnum(['asc', 'desc'])
   order?: 'asc' | 'desc' = 'desc';
 }

@@ -158,16 +158,9 @@ export class ProductsController {
     description: 'Paginated list of products',
   })
   async findAll(@Query() query: FindAllProductsDto) {
-    const { page, size, kind, search, status, sortBy, order } = query;
-    return this.productService.findAll(
-      Number(page),
-      Number(size),
-      kind,
-      search,
-      status,
-      sortBy,
-      order,
-    );
+    const { page, size, kind, search, status, sortBy, order, business_id } =
+      query;
+    return this.productService.findAll(query);
   }
   @Get('by-vendor')
   @ApiOperation({

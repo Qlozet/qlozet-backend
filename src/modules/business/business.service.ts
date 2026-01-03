@@ -9,7 +9,11 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { Warehouse, WarehouseDocument } from './schemas/warehouse.schema';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
-import { Business, BusinessDocument } from './schemas/business.schema';
+import {
+  Business,
+  BusinessDocument,
+  BusinessStatus,
+} from './schemas/business.schema';
 import { Utils } from 'src/common/utils/pagination';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { LogisticsService } from '../logistics/logistics.service';
@@ -543,31 +547,123 @@ export class BusinessService {
 
   async getRandomBusinesses(user: string, limit = 5) {
     const userObjectId = new Types.ObjectId(user);
+    const randomSeed = Math.random();
 
     return this.businessModel.aggregate([
       {
+        $addFields: {
+          randomSafe: { $ifNull: ['$random', Math.random()] },
+        },
+      },
+      {
         $match: {
-          status: { $in: ['approved', 'verified'] },
-          is_active: true,
+          status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+          randomSafe: { $gte: randomSeed },
+        },
+      },
+      { $sort: { randomSafe: 1 } },
+      { $limit: limit },
+
+      /**
+       * 🔁 Fallback window
+       */
+      {
+        $unionWith: {
+          coll: 'businesses',
+          pipeline: [
+            {
+              $addFields: {
+                randomSafe: { $ifNull: ['$random', Math.random()] },
+              },
+            },
+            {
+              $match: {
+                status: {
+                  $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED],
+                },
+                randomSafe: { $lt: randomSeed },
+              },
+            },
+            { $sort: { randomSafe: 1 } },
+            { $limit: limit },
+          ],
         },
       },
 
-      { $sample: { size: limit } },
       { $limit: limit },
 
-      // Products lookup
+      /**
+       * 🔹 RANDOM + MINIMAL PRODUCTS
+       */
       {
         $lookup: {
           from: 'products',
-          localField: '_id',
-          foreignField: 'business',
+          let: { businessId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$business', '$$businessId'] },
+              },
+            },
+
+            { $sample: { size: 3 } },
+
+            {
+              $addFields: {
+                images: {
+                  $cond: [
+                    { $eq: ['$kind', 'accessory'] },
+                    { $ifNull: ['$accessory.images', []] },
+                    {
+                      $cond: [
+                        { $eq: ['$kind', 'clothing'] },
+                        { $ifNull: ['$clothing.images', []] },
+                        {
+                          $cond: [
+                            { $eq: ['$kind', 'fabric'] },
+                            { $ifNull: ['$fabric.images', []] },
+                            [],
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+
+            {
+              $project: {
+                _id: 1,
+                kind: 1,
+                base_price: 1,
+                images: { $slice: ['$images', 1] },
+
+                ratings: 1,
+                average_rating: 1,
+              },
+            },
+          ],
           as: 'products',
         },
       },
 
-      // Computed fields
+      /**
+       * 🔹 FILTER: ONLY BUSINESSES WITH PRODUCTS
+       */
+      {
+        $match: {
+          products: { $ne: [], $exists: true },
+        },
+      },
+
+      /**
+       * 🔹 COMPUTED METRICS
+       */
       {
         $addFields: {
+          total_products: { $size: '$products' },
+
           total_number_of_ratings: {
             $sum: {
               $map: {
@@ -577,6 +673,7 @@ export class BusinessService {
               },
             },
           },
+
           cumulative_rating: {
             $cond: [
               { $gt: [{ $size: '$products' }, 0] },
@@ -584,21 +681,138 @@ export class BusinessService {
               0,
             ],
           },
-          total_products: { $size: '$products' },
 
-          // ✅ FOLLOWING FLAG (SOURCE OF TRUTH)
           following: {
             $in: [userObjectId, { $ifNull: ['$followers', []] }],
           },
 
-          // Optional but very useful
           followers_count: {
             $size: { $ifNull: ['$followers', []] },
           },
         },
       },
 
-      // Final response shape
+      /**
+       * 🔹 FINAL RESPONSE SHAPE
+       */
+      {
+        $project: {
+          _id: 1,
+          business_name: 1,
+          business_logo_url: 1,
+          description: 1,
+          city: 1,
+          country: 1,
+
+          total_items_sold: 1,
+          cumulative_rating: 1,
+          total_products: 1,
+          total_number_of_ratings: 1,
+
+          following: 1,
+          followers_count: 1,
+          products: {
+            _id: 1,
+            kind: 1,
+            base_price: 1,
+            images: 1,
+          },
+        },
+      },
+    ]);
+  }
+  async getSingleBusiness(userId: string, businessId: string) {
+    const userObjectId = new Types.ObjectId(userId);
+    const businessObjectId = new Types.ObjectId(businessId);
+    const result = await this.businessModel.aggregate([
+      /**
+       * 1️⃣ Match business
+       */
+      {
+        $match: {
+          _id: businessObjectId,
+          status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+        },
+      },
+
+      /**
+       * 2️⃣ Lookup products (for computation only)
+       */
+      {
+        $lookup: {
+          from: 'products',
+          let: { businessId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$business', '$$businessId'] },
+              },
+            },
+            {
+              $project: {
+                average_rating: 1,
+                ratings: 1,
+                total_items_sold: 1,
+              },
+            },
+          ],
+          as: 'products',
+        },
+      },
+
+      /**
+       * 3️⃣ Ensure vendor has products
+       */
+      {
+        $match: {
+          'products.0': { $exists: true },
+        },
+      },
+
+      /**
+       * 4️⃣ Computed fields
+       */
+      {
+        $addFields: {
+          total_products: { $size: '$products' },
+
+          total_items_sold: {
+            $sum: {
+              $map: {
+                input: '$products',
+                as: 'p',
+                in: { $ifNull: ['$$p.total_items_sold', 0] },
+              },
+            },
+          },
+
+          total_number_of_ratings: {
+            $sum: {
+              $map: {
+                input: '$products',
+                as: 'p',
+                in: { $size: { $ifNull: ['$$p.ratings', []] } },
+              },
+            },
+          },
+
+          cumulative_rating: {
+            $cond: [
+              { $gt: [{ $size: '$products' }, 0] },
+              { $avg: '$products.average_rating' },
+              0,
+            ],
+          },
+
+          following: {
+            $in: [userObjectId, { $ifNull: ['$followers', []] }],
+          },
+
+          followers_count: {
+            $size: { $ifNull: ['$followers', []] },
+          },
+        },
+      },
       {
         $project: {
           _id: 1,
@@ -611,11 +825,14 @@ export class BusinessService {
           cumulative_rating: 1,
           total_products: 1,
           total_number_of_ratings: 1,
+
           following: 1,
           followers_count: 1,
         },
       },
     ]);
+
+    return result[0] || null;
   }
 
   // in product.service.ts or a dedicated service like business-earnings.service.ts

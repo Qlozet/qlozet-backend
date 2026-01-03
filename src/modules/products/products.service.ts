@@ -28,6 +28,7 @@ import {
   OrderItem,
 } from '../orders/schemas/orders.schema';
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
+import { FindAllProductsDto } from './dto/find-all-products.dto';
 
 @Injectable()
 export class ProductService {
@@ -107,22 +108,34 @@ export class ProductService {
   /**
    * Get all products
    */
-  async findAll(
-    page: number = 1,
-    size: number = 10,
-    kind?: string,
-    search?: string,
-    status?: 'active' | 'draft' | 'archived',
-    sortBy?: 'rating' | 'date' | 'relevance',
-    order: 'asc' | 'desc' = 'desc',
-  ) {
+  async findAll(dto: FindAllProductsDto) {
+    const {
+      page = 1,
+      size = 10,
+      kind,
+      search,
+      status,
+      sortBy,
+      order = 'desc',
+      business_id,
+    } = dto;
+
     const filter: any = {};
 
-    if (kind) filter.kind = kind;
-    const validStatuses = ['active', 'draft', 'archived'];
-    if (status && validStatuses.includes(status.toLowerCase())) {
-      filter.status = status.toLowerCase();
+    // ✅ BUSINESS FILTER (THIS IS THE KEY)
+    if (business_id) {
+      filter.business = new Types.ObjectId(business_id);
     }
+
+    if (kind) {
+      filter.kind = kind;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    // 🔍 SEARCH
     if (search) {
       filter.$or = [
         { 'clothing.name': { $regex: search, $options: 'i' } },
@@ -141,33 +154,33 @@ export class ProductService {
 
     const { take, skip } = await Utils.getPagination(page, size);
 
-    // Determine sort order
+    // 🔃 SORT
     const sortOrder = order === 'asc' ? 1 : -1;
-    let sort: Record<string, 1 | -1> = {};
+    let sort: Record<string, 1 | -1> = { createdAt: -1 };
 
     switch (sortBy) {
       case 'rating':
-        sort = { average_rating: sortOrder }; // ascending or descending rating
+        sort = { average_rating: sortOrder };
         break;
       case 'date':
-        sort = { createdAt: sortOrder }; // ascending or descending date
+        sort = { createdAt: sortOrder };
         break;
       case 'relevance':
         sort = search
           ? { average_rating: -1, createdAt: -1 }
           : { createdAt: -1 };
         break;
-      default:
-        sort = { createdAt: -1 };
     }
 
     const [rows, count] = await Promise.all([
       this.productModel.find(filter).sort(sort).skip(skip).limit(take).exec(),
+
       this.productModel.countDocuments(filter),
     ]);
 
-    return Utils.getPagingData({ count, rows }, page, size);
+    return Utils.getPagingData({ rows, count }, page, size);
   }
+
   // trending this week, top vendors, new vendors
   /**
    * Get a product by ID

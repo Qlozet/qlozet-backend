@@ -320,6 +320,7 @@ export class UserController {
       Number(business_limit),
     );
   }
+
   @Roles('customer')
   @Get('vendors/top-week')
   @ApiOkResponse({
@@ -391,5 +392,80 @@ export class UserController {
   })
   async newVendors(@Req() req: any) {
     return this.businessService.getNewVendorsOfWeek(req.user?.id);
+  }
+  @Roles('customer')
+  @Get('vendors')
+  @ApiOkResponse({
+    description: 'Top vendors of the week sorted by total_items_sold',
+    schema: {
+      example: [
+        {
+          _id: '675ab92d9f1c2a0012cd421f',
+          business_name: 'African Fashion Hub',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+          total_items_sold: 120,
+          earnings: 5000000,
+          success_rate: 98,
+          is_active: true,
+          status: 'approved',
+          createdAt: '2025-12-01T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+        {
+          _id: '675ab93f9f1c2a0012cd4220',
+          business_name: 'Elegant Styles',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo2.png',
+          total_items_sold: 95,
+          earnings: 3200000,
+          success_rate: 95,
+          is_active: true,
+          status: 'verified',
+          createdAt: '2025-12-02T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+      ],
+    },
+  })
+  async fetchVendors(@Req() req: any) {
+    return this.businessService.getRandomBusinesses(req.user?.id);
+  }
+  @Roles('customer')
+  @Get('vendors/:business_id')
+  @ApiOkResponse({
+    description: 'Top vendors of the week sorted by total_items_sold',
+    schema: {
+      example: [
+        {
+          _id: '675ab92d9f1c2a0012cd421f',
+          business_name: 'African Fashion Hub',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo.png',
+          total_items_sold: 120,
+          earnings: 5000000,
+          success_rate: 98,
+          is_active: true,
+          status: 'approved',
+          createdAt: '2025-12-01T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+        {
+          _id: '675ab93f9f1c2a0012cd4220',
+          business_name: 'Elegant Styles',
+          business_logo_url: 'https://res.cloudinary.com/qlozet/logo2.png',
+          total_items_sold: 95,
+          earnings: 3200000,
+          success_rate: 95,
+          is_active: true,
+          status: 'verified',
+          createdAt: '2025-12-02T12:00:00.000Z',
+          updatedAt: '2025-12-08T12:00:00.000Z',
+        },
+      ],
+    },
+  })
+  async fetchVendor(
+    @Param('business_id') business_id: string,
+    @Req() req: any,
+  ) {
+    return this.businessService.getSingleBusiness(req?.user?.id, business_id);
   }
 }
