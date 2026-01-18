@@ -226,6 +226,10 @@ export class UserService {
     });
   }
 
+  async deleteUser(userId: string) {
+    return this.userModel.findByIdAndDelete(userId);
+  }
+
   /**
    * Update user profile
    */

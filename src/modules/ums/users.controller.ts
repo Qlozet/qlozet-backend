@@ -42,6 +42,7 @@ import { UpdatePlatformSettingsDto } from '../platform/dto/update-settings.dto';
 import { PlatformService } from '../platform/platform.service';
 import { BusinessService } from '../business/business.service';
 import { PaginationQueryType } from 'src/common/types/pagination.type';
+import { UserType } from './schemas';
 
 @ApiTags('Users')
 @Controller('users')
@@ -467,5 +468,11 @@ export class UserController {
     @Req() req: any,
   ) {
     return this.businessService.getSingleBusiness(req?.user?.id, business_id);
+  }
+
+  @Roles('customer')
+  @Delete('delete')
+  async deleteUser(@Req() req: any) {
+    return this.userService.deleteUser(req.user?.id);
   }
 }
