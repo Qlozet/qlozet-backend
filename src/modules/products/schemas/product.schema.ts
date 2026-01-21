@@ -1,0 +1,71 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { Fabric, FabricSchema } from './fabric.schema';
+import { Accessory, AccessorySchema } from './accessory.schema';
+import { Clothing, ClothingSchema } from './clothing.schema';
+
+export type ProductDocument = Product & Document;
+
+export enum ProductKind {
+  CLOTHING = 'clothing',
+  FABRIC = 'fabric',
+  ACCESSORY = 'accessory',
+}
+// Main Product schema
+@Schema({ timestamps: true, discriminatorKey: 'kind', collection: 'products' })
+export class Product extends Document {
+  @Prop({ required: true, enum: ProductKind })
+  kind: string;
+
+  @Prop({ type: Object })
+  seo?: Record<string, any>;
+
+  @Prop({ type: Object })
+  metafields?: Record<string, any>;
+
+  @Prop({ required: true, min: 0 })
+  base_price: number;
+
+  @Prop({ enum: ['active', 'draft', 'archived'], default: 'draft' })
+  status: 'active' | 'draft' | 'archived';
+
+  @Prop({ type: FabricSchema, default: null })
+  fabric?: Fabric;
+
+  @Prop({ type: AccessorySchema, default: null })
+  accessory?: Accessory;
+
+  @Prop({ type: ClothingSchema, default: null })
+  clothing?: Clothing;
+
+  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  business: Types.ObjectId;
+  @Prop({ type: Date, default: null })
+  scheduled_activation_date?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
+  applied_discount: Types.ObjectId;
+
+  @Prop({ type: [Types.ObjectId], ref: 'Collection', default: [] })
+  collections: Types.ObjectId[];
+  @Prop({
+    type: [
+      {
+        user: { type: Types.ObjectId, ref: 'User', required: true },
+        value: { type: Number, required: true, min: 1, max: 5 },
+        comment: { type: String },
+      },
+    ],
+    default: [],
+  })
+  ratings: {
+    user: Types.ObjectId;
+    value: number;
+    comment?: string;
+  }[];
+
+  @Prop({ type: Number, default: 0 })
+  average_rating: number;
+}
+
+export const ProductSchema = SchemaFactory.createForClass(Product);

@@ -1,0 +1,109 @@
+[
+    {
+        "description": "Feed Impression Batch",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "feed_impression_batch",
+            "metadata": {
+                "seenIds": [
+                    "item_A",
+                    "item_B",
+                    "item_C"
+                ]
+            },
+            "context": {
+                "surface": "home_feed",
+                "requestId": "req_uuid_1",
+                "stream": "main"
+            },
+            "timestamp": "2024-01-01T10:00:00.000Z"
+        }
+    },
+    {
+        "description": "Click Item",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "click_item",
+            "properties": {
+                "itemId": "item_A"
+            },
+            "context": {
+                "surface": "home_feed",
+                "requestId": "req_uuid_1",
+                "position": 2,
+                "stream": "main"
+            },
+            "metadata": {
+                "reasonCodes": [
+                    "match_tag",
+                    "fast_delivery"
+                ]
+            },
+            "timestamp": "2024-01-01T10:00:05.000Z"
+        }
+    },
+    {
+        "description": "View Item (Product Page)",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "view_item",
+            "properties": {
+                "itemId": "item_A"
+            },
+            "context": {
+                "surface": "product_detail",
+                "requestId": "req_uuid_1"
+            },
+            "metadata": {
+                "dwellMs": 4500
+            },
+            "timestamp": "2024-01-01T10:00:10.000Z"
+        }
+    },
+    {
+        "description": "Search",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "search",
+            "metadata": {
+                "query": "red cocktail dress",
+                "filters": {
+                    "size": "M",
+                    "color": "red"
+                },
+                "budgetMax": 200,
+                "deadlineDays": 7
+            },
+            "timestamp": "2024-01-01T10:05:00.000Z"
+        }
+    },
+    {
+        "description": "Not Interested",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "not_interested",
+            "properties": {
+                "itemId": "item_X"
+            },
+            "context": {
+                "surface": "home_feed",
+                "position": 5
+            },
+            "timestamp": "2024-01-01T10:06:00.000Z"
+        }
+    },
+    {
+        "description": "Hide Business",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "hide_business",
+            "properties": {
+                "vendorId": "vendor_555"
+            },
+            "context": {
+                "surface": "home_feed"
+            },
+            "timestamp": "2024-01-01T10:07:00.000Z"
+        }
+    }
+]

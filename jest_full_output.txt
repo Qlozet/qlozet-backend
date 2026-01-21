@@ -1,0 +1,28 @@
+[0m[7m[1m[31m FAIL [39m[22m[27m[0m [2msrc/modules/recommendations/user-embeddings/[22m[1muser-embeddings.service.spec.ts[22m
+  [1m● [22mTest suite failed to run
+
+    Cannot find module 'src/modules/logistics/logistics.service' from 'modules/ums/services/users.service.ts'
+
+    Require stack:
+      modules/ums/services/users.service.ts
+      modules/recommendations/user-embeddings/user-embeddings.service.ts
+      modules/recommendations/user-embeddings/user-embeddings.service.spec.ts
+
+    [0m [90m 14 |[39m [36mimport[39m { [33mAddress[39m[33m,[39m [33mAddressDocument[39m } [36mfrom[39m [32m'../schemas/address.schema'[39m[33m;[39m
+     [90m 15 |[39m [36mimport[39m { [33mAddressDto[39m } [36mfrom[39m [32m'../dto/address.dto'[39m[33m;[39m
+    [31m[1m>[22m[39m[90m 16 |[39m [36mimport[39m { [33mLogisticsService[39m } [36mfrom[39m [32m'src/modules/logistics/logistics.service'[39m[33m;[39m
+     [90m    |[39m [31m[1m^[22m[39m
+     [90m 17 |[39m [36mimport[39m { [33mUtils[39m } [36mfrom[39m [32m'src/common/utils/pagination'[39m[33m;[39m
+     [90m 18 |[39m [36mimport[39m { [33mAddMeasurementSetDto[39m } [36mfrom[39m [32m'src/modules/measurement/dto/user-measurement.dto'[39m[33m;[39m
+     [90m 19 |[39m [36mimport[39m { [33mUpdateUserDto[39m } [36mfrom[39m [32m'../dto/users.dto'[39m[33m;[39m[0m
+
+      [2mat Resolver._throwModNotFoundError ([22m../node_modules/jest-resolve/build/resolver.js[2m:427:11)[22m
+      [2mat Object.<anonymous> ([22mmodules/ums/services/users.service.ts[2m:16:1)[22m
+      [2mat Object.<anonymous> ([22mmodules/recommendations/user-embeddings/user-embeddings.service.ts[2m:9:1)[22m
+      [2mat Object.<anonymous> ([22m[0m[36mmodules/recommendations/user-embeddings/user-embeddings.service.spec.ts[39m[0m[2m:2:1)[22m
+
+[1mTest Suites: [22m[1m[31m1 failed[39m[22m, 1 total
+[1mTests:       [22m0 total
+[1mSnapshots:   [22m0 total
+[1mTime:[22m        17.057 s
+[2mRan all test suites[22m[2m matching [22m/src\\modules\\recommendations\\user-embeddings\\user-embeddings.service.spec.ts/i[2m with tests matching [22m",xml,,,text"[2m.[22m

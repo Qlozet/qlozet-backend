@@ -1,0 +1,32 @@
+{{> header title="Welcome to Our Marketplace!" subtitle="Get ready to grow your business with us" }}
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<p>Welcome to <strong>{{companyName}}</strong>! We're thrilled to have <strong>{{businessName}}</strong> join our
+    marketplace of exceptional vendors.</p>
+
+<p>Your vendor account has been successfully created and you're now part of our growing community of businesses.</p>
+
+<div style="background: #e7f3ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+    <h3 style="color: #007bff; margin-bottom: 15px;">🚀 Next Steps to Get Started:</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+        <li>Complete your business profile</li>
+        <li>Set up your product catalog</li>
+        <li>Configure your payment settings</li>
+        <li>Review our vendor guidelines</li>
+    </ul>
+</div>
+
+{{> button url=dashboardUrl text="Go to Vendor Dashboard" }}
+
+<div style="margin-top: 30px;">
+    <h3 style="color: #2c3e50; margin-bottom: 15px;">Need Help?</h3>
+    <p>Check out our <a href="{{setupGuideUrl}}" style="color: #007bff;">Vendor Setup Guide</a> for detailed
+        instructions.</p>
+    <p>Our support team is always here to help at <a href="mailto:{{supportEmail}}"
+            style="color: #007bff;">{{supportEmail}}</a>.</p>
+</div>
+
+<p>We're excited to see your business thrive on our platform!</p>
+
+<p>Best regards,<br>The {{companyName}} Team</p>

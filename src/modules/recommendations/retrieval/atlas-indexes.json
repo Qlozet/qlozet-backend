@@ -1,0 +1,40 @@
+[
+    {
+        "name": "items_style_vindex",
+        "definition": {
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "embeddings.e_style",
+                    "numDimensions": 1536,
+                    "similarity": "cosine"
+                },
+                {
+                    "type": "filter",
+                    "path": "type"
+                },
+                {
+                    "type": "filter",
+                    "path": "fitMeta.targetDemographic"
+                }
+            ]
+        }
+    },
+    {
+        "name": "items_fabric_vindex",
+        "definition": {
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "embeddings.e_fabric",
+                    "numDimensions": 1536,
+                    "similarity": "cosine"
+                },
+                {
+                    "type": "filter",
+                    "path": "type"
+                }
+            ]
+        }
+    }
+]

@@ -1,0 +1,26 @@
+{{!-- teamInvite.hbs --}}
+
+{{> header title="Welcome to Qlozet!" subtitle="You've been added to {{companyName}}" }}
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<p>You’ve been invited to join <strong>{{companyName}}</strong> as a <strong>{{role}}</strong> on
+    <strong>Qlozet</strong>.</p>
+
+<p>Your account has already been created for you. Use the details below to log in:</p>
+
+<ul>
+    <li><strong>Email:</strong> {{email}}</li>
+    <li><strong>Temporary Password:</strong> {{temporaryPassword}}</li>
+</ul>
+
+<p>👉 <a href="{{loginUrl}}" target="_blank"
+        style="color:#fff;background:#4F46E5;padding:10px 20px;border-radius:6px;text-decoration:none;">Login Now</a>
+</p>
+
+<p>For your security, you’ll be asked to change your password the first time you log in.</p>
+
+<p>If you weren’t expecting this invitation, please ignore this email or contact our support team at <a
+        href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>
+
+<p>Best regards,<br>The Qlozet Team</p>
