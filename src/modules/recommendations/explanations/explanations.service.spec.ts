@@ -32,7 +32,7 @@ describe('ExplanationsService', () => {
                 tags: ['running', 'shoes'],
                 finalScore: 0.9,
                 score: 0.9, // vScore proxy
-                scoringDebug: { vScore: 0.9, priceFit: 1 },
+                scoringDebug: { vScore: 0.9, priceFit: 1, vendorQuality: 0.95 },
                 rawVendorData: { eta_days: 2, vendorQuality: 0.95 }
             } as any;
 
@@ -43,11 +43,11 @@ describe('ExplanationsService', () => {
 
             const explanations = service.generateExplanations(item, history);
 
-            expect(explanations).toContain('Matches your interest in running');
-            expect(explanations).toContain('Highly relevant to your style');
-            expect(explanations).toContain('Fast Delivery');
-            expect(explanations).toContain('Top Rated Vendor');
-            expect(explanations).toContain('Within your budget');
+            expect(explanations.texts).toContain('Matches your interest in running');
+            expect(explanations.texts).toContain('Highly relevant to your style');
+            expect(explanations.texts).toContain('Fast Delivery');
+            expect(explanations.texts).toContain('Top Rated Vendor');
+            expect(explanations.texts).toContain('Within your budget');
         });
 
         it('should return empty if no evidence', () => {

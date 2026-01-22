@@ -28,15 +28,38 @@ describe('Server-Side Event Hooks', () => {
         create: jest.fn(),
     };
 
+    const mockCart = {
+        items: [],
+        save: jest.fn().mockResolvedValue({}),
+    };
+
+    const mockUser = {
+        _id: '507f1f77bcf86cd799439011', // valid ObjectId
+        wishlist: [],
+        save: jest.fn().mockResolvedValue({}),
+    };
+
     beforeEach(async () => {
+        // Reset mocks with proper chaining
+        mockModel.findOne.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(mockCart),
+        });
+
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 CartService,
                 UserService,
                 { provide: EventsService, useValue: mockEventsService },
                 { provide: getModelToken(Cart.name), useValue: mockModel },
-                { provide: getModelToken(Product.name), useValue: { ...mockModel, findById: jest.fn().mockResolvedValue({ _id: 'pid', base_price: 100 }) } },
-                { provide: getModelToken(User.name), useValue: { ...mockModel, findById: jest.fn().mockResolvedValue({ _id: 'uid', wishlist: [] }) } },
+                { provide: getModelToken(Product.name), useValue: { ...mockModel, findById: jest.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439012', base_price: 100 }) } },
+                {
+                    provide: getModelToken(User.name), useValue: {
+                        ...mockModel,
+                        findById: jest.fn().mockReturnValue({
+                            populate: jest.fn().mockResolvedValue(mockUser)
+                        })
+                    }
+                },
                 { provide: getModelToken(Address.name), useValue: mockModel },
                 { provide: MailService, useValue: {} },
                 { provide: LogisticsService, useValue: {} },
@@ -54,23 +77,20 @@ describe('Server-Side Event Hooks', () => {
 
     describe('Cart Hooks', () => {
         it('should log ADD_TO_CART event on addItem', async () => {
-            mockModel.findOne.mockReturnValue({ populate: () => ({ items: [], save: jest.fn() }) });
-
-            await cartService.addItem('uid', 'pid', 1);
+            await cartService.addItem('507f1f77bcf86cd799439011', '507f1f77bcf86cd799439012', 1);
 
             expect(mockEventsService.logEvent).toHaveBeenCalledWith(expect.objectContaining({
-                userId: 'uid',
+                userId: '507f1f77bcf86cd799439011',
                 eventType: EventType.ADD_TO_CART,
                 context: { surface: 'server_hook' }
             }));
         });
 
         it('should log REMOVE_FROM_CART event on removeItem', async () => {
-            mockModel.findOne.mockReturnValue({ populate: () => ({ items: [], save: jest.fn() }) });
-            await cartService.removeItem('uid', 'pid');
+            await cartService.removeItem('507f1f77bcf86cd799439011', '507f1f77bcf86cd799439012');
 
             expect(mockEventsService.logEvent).toHaveBeenCalledWith(expect.objectContaining({
-                userId: 'uid',
+                userId: '507f1f77bcf86cd799439011',
                 eventType: EventType.REMOVE_FROM_CART,
                 context: { surface: 'server_hook' }
             }));
@@ -79,10 +99,10 @@ describe('Server-Side Event Hooks', () => {
 
     describe('User Hooks', () => {
         it('should log WISHLIST_ADD on addToWishlist', async () => {
-            await userService.addToWishlist('uid', 'pid');
+            await userService.addToWishlist('507f1f77bcf86cd799439011', '507f1f77bcf86cd799439012');
 
             expect(mockEventsService.logEvent).toHaveBeenCalledWith(expect.objectContaining({
-                userId: 'uid',
+                userId: '507f1f77bcf86cd799439011',
                 eventType: EventType.WISHLIST_ADD,
                 context: { surface: 'server_hook' }
             }));

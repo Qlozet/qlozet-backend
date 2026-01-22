@@ -9,7 +9,7 @@ export class Event {
     @Prop({ required: true, index: true })
     userId: string;
 
-    @Prop({ required: true, enum: EventType })
+    @Prop({ required: true, type: String, enum: EventType })
     eventType: EventType;
 
     @Prop({ type: Object })

@@ -45,7 +45,7 @@ export class CatalogItem {
     @Prop({ required: true, unique: true, index: true })
     itemId: string;
 
-    @Prop({ required: true, enum: CatalogItemType, index: true })
+    @Prop({ required: true, type: String, enum: CatalogItemType, index: true })
     type: CatalogItemType;
 
     @Prop({ required: true })

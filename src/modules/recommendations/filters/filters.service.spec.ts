@@ -25,10 +25,13 @@ describe('FiltersService', () => {
         it('should filter by max price', () => {
             const spec = new FilterSpec();
             spec.maxPrice = 150;
+            spec.inStockOnly = false; // Disable default stock filtering
             const result = service.applyHardFilters(items as CatalogItem[], spec);
             const filtered = result.items;
+            // Items 1 (100) and 2 (50) should pass, item 3 (200) should be filtered out
             expect(filtered.length).toBe(2);
-            expect(filtered.map(i => i.itemId)).toEqual(['1', '2']);
+            expect(filtered.map(i => i.itemId)).toContain('1');
+            expect(filtered.map(i => i.itemId)).toContain('2');
         });
 
         it('should filter out of stock', () => {
@@ -54,6 +57,7 @@ describe('FiltersService', () => {
         it('should filter blocked vendors', () => {
             const spec = new FilterSpec();
             spec.blockedVendors = ['Gucci'];
+            spec.inStockOnly = false; // Disable default stock filtering
             const result = service.applyHardFilters(items as CatalogItem[], spec);
             const filtered = result.items;
             expect(filtered.length).toBe(2);

@@ -4,6 +4,8 @@ import { getModelToken } from '@nestjs/mongoose';
 import { UserEmbedding } from './schemas/user-embedding.schema';
 import { EventsService } from '../events/events.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { UserService } from '../../ums/services/users.service';
+import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { EventType } from '../events/enums/event-type.enum';
 
 describe('UserEmbeddingsService', () => {
@@ -22,6 +24,14 @@ describe('UserEmbeddingsService', () => {
         findById: jest.fn(),
     };
 
+    const mockUserService = {
+        findById: jest.fn().mockResolvedValue(null),
+    };
+
+    const mockEmbeddingsService = {
+        generateEmbedding: jest.fn().mockResolvedValue(new Array(1536).fill(0.1)),
+    };
+
     beforeEach(async () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
@@ -29,6 +39,8 @@ describe('UserEmbeddingsService', () => {
                 { provide: getModelToken(UserEmbedding.name), useValue: mockUserEmbeddingModel },
                 { provide: EventsService, useValue: mockEventsService },
                 { provide: CatalogService, useValue: mockCatalogService },
+                { provide: UserService, useValue: mockUserService },
+                { provide: EmbeddingsService, useValue: mockEmbeddingsService },
             ],
         }).compile();
 

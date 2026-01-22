@@ -3,6 +3,7 @@ import { UserEmbeddingsService } from './user-embeddings.service';
 import { EventsService } from '../events/events.service';
 import { UserService } from '../../ums/services/users.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
+import { CatalogService } from '../catalog/catalog.service';
 import { getModelToken } from '@nestjs/mongoose';
 import { UserEmbedding } from './schemas/user-embedding.schema';
 
@@ -19,11 +20,15 @@ describe('UserEmbeddingsService (Upgrade)', () => {
     };
 
     const mockUserService = {
-        findOne: jest.fn(),
+        findById: jest.fn(),
     };
 
     const mockEmbeddingsService = {
         generateEmbedding: jest.fn().mockResolvedValue(new Array(1536).fill(0.1)),
+    };
+
+    const mockCatalogService = {
+        findById: jest.fn().mockResolvedValue(null),
     };
 
     beforeEach(async () => {
@@ -34,6 +39,7 @@ describe('UserEmbeddingsService (Upgrade)', () => {
                 { provide: EventsService, useValue: mockEventsService },
                 { provide: UserService, useValue: mockUserService },
                 { provide: EmbeddingsService, useValue: mockEmbeddingsService },
+                { provide: CatalogService, useValue: mockCatalogService },
             ],
         }).compile();
 
@@ -42,7 +48,7 @@ describe('UserEmbeddingsService (Upgrade)', () => {
 
     describe('computeUserStyleVector', () => {
         it('should blend explicit preferences if user exists', async () => {
-            mockUserService.findOne.mockResolvedValue({
+            mockUserService.findById.mockResolvedValue({
                 _id: 'u1',
                 wears_preference: 'Male',
                 aesthetic_preferences: ['Minimalist'],
@@ -52,7 +58,7 @@ describe('UserEmbeddingsService (Upgrade)', () => {
 
             const vec = await service.computeUserStyleVector('u1');
 
-            expect(mockUserService.findOne).toHaveBeenCalledWith('u1');
+            expect(mockUserService.findById).toHaveBeenCalledWith('u1');
             expect(mockEmbeddingsService.generateEmbedding).toHaveBeenCalled();
             expect(mockUserEmbeddingModel.findOneAndUpdate).toHaveBeenCalledWith(
                 { userId: 'u1' },
@@ -72,7 +78,7 @@ describe('UserEmbeddingsService (Upgrade)', () => {
         });
 
         it('should handle missing user elegantly', async () => {
-            mockUserService.findOne.mockResolvedValue(null);
+            mockUserService.findById.mockResolvedValue(null);
             const vec = await service.computeUserStyleVector('u_unknown');
             expect(vec).toBeNull(); // No events and no user
         });
