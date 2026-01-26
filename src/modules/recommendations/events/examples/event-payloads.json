@@ -105,5 +105,23 @@
             },
             "timestamp": "2024-01-01T10:07:00.000Z"
         }
+    },
+    {
+        "description": "Preferred Aesthetic (Signup)",
+        "payload": {
+            "userId": "user_123",
+            "eventType": "preferred_aesthetic",
+            "properties": {
+                "itemId": "item_Z"
+            },
+            "context": {
+                "surface": "onboarding",
+                "step": "aesthetic_selection"
+            },
+            "metadata": {
+                "aestheticCategory": "minimalist"
+            },
+            "timestamp": "2024-01-01T09:00:00.000Z"
+        }
     }
 ]

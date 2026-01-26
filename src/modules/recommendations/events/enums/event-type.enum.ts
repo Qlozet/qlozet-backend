@@ -18,4 +18,5 @@ export enum EventType {
     HIDE_BUSINESS = 'hide_business',
     WISHLIST_ADD = 'wishlist_add',
     WISHLIST_REMOVE = 'wishlist_remove',
+    PREFERRED_AESTHETIC = 'preferred_aesthetic',
 }

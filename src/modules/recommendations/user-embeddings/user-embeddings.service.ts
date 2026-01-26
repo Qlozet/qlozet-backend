@@ -17,6 +17,7 @@ export class UserEmbeddingsService {
     // Weights for event types
     private readonly EVENT_WEIGHTS = {
         [EventType.PURCHASE]: 5.0,
+        [EventType.PREFERRED_AESTHETIC]: 4.0,
         [EventType.ADD_TO_CART]: 3.0,
         [EventType.SAVE_ITEM]: 2.0,
         [EventType.CLICK_ITEM]: 1.0,
