@@ -161,7 +161,7 @@ export class UserService {
     try {
       const user = new this.userModel(userData);
       return await user.save();
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('User creation failed', error.stack);
       if (error.code === 11000) {
         throw new ConflictException(
@@ -365,7 +365,7 @@ export class UserService {
         user.hashed_password,
       );
       return validPassword ? user : null;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `User validation failed: ${error.message}`,
         error.stack,
@@ -472,7 +472,7 @@ export class UserService {
       });
 
       return (await newAddress.save()).toJSON();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Upsert user address failed:', err.message);
 
       throw new HttpException(

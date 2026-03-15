@@ -773,7 +773,7 @@ export class SeedService {
       let role = await this.roleModel.findOne({ name: roleData.name });
 
       const permissionIds = roleData.permission_names
-        .map((name) => permissions.get(name)?._id)
+        .map((name: any) => permissions.get(name)?._id)
         .filter(Boolean) as Schema.Types.ObjectId[];
 
       if (!role) {
