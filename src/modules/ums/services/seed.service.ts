@@ -774,8 +774,7 @@ export class SeedService {
 
       const permissionIds = roleData.permission_names
         .map((name: any) => permissions.get(name)?._id)
-        .filter(Boolean) as Schema.Types.ObjectId[];
-
+        .filter(Boolean) as unknown as Schema.Types.ObjectId[];
       if (!role) {
         role = new this.roleModel({
           name: roleData.name,

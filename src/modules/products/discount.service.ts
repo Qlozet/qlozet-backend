@@ -110,8 +110,8 @@ export class DiscountService {
       .catch((err) =>
         this.logger.error('❌ Failed to apply discount to products', err),
       );
-
-    return savedDiscount.toJSON();
+    const newDiscount = savedDiscount.toObject();
+    return newDiscount;
   }
 
   /** 🔹 Apply discount to products that match its conditions */

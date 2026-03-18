@@ -48,7 +48,7 @@ export class TransactionController {
         +size,
         status,
       );
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
   }
@@ -72,7 +72,7 @@ export class TransactionController {
         +size,
         status,
       );
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
   }
@@ -84,7 +84,7 @@ export class TransactionController {
   async getByReference(@Param('reference') reference: string) {
     try {
       return this.transactionService.findByReference(reference);
-    } catch (error) {
+    } catch (error: any) {
       throw new HttpException(error.message, HttpStatus.NOT_FOUND);
     }
   }

@@ -70,6 +70,14 @@ import {
   BusinessEarning,
   BusinessEarningSchema,
 } from 'src/modules/business/schemas/business-earnings.schema';
+import {
+  CatalogItem,
+  CatalogItemSchema,
+} from 'src/modules/recommendations/catalog/schemas/catalog-item.schema';
+import {
+  UserEmbedding,
+  UserEmbeddingSchema,
+} from 'src/modules/recommendations/user-embeddings/schemas/user-embedding.schema';
 
 @Module({
   exports: [MongooseModule],
@@ -118,6 +126,8 @@ import {
       { name: Token.name, schema: TokenSchema },
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: JobStatus.name, schema: JobStatusSchema },
+      { name: CatalogItem.name, schema: CatalogItemSchema },
+      { name: UserEmbedding.name, schema: UserEmbeddingSchema },
     ]),
   ],
 })
