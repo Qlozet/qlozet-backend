@@ -9,6 +9,7 @@ import {
 import { RecommendationsService } from './recommendations.service';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('recommends')
 @ApiBearerAuth('access-token')
@@ -57,13 +58,14 @@ export class RecommendationsController {
     });
   }
 
+  @Public()
   @Get('trending')
   async getTrending(@Query('limit') limit: number = 30) {
     return this.recommendationsService.getTrendingFeed({
       limit: Number(limit),
     });
   }
-
+  @Public()
   @Get('new')
   async getNewArrivals(
     @Query('limit') limit: number = 30,
