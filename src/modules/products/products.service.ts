@@ -85,7 +85,7 @@ export class ProductService {
         await existing.save();
 
         return {
-          data: existing.toJSON(),
+          data: existing.toObject(),
           message: 'Product updated successfully',
         };
       }
@@ -100,7 +100,7 @@ export class ProductService {
     });
 
     return {
-      data: created.toJSON(),
+      data: created.toObject(),
       message: 'Product created successfully',
     };
   }
@@ -617,7 +617,7 @@ export class ProductService {
         }
       });
       this.logger.log('INVENTORY UPDATED');
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error('updateInventory failed', err.stack || err.message);
       throw err;
     } finally {

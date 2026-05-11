@@ -146,7 +146,7 @@ export class OrderService {
           payment: paymentInit.data,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof HttpException) {
         throw error;
       }
@@ -692,7 +692,7 @@ export class OrderService {
 
     const shippingItems = await Promise.all(
       order.items.map(async (item) => {
-        const product = await this.productModel.findById(item.product).lean();
+        const product = await this.productModel.findById(item.product);
         if (!product) throw new BadRequestException();
         const { name, description } = await this.getProductDetails(product);
         return {

@@ -28,6 +28,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { CurrencyService } from './modules/currency/currency.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
+import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 @Module({
   imports: [
     HttpModule,
@@ -81,6 +82,7 @@ import { BullModule } from '@nestjs/bullmq';
     LogisticsModule,
     TicketModule,
     PlatformModule,
+    RecommendationsModule,
   ],
   controllers: [AppController],
   providers: [

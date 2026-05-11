@@ -74,7 +74,7 @@ export class PriceCalculationService {
   }
 
   async calculateItemTotal(item: ProcessedOrderItem): Promise<number> {
-    const product = await this.productModel.findById(item.product_id).lean();
+    const product = await this.productModel.findById(item.product_id);
 
     if (!product) {
       throw new NotFoundException(`Product not found: ${item.product_id}`);

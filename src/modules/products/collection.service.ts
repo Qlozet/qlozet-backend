@@ -61,7 +61,8 @@ export class CollectionService {
         console.error('❌ Error applying collection to products:', err);
       });
 
-    return savedCollection.toJSON();
+    const newCollection = savedCollection.toObject();
+    return newCollection;
   }
 
   /**
