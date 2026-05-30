@@ -20,13 +20,13 @@ export class VideoPipelineSwaggerDto {
 
   @ApiProperty({ description: 'Weight value' })
   @IsOptional()
-  @IsString()
-  weight: string;
+  @IsNumber()
+  weight: number;
 
   @ApiProperty({ description: 'Height in cm' })
   @IsNotEmpty()
-  @IsString()
-  height_cm: string;
+  @IsNumber()
+  height_cm: number;
 
   @ApiProperty({ description: 'Gender value' })
   @IsNotEmpty()
