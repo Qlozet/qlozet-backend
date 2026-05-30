@@ -2,33 +2,43 @@
 import {
   Controller,
   Post,
-  Param,
   Body,
   Get,
-  Query,
   UseGuards,
   Req,
 } from '@nestjs/common';
 import { TokenService } from './token.service';
-import {
-  EarnDto,
-  SpendDto,
-  PurchaseDto,
-  HistoryQueryDto,
-} from './dto/token.dto';
+import { PurchaseDto } from './dto/token.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Tokens')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('token')
 export class TokenController {
   constructor(private readonly service: TokenService) {}
+
+  @Get('balance')
+  @ApiOperation({ summary: 'Get active token balance' })
+  async getBalance(@Req() req: any) {
+    const business = req.business?.id;
+    const customer = req.user?.id;
+    const tokens = await this.service.balance(business, customer);
+    return { tokens };
+  }
+
   @Post('customer/purchase')
+  @ApiOperation({ summary: 'Purchase tokens for customer' })
   async customerPurchase(@Body() dto: PurchaseDto, @Req() req: any) {
     return this.service.purchase(dto.amount, undefined, req.user.id);
   }
 
   @Roles(UserType.VENDOR)
   @Post('vendor/purchase')
+  @ApiOperation({ summary: 'Purchase tokens for vendor business' })
   async VendorPurchase(@Body() dto: PurchaseDto, @Req() req: any) {
     return this.service.purchase(dto.amount, req.business.id);
   }

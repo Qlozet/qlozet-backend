@@ -20,12 +20,16 @@ export class CatalogService {
         return this.catalogModel.find().exec();
     }
 
-    async findById(id: string): Promise<CatalogItem | null> {
-        return this.catalogModel.findById(id).exec();
+    async findById(itemId: string): Promise<CatalogItem | null> {
+        return this.catalogModel.findOne({ itemId }).exec();
     }
 
-    async update(id: string, updateData: Partial<CatalogItem>): Promise<CatalogItem | null> {
-        return this.catalogModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
+    async update(itemId: string, updateData: Partial<CatalogItem>): Promise<CatalogItem | null> {
+        return this.catalogModel.findOneAndUpdate({ itemId }, updateData, { new: true }).exec();
+    }
+
+    async delete(itemId: string): Promise<CatalogItem | null> {
+        return this.catalogModel.findOneAndDelete({ itemId }).exec();
     }
 
     normalizeVendorListing(raw: any, source: string): CreateCatalogItemDto {

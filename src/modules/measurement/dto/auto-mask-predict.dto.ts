@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsNumber } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class AutoMaskPredictBodyDto {
@@ -36,11 +36,19 @@ export class AutoMaskSwaggerDto {
 
   @ApiProperty({ type: 'string', required: false, description: 'Notes' })
   notes?: string;
-  @ApiProperty({ type: 'string', required: false, description: 'Notes' })
-  weight?: string;
-  @ApiProperty({ type: 'string', required: false, description: 'Notes' })
-  height_cm?: string;
-  @ApiProperty({ type: 'string', required: false, description: 'Notes' })
+  @ApiProperty({ type: 'number', required: false, description: 'Weight value in kg' })
+  @IsOptional()
+  @IsNumber()
+  weight?: number;
+
+  @ApiProperty({ type: 'number', required: false, description: 'Height in cm' })
+  @IsOptional()
+  @IsNumber()
+  height_cm?: number;
+
+  @ApiProperty({ type: 'string', required: false, description: 'Gender value' })
+  @IsOptional()
+  @IsString()
   gender?: string;
   business?: string;
   customer?: string;
