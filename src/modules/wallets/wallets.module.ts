@@ -26,10 +26,11 @@ import {
 import { DatabaseModule } from 'src/database/database.module';
 import { TokenService } from './token.service';
 import { CurrencyService } from '../currency/currency.service';
+import { TokenController } from './token.controller';
 
 @Module({
   imports: [BusinessModule, HttpModule, DatabaseModule],
-  controllers: [WalletsController],
+  controllers: [WalletsController, TokenController],
   providers: [
     WalletsService,
     TransactionService,
