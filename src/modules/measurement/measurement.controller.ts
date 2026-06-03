@@ -14,6 +14,8 @@ import {
   BadRequestException,
   Get,
   Param,
+  Patch,
+  Delete,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { MeasurementService } from './measurement.service';
@@ -303,6 +305,62 @@ export class MeasurementController {
   async getActiveMeasurements(@Req() req: any) {
     return this.userService.getActiveMeasurementSet(req.user.id);
   }
+
+  @Roles(UserType.CUSTOMER)
+  @Get('users/sets')
+  @ApiOperation({ summary: 'Get all saved measurement sets for a user' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of all measurement sets',
+  })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async getAllMeasurementSets(@Req() req: any) {
+    return this.userService.getAllMeasurementSets(req.user.id);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Get('users/sets/:name')
+  @ApiOperation({ summary: 'Get a specific measurement set by name' })
+  @ApiParam({ name: 'name', description: 'Name of the measurement set' })
+  @ApiResponse({
+    status: 200,
+    description: 'Measurement set details',
+    type: ActiveMeasurementSetDto,
+  })
+  @ApiResponse({ status: 404, description: 'Measurement set not found' })
+  async getMeasurementSetByName(
+    @Param('name') name: string,
+    @Req() req: any,
+  ) {
+    return this.userService.getMeasurementSetByName(req.user.id, name);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Patch('users/sets/:name/activate')
+  @ApiOperation({ summary: 'Set a measurement set as the active one' })
+  @ApiParam({ name: 'name', description: 'Name of the measurement set to activate' })
+  @ApiResponse({ status: 200, description: 'Measurement set activated' })
+  @ApiResponse({ status: 404, description: 'Measurement set not found' })
+  async activateMeasurementSet(
+    @Param('name') name: string,
+    @Req() req: any,
+  ) {
+    return this.userService.setActiveMeasurementSet(req.user.id, name);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Delete('users/sets/:name')
+  @ApiOperation({ summary: 'Delete a measurement set by name' })
+  @ApiParam({ name: 'name', description: 'Name of the measurement set to delete' })
+  @ApiResponse({ status: 200, description: 'Measurement set deleted' })
+  @ApiResponse({ status: 404, description: 'Measurement set not found' })
+  async deleteMeasurementSet(
+    @Param('name') name: string,
+    @Req() req: any,
+  ) {
+    return this.userService.deleteMeasurementSet(req.user.id, name);
+  }
+
   @Public()
   @Get('job/:job_id')
   async getJobStatus(@Param('job_id') jobId: string) {
