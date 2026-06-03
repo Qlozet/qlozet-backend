@@ -564,4 +564,66 @@ export class UserService {
     await user.save();
     return newSet;
   }
+
+  async getAllMeasurementSets(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('full_name email phone_number measurementSets')
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+
+    return {
+      full_name: user.full_name,
+      email: user.email,
+      phone_number: user.phone_number,
+      total: user.measurementSets?.length ?? 0,
+      sets: user.measurementSets ?? [],
+    };
+  }
+
+  async getMeasurementSetByName(userId: string, setName: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('full_name email phone_number measurementSets')
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+
+    const set = user.measurementSets?.find((s) => s.name === setName);
+    if (!set)
+      throw new NotFoundException(`Measurement set "${setName}" not found`);
+
+    return {
+      full_name: user.full_name,
+      email: user.email,
+      phone_number: user.phone_number,
+      ...set,
+    };
+  }
+
+  async deleteMeasurementSet(userId: string, setName: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.measurementSets || user.measurementSets.length === 0)
+      throw new BadRequestException('User has no measurement sets');
+
+    const setIndex = user.measurementSets.findIndex((s) => s.name === setName);
+    if (setIndex === -1)
+      throw new NotFoundException(`Measurement set "${setName}" not found`);
+
+    const wasActive = user.measurementSets[setIndex].active;
+    user.measurementSets.splice(setIndex, 1);
+
+    // If the deleted set was active and there are remaining sets, activate the first one
+    if (wasActive && user.measurementSets.length > 0) {
+      user.measurementSets[0].active = true;
+    }
+
+    await user.save();
+
+    return {
+      message: `Measurement set "${setName}" deleted successfully`,
+      remaining: user.measurementSets.length,
+    };
+  }
 }
