@@ -11,6 +11,7 @@ import {
   ValidationPipe,
   Req,
   NotFoundException,
+  BadRequestException,
   UseGuards,
   Patch,
 } from '@nestjs/common';
@@ -25,6 +26,9 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { OrderStatus } from './schemas/orders.schema';
+
+const VALID_STATUSES = Object.values(OrderStatus);
 
 @ApiTags('Orders')
 @ApiBearerAuth('access-token')
@@ -55,6 +59,7 @@ export class OrderController {
   @ApiQuery({
     name: 'status',
     required: false,
+    enum: OrderStatus,
     description: 'Optional order status filter',
   })
   async findCustomerOrders(
@@ -65,6 +70,12 @@ export class OrderController {
   ) {
     const userId = req.user?.id;
     if (!userId) throw new NotFoundException('User not found');
+
+    if (status && !VALID_STATUSES.includes(status as OrderStatus)) {
+      throw new BadRequestException(
+        `Invalid status "${status}". Valid statuses: ${VALID_STATUSES.join(', ')}`,
+      );
+    }
 
     return this.orderService.findCustomerOrdersWithFilters(
       userId,
@@ -79,6 +90,7 @@ export class OrderController {
   @ApiQuery({
     name: 'status',
     required: false,
+    enum: OrderStatus,
     description: 'Optional order status filter',
   })
   async findVendorOrders(
@@ -87,6 +99,12 @@ export class OrderController {
     @Query('size') size = 10,
     @Query('status') status?: string,
   ) {
+    if (status && status !== 'all' && !VALID_STATUSES.includes(status as OrderStatus)) {
+      throw new BadRequestException(
+        `Invalid status "${status}". Valid statuses: all, ${VALID_STATUSES.join(', ')}`,
+      );
+    }
+
     return this.orderService.findVendorOrders(
       Number(page),
       Number(size),
