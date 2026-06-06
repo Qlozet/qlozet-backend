@@ -29,6 +29,8 @@ import { CurrencyService } from './modules/currency/currency.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
+import { WaitlistModule } from './modules/waitlist/waitlist.module';
+
 @Module({
   imports: [
     HttpModule,
@@ -83,6 +85,7 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     TicketModule,
     PlatformModule,
     RecommendationsModule,
+    WaitlistModule,
   ],
   controllers: [AppController],
   providers: [

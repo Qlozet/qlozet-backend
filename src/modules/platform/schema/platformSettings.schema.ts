@@ -43,6 +43,12 @@ export class PlatformSettings extends Document {
   run_prediction_token_price: number;
 
   @Prop({ type: Number, default: 0 })
+  ai_ask_token_price: number;
+
+  @Prop({ type: Boolean, default: false })
+  ai_ask_requires_auth: boolean;
+
+  @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
   @Prop({
     type: {

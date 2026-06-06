@@ -91,7 +91,7 @@ export class TokenService {
   }
 
   async spend(
-    type: 'video' | 'image' | 'edit' | 'prediction',
+    type: 'video' | 'image' | 'edit' | 'prediction' | 'ai_ask',
     business?: string,
     customer?: string,
   ) {
@@ -102,6 +102,7 @@ export class TokenService {
       video: settings.video_measurement_token_price,
       prediction: settings.run_prediction_token_price,
       edit: settings.edit_garment_token_price,
+      ai_ask: settings.ai_ask_token_price,
     };
 
     const amount = priceMap[type] ?? settings.edit_garment_token_price;
