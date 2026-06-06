@@ -13,6 +13,8 @@ import { EventsModule } from '../events/events.module';
 import { BusinessModule } from '../../business/business.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { WalletsModule } from '../../wallets/wallets.module';
+import { DatabaseModule } from 'src/database/database.module';
+import { AuthModule } from 'src/modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -26,6 +28,8 @@ import { WalletsModule } from '../../wallets/wallets.module';
     BusinessModule,
     EmbeddingsModule,
     WalletsModule,
+    DatabaseModule,
+    AuthModule,
   ],
   controllers: [RouterController],
   providers: [RouterService, AskService, GuardrailsService],
