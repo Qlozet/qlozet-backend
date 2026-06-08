@@ -30,6 +30,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
+import { BespokeModule } from './modules/bespoke/bespoke.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { WaitlistModule } from './modules/waitlist/waitlist.module';
     PlatformModule,
     RecommendationsModule,
     WaitlistModule,
+    BespokeModule,
   ],
   controllers: [AppController],
   providers: [
