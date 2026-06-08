@@ -397,6 +397,130 @@ export class MailService {
     }
   }
 
+  // ================================================================
+  // BESPOKE QUOTE EMAIL METHODS
+  // ================================================================
+
+  async sendQuoteRequestEmail(
+    to: string,
+    vendorName: string,
+    designName: string,
+    designImages: string[],
+  ) {
+    try {
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2C1810;">New Bespoke Quote Request</h2>
+          <p>Hello <strong>${vendorName}</strong>,</p>
+          <p>A customer has requested a quote for their bespoke design: <strong>${designName}</strong>.</p>
+          ${designImages.length > 0 ? `<p><img src="${designImages[0]}" alt="Design" style="max-width: 300px; border-radius: 12px;" /></p>` : ''}
+          <p>You have <strong>7 days</strong> to submit your quote before it expires.</p>
+          <p>Log in to your vendor dashboard to review the design details and submit your quote.</p>
+          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/vendor/bespoke/quotes" 
+             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
+            View Quote Request
+          </a>
+          <p style="margin-top: 24px; color: #888; font-size: 12px;">
+            Custom orders become non-cancellable after cutting begins.
+          </p>
+        </div>
+      `;
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `New Bespoke Quote Request: ${designName}`,
+        html,
+      });
+
+      console.log('✅ Quote request email sent to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send quote request email:', error);
+      throw error;
+    }
+  }
+
+  async sendQuoteSubmittedEmail(
+    to: string,
+    customerName: string,
+    vendorName: string,
+    total: number,
+    estimatedDays: number,
+  ) {
+    try {
+      const formattedTotal = new Intl.NumberFormat('en-NG', {
+        style: 'currency',
+        currency: 'NGN',
+      }).format(total);
+
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2C1810;">Quote Received!</h2>
+          <p>Hello <strong>${customerName}</strong>,</p>
+          <p><strong>${vendorName}</strong> has submitted a quote for your bespoke design.</p>
+          <div style="background: #F9F7F4; padding: 16px; border-radius: 12px; margin: 16px 0;">
+            <p style="margin: 4px 0;"><strong>Total:</strong> ${formattedTotal}</p>
+            <p style="margin: 4px 0;"><strong>Estimated completion:</strong> ${estimatedDays} days</p>
+          </div>
+          <p>Log in to review and compare quotes for your design.</p>
+          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/bespoke" 
+             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
+            View Quotes
+          </a>
+        </div>
+      `;
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Quote received from ${vendorName}`,
+        html,
+      });
+
+      console.log('✅ Quote submitted email sent to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send quote submitted email:', error);
+      throw error;
+    }
+  }
+
+  async sendQuoteRevisionEmail(
+    to: string,
+    vendorName: string,
+    designName: string,
+    revisionMessage: string,
+  ) {
+    try {
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2C1810;">Revision Requested</h2>
+          <p>Hello <strong>${vendorName}</strong>,</p>
+          <p>A customer has requested a revision on your quote for <strong>${designName}</strong>.</p>
+          <div style="background: #FFF3CD; padding: 16px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #D97706;">
+            <p style="font-style: italic; margin: 0;">"${revisionMessage}"</p>
+          </div>
+          <p>Please update your quote and resubmit.</p>
+          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/vendor/bespoke/quotes" 
+             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
+            Update Quote
+          </a>
+        </div>
+      `;
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Revision requested: ${designName}`,
+        html,
+      });
+
+      console.log('✅ Quote revision email sent to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send quote revision email:', error);
+      throw error;
+    }
+  }
+
   areTemplatesLoaded(): boolean {
     return !!(
       this.templates.verification &&

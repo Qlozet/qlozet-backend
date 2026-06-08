@@ -131,6 +131,15 @@ export class Order {
   })
   status: OrderStatus;
 
+  @Prop({ type: String, enum: ['standard', 'bespoke'], default: 'standard' })
+  type?: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'BespokeDesign', default: null })
+  bespoke_design?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'BespokeQuote', default: null })
+  bespoke_quote?: Types.ObjectId;
+
   @Prop({ type: String })
   tracking_number?: string;
 

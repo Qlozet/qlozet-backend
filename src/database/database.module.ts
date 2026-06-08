@@ -78,6 +78,14 @@ import {
   UserEmbedding,
   UserEmbeddingSchema,
 } from 'src/modules/recommendations/user-embeddings/schemas/user-embedding.schema';
+import {
+  BespokeDesign,
+  BespokeDesignSchema,
+} from 'src/modules/bespoke/schemas/bespoke-design.schema';
+import {
+  BespokeQuote,
+  BespokeQuoteSchema,
+} from 'src/modules/bespoke/schemas/bespoke-quote.schema';
 
 @Module({
   exports: [MongooseModule],
@@ -128,6 +136,8 @@ import {
       { name: JobStatus.name, schema: JobStatusSchema },
       { name: CatalogItem.name, schema: CatalogItemSchema },
       { name: UserEmbedding.name, schema: UserEmbeddingSchema },
+      { name: BespokeDesign.name, schema: BespokeDesignSchema },
+      { name: BespokeQuote.name, schema: BespokeQuoteSchema },
     ]),
   ],
 })
