@@ -50,6 +50,9 @@ export class PlatformSettings extends Document {
 
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
+
+  @Prop({ type: Number, default: 10 })
+  reservation_fee_percent: number;
   @Prop({
     type: {
       usd: {

@@ -96,6 +96,12 @@ export class OrderItem {
   @Prop({ type: [AccessorySelection], default: [] })
   accessory_selections?: AccessorySelection[];
 
+  @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
+  applied_fabric?: Types.ObjectId;
+
+  @Prop({ type: Number, default: null })
+  applied_fabric_yards?: number;
+
   @Prop({ type: String })
   note?: string;
 }

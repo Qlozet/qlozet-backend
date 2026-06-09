@@ -86,6 +86,14 @@ import {
   BespokeQuote,
   BespokeQuoteSchema,
 } from 'src/modules/bespoke/schemas/bespoke-quote.schema';
+import {
+  FabricReservation,
+  FabricReservationSchema,
+} from 'src/modules/fabric-reservation/schemas/fabric-reservation.schema';
+import {
+  FabricClaim,
+  FabricClaimSchema,
+} from 'src/modules/fabric-reservation/schemas/fabric-claim.schema';
 
 @Module({
   exports: [MongooseModule],
@@ -138,6 +146,8 @@ import {
       { name: UserEmbedding.name, schema: UserEmbeddingSchema },
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
+      { name: FabricReservation.name, schema: FabricReservationSchema },
+      { name: FabricClaim.name, schema: FabricClaimSchema },
     ]),
   ],
 })

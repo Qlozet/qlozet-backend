@@ -265,6 +265,19 @@ export class ProductsController {
   }
 
   @Roles('customer')
+  @Get('wishlist/customizable')
+  @ApiOperation({
+    summary: 'Get customizable clothing items from wishlist (for Use Fabric modal)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of customizable clothing products from wishlist',
+  })
+  async getCustomizableWishlist(@Req() req: any) {
+    return this.productService.getCustomizableWishlist(req.user.id);
+  }
+
+  @Roles('customer')
   @Get('/trending/week')
   @ApiOkResponse({
     description: 'Trending products this week',

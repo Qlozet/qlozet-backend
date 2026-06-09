@@ -461,6 +461,25 @@ export class ProductService {
       };
     }
   }
+
+  async getCustomizableWishlist(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .populate({
+        path: 'wishlist',
+        match: {
+          kind: 'clothing',
+          'clothing.type': ClothingType.CUSTOMIZE,
+          status: 'active',
+        },
+      })
+      .select('wishlist');
+
+    if (!user) throw new NotFoundException('User not found');
+
+    return user.wishlist || [];
+  }
+
   async getTrendingProductsThisWeek() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -614,6 +633,27 @@ export class ProductService {
           await this.updateFabric(item, session);
           await this.updateAccessory(item, session);
           await this.updateColorVariant(item, session);
+
+          // Deduct applied fabric (from "Use Fabric" feature)
+          if (item.applied_fabric && item.applied_fabric_yards) {
+            const fabricProduct = await this.productModel
+              .findById(item.applied_fabric)
+              .session(session);
+            if (fabricProduct?.fabric) {
+              const newYards =
+                fabricProduct.fabric.yard_length - item.applied_fabric_yards;
+              if (newYards < 0) {
+                throw new BadRequestException(
+                  `Not enough applied fabric (${fabricProduct.fabric.name}) available`,
+                );
+              }
+              fabricProduct.fabric.yard_length = newYards;
+              await fabricProduct.save({ session });
+              this.logger.log(
+                `Applied fabric ${item.applied_fabric} deducted by ${item.applied_fabric_yards} yards`,
+              );
+            }
+          }
         }
       });
       this.logger.log('INVENTORY UPDATED');
