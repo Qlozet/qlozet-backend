@@ -27,6 +27,12 @@ export class Cart {
           },
           default: {},
         },
+        applied_fabric_id: {
+          type: Types.ObjectId,
+          ref: 'Product',
+          default: null,
+        },
+        applied_fabric_yards: { type: Number, default: null },
         quantity: { type: Number, required: true, min: 1 },
         unit_price: { type: Number, required: true },
         total_price: { type: Number, required: true },
@@ -43,6 +49,8 @@ export class Cart {
       style_ids?: Types.ObjectId[];
       accessory_ids?: Types.ObjectId[];
     };
+    applied_fabric_id?: Types.ObjectId;
+    applied_fabric_yards?: number;
     quantity: number;
     unit_price: number;
     total_price: number;

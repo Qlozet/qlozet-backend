@@ -31,6 +31,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { BespokeModule } from './modules/bespoke/bespoke.module';
+import { FabricReservationModule } from './modules/fabric-reservation/fabric-reservation.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { BespokeModule } from './modules/bespoke/bespoke.module';
     RecommendationsModule,
     WaitlistModule,
     BespokeModule,
+    FabricReservationModule,
   ],
   controllers: [AppController],
   providers: [
