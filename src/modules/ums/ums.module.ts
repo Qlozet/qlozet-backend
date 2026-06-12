@@ -11,6 +11,8 @@ import { JwtService } from '@nestjs/jwt';
 // Import modules instead of directly listing foreign services
 import { LogisticsModule } from '../logistics/logistics.module';
 import { ProductModule } from '../products/products.module';
+import { PlatformModule } from '../platform/platform.module';
+import { BusinessModule } from '../business/business.module';
 
 import { User, UserSchema } from './schemas/user.schema';
 import { Address, AddressSchema } from './schemas/address.schema';
@@ -31,6 +33,8 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     ]),
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService
+    PlatformModule,    // provides PlatformService (needed by UserController)
+    BusinessModule,    // provides BusinessService (needed by UserController)
   ],
   controllers: [UserController],
   providers: [
