@@ -24,8 +24,11 @@ export class Business extends Document {
   @Prop({ required: false })
   business_address: string;
 
-  @Prop()
-  address_code?: string;
+  @Prop({ type: Number, default: null })
+  address_code?: number; // Shipbubble validated address code
+
+  @Prop({ type: String, default: null })
+  validated_address?: string; // Formatted address from Shipbubble
 
   @Prop()
   address_line_2?: string;

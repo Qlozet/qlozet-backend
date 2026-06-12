@@ -17,12 +17,20 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
+  ApiParam,
   ApiQuery,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import {
+  CheckoutPreviewDto,
+  CheckoutPreviewResponseDto,
+} from './dto/checkout-preview.dto';
+import { FulfillOrderDto } from './dto/fulfill-order.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
@@ -50,6 +58,28 @@ export class OrderController {
   async create(@Body() dto: CreateOrderDto, @Req() req) {
     const customer = req.user;
     return this.orderService.createOrder(dto, customer);
+  }
+
+  /**
+   * 📦 Get shipping rates per vendor before checkout
+   */
+  @Roles(UserType.CUSTOMER)
+  @Post('checkout-preview')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get shipping rates per vendor for cart items',
+    description:
+      'Splits cart by vendor, fetches Shipbubble rates for each. Returns courier options for customer to select.',
+  })
+  @ApiBody({ type: CheckoutPreviewDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Shipping rates per vendor',
+    type: CheckoutPreviewResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'No validated address or empty cart' })
+  async checkoutPreview(@Req() req, @Body() dto: CheckoutPreviewDto) {
+    return this.orderService.checkoutPreview(req.user, dto);
   }
 
   // In your controller
@@ -111,13 +141,37 @@ export class OrderController {
       req.business?._id,
     );
   }
-  // @Roles(UserType.VENDOR)
-  // @Post('confirm/:reference')
-  // @ApiOperation({ summary: 'Confirm an order and create shipment' })
-  // async confirmOrder(@Param('reference') reference: string, @Req() req) {
-  //   const business = req.business;
-  //   return this.orderService.confirmOrder(reference, business);
-  // }
+
+  /**
+   * 🚚 Vendor fulfills their portion of the order — creates Shipbubble label
+   */
+  @Roles(UserType.VENDOR)
+  @Post(':reference/fulfill')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Vendor fulfills their portion — creates Shipbubble shipping label',
+    description:
+      'Creates a Shipbubble label for this vendor\'s items. Re-fetches rates if token is stale (>25min).',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference (e.g. ORD-XXXX)' })
+  @ApiBody({ type: FulfillOrderDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Shipment label created successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Payment not completed or shipment already fulfilled' })
+  async fulfillOrder(
+    @Param('reference') reference: string,
+    @Body() dto: FulfillOrderDto,
+    @Req() req,
+  ) {
+    return this.orderService.fulfillVendorShipment(
+      reference,
+      req.business,
+      dto,
+    );
+  }
+
   @Roles(UserType.VENDOR)
   @Patch('cancel/:reference')
   @ApiOperation({ summary: 'Cancel an order and refund customer' })
@@ -132,3 +186,4 @@ export class OrderController {
     return this.orderService.getBusinessChart(req.business?.id);
   }
 }
+

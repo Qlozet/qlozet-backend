@@ -1,8 +1,14 @@
 // src/dto/create-order.dto.ts
-import { ArrayMinSize, IsArray, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProcessedOrderItemDto } from './order-item.dto';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SelectedShippingDto } from './selected-shipping.dto';
 
 export class CreateOrderDto {
   @ApiProperty({
@@ -48,4 +54,16 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => ProcessedOrderItemDto)
   items: ProcessedOrderItemDto[];
+
+  @ApiPropertyOptional({
+    type: [SelectedShippingDto],
+    description:
+      'Shipping selections per vendor from checkout-preview. When provided, creates VendorShipment entries.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SelectedShippingDto)
+  selected_shipping?: SelectedShippingDto[];
 }
+

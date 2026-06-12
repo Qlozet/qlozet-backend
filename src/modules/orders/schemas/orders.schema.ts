@@ -13,6 +13,15 @@ export enum OrderStatus {
 }
 export const ALLOWED_STATUSES = [OrderStatus.PROCESSING, OrderStatus.COMPLETED];
 
+export enum ShipmentStatus {
+  PENDING = 'pending',
+  READY_TO_SHIP = 'ready_to_ship',
+  SHIPPED = 'shipped',
+  IN_TRANSIT = 'in_transit',
+  DELIVERED = 'delivered',
+  FAILED = 'failed',
+}
+
 export type OrderDocument = Order & Document;
 
 /** ------------------ Sub-schemas for selections ------------------ */
@@ -106,6 +115,57 @@ export class OrderItem {
   note?: string;
 }
 
+/** ------------------ Vendor Shipment Sub-Schema ------------------ */
+@Schema({ _id: true })
+export class VendorShipment {
+  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  business: Types.ObjectId;
+
+  // Rate quote data (saved from checkout-preview)
+  @Prop({ type: String })
+  request_token?: string;
+
+  @Prop({ type: String })
+  service_code?: string;
+
+  @Prop({ type: String })
+  courier_id?: string;
+
+  @Prop({ type: String })
+  courier_name?: string;
+
+  @Prop({ type: Number, default: 0 })
+  shipping_fee: number;
+
+  // Label/shipment data (populated after fulfillment)
+  @Prop({ type: String })
+  shipment_id?: string;
+
+  @Prop({ type: String })
+  tracking_number?: string;
+
+  @Prop({ type: String })
+  label_url?: string;
+
+  @Prop({
+    type: String,
+    enum: Object.values(ShipmentStatus),
+    default: ShipmentStatus.PENDING,
+  })
+  status: ShipmentStatus;
+
+  @Prop({ type: Date })
+  rate_fetched_at?: Date;
+
+  @Prop({ type: Date })
+  shipped_at?: Date;
+
+  @Prop({ type: Date })
+  delivered_at?: Date;
+}
+
+export const VendorShipmentSchema = SchemaFactory.createForClass(VendorShipment);
+
 /** ------------------ Main Order Schema ------------------ */
 @Schema({ timestamps: true })
 export class Order {
@@ -146,11 +206,16 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'BespokeQuote', default: null })
   bespoke_quote?: Types.ObjectId;
 
+  /** @deprecated Use shipments[].tracking_number instead */
   @Prop({ type: String })
   tracking_number?: string;
 
+  /** @deprecated Use shipments[].courier_name instead */
   @Prop({ type: String })
   courier_name?: string;
+
+  @Prop({ type: [VendorShipmentSchema], default: [] })
+  shipments: VendorShipment[];
   @Prop({ type: Number, default: 0 })
   vendor_earnings?: number; // After commission removed
 
