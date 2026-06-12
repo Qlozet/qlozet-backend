@@ -8,5 +8,6 @@ import { LogisticsService } from './logistics.service';
   imports: [HttpModule],
   controllers: [LogisticsController],
   providers: [LogisticsService],
+  exports: [LogisticsService],
 })
 export class LogisticsModule {}

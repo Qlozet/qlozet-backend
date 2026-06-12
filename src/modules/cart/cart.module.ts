@@ -14,5 +14,6 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
   ],
   controllers: [CartController],
   providers: [CartService],
+  exports: [CartService, MongooseModule],
 })
 export class CartModule {}

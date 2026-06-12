@@ -1,37 +1,27 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
 import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
-import { TransactionService } from '../transactions/transactions.service';
-import { WalletsService } from '../wallets/wallets.service';
-import { HttpModule } from '@nestjs/axios';
-import { BusinessModule } from '../business/business.module';
-import { PaymentService } from '../payment/payment.service';
-import { PlatformService } from '../platform/platform.service';
-import { Order, OrderSchema } from '../orders/schemas/orders.schema';
-import { CurrencyService } from '../currency/currency.service';
 import { JobStatusService } from '../measurement/job-status.service';
+
+// Import modules instead of directly listing their services
+import { TransactionsModule } from '../transactions/transactions.module';
+import { WalletsModule } from '../wallets/wallets.module';
+import { BusinessModule } from '../business/business.module';
 import { ProductModule } from '../products/products.module';
+import { OrdersModule } from '../orders/orders.module';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Order.name, schema: OrderSchema },
-    ]),
-    BusinessModule,
-    HttpModule,
-    ProductModule,
+    TransactionsModule,  // provides TransactionService
+    WalletsModule,       // provides WalletsService, PaymentService, etc.
+    BusinessModule,      // provides BusinessService
+    ProductModule,       // provides ProductService
+    OrdersModule,        // provides Order model (MongooseModule)
   ],
   controllers: [WebhookController],
   providers: [
     WebhookService,
-    TransactionService,
-    WalletsService,
-    PaymentService,
-    PlatformService,
-    CurrencyService,
     JobStatusService,
   ],
 })
 export class WebhookModule {}
-
