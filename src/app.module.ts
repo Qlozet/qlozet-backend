@@ -21,12 +21,10 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { MeasurementModule } from './modules/measurement/measurement.module';
-import { LogisticsService } from './modules/logistics/logistics.service';
-import { HttpModule } from '@nestjs/axios';
 import { LogisticsModule } from './modules/logistics/logistics.module';
 import { TicketModule } from './modules/ticket/ticket.module';
 import { PlatformModule } from './modules/platform/platform.module';
-import { CurrencyService } from './modules/currency/currency.service';
+import { CurrencyModule } from './modules/currency/currency.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
@@ -36,7 +34,6 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
 
 @Module({
   imports: [
-    HttpModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -108,6 +105,7 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
     WaitlistModule,
     BespokeModule,
     FabricReservationModule,
+    CurrencyModule,
   ],
   controllers: [AppController],
   providers: [
@@ -120,8 +118,6 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
-    LogisticsService,
-    CurrencyService,
   ],
 })
 export class AppModule {}

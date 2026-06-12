@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { HttpModule } from '@nestjs/axios';
 import { BespokeController } from './bespoke.controller';
 import { BespokeService } from './bespoke.service';
 import {
@@ -11,25 +10,28 @@ import {
   BespokeQuote,
   BespokeQuoteSchema,
 } from './schemas/bespoke-quote.schema';
-import { Order, OrderSchema } from '../orders/schemas/orders.schema';
-import { Business, BusinessSchema } from '../business/schemas/business.schema';
-import { Product, ProductSchema } from '../products/schemas/product.schema';
+import { MailService } from '../notifications/mail/mail.service';
+
+// Import modules for dependencies
 import { AuthModule } from '../auth/auth.module';
 import { OrdersModule } from '../orders/orders.module';
-import { MailService } from '../notifications/mail/mail.service';
+import { TransactionsModule } from '../transactions/transactions.module';
+import { PaymentModule } from '../payment/payment.module';
+import { BusinessModule } from '../business/business.module';
+import { ProductModule } from '../products/products.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
-      { name: Order.name, schema: OrderSchema },
-      { name: Business.name, schema: BusinessSchema },
-      { name: Product.name, schema: ProductSchema },
     ]),
-    HttpModule,
     AuthModule,
-    OrdersModule, // Exports TransactionService, PaymentService, etc.
+    OrdersModule,        // provides Order model
+    TransactionsModule,  // provides TransactionService
+    PaymentModule,       // provides PaymentService
+    BusinessModule,      // provides Business model
+    ProductModule,       // provides Product model
   ],
   controllers: [BespokeController],
   providers: [BespokeService, MailService],
