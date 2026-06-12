@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -40,6 +41,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
   @Post('register/vendor')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Register a new vendor',
@@ -85,6 +87,7 @@ export class AuthController {
   // Customer Registration
   @Post('register/customer')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Register a new customer',
@@ -125,6 +128,7 @@ export class AuthController {
   // Vendor Login
   @Post('login/vendor')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({
     type: LoginVendorResponseWrapperDto,
@@ -146,6 +150,7 @@ export class AuthController {
 
   @Post('login/customer')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({
     type: LoginCustomerResponseWrapperDto,

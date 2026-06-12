@@ -176,7 +176,7 @@ export class UserController {
     return this.rolesService.removePermissionsFromRole(id, dto.permission_ids);
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Post('customer/shipping-address/upsert')
   @HttpCode(HttpStatus.OK)
   async upsertAddress(@Req() req, @Body() dto: AddressDto) {
@@ -185,7 +185,7 @@ export class UserController {
     return { message: 'Address saved successfully', data: address };
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('customer/shipping-address')
   async getMyAddress(@Req() req) {
     const userId = req.user._id;
@@ -233,23 +233,23 @@ export class UserController {
     return await this.platformService.update(dto);
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('me/following-businesses')
   async getFollowing(@Req() req, @Query() dto: PaginationQueryType) {
     return this.businessService.getUserFollowingBusinesses(req.user.id, dto);
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Post(':business_id/follow')
   async follow(@Param('business_id') businessId: string, @Req() req) {
     return this.businessService.followBusiness(req.user.id, businessId);
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Delete(':business_id/unfollow')
   async unfollow(@Param('business_id') businessId: string, @Req() req) {
     return this.businessService.unfollowBusiness(req.user.id, businessId);
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('feed')
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'size', required: false, example: 10 })
@@ -322,7 +322,7 @@ export class UserController {
     );
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('vendors/top-week')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -358,7 +358,7 @@ export class UserController {
   async topVendors(@Req() req: any) {
     return this.businessService.getTopVendorsOfWeek(req.user?.id);
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('vendors/new-week')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -394,7 +394,7 @@ export class UserController {
   async newVendors(@Req() req: any) {
     return this.businessService.getNewVendorsOfWeek(req.user?.id);
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('vendors')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -430,7 +430,7 @@ export class UserController {
   async fetchVendors(@Req() req: any) {
     return this.businessService.getRandomBusinesses(req.user?.id);
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('vendors/:business_id')
   @ApiOkResponse({
     description: 'Top vendors of the week sorted by total_items_sold',
@@ -470,7 +470,7 @@ export class UserController {
     return this.businessService.getSingleBusiness(req?.user?.id, business_id);
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Delete('delete')
   async deleteUser(@Req() req: any) {
     return this.userService.deleteUser(req.user?.id);

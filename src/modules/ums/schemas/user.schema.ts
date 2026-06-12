@@ -5,6 +5,7 @@ export type UserDocument = User & Document;
 
 export enum UserType {
   PLATFORM = 'platform',
+  ADMIN = 'platform', // alias for PLATFORM
   VENDOR = 'vendor',
   CUSTOMER = 'customer',
 }

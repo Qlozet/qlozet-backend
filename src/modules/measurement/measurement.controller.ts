@@ -103,7 +103,7 @@ export class MeasurementController {
     }
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Post('auto-mask-prediction')
   async autoMask(@Body() body: AutoMaskSwaggerDto, @Req() req: any) {
     try {
@@ -132,7 +132,7 @@ export class MeasurementController {
     }
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @ApiBody({ type: VideoPipelineSwaggerDto })
   @Post('video-pipeline')
   async videoPipeline(@Body() body: VideoPipelineSwaggerDto, @Req() req: any) {
@@ -162,7 +162,7 @@ export class MeasurementController {
     }
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Post('avatar')
   @UseInterceptors(FileInterceptor('pred_json'))
   async avatar(

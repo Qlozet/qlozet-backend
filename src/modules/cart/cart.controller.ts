@@ -7,12 +7,17 @@ import {
   Param,
   Req,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CartService } from './cart.service';
+import { AddToCartDto } from './dto/add-to-cart.dto';
 
 @ApiTags('Cart')
+@ApiBearerAuth('access-token')
 @Controller('cart')
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class CartController {
   constructor(private readonly cartService: CartService) {}
 
@@ -24,12 +29,14 @@ export class CartController {
 
   @Post('add')
   @ApiOperation({ summary: 'Add item to cart' })
-  async addToCart(
-    @Req() req,
-    @Param('businessId') businessId: string,
-    @Body() dto,
-  ) {
-    return this.cartService.addItem(req.user.id, businessId, dto);
+  async addToCart(@Req() req, @Body() dto: AddToCartDto) {
+    return this.cartService.addItem(
+      req.user.id,
+      dto.productId,
+      dto.quantity,
+      dto.appliedFabricId,
+      dto.appliedFabricYards,
+    );
   }
 
   @Delete('/remove/:productId')
@@ -44,3 +51,4 @@ export class CartController {
     return this.cartService.clearCart(req.user.id);
   }
 }
+

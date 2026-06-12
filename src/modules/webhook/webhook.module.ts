@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
 import { TransactionService } from '../transactions/transactions.service';
@@ -7,14 +8,20 @@ import { HttpModule } from '@nestjs/axios';
 import { BusinessModule } from '../business/business.module';
 import { PaymentService } from '../payment/payment.service';
 import { PlatformService } from '../platform/platform.service';
-
-import { DatabaseModule } from 'src/database/database.module';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { CurrencyService } from '../currency/currency.service';
 import { JobStatusService } from '../measurement/job-status.service';
 import { ProductModule } from '../products/products.module';
 
 @Module({
-  imports: [BusinessModule, HttpModule, DatabaseModule, ProductModule],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Order.name, schema: OrderSchema },
+    ]),
+    BusinessModule,
+    HttpModule,
+    ProductModule,
+  ],
   controllers: [WebhookController],
   providers: [
     WebhookService,
@@ -27,3 +34,4 @@ import { ProductModule } from '../products/products.module';
   ],
 })
 export class WebhookModule {}
+

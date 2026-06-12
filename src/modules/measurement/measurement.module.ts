@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { MeasurementService } from './measurement.service';
 import { MeasurementController } from './measurement.controller';
 import { GradioService } from './gradio.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { JwtService } from '@nestjs/jwt';
-import { DatabaseModule } from 'src/database/database.module';
+import { JobStatus, JobStatusSchema } from 'src/common/schemas/job-status.schema';
 import { WalletsModule } from '../wallets/wallets.module';
 import { BullModule } from '@nestjs/bullmq';
 import { JobStatusService } from './job-status.service';
@@ -15,7 +16,9 @@ import { UmsModule } from '../ums/ums.module';
 
 @Module({
   imports: [
-    DatabaseModule,
+    MongooseModule.forFeature([
+      { name: JobStatus.name, schema: JobStatusSchema },
+    ]),
     WalletsModule,
     UmsModule,
     BullModule.registerQueue({
@@ -42,3 +45,4 @@ import { UmsModule } from '../ums/ums.module';
   ],
 })
 export class MeasurementModule {}
+
