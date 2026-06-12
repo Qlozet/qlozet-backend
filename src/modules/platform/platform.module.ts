@@ -21,7 +21,7 @@ import { OrdersModule } from '../orders/orders.module';
     OrdersModule,
   ],
   controllers: [PlatformController],
-  providers: [JwtService, OrderService],
+  providers: [PlatformService, JwtService, OrderService],
   exports: [PlatformService, MongooseModule],
 })
 export class PlatformModule {}
