@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RolesService, UserService } from './services';
 import { PermissionService } from './services/permissions.service';
@@ -33,7 +33,7 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     ]),
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService
-    PlatformModule,    // provides PlatformService (needed by UserController)
+    forwardRef(() => PlatformModule),  // forwardRef: UmsModule ↔ PlatformModule circular
     BusinessModule,    // provides BusinessService (needed by UserController)
   ],
   controllers: [UserController],
