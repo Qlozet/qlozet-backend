@@ -12,6 +12,7 @@ import { TokenController } from './token.controller';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { PaymentModule } from '../payment/payment.module';
 import { CurrencyModule } from '../currency/currency.module';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { CurrencyModule } from '../currency/currency.module';
     TransactionsModule,  // provides TransactionService
     PaymentModule,       // provides PaymentService
     CurrencyModule,      // provides CurrencyService
+    PlatformModule,      // provides PlatformService (needed by TokenService)
   ],
   controllers: [WalletsController, TokenController],
   providers: [
