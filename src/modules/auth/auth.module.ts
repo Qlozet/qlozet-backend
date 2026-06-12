@@ -3,7 +3,6 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { HttpModule } from '@nestjs/axios';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { User, UserSchema } from '../ums/schemas/user.schema';
@@ -22,7 +21,7 @@ import {
 import { PermissionService } from '../ums/services/permissions.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
-import { LogisticsService } from '../logistics/logistics.service';
+import { LogisticsModule } from '../logistics/logistics.module';
 
 @Module({
   imports: [
@@ -37,7 +36,6 @@ import { LogisticsService } from '../logistics/logistics.service';
       { name: Wallet.name, schema: WalletSchema },
     ]),
     PassportModule,
-    HttpModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -48,6 +46,7 @@ import { LogisticsService } from '../logistics/logistics.service';
       }),
       inject: [ConfigService],
     }),
+    LogisticsModule,  // provides LogisticsService
   ],
   controllers: [AuthController],
   providers: [
@@ -58,7 +57,6 @@ import { LogisticsService } from '../logistics/logistics.service';
     JwtAuthGuard,
     RolesGuard,
     PermissionsGuard,
-    LogisticsService,
   ],
   exports: [
     AuthService,
