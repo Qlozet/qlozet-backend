@@ -1,32 +1,43 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { MongooseModule } from '@nestjs/mongoose';
+import { HttpModule } from '@nestjs/axios';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
+import { Permission, PermissionSchema } from '../ums/schemas/permission.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
+import { Address, AddressSchema } from '../ums/schemas/address.schema';
+import { Token, TokenSchema } from '../wallets/schema/token.schema';
+import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import {
   JwtAuthGuard,
   PermissionsGuard,
   RolesGuard,
 } from '../../common/guards';
-import { Permission } from '../ums/schemas';
-import { PermissionSchema } from '../ums/schemas/permission.schema';
 import { PermissionService } from '../ums/services/permissions.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
 import { LogisticsService } from '../logistics/logistics.service';
-import { HttpModule } from '@nestjs/axios';
-import { DatabaseModule } from '../../database/database.module';
 
 @Module({
   imports: [
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: Role.name, schema: RoleSchema },
+      { name: Permission.name, schema: PermissionSchema },
+      { name: Business.name, schema: BusinessSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
+      { name: Address.name, schema: AddressSchema },
+      { name: Token.name, schema: TokenSchema },
+      { name: Wallet.name, schema: WalletSchema },
+    ]),
     PassportModule,
     HttpModule,
-    DatabaseModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -57,6 +68,8 @@ import { DatabaseModule } from '../../database/database.module';
     RolesGuard,
     PermissionsGuard,
     JwtModule,
+    MongooseModule,
   ],
 })
 export class AuthModule {}
+

@@ -14,11 +14,9 @@ import { EvaluationModule } from './evaluation/evaluation.module';
 
 import { FeedMixerService } from './feed-mixer/feed-mixer.service';
 import { BusinessModule } from '../business/business.module';
-import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
   imports: [
-    DatabaseModule,
     EventsModule,
     CatalogModule,
     EmbeddingsModule,

@@ -1,9 +1,17 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { OrderController } from './orders.controller';
 import { OrderService } from './orders.service';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
-
+import { Order, OrderSchema } from './schemas/orders.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
+import { Style, StyleSchema } from '../products/schemas/style.schema';
+import { Fabric, FabricSchema } from '../products/schemas/fabric.schema';
+import { Accessory, AccessorySchema } from '../products/schemas/accessory.schema';
+import { Discount, DiscountSchema } from '../products/schemas/discount.schema';
+import { Address, AddressSchema } from '../ums/schemas/address.schema';
+import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
 import { JwtService } from '@nestjs/jwt';
 import { TransactionService } from '../transactions/transactions.service';
 import { HttpModule } from '@nestjs/axios';
@@ -12,11 +20,22 @@ import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { BusinessService } from '../business/business.service';
 import { PlatformService } from '../platform/platform.service';
-import { DatabaseModule } from 'src/database/database.module';
 import { CurrencyService } from '../currency/currency.service';
 
 @Module({
-  imports: [HttpModule, DatabaseModule],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Order.name, schema: OrderSchema },
+      { name: Product.name, schema: ProductSchema },
+      { name: Style.name, schema: StyleSchema },
+      { name: Fabric.name, schema: FabricSchema },
+      { name: Accessory.name, schema: AccessorySchema },
+      { name: Discount.name, schema: DiscountSchema },
+      { name: Address.name, schema: AddressSchema },
+      { name: BusinessEarning.name, schema: BusinessEarningSchema },
+    ]),
+    HttpModule,
+  ],
   controllers: [OrderController],
   providers: [
     OrderService,
@@ -46,3 +65,4 @@ import { CurrencyService } from '../currency/currency.service';
   ],
 })
 export class OrdersModule {}
+

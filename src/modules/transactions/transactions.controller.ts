@@ -28,7 +28,7 @@ import { UserType } from '../ums/schemas';
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
-  @Roles('vendor')
+  @Roles(UserType.VENDOR)
   @Get('vendor')
   @ApiOperation({ summary: 'Get paginated transactions by business ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -76,7 +76,7 @@ export class TransactionController {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
   }
-  @Roles(UserType.CUSTOMER, 'vendor')
+  @Roles(UserType.CUSTOMER, UserType.VENDOR)
   @Get('reference/:reference')
   @ApiOperation({ summary: 'Get transaction by reference' })
   @ApiResponse({ status: 200, description: 'Transaction found' })

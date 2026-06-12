@@ -42,7 +42,6 @@ export class OrderController {
    * 🧾 Create a new order
    * - Direct checkout or from cart
    */
-  @Roles('customer')
   @Roles(UserType.CUSTOMER)
   @Post()
   @HttpCode(HttpStatus.CREATED)

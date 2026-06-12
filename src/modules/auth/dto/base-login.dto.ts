@@ -6,12 +6,8 @@ import {
   IsEnum,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-
-export enum UserType {
-  ADMIN = 'admin',
-  USER = 'user',
-  VENDOR = 'vendor',
-}
+// Re-export the canonical UserType from user schema for backward compatibility
+export { UserType } from '../../ums/schemas/user.schema';
 
 export class BaseLoginDto {
   @IsEmail({}, { message: 'Please provide a valid email address' })

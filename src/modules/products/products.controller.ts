@@ -123,7 +123,7 @@ export class ProductsController {
     );
   }
   @Get()
-  @Roles(UserType.VENDOR, 'customer', UserType.ADMIN)
+  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
   @ApiOkResponse({ type: ProductListResponseDto })
   @ApiOperation({
     summary: 'Get all products with pagination and optional filters/search',
@@ -257,14 +257,14 @@ export class ProductsController {
       data: ratingSummary,
     };
   }
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Post(':id/wishlist')
   async toggleWishlist(@Param('id') id: string, @Req() req: any) {
     const result = await this.productService.toggleWishlist(req.user.id, id);
     return result;
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('wishlist/customizable')
   @ApiOperation({
     summary: 'Get customizable clothing items from wishlist (for Use Fabric modal)',
@@ -277,7 +277,7 @@ export class ProductsController {
     return this.productService.getCustomizableWishlist(req.user.id);
   }
 
-  @Roles('customer')
+  @Roles(UserType.CUSTOMER)
   @Get('/trending/week')
   @ApiOkResponse({
     description: 'Trending products this week',

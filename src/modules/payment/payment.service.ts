@@ -1,8 +1,3 @@
-~~~{
-  variant: 'standard',
-  title: 'Payment Service for Vendor Payouts',
-  id: '27504',
-};
 import {
   Injectable,
   BadRequestException,

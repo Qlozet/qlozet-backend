@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module';
 import { DatabaseModule } from './database/database.module';
 import { APP_GUARD } from '@nestjs/core';
@@ -48,6 +49,23 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
     }),
 
     ScheduleModule.forRoot({}),
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000,   // 1 second
+        limit: 3,    // 3 requests per second
+      },
+      {
+        name: 'medium',
+        ttl: 10000,  // 10 seconds
+        limit: 20,   // 20 requests per 10 seconds
+      },
+      {
+        name: 'long',
+        ttl: 60000,  // 1 minute
+        limit: 100,  // 100 requests per minute
+      },
+    ]),
     MailerModule.forRoot({
       transport: {
         host: process.env.MAIL_HOST,
@@ -97,6 +115,10 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
     LogisticsService,
     CurrencyService,

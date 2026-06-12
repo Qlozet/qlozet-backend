@@ -11,7 +11,8 @@ import {
   FabricClaim,
   FabricClaimSchema,
 } from './schemas/fabric-claim.schema';
-import { DatabaseModule } from '../../database/database.module';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { OrdersModule } from '../orders/orders.module';
 
 @Module({
@@ -19,9 +20,10 @@ import { OrdersModule } from '../orders/orders.module';
     MongooseModule.forFeature([
       { name: FabricReservation.name, schema: FabricReservationSchema },
       { name: FabricClaim.name, schema: FabricClaimSchema },
+      { name: Order.name, schema: OrderSchema },
+      { name: Product.name, schema: ProductSchema },
     ]),
     HttpModule,
-    DatabaseModule,
     OrdersModule, // Exports TransactionService, PaymentService, PlatformService, etc.
   ],
   controllers: [FabricReservationController],
