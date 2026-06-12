@@ -13,6 +13,7 @@ import { OutfitQueueService } from './outfit-queue.service';
 import { OutfitProcessor } from './queue/outfit.processor';
 import { UserService } from '../ums/services';
 import { UmsModule } from '../ums/ums.module';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UmsModule } from '../ums/ums.module';
     ]),
     WalletsModule,
     UmsModule,
+    PlatformModule,      // provides PlatformService (needed by MeasurementService + controller)
     BullModule.registerQueue({
       name: 'outfit-generation',
       defaultJobOptions: {
