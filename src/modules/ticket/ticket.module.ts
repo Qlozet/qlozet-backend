@@ -15,5 +15,6 @@ import { JwtService } from '@nestjs/jwt';
   ],
   controllers: [TicketController],
   providers: [TicketService, JwtService],
+  exports: [TicketService],
 })
 export class TicketModule {}

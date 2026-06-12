@@ -10,10 +10,11 @@ import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import { JwtService } from '@nestjs/jwt';
-import { LogisticsService } from '../logistics/logistics.service';
-import { HttpModule } from '@nestjs/axios';
-import { ProductModule } from '../products/products.module';
 import { BusinessEarningsCron } from './business-earning-cron';
+
+// Import modules instead of directly listing services
+import { LogisticsModule } from '../logistics/logistics.module';
+import { ProductModule } from '../products/products.module';
 
 @Module({
   imports: [
@@ -26,23 +27,19 @@ import { BusinessEarningsCron } from './business-earning-cron';
       { name: Order.name, schema: OrderSchema },
       { name: Wallet.name, schema: WalletSchema },
     ]),
-    HttpModule,
-    ProductModule,
+    LogisticsModule,   // provides LogisticsService
+    ProductModule,     // provides ProductService
   ],
   controllers: [BusinessController],
   exports: [
     BusinessService,
-    JwtService,
-    LogisticsService,
     BusinessEarningsCron,
     MongooseModule,
   ],
   providers: [
     BusinessService,
     JwtService,
-    LogisticsService,
     BusinessEarningsCron,
   ],
 })
 export class BusinessModule {}
-
