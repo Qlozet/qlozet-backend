@@ -17,7 +17,7 @@ import { OrdersModule } from '../orders/orders.module';
     MongooseModule.forFeature([
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
-    UmsModule,
+    forwardRef(() => UmsModule),       // forwardRef: UmsModule → OrdersModule → PaymentModule → PlatformModule → UmsModule
     CurrencyModule,     // provides CurrencyService (needed by PlatformService)
     TicketModule,       // provides TicketService (needed by PlatformController)
     BusinessModule,     // provides BusinessService (needed by PlatformController)
