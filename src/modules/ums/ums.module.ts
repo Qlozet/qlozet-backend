@@ -5,15 +5,13 @@ import { PermissionService } from './services/permissions.service';
 import { SeedService } from './services/seed.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { UserController } from './users.controller';
-import { ProductModule } from '../products/products.module';
 import { TeamService } from './services/team.service';
 import { JwtService } from '@nestjs/jwt';
-import { BusinessService } from '../business/business.service';
-import { OrdersModule } from '../orders/orders.module';
-import { LogisticsService } from '../logistics/logistics.service';
-import { HttpModule } from '@nestjs/axios';
-import { TicketService } from '../ticket/ticket.service';
-import { PlatformService } from '../platform/platform.service';
+
+// Import modules instead of directly listing foreign services
+import { LogisticsModule } from '../logistics/logistics.module';
+import { ProductModule } from '../products/products.module';
+
 import { User, UserSchema } from './schemas/user.schema';
 import { Address, AddressSchema } from './schemas/address.schema';
 import { TeamMember, TeamMemberSchema } from './schemas/team.schema';
@@ -31,9 +29,8 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
       { name: Permission.name, schema: PermissionSchema },
       { name: Business.name, schema: BusinessSchema },
     ]),
-    OrdersModule,
-    HttpModule,
-    ProductModule,
+    LogisticsModule,   // provides LogisticsService (needed by UserService)
+    ProductModule,     // provides ProductService
   ],
   controllers: [UserController],
   providers: [
@@ -43,12 +40,7 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     UserService,
     TeamService,
     MailService,
-    TeamService,
     JwtService,
-    BusinessService,
-    LogisticsService,
-    TicketService,
-    PlatformService,
   ],
   exports: [
     RolesService,
@@ -57,14 +49,8 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     UserService,
     TeamService,
     MailService,
-    TeamService,
     JwtService,
-    BusinessService,
-    LogisticsService,
-    TicketService,
-    PlatformService,
     MongooseModule,
   ],
 })
 export class UmsModule {}
-
