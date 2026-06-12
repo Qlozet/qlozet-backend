@@ -12,7 +12,12 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [DatabaseModule, EventsModule, UmsModule, EmbeddingsModule, CatalogModule],
+  imports: [
+    MongooseModule.forFeature([
+      { name: UserEmbedding.name, schema: UserEmbeddingSchema },
+    ]),
+    DatabaseModule, EventsModule, UmsModule, EmbeddingsModule, CatalogModule,
+  ],
   providers: [UserEmbeddingsService],
   exports: [UserEmbeddingsService],
 })
