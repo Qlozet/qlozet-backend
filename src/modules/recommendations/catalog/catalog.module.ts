@@ -10,6 +10,6 @@ import { CatalogItem, CatalogItemSchema } from './schemas/catalog-item.schema';
     ],
     controllers: [CatalogController],
     providers: [CatalogService],
-    exports: [CatalogService],
+    exports: [CatalogService, MongooseModule],
 })
 export class CatalogModule { }
