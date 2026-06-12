@@ -8,12 +8,12 @@ import {
 import { EventsModule } from '../events/events.module';
 import { UmsModule } from '../../ums/ums.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
-import { CatalogService } from '../catalog/catalog.service';
+import { CatalogModule } from '../catalog/catalog.module';
 import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
-  imports: [DatabaseModule, EventsModule, UmsModule, EmbeddingsModule],
-  providers: [UserEmbeddingsService, CatalogService],
+  imports: [DatabaseModule, EventsModule, UmsModule, EmbeddingsModule, CatalogModule],
+  providers: [UserEmbeddingsService],
   exports: [UserEmbeddingsService],
 })
 export class UserEmbeddingsModule {}
