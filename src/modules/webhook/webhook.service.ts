@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
 import {
@@ -7,13 +7,20 @@ import {
   TransactionType,
 } from '../transactions/schema/transaction.schema';
 import { BusinessService } from '../business/business.service';
-import { Order } from '../orders/schemas/orders.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+  ShipmentStatus,
+} from '../orders/schemas/orders.schema';
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
 
 @Injectable()
 export class WebhookService {
+  private readonly logger = new Logger(WebhookService.name);
+
   constructor(
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
@@ -153,5 +160,110 @@ export class WebhookService {
       { 'items.business': business._id, payout_status: 'eligible' },
       { $set: { payout_status: 'paid' } },
     );
+  }
+
+  // -------------------- Shipbubble Webhook --------------------
+
+  async handleShipbubbleWebhook(payload: any) {
+    this.logger.log(`Shipbubble webhook received: ${JSON.stringify(payload)}`);
+
+    const trackingNumber =
+      payload?.tracking_number ||
+      payload?.data?.tracking_number ||
+      payload?.shipment?.tracking_number;
+
+    const newStatus =
+      payload?.status ||
+      payload?.data?.status ||
+      payload?.shipment?.status;
+
+    if (!trackingNumber) {
+      this.logger.warn('Shipbubble webhook: no tracking_number found');
+      return { status: 'ignored', message: 'No tracking number' };
+    }
+
+    // Find order with matching shipment tracking number
+    const order = await this.orderModel.findOne({
+      'shipments.tracking_number': trackingNumber,
+    }) as OrderDocument;
+
+    if (!order) {
+      this.logger.warn(
+        `Shipbubble webhook: no order found for tracking ${trackingNumber}`,
+      );
+      return { status: 'ignored', message: 'Order not found' };
+    }
+
+    // Find and update the specific shipment
+    const shipmentIndex = order.shipments.findIndex(
+      (s) => s.tracking_number === trackingNumber,
+    );
+    if (shipmentIndex === -1) {
+      return { status: 'ignored', message: 'Shipment not found in order' };
+    }
+
+    // Map Shipbubble status to our ShipmentStatus
+    const statusMap: Record<string, ShipmentStatus> = {
+      in_transit: ShipmentStatus.IN_TRANSIT,
+      delivered: ShipmentStatus.DELIVERED,
+      failed: ShipmentStatus.FAILED,
+      picked_up: ShipmentStatus.IN_TRANSIT,
+      out_for_delivery: ShipmentStatus.IN_TRANSIT,
+    };
+
+    const mappedStatus =
+      statusMap[newStatus?.toLowerCase()] || null;
+
+    if (!mappedStatus) {
+      this.logger.log(
+        `Shipbubble webhook: unmapped status "${newStatus}" for ${trackingNumber}`,
+      );
+      return { status: 'ignored', message: `Unknown status: ${newStatus}` };
+    }
+
+    order.shipments[shipmentIndex].status = mappedStatus;
+
+    if (mappedStatus === ShipmentStatus.DELIVERED) {
+      order.shipments[shipmentIndex].delivered_at = new Date();
+    }
+
+    // Check if ALL shipments are delivered → complete the order
+    const allDelivered = order.shipments.every(
+      (s, i) =>
+        i === shipmentIndex
+          ? mappedStatus === ShipmentStatus.DELIVERED
+          : s.status === ShipmentStatus.DELIVERED,
+    );
+
+    if (allDelivered) {
+      order.status = OrderStatus.COMPLETED;
+      this.logger.log(
+        `All shipments delivered for order ${order.reference} — marking COMPLETED`,
+      );
+
+      // Set payout eligibility for each vendor (after delay period)
+      // This can be enhanced with platform-specific payout_delay_days
+      order.payout_eligible_at = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ); // 7 days default
+      order.payout_status = 'eligible';
+    } else if (
+      order.shipments.some(
+        (s) =>
+          s.status === ShipmentStatus.IN_TRANSIT ||
+          s.status === ShipmentStatus.SHIPPED,
+      )
+    ) {
+      order.status = OrderStatus.IN_TRANSIT;
+    }
+
+    await order.save();
+
+    return {
+      status: 'success',
+      tracking_number: trackingNumber,
+      shipment_status: mappedStatus,
+      order_status: order.status,
+    };
   }
 }

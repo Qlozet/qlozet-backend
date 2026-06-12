@@ -21,6 +21,8 @@ import { PaymentService } from '../payment/payment.service';
 import { BusinessService } from '../business/business.service';
 import { PlatformService } from '../platform/platform.service';
 import { CurrencyService } from '../currency/currency.service';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import { Cart, CartSchema } from '../cart/schema/cart.schema';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { CurrencyService } from '../currency/currency.service';
       { name: Discount.name, schema: DiscountSchema },
       { name: Address.name, schema: AddressSchema },
       { name: BusinessEarning.name, schema: BusinessEarningSchema },
+      { name: Business.name, schema: BusinessSchema },
+      { name: Cart.name, schema: CartSchema },
     ]),
     HttpModule,
   ],

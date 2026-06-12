@@ -14,6 +14,8 @@ import {
   OrderDocument,
   OrderItem,
   OrderStatus,
+  ShipmentStatus,
+  VendorShipment,
 } from './schemas/orders.schema';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
@@ -49,8 +51,15 @@ import { TransactionService } from '../transactions/transactions.service';
 import { User } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
-import { Business } from '../business/schemas/business.schema';
+import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
+import {
+  CheckoutPreviewResponse,
+  CheckoutPreviewDto,
+  VendorShippingRate,
+} from './dto/checkout-preview.dto';
+import { FulfillOrderDto } from './dto/fulfill-order.dto';
+import { Cart, CartDocument } from '../cart/schema/cart.schema';
 
 @Injectable()
 export class OrderService {
@@ -71,6 +80,8 @@ export class OrderService {
     @InjectModel('Address') private addressModel: Model<AddressDocument>,
     @InjectModel('BusinessEarning')
     private businessEarningsModel: Model<BusinessEarningDocument>,
+    @InjectModel('Business') private businessModel: Model<BusinessDocument>,
+    @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -102,6 +113,39 @@ export class OrderService {
         };
       });
 
+      // Build VendorShipment entries if shipping selections are provided
+      const shipments: any[] = [];
+      let totalShippingFee = 0;
+
+      if (orderData.selected_shipping?.length) {
+        // Group processed items by business_id
+        const itemsByBusiness = new Map<string, any[]>();
+        for (const item of processedItems) {
+          const bizId = item.business?.toString();
+          if (!bizId) continue;
+          if (!itemsByBusiness.has(bizId)) {
+            itemsByBusiness.set(bizId, []);
+          }
+          itemsByBusiness.get(bizId)!.push(item);
+        }
+
+        for (const selection of orderData.selected_shipping) {
+          shipments.push({
+            business: new Types.ObjectId(selection.business_id),
+            request_token: selection.request_token,
+            service_code: selection.service_code,
+            courier_id: selection.courier_id,
+            courier_name: selection.courier_name,
+            shipping_fee: selection.shipping_fee,
+            status: 'pending',
+            rate_fetched_at: new Date(),
+          });
+          totalShippingFee += selection.shipping_fee;
+        }
+      }
+
+      const finalTotal = total + totalShippingFee;
+
       const order = new this.orderModel({
         reference: orderReference,
         customer: new Types.ObjectId(customer.id),
@@ -109,8 +153,9 @@ export class OrderService {
         items: normalizedItems,
         status: 'pending',
         subtotal,
-        shipping_fee: 0,
-        total,
+        shipping_fee: totalShippingFee,
+        total: finalTotal,
+        shipments,
       });
 
       const savedOrder = await order.save();
@@ -665,61 +710,349 @@ export class OrderService {
     };
   }
 
+  /**
+   * @deprecated Replaced by fulfillVendorShipment()
+   */
   async confirmOrder(orderReference: string, business: Business) {
-    const order = await this.orderModel.findOne({ reference: orderReference });
-    if (!order) throw new BadRequestException('Order not found');
+    return this.fulfillVendorShipment(orderReference, business, {});
+  }
 
-    const shippingAddress = order.address;
-    if (!shippingAddress || !shippingAddress.address_code) {
+  /**
+   * Checkout preview: split cart by vendor, fetch rates per vendor.
+   * Returns per-vendor courier options for the customer to select.
+   */
+  async checkoutPreview(
+    customer: any,
+    dto: CheckoutPreviewDto,
+  ): Promise<CheckoutPreviewResponse> {
+    // 1. Get customer address
+    const customerAddress = await this.addressModel.findOne({
+      customer: customer.id || customer._id,
+    });
+    if (!customerAddress?.address_code) {
       throw new BadRequestException(
-        'Shipping address not found or address_code missing',
+        'Please add and validate a shipping address before checkout',
       );
     }
 
-    if (!business.address_code) {
-      throw new BadRequestException('Business address_code is missing');
+    // 2. Get cart
+    const cart = await this.cartModel
+      .findOne({ user: customer.id || customer._id })
+      .populate('items.product_id');
+    if (!cart || cart.items.length === 0) {
+      throw new BadRequestException('Cart is empty');
     }
+
+    // 3. Get all products with business info
+    const productIds = cart.items.map((i) => i.product_id);
+    const products = await this.productModel
+      .find({ _id: { $in: productIds } })
+      .populate('business');
+
+    // 4. Group items by business_id — batch lookup businesses
+    const bizIds = [...new Set(
+      products
+        .map((p) => p.business?.toString())
+        .filter(Boolean) as string[],
+    )];
+    const businesses = await this.businessModel.find({
+      _id: { $in: bizIds },
+    });
+    const bizMap = new Map(
+      businesses.map((b) => [String(b._id), b]),
+    );
+
+    const vendorGroups = new Map<
+      string,
+      {
+        business: BusinessDocument;
+        items: Array<{ product_id: string; product_name: string; amount: number; weight: number }>;
+      }
+    >();
+
+    for (const product of products) {
+      const bizId = product.business?.toString();
+      if (!bizId || !bizMap.has(bizId)) continue;
+
+      if (!vendorGroups.has(bizId)) {
+        vendorGroups.set(bizId, { business: bizMap.get(bizId)!, items: [] });
+      }
+
+      const { name } = await this.getProductDetails(product);
+      vendorGroups.get(bizId)!.items.push({
+        product_id: String(product._id),
+        product_name: name,
+        amount: product.base_price || 0,
+        weight: 1, // default weight in kg
+      });
+    }
+
+    // 5. Fetch rates per vendor — PARALLEL
+    const pickupDate = new Date().toISOString().split('T')[0];
+
+    const ratePromises = Array.from(vendorGroups.entries())
+      .filter(([, group]) => {
+        if (!group.business.address_code) {
+          this.logger.warn(
+            `Vendor ${group.business.business_name} has no validated address`,
+          );
+          return false;
+        }
+        return true;
+      })
+      .map(async ([bizId, group]) => {
+        const biz = group.business;
+        try {
+          const ratePayload = {
+            sender_address_code: biz.address_code!,
+            reciever_address_code: customerAddress.address_code!,
+            pickup_date: pickupDate,
+            package_items: group.items.map((item) => ({
+              name: item.product_name,
+              description: item.product_name,
+              unit_weight: item.weight,
+              unit_amount: item.amount,
+              quantity: 1,
+            })),
+            service_type: dto.service_type || 'pickup',
+            package_dimension: { length: 12, width: 10, height: 10 },
+          };
+
+          const rateResponse = await this.logisticService.fetchRates(
+            [],
+            ratePayload,
+          );
+
+          const rates = (rateResponse.couriers || []).map((c) => ({
+            courier_id: String(c.courier_id),
+            courier_name: c.courier_name,
+            courier_image: c.courier_image,
+            service_code: c.service_code,
+            rate_amount: c.total,
+            delivery_eta: c.delivery_eta,
+            delivery_eta_time: c.delivery_eta_time,
+            insurance_fee: c.insurance?.fee || 0,
+            insurance_code: c.insurance?.code || '',
+          }));
+
+          return {
+            business_id: bizId,
+            business_name: biz.business_name,
+            items: group.items.map((i) => ({
+              product_id: i.product_id,
+              product_name: i.product_name,
+            })),
+            request_token: rateResponse.request_token,
+            rates,
+            cheapest_rate: rateResponse.cheapest_courier?.total || 0,
+            fastest_rate: rateResponse.fastest_courier?.total || 0,
+          } as VendorShippingRate;
+        } catch (error) {
+          this.logger.error(
+            `Failed to fetch rates for vendor ${biz.business_name}: ${error.message}`,
+          );
+          return null;
+        }
+      });
+
+    const results = await Promise.allSettled(ratePromises);
+    const vendorShipping: VendorShippingRate[] = results
+      .filter(
+        (r): r is PromiseFulfilledResult<VendorShippingRate | null> =>
+          r.status === 'fulfilled' && r.value !== null,
+      )
+      .map((r) => r.value!);
+
+    // 6. Calculate totals
+    const totalShippingFee = vendorShipping.reduce(
+      (sum, vs) => sum + vs.cheapest_rate,
+      0,
+    );
+    const subtotal = cart.subtotal || 0;
+
+    return {
+      vendor_shipping: vendorShipping,
+      total_shipping_fee: totalShippingFee,
+      subtotal,
+      total: subtotal + totalShippingFee,
+    };
+  }
+
+  /**
+   * Vendor fulfills their portion of the order — creates Shipbubble label.
+   * Re-fetches rates if the token is stale (> 25 minutes old).
+   */
+  async fulfillVendorShipment(
+    orderReference: string,
+    business: Business | BusinessDocument,
+    dto: FulfillOrderDto,
+  ) {
+    const businessId = (business._id || business.id).toString();
+
+    // Atomic claim: set status to 'ready_to_ship' only if currently 'pending'
+    // This prevents double-fulfillment from concurrent requests
+    const claimed = await this.orderModel.findOneAndUpdate(
+      {
+        reference: orderReference,
+        'shipments.business': businessId,
+        'shipments.status': { $in: [ShipmentStatus.PENDING, ShipmentStatus.READY_TO_SHIP] },
+      },
+      {
+        $set: { 'shipments.$.status': ShipmentStatus.READY_TO_SHIP },
+      },
+      { new: true },
+    );
+
+    if (!claimed) {
+      // Either order doesn't exist, no shipment for this vendor, or already fulfilled
+      const order = await this.orderModel.findOne({ reference: orderReference });
+      if (!order) throw new BadRequestException('Order not found');
+
+      const existingShipment = order.shipments.find(
+        (s) => s.business.toString() === businessId,
+      );
+      if (!existingShipment) {
+        throw new BadRequestException(
+          'No shipment found for your business in this order',
+        );
+      }
+      throw new BadRequestException(
+        `Shipment already ${existingShipment.status}, cannot fulfill again`,
+      );
+    }
+
+    const order = claimed;
+
+    // Find the shipment for this vendor
+    const shipmentIndex = order.shipments.findIndex(
+      (s) => s.business.toString() === businessId,
+    );
+    const shipment = order.shipments[shipmentIndex];
+
+    // Verify payment
     const transaction =
       await this.transactionService.findByReference(orderReference);
     if (!transaction || transaction.status !== 'success') {
       throw new BadRequestException(
-        'Cannot confirm order: payment not completed',
+        'Cannot fulfill order: payment not completed',
       );
     }
 
-    const now = new Date();
-    const pickupDate = now.toISOString().split('T')[0]; // yyyy-mm-dd
+    // Check if rate token is stale (> 25 min)
+    let requestToken = shipment.request_token;
+    let courierId = dto.courier_id || shipment.courier_id;
+    let serviceCode = dto.service_code || shipment.service_code;
 
-    const shippingItems = await Promise.all(
-      order.items.map(async (item) => {
-        const product = await this.productModel.findById(item.product);
-        if (!product) throw new BadRequestException();
-        const { name, description } = await this.getProductDetails(product);
-        return {
-          name,
-          description: description ?? name,
-          unit_weight: 1,
-          unit_amount: order.total,
-          quantity: 1,
-        };
-      }),
+    const RATE_TOKEN_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes
+    const tokenAge = shipment.rate_fetched_at
+      ? Date.now() - new Date(shipment.rate_fetched_at).getTime()
+      : Infinity;
+
+    if (tokenAge > RATE_TOKEN_MAX_AGE_MS) {
+      this.logger.log(
+        `Rate token for shipment is stale (${Math.round(tokenAge / 60000)}min old), re-fetching...`,
+      );
+
+      const customerAddress = order.address;
+      if (!customerAddress?.address_code || !business.address_code) {
+        throw new BadRequestException(
+          'Cannot re-fetch rates: missing address codes',
+        );
+      }
+
+      // Build items for this vendor only
+      const vendorItems = order.items.filter(
+        (i) => i.business?.toString() === businessId,
+      );
+      const shippingItems = await Promise.all(
+        vendorItems.map(async (item) => {
+          const product = await this.productModel.findById(item.product);
+          const { name } = product
+            ? await this.getProductDetails(product)
+            : { name: 'Unknown' };
+          return {
+            name,
+            description: name,
+            unit_weight: 1,
+            unit_amount: shipment.shipping_fee || 1000,
+            quantity: 1,
+          };
+        }),
+      );
+
+      const rateResponse = await this.logisticService.fetchRates([], {
+        sender_address_code: business.address_code,
+        reciever_address_code: customerAddress.address_code,
+        pickup_date: new Date().toISOString().split('T')[0],
+        package_items: shippingItems,
+        service_type: 'pickup',
+        package_dimension: { length: 12, width: 10, height: 10 },
+      });
+
+      requestToken = rateResponse.request_token;
+      // Try to use the same courier, fall back to cheapest
+      const matchedCourier = rateResponse.couriers?.find(
+        (c) => String(c.courier_id) === courierId,
+      );
+      if (matchedCourier) {
+        courierId = String(matchedCourier.courier_id);
+        serviceCode = matchedCourier.service_code;
+      } else {
+        courierId = String(rateResponse.cheapest_courier.courier_id);
+        serviceCode = rateResponse.cheapest_courier.service_code;
+      }
+
+      // Update stored values
+      order.shipments[shipmentIndex].request_token = requestToken;
+      order.shipments[shipmentIndex].courier_id = courierId;
+      order.shipments[shipmentIndex].service_code = serviceCode;
+      order.shipments[shipmentIndex].rate_fetched_at = new Date();
+    }
+
+    if (!requestToken || !courierId || !serviceCode) {
+      throw new BadRequestException(
+        'Missing shipping data (request_token, courier_id, or service_code) for this shipment',
+      );
+    }
+
+    // Create shipment label
+    const shipmentResult =
+      await this.logisticService.createShipmentFromToken({
+        request_token: requestToken,
+        courier_id: courierId,
+        service_code: serviceCode,
+      });
+
+    // Update shipment data
+    order.shipments[shipmentIndex].shipment_id = shipmentResult.shipment_id;
+    order.shipments[shipmentIndex].tracking_number =
+      shipmentResult.tracking_number;
+    order.shipments[shipmentIndex].label_url = shipmentResult.label_url;
+    order.shipments[shipmentIndex].status = ShipmentStatus.SHIPPED;
+    order.shipments[shipmentIndex].shipped_at = new Date();
+
+    // Check if all shipments are now shipped
+    const allShipped = order.shipments.every(
+      (s, i) =>
+        i === shipmentIndex ||
+        s.status === ShipmentStatus.SHIPPED ||
+        s.status === ShipmentStatus.IN_TRANSIT ||
+        s.status === ShipmentStatus.DELIVERED,
     );
+    if (allShipped) {
+      order.status = OrderStatus.PROCESSING;
+    }
 
-    const data = {
-      sender_address_code: shippingAddress.address_code,
-      reciever_address_code: business.address_code,
-      pickup_date: pickupDate,
-      package_items: shippingItems,
-      service_type: 'pickup',
-      package_dimension: { length: 12, width: 10, height: 10 },
-    };
-    await this.logisticService.createShipment(data);
-    order.status = OrderStatus.PROCESSING;
     await order.save();
 
     return {
-      message: 'Order confirmed and shipment created successfully',
-      data: order,
+      message: 'Shipment created successfully',
+      data: {
+        shipment: order.shipments[shipmentIndex],
+        label_url: shipmentResult.label_url,
+        tracking_number: shipmentResult.tracking_number,
+        order_status: order.status,
+      },
     };
   }
 

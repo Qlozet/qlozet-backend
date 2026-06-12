@@ -382,6 +382,7 @@ export class BusinessService {
           ...dto,
           business_address: validateAddress.formatted_address,
           address_code: validateAddress.address_code,
+          validated_address: validateAddress.formatted_address,
           address_completed: true,
         },
         { new: true },
