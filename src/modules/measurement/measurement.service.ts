@@ -82,6 +82,11 @@ export class MeasurementService {
           'Insufficient tokens, please fund your wallet',
         );
       }
+
+      // Pre-deduct tokens BEFORE the Gradio call.
+      // MongoDB connection is fresh now; after Gradio it may go stale.
+      await this.tokenService.spend('prediction', business, customer);
+
       const client = await this.gradio.getClient(this.hbm);
 
       this.logger.log(
@@ -104,7 +109,6 @@ export class MeasurementService {
         `result.data length: ${result?.data?.length}, result.data[0] type: ${typeof result?.data?.[0]}`,
       );
 
-      await this.tokenService.spend('prediction', business, customer);
       this.logger.log('Prediction completed successfully');
       return result.data[0];
     } catch (error) {
