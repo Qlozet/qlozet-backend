@@ -439,42 +439,220 @@ export class UserService {
     const user = await this.findById(userId);
     return this.sanitizeUser(user);
   }
+  // ════════════════════════════════════════════════════════════════
+  //  ADDRESS BOOK
+  // ════════════════════════════════════════════════════════════════
+
+  private static readonly MAX_ADDRESSES = 5;
+
+  /**
+   * Add a new address to the customer's address book.
+   * First address is auto-set as default. Max 5 per customer.
+   */
+  async addAddress(user: UserDocument, dto: AddressDto) {
+    const count = await this.addressModel.countDocuments({ customer: user.id });
+    if (count >= UserService.MAX_ADDRESSES) {
+      throw new BadRequestException(
+        `You can save up to ${UserService.MAX_ADDRESSES} addresses. Please delete one first.`,
+      );
+    }
+
+    // Validate via ShipBubble
+    const validated = await this.logisticService.validateAddress({
+      ...dto,
+      name: dto.full_name || user.full_name,
+      email: user.email,
+      phone: dto.phone_number ?? user.phone_number,
+      latitude: dto.latitude ?? 0,
+      longitude: dto.longitude ?? 0,
+    });
+
+    const isFirst = count === 0;
+    const shouldBeDefault = dto.is_default || isFirst;
+
+    // If setting as default, unset any existing default
+    if (shouldBeDefault) {
+      await this.addressModel.updateMany(
+        { customer: user.id, is_default: true },
+        { $set: { is_default: false } },
+      );
+    }
+
+    const newAddress = new this.addressModel({
+      customer: user.id,
+      full_name: dto.full_name || user.full_name,
+      phone_number: dto.phone_number || user.phone_number,
+      ...dto,
+      address: validated.formatted_address,
+      address_code: validated.address_code,
+      is_default: shouldBeDefault,
+      label: dto.label || '',
+    });
+
+    return (await newAddress.save()).toJSON();
+  }
+
+  /**
+   * List all addresses for a customer (default first).
+   */
+  async listAddresses(userId: string | Types.ObjectId) {
+    return this.addressModel
+      .find({ customer: userId })
+      .sort({ is_default: -1, createdAt: -1 })
+      .lean();
+  }
+
+  /**
+   * Get the customer's default address.
+   */
+  async getDefaultAddress(userId: string | Types.ObjectId) {
+    const address = await this.addressModel.findOne({
+      customer: userId,
+      is_default: true,
+    });
+    if (!address) {
+      // Fallback: get the most recent address
+      const fallback = await this.addressModel
+        .findOne({ customer: userId })
+        .sort({ createdAt: -1 });
+      if (!fallback) return null;
+      // Auto-set it as default
+      fallback.is_default = true;
+      await fallback.save();
+      return fallback;
+    }
+    return address;
+  }
+
+  /**
+   * Get a specific address by ID (verify ownership).
+   */
+  async getAddressById(userId: string | Types.ObjectId, addressId: string) {
+    const address = await this.addressModel.findOne({
+      _id: addressId,
+      customer: userId,
+    });
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+    return address;
+  }
+
+  /**
+   * Update an existing address. Re-validates via ShipBubble if address fields changed.
+   */
+  async updateAddress(userId: string | Types.ObjectId, addressId: string, dto: any) {
+    const address = await this.addressModel.findOne({
+      _id: addressId,
+      customer: userId,
+    });
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    // Check if any physical address fields changed (require re-validation)
+    const addressFields = ['address', 'city', 'state', 'country', 'postal_code'];
+    const needsRevalidation = addressFields.some(
+      (field) => dto[field] !== undefined && dto[field] !== address[field],
+    );
+
+    if (needsRevalidation) {
+      const mergedAddress = {
+        address: dto.address ?? address.address,
+        city: dto.city ?? address.city,
+        state: dto.state ?? address.state,
+        country: dto.country ?? address.country,
+        postal_code: dto.postal_code ?? address.postal_code,
+      };
+
+      const validated = await this.logisticService.validateAddress({
+        ...mergedAddress,
+        name: dto.full_name || address.full_name,
+        email: '',
+        phone: dto.phone_number || address.phone_number,
+        latitude: dto.latitude ?? 0,
+        longitude: dto.longitude ?? 0,
+      });
+
+      dto.address = validated.formatted_address;
+      dto.address_code = validated.address_code;
+    }
+
+    // Apply updates
+    Object.keys(dto).forEach((key) => {
+      if (dto[key] !== undefined) {
+        address[key] = dto[key];
+      }
+    });
+
+    await address.save();
+    return address.toJSON();
+  }
+
+  /**
+   * Delete an address. Cannot delete the default if other addresses exist
+   * (must set a new default first).
+   */
+  async deleteAddress(userId: string | Types.ObjectId, addressId: string) {
+    const address = await this.addressModel.findOne({
+      _id: addressId,
+      customer: userId,
+    });
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    const totalCount = await this.addressModel.countDocuments({ customer: userId });
+
+    if (address.is_default && totalCount > 1) {
+      // Auto-reassign default to the next most recent address
+      const next = await this.addressModel
+        .findOne({ customer: userId, _id: { $ne: addressId } })
+        .sort({ createdAt: -1 });
+      if (next) {
+        next.is_default = true;
+        await next.save();
+      }
+    }
+
+    await this.addressModel.deleteOne({ _id: addressId });
+    return { message: 'Address deleted successfully' };
+  }
+
+  /**
+   * Set a specific address as the default.
+   */
+  async setDefaultAddress(userId: string | Types.ObjectId, addressId: string) {
+    const address = await this.addressModel.findOne({
+      _id: addressId,
+      customer: userId,
+    });
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    // Unset all defaults for this customer
+    await this.addressModel.updateMany(
+      { customer: userId, is_default: true },
+      { $set: { is_default: false } },
+    );
+
+    address.is_default = true;
+    await address.save();
+    return address.toJSON();
+  }
+
+  // ── Backward compatibility (deprecated) ──────────────────────
+
+  /** @deprecated Use addAddress / updateAddress instead */
   async upsertUserAddress(user: UserDocument, dto: AddressDto) {
     try {
-      const validated = await this.logisticService.validateAddress({
-        ...dto,
-        name: dto.address,
-        email: user.email,
-        phone: dto?.phone_number ?? user.phone_number,
-      });
-
       const existing = await this.addressModel.findOne({ customer: user.id });
-
       if (existing) {
-        Object.assign(existing, {
-          ...dto,
-          address: validated.formatted_address,
-          address_code: validated.address_code,
-        });
-
-        await existing.save();
-        return existing.toJSON();
+        return this.updateAddress(user.id, (existing._id as Types.ObjectId).toString(), dto);
       }
-
-      // Create a new address
-      const newAddress = new this.addressModel({
-        customer: user.id,
-        ...(!dto.full_name && { full_name: user.full_name }),
-        ...(!dto.phone_number && { phone_number: user.phone_number }),
-        ...dto,
-        address: validated.formatted_address,
-        address_code: validated.address_code,
-      });
-
-      return (await newAddress.save()).toJSON();
+      return this.addAddress(user, dto);
     } catch (err: any) {
-      console.error('Upsert user address failed:', err.message);
-
       throw new HttpException(
         err?.message || err?.response?.data || 'Unable to update address',
         err?.response?.status || 500,
@@ -482,8 +660,9 @@ export class UserService {
     }
   }
 
+  /** @deprecated Use getDefaultAddress instead */
   async getUserAddress(userId: Types.ObjectId) {
-    const address = await this.addressModel.findOne({ user: userId });
+    const address = await this.getDefaultAddress(userId);
     if (!address) throw new NotFoundException('No address found for this user');
     return address;
   }

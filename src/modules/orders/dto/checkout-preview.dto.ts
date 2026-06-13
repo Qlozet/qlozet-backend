@@ -10,6 +10,14 @@ export class CheckoutPreviewDto {
   @IsOptional()
   @IsString()
   service_type?: string = 'pickup';
+
+  @ApiPropertyOptional({
+    description: 'Address ID to use for shipping. Defaults to the default address.',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @IsOptional()
+  @IsString()
+  address_id?: string;
 }
 
 // ---- Response Schemas for Swagger ----
