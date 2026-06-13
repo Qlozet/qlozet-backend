@@ -3,7 +3,6 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { RolesService, UserService } from './services';
 import { PermissionService } from './services/permissions.service';
 import { SeedService } from './services/seed.service';
-import { MailService } from '../notifications/mail/mail.service';
 import { UserController } from './users.controller';
 import { TeamService } from './services/team.service';
 import { JwtService } from '@nestjs/jwt';
@@ -13,6 +12,7 @@ import { LogisticsModule } from '../logistics/logistics.module';
 import { ProductModule } from '../products/products.module';
 import { PlatformModule } from '../platform/platform.module';
 import { BusinessModule } from '../business/business.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 import { User, UserSchema } from './schemas/user.schema';
 import { Address, AddressSchema } from './schemas/address.schema';
@@ -34,7 +34,8 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService
     forwardRef(() => PlatformModule),  // forwardRef: UmsModule ↔ PlatformModule circular
-    BusinessModule,    // provides BusinessService (needed by UserController)
+    BusinessModule,          // provides BusinessService (needed by UserController)
+    NotificationsModule,     // provides MailService
   ],
   controllers: [UserController],
   providers: [
@@ -43,7 +44,6 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     SeedService,
     UserService,
     TeamService,
-    MailService,
     JwtService,
   ],
   exports: [
@@ -52,7 +52,6 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     SeedService,
     UserService,
     TeamService,
-    MailService,
     JwtService,
     MongooseModule,
   ],

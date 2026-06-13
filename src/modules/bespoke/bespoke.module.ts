@@ -10,7 +10,6 @@ import {
   BespokeQuote,
   BespokeQuoteSchema,
 } from './schemas/bespoke-quote.schema';
-import { MailService } from '../notifications/mail/mail.service';
 
 // Import modules for dependencies
 import { AuthModule } from '../auth/auth.module';
@@ -19,6 +18,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { PaymentModule } from '../payment/payment.module';
 import { BusinessModule } from '../business/business.module';
 import { ProductModule } from '../products/products.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -32,9 +32,10 @@ import { ProductModule } from '../products/products.module';
     PaymentModule,       // provides PaymentService
     BusinessModule,      // provides Business model
     ProductModule,       // provides Product model
+    NotificationsModule, // provides MailService
   ],
   controllers: [BespokeController],
-  providers: [BespokeService, MailService],
+  providers: [BespokeService],
   exports: [BespokeService],
 })
 export class BespokeModule {}
