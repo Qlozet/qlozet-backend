@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
 import { JobStatusService } from '../measurement/job-status.service';
+import { JobStatus, JobStatusSchema } from '../../common/schemas/job-status.schema';
 
 // Import modules instead of directly listing their services
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -12,6 +14,9 @@ import { OrdersModule } from '../orders/orders.module';
 
 @Module({
   imports: [
+    MongooseModule.forFeature([
+      { name: JobStatus.name, schema: JobStatusSchema },
+    ]),
     TransactionsModule,  // provides TransactionService
     WalletsModule,       // provides WalletsService, PaymentService, etc.
     BusinessModule,      // provides BusinessService

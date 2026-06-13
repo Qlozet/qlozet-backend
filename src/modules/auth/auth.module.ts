@@ -19,9 +19,9 @@ import {
   RolesGuard,
 } from '../../common/guards';
 import { PermissionService } from '../ums/services/permissions.service';
-import { MailService } from '../notifications/mail/mail.service';
 import { UserService } from '../ums/services';
 import { LogisticsModule } from '../logistics/logistics.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -46,14 +46,14 @@ import { LogisticsModule } from '../logistics/logistics.module';
       }),
       inject: [ConfigService],
     }),
-    LogisticsModule,  // provides LogisticsService
+    LogisticsModule,       // provides LogisticsService
+    NotificationsModule,   // provides MailService
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
-    PermissionService,
+    PermissionService,  // pragmatic: AuthModule already registers User/Role schemas
     UserService,
-    MailService, // Add MailService to providers
     JwtAuthGuard,
     RolesGuard,
     PermissionsGuard,
@@ -61,7 +61,6 @@ import { LogisticsModule } from '../logistics/logistics.module';
   exports: [
     AuthService,
     PermissionService,
-    MailService, // Export if needed in other modules
     JwtAuthGuard,
     RolesGuard,
     PermissionsGuard,
