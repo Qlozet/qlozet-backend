@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -23,6 +23,7 @@ import { UserService } from '../ums/services';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([
