@@ -88,7 +88,7 @@ export class OrderService {
     try {
       const [, shippingAddress, processedItems] = await Promise.all([
         this.validationService.validateCompleteOrder(orderData.items),
-        this.resolveShippingAddress(customer.id),
+        this.resolveShippingAddress(customer.id, orderData.address_id),
         this.processOrderItems(orderData.items),
       ]);
       const [orderReference, { total, subtotal }] = await Promise.all([
@@ -489,18 +489,39 @@ export class OrderService {
       return sanitized;
     });
   }
-  private async resolveShippingAddress(customerId: string): Promise<any> {
-    const existingAddress = await this.addressModel.findOne({
-      customer: customerId,
-    });
+  private async resolveShippingAddress(
+    customerId: string,
+    addressId?: string,
+  ): Promise<any> {
+    let address;
+    if (addressId) {
+      address = await this.addressModel.findOne({
+        _id: addressId,
+        customer: customerId,
+      });
+      if (!address) {
+        throw new BadRequestException(
+          'Specified address not found or does not belong to customer',
+        );
+      }
+    } else {
+      // Try default, then fallback to any
+      address = await this.addressModel.findOne({
+        customer: customerId,
+        is_default: true,
+      });
+      if (!address) {
+        address = await this.addressModel.findOne({ customer: customerId });
+      }
+    }
 
-    if (!existingAddress) {
+    if (!address) {
       throw new BadRequestException(
-        'Address not found or does not belong to customer',
+        'Please add a shipping address before placing an order',
       );
     }
 
-    return existingAddress;
+    return address;
   }
   private sanitizeDiscountSnapshot(discount: any): any {
     const { __v, createdAt, updatedAt, ...sanitized } = discount.toObject
@@ -725,10 +746,27 @@ export class OrderService {
     customer: any,
     dto: CheckoutPreviewDto,
   ): Promise<CheckoutPreviewResponse> {
-    // 1. Get customer address
-    const customerAddress = await this.addressModel.findOne({
-      customer: customer.id || customer._id,
-    });
+    // 1. Get customer address (by ID or default)
+    const customerId = customer.id || customer._id;
+    let customerAddress;
+    if (dto.address_id) {
+      customerAddress = await this.addressModel.findOne({
+        _id: dto.address_id,
+        customer: customerId,
+      });
+      if (!customerAddress) {
+        throw new BadRequestException('Specified address not found');
+      }
+    } else {
+      customerAddress = await this.addressModel.findOne({
+        customer: customerId,
+        is_default: true,
+      });
+      if (!customerAddress) {
+        // Fallback to any address
+        customerAddress = await this.addressModel.findOne({ customer: customerId });
+      }
+    }
     if (!customerAddress?.address_code) {
       throw new BadRequestException(
         'Please add and validate a shipping address before checkout',

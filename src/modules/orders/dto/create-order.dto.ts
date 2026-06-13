@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsOptional,
+  IsString,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -65,5 +66,12 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => SelectedShippingDto)
   selected_shipping?: SelectedShippingDto[];
-}
 
+  @ApiPropertyOptional({
+    description: 'Address ID to use for this order. Defaults to the default address.',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @IsOptional()
+  @IsString()
+  address_id?: string;
+}

@@ -36,7 +36,7 @@ import {
   CreateRoleDto,
   UpdateRoleDto,
 } from './dto/roles.dto';
-import { AddressDto } from './dto/address.dto';
+import { AddressDto, UpdateAddressDto } from './dto/address.dto';
 import { UpdateUserDto } from './dto/users.dto';
 import { UpdatePlatformSettingsDto } from '../platform/dto/update-settings.dto';
 import { PlatformService } from '../platform/platform.service';
@@ -176,20 +176,97 @@ export class UserController {
     return this.rolesService.removePermissionsFromRole(id, dto.permission_ids);
   }
 
+  // ==============================
+  // ADDRESS BOOK
+  // ==============================
+
   @Roles(UserType.CUSTOMER)
-  @Post('customer/shipping-address/upsert')
-  @HttpCode(HttpStatus.OK)
-  async upsertAddress(@Req() req, @Body() dto: AddressDto) {
-    const user = req.user;
-    const address = await this.userService.upsertUserAddress(user, dto);
-    return { message: 'Address saved successfully', data: address };
+  @Post('customer/addresses')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Add a new address to address book' })
+  @ApiBody({ type: AddressDto })
+  @ApiResponse({ status: 201, description: 'Address created' })
+  async addAddress(@Req() req, @Body() dto: AddressDto) {
+    const address = await this.userService.addAddress(req.user, dto);
+    return { message: 'Address added successfully', data: address };
   }
 
   @Roles(UserType.CUSTOMER)
+  @Get('customer/addresses')
+  @ApiOperation({ summary: 'List all saved addresses' })
+  @ApiResponse({ status: 200, description: 'Address list (default first)' })
+  async listAddresses(@Req() req) {
+    const addresses = await this.userService.listAddresses(req.user._id);
+    return { data: addresses };
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Get('customer/addresses/default')
+  @ApiOperation({ summary: 'Get default address' })
+  @ApiResponse({ status: 200, description: 'Default address' })
+  async getDefaultAddress(@Req() req) {
+    const address = await this.userService.getDefaultAddress(req.user._id);
+    if (!address) {
+      return { message: 'No address found', data: null };
+    }
+    return { data: address };
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Get('customer/addresses/:id')
+  @ApiOperation({ summary: 'Get a specific address by ID' })
+  async getAddressById(@Req() req, @Param('id') id: string) {
+    const address = await this.userService.getAddressById(req.user._id, id);
+    return { data: address };
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Patch('customer/addresses/:id')
+  @ApiOperation({ summary: 'Update an existing address' })
+  @ApiBody({ type: UpdateAddressDto })
+  async updateAddress(
+    @Req() req,
+    @Param('id') id: string,
+    @Body() dto: UpdateAddressDto,
+  ) {
+    const address = await this.userService.updateAddress(req.user._id, id, dto);
+    return { message: 'Address updated successfully', data: address };
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Delete('customer/addresses/:id')
+  @ApiOperation({ summary: 'Delete an address' })
+  async deleteAddress(@Req() req, @Param('id') id: string) {
+    return this.userService.deleteAddress(req.user._id, id);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Patch('customer/addresses/:id/default')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Set an address as default' })
+  async setDefaultAddress(@Req() req, @Param('id') id: string) {
+    const address = await this.userService.setDefaultAddress(req.user._id, id);
+    return { message: 'Default address updated', data: address };
+  }
+
+  // ── Deprecated routes (backward compat) ──
+
+  /** @deprecated Use POST /customer/addresses instead */
+  @Roles(UserType.CUSTOMER)
+  @Post('customer/shipping-address/upsert')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[DEPRECATED] Upsert single address', deprecated: true })
+  async upsertAddress(@Req() req, @Body() dto: AddressDto) {
+    const address = await this.userService.upsertUserAddress(req.user, dto);
+    return { message: 'Address saved successfully', data: address };
+  }
+
+  /** @deprecated Use GET /customer/addresses/default instead */
+  @Roles(UserType.CUSTOMER)
   @Get('customer/shipping-address')
+  @ApiOperation({ summary: '[DEPRECATED] Get single address', deprecated: true })
   async getMyAddress(@Req() req) {
-    const userId = req.user._id;
-    const address = await this.userService.getUserAddress(userId);
+    const address = await this.userService.getUserAddress(req.user._id);
     return address;
   }
 
