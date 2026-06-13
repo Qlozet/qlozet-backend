@@ -1,24 +1,39 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 @Injectable()
 export class GradioService {
-  private client: any = null;
+  private readonly logger = new Logger(GradioService.name);
+  private clients = new Map<string, any>();
 
   /**
-   * Get or initialize Gradio Client
+   * Get or initialize Gradio Client for a specific space.
+   * Each space gets its own cached client.
    */
   async getClient(spaceId: string): Promise<any> {
-    if (this.client) return this.client;
+    const existing = this.clients.get(spaceId);
+    if (existing) return existing;
+
+    this.logger.log(`Connecting to Gradio space: ${spaceId}`);
 
     // Dynamic import for ESM module
     const { Client } = await import('@gradio/client');
 
-    this.client = await Client.connect(spaceId, {
+    const client = await Client.connect(spaceId, {
       token: `hf_${process.env.HUGGING_FACE_TOKEN}`,
     });
-    return this.client;
+
+    this.clients.set(spaceId, client);
+    this.logger.log(`Connected to Gradio space: ${spaceId}`);
+    return client;
+  }
+
+  /**
+   * Clear a cached client (useful if a connection goes stale).
+   */
+  clearClient(spaceId: string) {
+    this.clients.delete(spaceId);
   }
 
   /**
@@ -30,6 +45,20 @@ export class GradioService {
   ): Blob {
     const uint8 = new Uint8Array(buffer);
     return new Blob([uint8], { type: mime });
+  }
+
+  /**
+   * Create a 1x1 black PNG blob as a placeholder for Required image params
+   * that the model doesn't actually use (e.g. LightGBM tabular-only mode).
+   */
+  createPlaceholderImage(): Blob {
+    // Minimal valid 1x1 black PNG (67 bytes)
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAB' +
+        'Nl7BcQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    return new Blob([png], { type: 'image/png' });
   }
 
   /**
@@ -53,18 +82,4 @@ export class GradioService {
       return fileData.path;
     }
   }
-
-  /**
-   * Example method to run Gradio inference
-   */
-  // async runInference(fileBuffer: Buffer): Promise<any> {
-  //   const client = await this.getClient();
-  //   const blob = this.bufferToBlob(fileBuffer);
-
-  //   // Adjust method name depending on your Gradio space inputs
-  //   const result = await client.predict('/predict', {
-  //     image: blob,
-  //   });
-  //   return result;
-  // }
 }

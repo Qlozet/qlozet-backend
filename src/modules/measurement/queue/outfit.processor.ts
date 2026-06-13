@@ -19,64 +19,100 @@ export class OutfitProcessor extends WorkerHost {
 
   async process(job: Job<OutfitJobData, any, string>): Promise<any> {
     const jobId = String(job.id);
-    this.logger.log(`Processing job ${jobId}`);
+    this.logger.log(`Processing job ${jobId} (type: ${job.data.type})`);
 
     await this.jobStatusService.updateStatus(jobId, JobState.RUNNING);
 
-    let result: any;
+    try {
+      let result: any;
 
-    switch (job.data.type) {
-      case 'runPrediction': {
-        const prediction = await this.measurement.runPrediction(job.data);
-        const dataArray = prediction.data;
+      switch (job.data.type) {
+        case 'runPrediction': {
+          // runPrediction returns result.data[0] which is the raw prediction data
+          const prediction = await this.measurement.runPrediction(job.data);
+          // prediction is already the inner data (array of [name, cm, inch])
+          const dataArray = Array.isArray(prediction?.data)
+            ? prediction.data
+            : Array.isArray(prediction)
+              ? prediction
+              : [];
 
-        result = Object.fromEntries(
-          dataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
-        );
-        break;
+          if (dataArray.length === 0) {
+            this.logger.warn(
+              `runPrediction returned unexpected shape: ${JSON.stringify(prediction)?.slice(0, 200)}`,
+            );
+          }
+
+          result = Object.fromEntries(
+            dataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
+          );
+          break;
+        }
+
+        case 'editGarment':
+          result = await this.measurement.editGarmentWithImageEditor(job.data);
+          break;
+
+        case 'generateOutfit':
+          result = await this.measurement.generateOutfitImageFromConfig(
+            job.data,
+          );
+          break;
+
+        case 'videoPipeline': {
+          const videoMeasurement = await this.measurement.videoPipeline(
+            job.data,
+          );
+          const videoDataArray = videoMeasurement[4].data;
+
+          result = Object.fromEntries(
+            videoDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
+          );
+          break;
+        }
+
+        case 'autoMask': {
+          const maskMeasurement = await this.measurement.autoMaskPredict(
+            job.data,
+          );
+          const maskDataArray = maskMeasurement.data;
+
+          result = Object.fromEntries(
+            maskDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
+          );
+          break;
+        }
+
+        case 'avatar':
+          result = await this.measurement.generateAvatar(job.data);
+          break;
+
+        default: {
+          throw new Error(`Unknown job type: ${(job.data as any).type}`);
+        }
       }
 
-      case 'editGarment':
-        result = await this.measurement.editGarmentWithImageEditor(job.data);
-        break;
+      await this.jobStatusService.updateStatus(
+        jobId,
+        JobState.COMPLETED,
+        result,
+      );
+      this.logger.log(`Job ${jobId} completed successfully`);
 
-      case 'generateOutfit':
-        result = await this.measurement.generateOutfitImageFromConfig(job.data);
-        break;
+      return result;
+    } catch (error) {
+      this.logger.error(
+        `Job ${jobId} failed: ${error?.message || error}`,
+        error?.stack,
+      );
 
-      case 'videoPipeline': {
-        const videoMeasurement = await this.measurement.videoPipeline(job.data);
-        const videoDataArray = videoMeasurement[4].data;
-
-        result = Object.fromEntries(
-          videoDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
+      await this.jobStatusService
+        .updateStatus(jobId, JobState.FAILED, null, error?.message || 'Unknown error')
+        .catch((e) =>
+          this.logger.error(`Failed to update job status to FAILED: ${e.message}`),
         );
-        break;
-      }
 
-      case 'autoMask': {
-        const maskMeasurement = await this.measurement.autoMaskPredict(
-          job.data,
-        );
-        const maskDataArray = maskMeasurement.data;
-
-        result = Object.fromEntries(
-          maskDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
-        );
-        break;
-      }
-
-      case 'avatar':
-        result = await this.measurement.generateAvatar(job.data);
-        break;
-
-      default: {
-        throw new Error(`Unknown job type: ${(job.data as any).type}`);
-      }
+      throw error; // Re-throw so BullMQ marks the job as failed
     }
-
-    await this.jobStatusService.updateStatus(jobId, JobState.COMPLETED, result);
-
-    return result;
   }
 }
