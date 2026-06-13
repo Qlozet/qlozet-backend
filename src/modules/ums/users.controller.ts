@@ -196,7 +196,7 @@ export class UserController {
   @ApiOperation({ summary: 'List all saved addresses' })
   @ApiResponse({ status: 200, description: 'Address list (default first)' })
   async listAddresses(@Req() req) {
-    const addresses = await this.userService.listAddresses(req.user._id);
+    const addresses = await this.userService.listAddresses(req.user.id);
     return addresses;
   }
 
@@ -205,7 +205,7 @@ export class UserController {
   @ApiOperation({ summary: 'Get default address' })
   @ApiResponse({ status: 200, description: 'Default address' })
   async getDefaultAddress(@Req() req) {
-    const address = await this.userService.getDefaultAddress(req.user._id);
+    const address = await this.userService.getDefaultAddress(req.user.id);
     if (!address) {
       return { message: 'No address found', data: null };
     }
@@ -216,7 +216,7 @@ export class UserController {
   @Get('customer/addresses/:id')
   @ApiOperation({ summary: 'Get a specific address by ID' })
   async getAddressById(@Req() req, @Param('id') id: string) {
-    const address = await this.userService.getAddressById(req.user._id, id);
+    const address = await this.userService.getAddressById(req.user.id, id);
     return address;
   }
 
@@ -229,7 +229,7 @@ export class UserController {
     @Param('id') id: string,
     @Body() dto: UpdateAddressDto,
   ) {
-    const address = await this.userService.updateAddress(req.user._id, id, dto);
+    const address = await this.userService.updateAddress(req.user.id, id, dto);
     return { message: 'Address updated successfully', data: address };
   }
 
@@ -237,7 +237,7 @@ export class UserController {
   @Delete('customer/addresses/:id')
   @ApiOperation({ summary: 'Delete an address' })
   async deleteAddress(@Req() req, @Param('id') id: string) {
-    return this.userService.deleteAddress(req.user._id, id);
+    return this.userService.deleteAddress(req.user.id, id);
   }
 
   @Roles(UserType.CUSTOMER)
@@ -245,7 +245,7 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Set an address as default' })
   async setDefaultAddress(@Req() req, @Param('id') id: string) {
-    const address = await this.userService.setDefaultAddress(req.user._id, id);
+    const address = await this.userService.setDefaultAddress(req.user.id, id);
     return { message: 'Default address updated', data: address };
   }
 
@@ -266,7 +266,7 @@ export class UserController {
   @Get('customer/shipping-address')
   @ApiOperation({ summary: '[DEPRECATED] Get single address', deprecated: true })
   async getMyAddress(@Req() req) {
-    const address = await this.userService.getUserAddress(req.user._id);
+    const address = await this.userService.getUserAddress(req.user.id);
     return address;
   }
 
