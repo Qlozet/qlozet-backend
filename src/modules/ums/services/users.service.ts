@@ -445,6 +445,12 @@ export class UserService {
 
   private static readonly MAX_ADDRESSES = 5;
 
+  private validateObjectId(id: string, label = 'ID') {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid ${label}: ${id}`);
+    }
+  }
+
   /**
    * Add a new address to the customer's address book.
    * First address is auto-set as default. Max 5 per customer.
@@ -528,6 +534,7 @@ export class UserService {
    * Get a specific address by ID (verify ownership).
    */
   async getAddressById(userId: string | Types.ObjectId, addressId: string) {
+    this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
       customer: userId,
@@ -542,6 +549,7 @@ export class UserService {
    * Update an existing address. Re-validates via ShipBubble if address fields changed.
    */
   async updateAddress(userId: string | Types.ObjectId, addressId: string, dto: any) {
+    this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
       customer: userId,
@@ -594,6 +602,7 @@ export class UserService {
    * (must set a new default first).
    */
   async deleteAddress(userId: string | Types.ObjectId, addressId: string) {
+    this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
       customer: userId,
@@ -623,6 +632,7 @@ export class UserService {
    * Set a specific address as the default.
    */
   async setDefaultAddress(userId: string | Types.ObjectId, addressId: string) {
+    this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
       customer: userId,
