@@ -197,7 +197,7 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'Address list (default first)' })
   async listAddresses(@Req() req) {
     const addresses = await this.userService.listAddresses(req.user._id);
-    return { data: addresses };
+    return addresses;
   }
 
   @Roles(UserType.CUSTOMER)
@@ -209,7 +209,7 @@ export class UserController {
     if (!address) {
       return { message: 'No address found', data: null };
     }
-    return { data: address };
+    return address;
   }
 
   @Roles(UserType.CUSTOMER)
@@ -217,7 +217,7 @@ export class UserController {
   @ApiOperation({ summary: 'Get a specific address by ID' })
   async getAddressById(@Req() req, @Param('id') id: string) {
     const address = await this.userService.getAddressById(req.user._id, id);
-    return { data: address };
+    return address;
   }
 
   @Roles(UserType.CUSTOMER)
