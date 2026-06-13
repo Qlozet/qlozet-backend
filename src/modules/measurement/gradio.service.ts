@@ -48,6 +48,20 @@ export class GradioService {
   }
 
   /**
+   * Create a 1x1 black PNG blob as a placeholder for Required image params
+   * that the model doesn't actually use (e.g. LightGBM tabular-only mode).
+   */
+  createPlaceholderImage(): Blob {
+    // Minimal valid 1x1 black PNG (67 bytes)
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAB' +
+        'Nl7BcQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    return new Blob([png], { type: 'image/png' });
+  }
+
+  /**
    * Save a file to a temporary folder
    */
   async saveFile(
