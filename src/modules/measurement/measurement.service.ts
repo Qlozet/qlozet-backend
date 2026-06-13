@@ -101,10 +101,13 @@ export class MeasurementService {
       this.logger.log('Prediction completed successfully');
       return result.data[0];
     } catch (error) {
-      this.logger.error('Prediction failed', error?.stack || error);
-      throw new Error(
-        `Prediction Error: ${error?.message || 'Unknown error occurred'}`,
-      );
+      const errMsg =
+        error?.message ||
+        error?.detail ||
+        (typeof error === 'string' ? error : JSON.stringify(error));
+      this.logger.error(`Prediction failed: ${errMsg}`, error?.stack);
+      this.logger.error('Full error object:', JSON.stringify(error, null, 2));
+      throw new Error(`Prediction Error: ${errMsg}`);
     }
   }
 
