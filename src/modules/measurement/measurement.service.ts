@@ -84,18 +84,25 @@ export class MeasurementService {
       }
       const client = await this.gradio.getClient(this.hbm);
 
-      // Gradio JS client hangs on null for Required Blob params.
-      // LightGBM ignores images, but we must pass a valid Blob.
-      const placeholder = this.gradio.createPlaceholderImage();
+      this.logger.log(
+        `Running prediction: height=${body.height_cm}, weight=${body.weight}, gender=${body.gender}`,
+      );
 
       const result = await client.predict('//run_predict', {
         model_choice: 'Tabular (LightGBM)',
-        front_image: placeholder,
-        side_image: placeholder,
+        front_image: null,
+        side_image: null,
         height_cm: Number(body.height_cm) || 175,
         weight: Number(body.weight) || 0,
         gender: body.gender || '',
       });
+
+      this.logger.log(
+        `Prediction result shape: ${JSON.stringify(Object.keys(result || {}))}`,
+      );
+      this.logger.log(
+        `result.data length: ${result?.data?.length}, result.data[0] type: ${typeof result?.data?.[0]}`,
+      );
 
       await this.tokenService.spend('prediction', business, customer);
       this.logger.log('Prediction completed successfully');
