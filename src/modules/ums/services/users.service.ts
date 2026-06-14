@@ -773,7 +773,10 @@ export class UserService {
 
     if (dto.unit) set.unit = dto.unit;
     if (dto.measurements) {
-      set.measurements = { ...set.measurements, ...dto.measurements };
+      // measurements is a Mongoose Map — use .set() for each key
+      for (const [key, value] of Object.entries(dto.measurements)) {
+        (set.measurements as any).set(key, value);
+      }
     }
 
     await user.save();
