@@ -234,12 +234,20 @@ export class UserService {
    * Update user profile
    */
   async updateProfile(userId: string, dto: UpdateUserDto) {
-    const data = await this.userModel.findByIdAndUpdate(
-      userId,
-      { $set: dto },
-      { new: true },
-    );
-    return data?.toJSON();
+    try {
+      const data = await this.userModel.findByIdAndUpdate(
+        userId,
+        { $set: dto },
+        { new: true },
+      );
+      return data?.toJSON();
+    } catch (error) {
+      // MongoDB duplicate key error (E11000) — username already taken
+      if (error?.code === 11000 && error?.keyPattern?.username) {
+        throw new HttpException('Username already taken', 409);
+      }
+      throw error;
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { IsOptional, IsArray, IsString, IsDate, IsEnum } from 'class-validator';
+import { IsOptional, IsArray, IsString, IsDate, IsEnum, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -39,4 +39,12 @@ export class UpdateUserDto {
   @IsOptional()
   @IsArray()
   body_fit?: string[];
+
+  @ApiPropertyOptional({ example: 'kendokennedy' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9_]{3,20}$/, {
+    message: 'Username must be 3-20 characters, lowercase letters, numbers, and underscores only',
+  })
+  username?: string;
 }
