@@ -94,3 +94,16 @@ export class AddMeasurementSetDto {
   @Type(() => MeasurementInputDto)
   measurements: MeasurementInputDto;
 }
+
+export class UpdateMeasurementSetDto {
+  @ApiProperty({ example: 'cm', enum: ['cm', 'inch'], required: false })
+  @IsOptional()
+  @IsEnum(['cm', 'inch'])
+  unit?: 'cm' | 'inch';
+
+  @ApiProperty({ type: MeasurementInputDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MeasurementInputDto)
+  measurements?: MeasurementInputDto;
+}

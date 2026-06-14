@@ -47,6 +47,7 @@ import { UserService } from '../ums/services';
 import {
   ActiveMeasurementSetDto,
   AddMeasurementSetDto,
+  UpdateMeasurementSetDto,
 } from './dto/user-measurement.dto';
 import { EditGarmentDto } from './dto/edit-image.dto';
 import { JobStatusService } from './job-status.service';
@@ -338,6 +339,20 @@ export class MeasurementController {
     @Req() req: any,
   ) {
     return this.userService.setActiveMeasurementSet(req.user.id, name);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Patch('users/sets/:name')
+  @ApiOperation({ summary: 'Update a measurement set by name' })
+  @ApiParam({ name: 'name', description: 'Name of the measurement set to update' })
+  @ApiResponse({ status: 200, description: 'Measurement set updated' })
+  @ApiResponse({ status: 404, description: 'Measurement set not found' })
+  async updateMeasurementSet(
+    @Param('name') name: string,
+    @Body() dto: UpdateMeasurementSetDto,
+    @Req() req: any,
+  ) {
+    return this.userService.updateMeasurementSet(req.user.id, name, dto);
   }
 
   @Roles(UserType.CUSTOMER)

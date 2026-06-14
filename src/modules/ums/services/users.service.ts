@@ -15,7 +15,7 @@ import { Address, AddressDocument } from '../schemas/address.schema';
 import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
-import { AddMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
+import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
 
 @Injectable()
@@ -752,6 +752,32 @@ export class UserService {
 
     await user.save();
     return newSet;
+  }
+
+  async updateMeasurementSet(
+    userId: string,
+    setName: string,
+    dto: UpdateMeasurementSetDto,
+  ) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.measurementSets || user.measurementSets.length === 0) {
+      throw new BadRequestException('User has no measurement sets');
+    }
+
+    const set = user.measurementSets.find((s) => s.name === setName);
+    if (!set) {
+      throw new NotFoundException(`Measurement set "${setName}" not found`);
+    }
+
+    if (dto.unit) set.unit = dto.unit;
+    if (dto.measurements) {
+      set.measurements = { ...set.measurements, ...dto.measurements };
+    }
+
+    await user.save();
+    return set;
   }
 
   async getAllMeasurementSets(userId: string) {
