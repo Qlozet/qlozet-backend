@@ -127,7 +127,7 @@ export class TokenService {
 
     // Record transaction (non-critical, fire-and-forget safe)
     await this.transactionModel.create({
-      wallet: tokenWallet._id,
+      token: tokenWallet._id,
       type: TokenTransactionType.SPEND,
       amount,
     });
