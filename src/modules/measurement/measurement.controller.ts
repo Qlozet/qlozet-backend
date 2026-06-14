@@ -67,15 +67,12 @@ export class MeasurementController {
     private readonly userService: UserService,
   ) {}
 
-  @Public()
-  // @Roles('customer')
-  // @ApiConsumes('multipart/form-data')
+  @Roles(UserType.CUSTOMER)
   @ApiBody({
     description: 'Run predict with front and side images',
     type: RunPredictBodyDto,
   })
   @Post('run-prediction')
-  // @UseInterceptors(FilesInterceptor('files'))
   async runPredict(@Body() body: RunPredictBodyDto, @Req() req: any) {
     try {
       const business = req.business?.id;
