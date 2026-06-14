@@ -107,46 +107,32 @@ export class TokenService {
 
     const amount = priceMap[type] ?? settings.edit_garment_token_price;
 
-    const session = await startSession();
-    session.startTransaction();
+    const tokenWalletFilter: any = {};
+    if (business) tokenWalletFilter.business = new Types.ObjectId(business);
+    if (customer) tokenWalletFilter.customer = new Types.ObjectId(customer);
 
-    try {
-      const tokenWalletFilter: any = {};
-      if (business) tokenWalletFilter.business = new Types.ObjectId(business);
-      if (customer) tokenWalletFilter.customer = new Types.ObjectId(customer);
+    // Atomic deduct: only succeeds if tokens >= amount (no session needed)
+    const tokenWallet = await this.tokenModel.findOneAndUpdate(
+      { ...tokenWalletFilter, tokens: { $gte: amount } },
+      { $inc: { tokens: -amount, lifetimeSpent: amount } },
+      { new: true },
+    );
 
-      const tokenWallet = await this.tokenModel
-        .findOne(tokenWalletFilter)
-        .session(session);
-      if (!tokenWallet) throw new NotFoundException('Token wallet not found');
-
-      if (tokenWallet.tokens < amount) {
-        throw new BadRequestException('Insufficient tokens');
-      }
-
-      // Deduct tokens
-      tokenWallet.tokens -= amount;
-      tokenWallet.lifetimeSpent += amount;
-      await tokenWallet.save({ session });
-
-      // Record transaction
-      await this.transactionModel.create(
-        {
-          wallet: tokenWallet._id,
-          type: TokenTransactionType.SPEND,
-          amount,
-        },
-        { session },
-      );
-
-      await session.commitTransaction();
-      return tokenWallet;
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
+    if (!tokenWallet) {
+      // Check if wallet exists but has insufficient tokens
+      const exists = await this.tokenModel.findOne(tokenWalletFilter).lean();
+      if (!exists) throw new NotFoundException('Token wallet not found');
+      throw new BadRequestException('Insufficient tokens');
     }
+
+    // Record transaction (non-critical, fire-and-forget safe)
+    await this.transactionModel.create({
+      wallet: tokenWallet._id,
+      type: TokenTransactionType.SPEND,
+      amount,
+    });
+
+    return tokenWallet;
   }
 
   async purchase(tokenAmount: number, business?: string, customer?: string) {
