@@ -112,12 +112,14 @@ export class MeasurementService {
       this.logger.log('Prediction completed successfully');
       return result.data[0];
     } catch (error) {
+      // Re-throw known NestJS exceptions with correct HTTP status
+      if (error instanceof BadRequestException) throw error;
+
       const errMsg =
         error?.message ||
         error?.detail ||
         (typeof error === 'string' ? error : JSON.stringify(error));
       this.logger.error(`Prediction failed: ${errMsg}`, error?.stack);
-      this.logger.error('Full error object:', JSON.stringify(error, null, 2));
       throw new Error(`Prediction Error: ${errMsg}`);
     }
   }
