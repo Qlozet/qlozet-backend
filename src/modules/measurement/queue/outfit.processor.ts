@@ -92,10 +92,10 @@ export class OutfitProcessor extends WorkerHost {
         }
       }
 
-      await this.jobStatusService.updateStatus(
-        jobId,
-        JobState.COMPLETED,
-        result,
+      // Retry wrapper: Fly.io proxy may kill idle TCP connections during
+      // long Gradio calls, causing the first MongoDB write to fail.
+      await this.retryMongo(() =>
+        this.jobStatusService.updateStatus(jobId, JobState.COMPLETED, result),
       );
       this.logger.log(`Job ${jobId} completed successfully`);
 
@@ -106,13 +106,50 @@ export class OutfitProcessor extends WorkerHost {
         error?.stack,
       );
 
-      await this.jobStatusService
-        .updateStatus(jobId, JobState.FAILED, null, error?.message || 'Unknown error')
-        .catch((e) =>
-          this.logger.error(`Failed to update job status to FAILED: ${e.message}`),
-        );
+      await this.retryMongo(() =>
+        this.jobStatusService.updateStatus(
+          jobId,
+          JobState.FAILED,
+          null,
+          error?.message || 'Unknown error',
+        ),
+      ).catch((e) =>
+        this.logger.error(
+          `Failed to update job status to FAILED: ${e.message}`,
+        ),
+      );
 
-      throw error; // Re-throw so BullMQ marks the job as failed
+      throw error;
     }
+  }
+
+  /**
+   * Retry a MongoDB operation up to 3 times with a short delay.
+   * Handles stale connections from Fly.io proxy killing idle sockets.
+   */
+  private async retryMongo<T>(
+    fn: () => Promise<T>,
+    retries = 3,
+    delayMs = 2000,
+  ): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        const isConnectionError =
+          err?.message?.includes('buffering timed out') ||
+          err?.message?.includes('connection') ||
+          err?.message?.includes('topology');
+        if (isConnectionError && i < retries - 1) {
+          this.logger.warn(
+            `MongoDB retry ${i + 1}/${retries}: ${err.message}`,
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('retryMongo exhausted');
   }
 }
