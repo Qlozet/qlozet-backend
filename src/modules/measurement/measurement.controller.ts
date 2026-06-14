@@ -80,21 +80,16 @@ export class MeasurementController {
     try {
       const business = req.business?.id;
       const customer = req.user?.id;
-      const [settings, tokenBalance] = await Promise.all([
-        this.platformService.getSettings(),
-        this.tokenService.balance(business, customer),
-      ]);
 
-      if (tokenBalance < settings.run_prediction_token_price) {
-        throw new BadRequestException(
-          'Insufficient tokens, please fund your wallet',
-        );
-      }
-      return this.outfitService.queueRunPrediction({
+      // Call Gradio synchronously — tabular prediction is fast (~1-2s).
+      // Bypasses BullMQ queue to avoid MongoDB stale-connection issues on Fly.io.
+      const result = await this.measurement.runPrediction({
         ...body,
-        business: req.business?.id,
-        customer: req.user?.id,
+        business,
+        customer,
       });
+
+      return result;
     } catch (error) {
       throw new HttpException(
         error.message || 'Prediction failed',
