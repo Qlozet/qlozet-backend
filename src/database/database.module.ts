@@ -13,6 +13,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         socketTimeoutMS: 45000,
         maxPoolSize: 10,
         minPoolSize: 2,
+        heartbeatFrequencyMS: 5000,       // ping every 5s to keep connections alive
+        maxIdleTimeMS: 60000,             // keep idle connections for 60s
       }),
       inject: [ConfigService],
     }),
