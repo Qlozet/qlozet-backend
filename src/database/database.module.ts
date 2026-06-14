@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import * as mongoose from 'mongoose';
+
+// Set global Mongoose options BEFORE any connection is established
+mongoose.set('bufferTimeoutMS', 30000);
 
 @Module({
   exports: [MongooseModule],
@@ -15,7 +19,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         minPoolSize: 2,
         heartbeatFrequencyMS: 5000,
         maxIdleTimeMS: 60000,
-        bufferTimeoutMS: 30000,           // wait up to 30s for stale connections to recover
       }),
       inject: [ConfigService],
     }),
