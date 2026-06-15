@@ -86,9 +86,12 @@ export class WebhookService {
 
     const isWalletFunding =
       transaction.type === TransactionType.FUND &&
-      transaction.wallet !== undefined;
+      transaction.wallet != null;
 
     if (isWalletFunding) {
+      this.logger.log(
+        `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
+      );
       await this.walletsService.creditWallet(
         transaction.wallet!.toString(),
         transaction.amount,
@@ -96,7 +99,8 @@ export class WebhookService {
     }
 
     const isCheckoutOrder =
-      transaction.channel === 'checkout' && transaction.order !== undefined;
+      transaction.channel === 'checkout' &&
+      transaction.order != null;
 
     if (isCheckoutOrder) {
       const orderId = transaction.order!._id;
