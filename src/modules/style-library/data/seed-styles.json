@@ -1,0 +1,507 @@
+[
+  {
+    "name": "V-Neck",
+    "style_code": "NECK_V",
+    "category": "neckline",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A neckline that dips down in a V shape at the front, elongating the neck and flattering most body types",
+    "aliases": ["V Neckline", "Plunging Neck"],
+    "attributes": ["formal", "casual", "flattering", "elongating"]
+  },
+  {
+    "name": "Round Neck",
+    "style_code": "NECK_ROUND",
+    "category": "neckline",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A classic circular neckline that sits close to the base of the neck",
+    "aliases": ["Crew Neck", "Jewel Neck"],
+    "attributes": ["classic", "casual", "versatile"]
+  },
+  {
+    "name": "Off-Shoulder",
+    "style_code": "NECK_OFF_SHOULDER",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A neckline that sits below the shoulders, exposing the collarbone and shoulders",
+    "aliases": ["Bardot Neckline"],
+    "attributes": ["romantic", "elegant", "evening"]
+  },
+  {
+    "name": "Sweetheart",
+    "style_code": "NECK_SWEETHEART",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A heart-shaped neckline that dips in the center, creating a romantic silhouette",
+    "aliases": ["Heart Neckline"],
+    "attributes": ["romantic", "bridal", "evening", "flattering"]
+  },
+  {
+    "name": "Square Neck",
+    "style_code": "NECK_SQUARE",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A straight-across neckline with right-angle corners, creating a structured look",
+    "aliases": [],
+    "attributes": ["structured", "modern", "flattering"]
+  },
+  {
+    "name": "Boat Neck",
+    "style_code": "NECK_BOAT",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A wide neckline that runs horizontally across the collarbone, nearly reaching the shoulder points",
+    "aliases": ["Bateau Neck", "Sabrina Neckline"],
+    "attributes": ["elegant", "classic", "formal"]
+  },
+  {
+    "name": "Halter Neck",
+    "style_code": "NECK_HALTER",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A neckline with straps that tie or fasten behind the neck, leaving shoulders and back exposed",
+    "aliases": [],
+    "attributes": ["summer", "evening", "backless"]
+  },
+  {
+    "name": "Cowl Neck",
+    "style_code": "NECK_COWL",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A draped, fabric-folded neckline that creates soft, flowing folds",
+    "aliases": ["Draped Neckline"],
+    "attributes": ["elegant", "soft", "evening"]
+  },
+  {
+    "name": "Scoop Neck",
+    "style_code": "NECK_SCOOP",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A deep, U-shaped neckline that scoops lower than a round neck",
+    "aliases": ["U-Neck"],
+    "attributes": ["casual", "feminine", "versatile"]
+  },
+  {
+    "name": "Illusion Neck",
+    "style_code": "NECK_ILLUSION",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A sheer mesh or lace panel over the chest area, creating the illusion of bare skin while providing coverage",
+    "aliases": [],
+    "attributes": ["bridal", "elegant", "formal"]
+  },
+  {
+    "name": "Keyhole Neck",
+    "style_code": "NECK_KEYHOLE",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A round neckline with a small cutout (keyhole) at the front or back",
+    "aliases": [],
+    "attributes": ["subtle", "elegant", "detail"]
+  },
+  {
+    "name": "One-Shoulder",
+    "style_code": "NECK_ONE_SHOULDER",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "An asymmetric neckline with one strap, leaving one shoulder bare",
+    "aliases": ["Asymmetric Neckline"],
+    "attributes": ["dramatic", "evening", "modern"]
+  },
+
+  {
+    "name": "Short Sleeve",
+    "style_code": "SLV_SHORT",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "unisex",
+    "description": "Sleeves ending above the elbow, typically at mid-upper arm",
+    "aliases": [],
+    "attributes": ["casual", "everyday", "classic"]
+  },
+  {
+    "name": "Long Sleeve",
+    "style_code": "SLV_LONG",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "unisex",
+    "description": "Sleeves extending to the wrist",
+    "aliases": ["Full Sleeve"],
+    "attributes": ["formal", "modest", "versatile"]
+  },
+  {
+    "name": "3/4 Sleeve",
+    "style_code": "SLV_THREE_QUARTER",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Sleeves ending between the elbow and wrist",
+    "aliases": ["Three-Quarter Sleeve"],
+    "attributes": ["elegant", "versatile", "flattering"]
+  },
+  {
+    "name": "Puff Sleeve",
+    "style_code": "SLV_PUFF",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Gathered sleeves that balloon out before tapering at the cuff or shoulder",
+    "aliases": ["Bishop Sleeve", "Balloon Sleeve"],
+    "attributes": ["romantic", "dramatic", "trendy"]
+  },
+  {
+    "name": "Bell Sleeve",
+    "style_code": "SLV_BELL",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Sleeves that flare out from the elbow like a bell",
+    "aliases": ["Trumpet Sleeve"],
+    "attributes": ["bohemian", "flowing", "dramatic"]
+  },
+  {
+    "name": "Cap Sleeve",
+    "style_code": "SLV_CAP",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Very short sleeves that just cover the shoulder cap",
+    "aliases": [],
+    "attributes": ["feminine", "subtle", "summer"]
+  },
+  {
+    "name": "Sleeveless",
+    "style_code": "SLV_SLEEVELESS",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "unisex",
+    "description": "No sleeves — the garment ends at the shoulder seam",
+    "aliases": ["Tank"],
+    "attributes": ["summer", "casual", "sporty"]
+  },
+  {
+    "name": "Flutter Sleeve",
+    "style_code": "SLV_FLUTTER",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Short, loose sleeves that drape softly and flutter with movement",
+    "aliases": ["Angel Sleeve"],
+    "attributes": ["feminine", "soft", "romantic"]
+  },
+  {
+    "name": "Raglan Sleeve",
+    "style_code": "SLV_RAGLAN",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "unisex",
+    "description": "Sleeves that extend in one piece from the collar, with diagonal seam from underarm to collarbone",
+    "aliases": [],
+    "attributes": ["sporty", "casual", "comfortable"]
+  },
+  {
+    "name": "Kimono Sleeve",
+    "style_code": "SLV_KIMONO",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "Wide, straight sleeves cut as one piece with the body of the garment",
+    "aliases": [],
+    "attributes": ["relaxed", "flowing", "elegant"]
+  },
+
+  {
+    "name": "Mandarin Collar",
+    "style_code": "COL_MANDARIN",
+    "category": "collar",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A short, stand-up collar that does not fold over, originating from Chinese traditional wear",
+    "aliases": ["Chinese Collar", "Band Collar"],
+    "attributes": ["traditional", "formal", "structured"]
+  },
+  {
+    "name": "Peter Pan Collar",
+    "style_code": "COL_PETER_PAN",
+    "category": "collar",
+    "type": "top",
+    "gender": "female",
+    "description": "A flat, rounded collar lying flat against the garment",
+    "aliases": [],
+    "attributes": ["classic", "feminine", "preppy"]
+  },
+  {
+    "name": "Notch Collar",
+    "style_code": "COL_NOTCH",
+    "category": "collar",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A tailored collar with a V-shaped notch where the collar meets the lapel",
+    "aliases": ["Lapel Collar", "Blazer Collar"],
+    "attributes": ["formal", "business", "tailored"]
+  },
+  {
+    "name": "Stand Collar",
+    "style_code": "COL_STAND",
+    "category": "collar",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A tall, upright collar that stands against the neck",
+    "aliases": ["Funnel Collar"],
+    "attributes": ["modern", "structured", "dramatic"]
+  },
+  {
+    "name": "Shawl Collar",
+    "style_code": "COL_SHAWL",
+    "category": "collar",
+    "type": "top",
+    "gender": "unisex",
+    "description": "A rounded collar that rolls softly from the neckline without a notch",
+    "aliases": [],
+    "attributes": ["elegant", "evening", "formal"]
+  },
+  {
+    "name": "Spread Collar",
+    "style_code": "COL_SPREAD",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A wide collar with points spread apart, commonly used in dress shirts",
+    "aliases": ["Windsor Collar"],
+    "attributes": ["formal", "business", "classic"]
+  },
+
+  {
+    "name": "A-Line Skirt",
+    "style_code": "SKT_A_LINE",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt that is fitted at the hips and gradually flares out toward the hem, resembling the letter A",
+    "aliases": [],
+    "attributes": ["classic", "flattering", "versatile"]
+  },
+  {
+    "name": "Pencil Skirt",
+    "style_code": "SKT_PENCIL",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A slim-fitting skirt with a straight, narrow cut",
+    "aliases": ["Straight Skirt"],
+    "attributes": ["formal", "business", "sleek"]
+  },
+  {
+    "name": "Mermaid Skirt",
+    "style_code": "SKT_MERMAID",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A fitted skirt that flares out dramatically at or below the knee, resembling a mermaid tail",
+    "aliases": ["Fishtail Skirt", "Trumpet Skirt"],
+    "attributes": ["dramatic", "evening", "bridal"]
+  },
+  {
+    "name": "Flared Skirt",
+    "style_code": "SKT_FLARED",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt that flares outward from the waist, creating a full, circular silhouette",
+    "aliases": ["Circle Skirt", "Skater Skirt"],
+    "attributes": ["playful", "casual", "youthful"]
+  },
+  {
+    "name": "Pleated Skirt",
+    "style_code": "SKT_PLEATED",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt featuring evenly spaced folds (pleats) for added volume and movement",
+    "aliases": [],
+    "attributes": ["classic", "elegant", "structured"]
+  },
+  {
+    "name": "Wrap Skirt",
+    "style_code": "SKT_WRAP",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt that wraps around the body and ties or buttons at the side",
+    "aliases": [],
+    "attributes": ["adjustable", "feminine", "versatile"]
+  },
+  {
+    "name": "High-Low Skirt",
+    "style_code": "SKT_HIGH_LOW",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt with a shorter front hemline and a longer back hemline",
+    "aliases": ["Mullet Skirt", "Asymmetric Hem"],
+    "attributes": ["modern", "dramatic", "trendy"]
+  },
+  {
+    "name": "Peplum Skirt",
+    "style_code": "SKT_PEPLUM",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt with a short, flared ruffle attached at the waistline",
+    "aliases": [],
+    "attributes": ["feminine", "flattering", "structured"]
+  },
+
+  {
+    "name": "Straight Trouser",
+    "style_code": "TRS_STRAIGHT",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "unisex",
+    "description": "Trousers with a straight, consistent width from hip to hem",
+    "aliases": ["Straight Leg"],
+    "attributes": ["classic", "versatile", "business"]
+  },
+  {
+    "name": "Wide-Leg Trouser",
+    "style_code": "TRS_WIDE_LEG",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "Trousers that widen from the waist or hip to create a flowing, relaxed silhouette",
+    "aliases": [],
+    "attributes": ["elegant", "relaxed", "trendy"]
+  },
+  {
+    "name": "Palazzo Trouser",
+    "style_code": "TRS_PALAZZO",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "Very wide-legged trousers that flow dramatically from the waist",
+    "aliases": [],
+    "attributes": ["dramatic", "elegant", "evening"]
+  },
+  {
+    "name": "Tapered Trouser",
+    "style_code": "TRS_TAPERED",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "unisex",
+    "description": "Trousers that narrow gradually from the hip to the ankle",
+    "aliases": ["Slim Fit"],
+    "attributes": ["modern", "smart-casual", "tailored"]
+  },
+  {
+    "name": "Flared Trouser",
+    "style_code": "TRS_FLARED",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "Trousers that fit snugly through the thigh and flare out from the knee",
+    "aliases": ["Boot Cut", "Bell Bottom"],
+    "attributes": ["retro", "trendy", "elongating"]
+  },
+
+  {
+    "name": "Agbada",
+    "style_code": "FB_AGBADA",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A flowing wide-sleeved robe worn over an inner shirt (Buba) and trousers (Sokoto). Traditional Yoruba formal attire",
+    "aliases": ["Grand Boubou"],
+    "attributes": ["traditional", "formal", "ceremonial", "yoruba"]
+  },
+  {
+    "name": "Kaftan",
+    "style_code": "FB_KAFTAN",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "unisex",
+    "description": "A long, loose garment with wide sleeves, worn as a flowing dress or robe",
+    "aliases": ["Caftan"],
+    "attributes": ["relaxed", "elegant", "traditional", "versatile"]
+  },
+  {
+    "name": "Buba & Iro",
+    "style_code": "FB_BUBA_IRO",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "Traditional Yoruba two-piece outfit — a loose blouse (Buba) paired with a wrapper (Iro) tied around the waist",
+    "aliases": ["Iro and Buba"],
+    "attributes": ["traditional", "yoruba", "ceremonial", "feminine"]
+  },
+  {
+    "name": "Senator / Safari",
+    "style_code": "FB_SENATOR",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A structured tunic top with Mandarin collar, typically worn with matching trousers. Popular Nigerian male formal wear",
+    "aliases": ["Safari Suit", "Nigerian Senator"],
+    "attributes": ["formal", "modern", "structured", "nigerian"]
+  },
+  {
+    "name": "Dashiki",
+    "style_code": "FB_DASHIKI",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "unisex",
+    "description": "A colorful, loose-fitting garment with an ornate V-shaped collar and embroidery on the chest",
+    "aliases": [],
+    "attributes": ["casual", "traditional", "west-african", "colorful"]
+  },
+  {
+    "name": "Jumpsuit",
+    "style_code": "FB_JUMPSUIT",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A one-piece garment combining a top and trousers",
+    "aliases": ["Romper"],
+    "attributes": ["modern", "sleek", "versatile"]
+  },
+  {
+    "name": "Aso Oke Set",
+    "style_code": "FB_ASO_OKE",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "unisex",
+    "description": "Hand-woven cloth from Yorubaland, worn as a complete set — Aso Oke, Gele (headtie), and Ipele (shoulder piece)",
+    "aliases": ["Aso Ofi"],
+    "attributes": ["luxury", "traditional", "ceremonial", "yoruba"]
+  },
+  {
+    "name": "Boubou",
+    "style_code": "FB_BOUBOU",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "unisex",
+    "description": "A wide, flowing robe with elaborate embroidery, common across West Africa",
+    "aliases": ["Grand Boubou", "Bubu"],
+    "attributes": ["traditional", "ceremonial", "west-african", "flowing"]
+  },
+  {
+    "name": "Wrapper Dress",
+    "style_code": "FB_WRAPPER_DRESS",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A fitted dress made from traditional African print fabric (Ankara, Adire), often with modern styling elements",
+    "aliases": ["Ankara Dress"],
+    "attributes": ["modern", "feminine", "african-print", "versatile"]
+  }
+]
