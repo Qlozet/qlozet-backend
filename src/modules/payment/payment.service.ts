@@ -151,6 +151,9 @@ export class PaymentService {
 
     if (!transaction) throw new NotFoundException('Transaction not found');
 
+    // Guard: don't re-process already completed transactions
+    const alreadyProcessed = transaction.status === TransactionStatus.SUCCESS;
+
     if (data.status === 'success') {
       transaction.status = TransactionStatus.SUCCESS;
       transaction.metadata = { ...transaction.metadata, paystack: data };
@@ -165,6 +168,9 @@ export class PaymentService {
       status: transaction.status,
       reference,
       amount: transaction.amount,
+      walletId: transaction.wallet?.toString() || null,
+      transactionType: transaction.type,
+      alreadyProcessed,
       message:
         transaction.status === TransactionStatus.SUCCESS
           ? 'Payment verified successfully'
