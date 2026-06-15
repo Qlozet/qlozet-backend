@@ -9,6 +9,7 @@ import { StyleLibraryService } from './style-library.service';
 import { StyleLibraryController } from './style-library.controller';
 import { UmsModule } from '../ums/ums.module';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
       { name: Product.name, schema: ProductSchema },
     ]),
     UmsModule, // provides User + Role models for RolesGuard
+    CloudinaryModule, // provides CloudinaryService for image uploads
   ],
   controllers: [StyleLibraryController],
   providers: [StyleLibraryService, JwtService],

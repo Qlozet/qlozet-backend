@@ -4,8 +4,10 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import OpenAI from 'openai';
 import {
   PlatformStyle,
   PlatformStyleDocument,
@@ -17,17 +19,24 @@ import {
 } from './dto/platform-style.dto';
 import * as seedData from './data/seed-styles.json';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class StyleLibraryService {
   private readonly logger = new Logger(StyleLibraryService.name);
+  private openai: OpenAI;
 
   constructor(
     @InjectModel(PlatformStyle.name)
     private readonly styleModel: Model<PlatformStyleDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
-  ) {}
+    private readonly cloudinaryService: CloudinaryService,
+    private readonly configService: ConfigService,
+  ) {
+    const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+    this.openai = new OpenAI({ apiKey: apiKey || 'dummy' });
+  }
 
   async create(dto: CreatePlatformStyleDto): Promise<PlatformStyleDocument> {
     const existing = await this.styleModel.findOne({
@@ -38,6 +47,12 @@ export class StyleLibraryService {
         `Style with code "${dto.style_code}" already exists`,
       );
     }
+
+    // Auto-generate image if not provided
+    if (!dto.image_url) {
+      dto.image_url = await this.generateStyleImage(dto.name, dto.category, dto.description);
+    }
+
     return this.styleModel.create(dto);
   }
 
@@ -103,9 +118,10 @@ export class StyleLibraryService {
     return style;
   }
 
-  async seed(): Promise<{ created: number; skipped: number }> {
+  async seed(): Promise<{ created: number; skipped: number; failed: number }> {
     let created = 0;
     let skipped = 0;
+    let failed = 0;
 
     for (const styleData of seedData) {
       const existing = await this.styleModel.findOne({
@@ -117,15 +133,29 @@ export class StyleLibraryService {
         continue;
       }
 
+      // Auto-generate image
+      let image_url: string | undefined;
+      try {
+        image_url = await this.generateStyleImage(
+          styleData.name,
+          styleData.category,
+          styleData.description,
+        );
+      } catch (err) {
+        this.logger.warn(`Image generation failed for ${styleData.name}: ${err.message}`);
+        failed++;
+      }
+
       await this.styleModel.create({
         ...styleData,
+        image_url,
         is_active: true,
       });
       created++;
     }
 
-    this.logger.log(`Seed complete: ${created} created, ${skipped} skipped`);
-    return { created, skipped };
+    this.logger.log(`Seed complete: ${created} created, ${skipped} skipped, ${failed} image failures`);
+    return { created, skipped, failed };
   }
 
   async getCategories() {
@@ -222,5 +252,66 @@ export class StyleLibraryService {
       skipped,
       product_id: productId,
     };
+  }
+
+  // ─── Image Generation ───
+
+  /**
+   * Generate a minimal fashion sketch using DALL-E and upload to Cloudinary.
+   * Returns the Cloudinary URL or undefined if generation fails.
+   */
+  private async generateStyleImage(
+    name: string,
+    category: string,
+    description?: string,
+  ): Promise<string | undefined> {
+    if (this.openai.apiKey === 'dummy') {
+      this.logger.warn('OPENAI_API_KEY not set — skipping image generation');
+      return undefined;
+    }
+
+    const categoryHint = {
+      neckline: `${name} neckline on a women's blouse`,
+      sleeve: `${name} sleeve style on a women's blouse`,
+      collar: `${name} collar on a shirt`,
+      skirt: `${name} skirt silhouette`,
+      trouser: `${name} trouser/pant silhouette`,
+      full_body: `${name} traditional outfit, full body silhouette`,
+      bodice: `${name} bodice style on a dress`,
+      hemline: `${name} hemline on a dress`,
+      back: `${name} back design on a dress`,
+    }[category] || `${name} fashion style`;
+
+    const prompt = `Minimal fashion technical sketch on pure white background. Clean black line drawing of ${categoryHint}. Simple, elegant fashion illustration style. No color, no shading, just clean outlines. Professional fashion design reference sketch. ${description || ''}`.trim();
+
+    try {
+      this.logger.log(`Generating image for "${name}"...`);
+
+      const response = await this.openai.images.generate({
+        model: 'dall-e-3',
+        prompt,
+        n: 1,
+        size: '1024x1024',
+        response_format: 'b64_json',
+      });
+
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) {
+        this.logger.warn(`No image data returned for "${name}"`);
+        return undefined;
+      }
+
+      // Upload to Cloudinary
+      const result = await this.cloudinaryService.uploadBase64(
+        b64,
+        'platform-styles',
+      ) as { fileUrl: string };
+
+      this.logger.log(`Image generated and uploaded for "${name}": ${result.fileUrl}`);
+      return result.fileUrl;
+    } catch (err) {
+      this.logger.error(`Image generation failed for "${name}": ${err.message}`);
+      return undefined;
+    }
   }
 }
