@@ -65,7 +65,7 @@ export class WalletsService {
     customerId?: string,
     businessId?: string,
   ) {
-    const wallet = await this.getOrCreateWallet(customerId, businessId);
+    const wallet = await this.getOrCreateWallet(businessId, customerId);
 
     const transaction = await this.transactionService.create({
       initiator: wallet.customer,
@@ -85,6 +85,7 @@ export class WalletsService {
       walletId: wallet._id,
       transactionId: transaction._id,
       ...result.data,
+      authorization_url: result.data?.paymentUrl,
     };
   }
 
