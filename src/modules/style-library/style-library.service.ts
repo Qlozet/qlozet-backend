@@ -16,6 +16,7 @@ import {
   QueryPlatformStyleDto,
 } from './dto/platform-style.dto';
 import * as seedData from './data/seed-styles.json';
+import { Product, ProductDocument } from '../products/schemas/product.schema';
 
 @Injectable()
 export class StyleLibraryService {
@@ -24,6 +25,8 @@ export class StyleLibraryService {
   constructor(
     @InjectModel(PlatformStyle.name)
     private readonly styleModel: Model<PlatformStyleDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
   ) {}
 
   async create(dto: CreatePlatformStyleDto): Promise<PlatformStyleDocument> {
@@ -139,5 +142,85 @@ export class StyleLibraryService {
       })),
     );
     return counts;
+  }
+
+  /**
+   * Copy platform styles into a vendor's product (clothing.styles[])
+   * Uses the COPY approach — vendor gets independent copies with optional price overrides.
+   */
+  async addToProduct(
+    productId: string,
+    businessId: string,
+    platformStyleIds: string[],
+    priceOverrides?: Record<string, number>,
+  ) {
+    // 1. Verify product exists and belongs to vendor
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (product.business.toString() !== businessId) {
+      throw new NotFoundException('Product not found for this vendor');
+    }
+
+    if (product.kind !== 'clothing' || !product.clothing) {
+      throw new ConflictException('Only clothing products support styles');
+    }
+
+    // 2. Fetch platform styles
+    const platformStyles = await this.styleModel.find({
+      _id: { $in: platformStyleIds },
+      is_active: true,
+    });
+
+    if (platformStyles.length === 0) {
+      throw new NotFoundException('No active platform styles found');
+    }
+
+    // 3. Copy each style into the product
+    const existingCodes = new Set(
+      (product.clothing.styles || []).map((s: any) => s.style_code),
+    );
+
+    const added: string[] = [];
+    const skipped: string[] = [];
+
+    for (const ps of platformStyles) {
+      if (existingCodes.has(ps.style_code)) {
+        skipped.push(ps.name);
+        continue;
+      }
+
+      const vendorPrice =
+        priceOverrides?.[(ps as any)._id.toString()] ?? ps.price_suggestion ?? 0;
+
+      (product.clothing.styles ??= []).push({
+        name: ps.name,
+        style_code: ps.style_code,
+        categories: [ps.category],
+        attributes: ps.attributes || [],
+        images: ps.image_url
+          ? [{ url: ps.image_url, alt_text: ps.name }]
+          : [],
+        price: vendorPrice,
+        type: ps.type,
+        notes: ps.description,
+        platform_source: (ps as any)._id.toString(),
+      } as any);
+
+      added.push(ps.name);
+    }
+
+    await product.save();
+
+    this.logger.log(
+      `Added ${added.length} platform styles to product ${productId}`,
+    );
+
+    return {
+      message: `${added.length} style(s) added, ${skipped.length} skipped (already exist)`,
+      added,
+      skipped,
+      product_id: productId,
+    };
   }
 }

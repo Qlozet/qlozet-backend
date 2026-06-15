@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -15,9 +16,11 @@ import {
   CreatePlatformStyleDto,
   UpdatePlatformStyleDto,
   QueryPlatformStyleDto,
+  AddPlatformStylesDto,
 } from './dto/platform-style.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { UserType } from '../auth/dto/base-login.dto';
 
 @ApiTags('Style Library')
 @ApiBearerAuth()
@@ -57,6 +60,25 @@ export class StyleLibraryController {
   @ApiOperation({ summary: 'Seed default platform styles (admin only)' })
   seed() {
     return this.service.seed();
+  }
+
+  // ─── Vendor Endpoints ───
+
+  @Post('add-to-product/:product_id')
+  @UseGuards(RolesGuard)
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Add platform styles to a product (vendor only)' })
+  addToProduct(
+    @Param('product_id') productId: string,
+    @Body() dto: AddPlatformStylesDto,
+    @Req() req: any,
+  ) {
+    return this.service.addToProduct(
+      productId,
+      req.business._id.toString(),
+      dto.platform_style_ids,
+      dto.price_overrides,
+    );
   }
 
   // ─── Public Endpoints (any authenticated user) ───
