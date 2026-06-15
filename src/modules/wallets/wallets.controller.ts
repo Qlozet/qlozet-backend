@@ -10,13 +10,14 @@ import {
   Req,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags, ApiBody } from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
 import { TokenService } from './token.service';
+import { PaymentService } from '../payment/payment.service';
 
 @ApiTags('Wallets')
 @ApiBearerAuth('access-token')
@@ -26,6 +27,7 @@ export class WalletsController {
   constructor(
     private readonly walletsService: WalletsService,
     private readonly tokenService: TokenService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   // Fund wallet
@@ -43,6 +45,28 @@ export class WalletsController {
       business,
     );
     return { message: 'Wallet funding initialized', data: result };
+  }
+
+  // Verify payment after Paystack redirect
+  @Get('verify/:reference')
+  @ApiOperation({ summary: 'Verify Paystack payment and credit wallet' })
+  @ApiParam({ name: 'reference', description: 'Transaction reference' })
+  async verifyPayment(@Param('reference') reference: string) {
+    const result = await this.paymentService.verifyPaystackPayment(reference);
+
+    // Credit wallet only if payment succeeded AND not already processed (avoids double-credit)
+    if (
+      result.status === 'success' &&
+      result.walletId &&
+      !result.alreadyProcessed
+    ) {
+      await this.walletsService.creditWallet(
+        result.walletId,
+        result.amount,
+      );
+    }
+
+    return result;
   }
 
   // Get wallet balance
