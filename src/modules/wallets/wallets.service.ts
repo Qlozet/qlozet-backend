@@ -72,7 +72,7 @@ export class WalletsService {
       wallet: wallet.id,
       amount,
       type: TransactionType.FUND,
-      channel: 'paystack',
+      channel: 'wallet_topup',
       description: `Funding wallet`,
     });
 
