@@ -38,7 +38,10 @@ export class CurrencyService {
     } catch (error) {
       this.logger.warn(`Exchange rate API failed (${error.message}), using stale cache`);
       if (cached) return cached.data;
-      throw new BadRequestException('Exchange rate unavailable');
+      // Hardcoded fallback for first-ever call when no cache exists
+      this.logger.warn('No cached rate available, using hardcoded fallback');
+      const fallbackRates: Record<string, number> = { USD: 1, NGN: 1650, GBP: 0.79, EUR: 0.92 };
+      return { rates: { [symbols[0]]: fallbackRates[symbols[0]] || 1 } };
     }
   }
 
