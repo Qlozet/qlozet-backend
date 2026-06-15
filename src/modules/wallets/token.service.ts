@@ -17,7 +17,7 @@ import { CurrencyService } from '../currency/currency.service';
 import { WalletsService } from './wallets.service';
 import { PlatformService } from '../platform/platform.service';
 import { TransactionService } from '../transactions/transactions.service';
-import { TransactionType } from '../transactions/schema/transaction.schema';
+import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 
 @Injectable()
 export class TokenService {
@@ -165,6 +165,7 @@ export class TokenService {
       wallet: wallet._id,
       amount: tokenPrice.amount,
       type: TransactionType.DEBIT,
+      status: TransactionStatus.SUCCESS,
       channel: 'wallet_topup',
       description: `Purchased ${tokenAmount} token${tokenAmount > 1 ? 's' : ''}`,
     });

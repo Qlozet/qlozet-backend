@@ -23,6 +23,7 @@ interface CreateTransactionDto {
   initiator?: Types.ObjectId;
   amount: number;
   type: TransactionType;
+  status?: TransactionStatus;
   wallet?: Types.ObjectId;
   order?: Types.ObjectId;
   channel: string;
