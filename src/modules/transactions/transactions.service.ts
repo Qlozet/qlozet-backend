@@ -60,7 +60,7 @@ export class TransactionService {
       currency: dto.currency ?? 'NGN',
       payment_method: dto.payment_method ?? 'paystack',
       metadata: dto.metadata ?? {},
-      status: TransactionStatus.PENDING,
+      status: dto.status ?? TransactionStatus.PENDING,
     });
 
     return transaction.save();
