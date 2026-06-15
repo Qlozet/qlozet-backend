@@ -76,10 +76,10 @@ export class WalletsController {
   async getBalance(@Req() req) {
     const business = req?.business?.id;
     const customerId = req.user.id;
-    return this.walletsService.getOrCreateWallet(
-      business ?? undefined,
-      business ? undefined : customerId,
-    );
+    return this.walletsService.getOrCreateWallet({
+      business: business ?? undefined,
+      customer: business ? undefined : customerId,
+    });
   }
 
   @Get('price')
