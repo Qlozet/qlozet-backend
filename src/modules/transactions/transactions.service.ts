@@ -223,18 +223,7 @@ export class TransactionService {
   }
 
   async findByReference(reference: string) {
-    const tx = await this.transactionModel.findOne({ reference }).select({
-      _id: 1,
-      type: 1,
-      amount: 1,
-      status: 1,
-      reference: 1,
-      description: 1,
-      currency: 1,
-      payment_method: 1,
-      channel: 1,
-      createdAt: 1,
-    });
+    const tx = await this.transactionModel.findOne({ reference });
     if (!tx) throw new NotFoundException('Transaction not found');
     return tx;
   }
