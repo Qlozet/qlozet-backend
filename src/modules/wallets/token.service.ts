@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types, startSession } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Token,
   TokenDocument,
@@ -57,37 +57,22 @@ export class TokenService {
   async earn(userId: string, amount: number, feature?: string, metadata?: any) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
 
-    const session = await startSession();
-    session.startTransaction();
+    const wallet = await this.tokenModel.findOneAndUpdate(
+      { user: new Types.ObjectId(userId) },
+      { $inc: { tokens: amount, lifetimeEarned: amount } },
+      { new: true, upsert: true },
+    );
 
-    try {
-      const wallet = await this.tokenModel.findOneAndUpdate(
-        { user: new Types.ObjectId(userId) },
-        { $inc: { tokens: amount, lifetimeEarned: amount } },
-        { new: true, upsert: true, session },
-      );
+    // Record transaction (non-critical)
+    await this.transactionModel.create({
+      wallet: wallet._id,
+      type: TokenTransactionType.EARN,
+      amount,
+      feature,
+      metadata,
+    });
 
-      await this.transactionModel.create(
-        [
-          {
-            wallet: wallet._id,
-            type: TokenTransactionType.EARN,
-            amount,
-            feature,
-            metadata,
-          },
-        ],
-        { session },
-      );
-
-      await session.commitTransaction();
-      return wallet;
-    } catch (e) {
-      await session.abortTransaction();
-      throw e;
-    } finally {
-      session.endSession();
-    }
+    return wallet;
   }
 
   async spend(
@@ -147,41 +132,31 @@ export class TokenService {
       throw new BadRequestException('Insufficient balance');
     }
 
-    const session = await startSession();
-    session.startTransaction();
+    // Atomic wallet debit — balance >= amount guard prevents overdraft
+    const updatedWallet = await this.walletService.debitWallet(
+      wallet._id.toString(),
+      tokenPrice.amount,
+    );
 
-    try {
-      wallet.balance -= tokenPrice.amount;
-      wallet.last_transaction_at = new Date();
-      await wallet.save({ session });
+    // Credit token wallet
+    const tokenWalletFilter: any = {};
+    if (customer) tokenWalletFilter.customer = new Types.ObjectId(customer);
+    if (business) tokenWalletFilter.business = new Types.ObjectId(business);
 
-      const tokenWalletFilter: any = {};
-      if (customer) tokenWalletFilter.customer = new Types.ObjectId(customer);
-      if (business) tokenWalletFilter.business = new Types.ObjectId(business);
+    const tokenWallet = await this.tokenModel.findOneAndUpdate(
+      tokenWalletFilter,
+      { $inc: { tokens: tokenAmount, lifetimeEarned: tokenAmount } },
+      { new: true, upsert: true },
+    );
 
-      const tokenWallet = await this.tokenModel.findOneAndUpdate(
-        tokenWalletFilter,
-        { $inc: { tokens: tokenAmount, lifetimeEarned: tokenAmount } },
-        { new: true, upsert: true, session },
-      );
+    // Record transaction (non-critical)
+    await this.transactionModel.create({
+      token: tokenWallet._id,
+      type: TokenTransactionType.PURCHASE,
+      amount: tokenAmount,
+    });
 
-      await this.transactionModel.create(
-        {
-          wallet: tokenWallet._id,
-          type: TokenTransactionType.PURCHASE,
-          amount: tokenAmount,
-        },
-        { session },
-      );
-
-      await session.commitTransaction();
-      return { wallet, tokenWallet };
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
+    return { wallet: updatedWallet, tokenWallet };
   }
 
   async history(userId: string, page = 1, size = 20) {
@@ -222,39 +197,28 @@ export class TokenService {
     feature?: string,
     metadata?: any,
   ) {
-    const session = await startSession();
-    session.startTransaction();
+    const wallet = await this.findOrCreate(userId);
 
-    try {
-      const wallet = await this.findOrCreate(userId);
+    const update: any = { $inc: { tokens: amount } };
+    if (amount > 0) update.$inc.lifetimeEarned = amount;
+    if (amount < 0) update.$inc.lifetimeSpent = Math.abs(amount);
 
-      wallet.tokens += amount;
-      if (amount > 0) wallet.lifetimeEarned += amount;
-      if (amount < 0) wallet.lifetimeSpent += Math.abs(amount);
+    const updatedWallet = await this.tokenModel.findOneAndUpdate(
+      { _id: wallet._id },
+      update,
+      { new: true },
+    );
 
-      await wallet.save({ session });
+    // Record transaction (non-critical)
+    await this.transactionModel.create({
+      wallet: wallet._id,
+      type,
+      amount,
+      feature,
+      metadata,
+    });
 
-      await this.transactionModel.create(
-        [
-          {
-            wallet: wallet._id,
-            type,
-            amount,
-            feature,
-            metadata,
-          },
-        ],
-        { session },
-      );
-
-      await session.commitTransaction();
-      return wallet;
-    } catch (e) {
-      await session.abortTransaction();
-      throw e;
-    } finally {
-      session.endSession();
-    }
+    return updatedWallet;
   }
 
   async getTokenPurchasePrice(tokens: number, currency: string = 'USD') {
