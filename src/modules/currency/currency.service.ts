@@ -1,20 +1,38 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class CurrencyService {
+  private readonly logger = new Logger(CurrencyService.name);
   private readonly API_URL = 'https://api.unirateapi.com/api/rates';
   private readonly API_KEY = process.env.RATE_API_KEY;
+
+  // Cache rates for 10 minutes to avoid rate-limiting
+  private rateCache = new Map<string, { data: any; expiresAt: number }>();
+  private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
   constructor(private readonly http: HttpService) {}
 
   async getRates(base: string, symbols: string[]) {
     if (!this.API_KEY) throw new BadRequestException('RATE_API_KEY missing');
 
+    const cacheKey = `${base}:${symbols.sort().join(',')}`;
+    const cached = this.rateCache.get(cacheKey);
+
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data;
+    }
+
     const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbols.join(',')}`;
 
     const { data } = await firstValueFrom(this.http.get(url));
+
+    this.rateCache.set(cacheKey, {
+      data,
+      expiresAt: Date.now() + this.CACHE_TTL_MS,
+    });
+
     return data;
   }
 
