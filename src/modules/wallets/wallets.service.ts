@@ -19,7 +19,8 @@ export class WalletsService {
     private readonly paymentService: PaymentService,
   ) {}
 
-  async getOrCreateWallet(business?: string, customer?: string) {
+  async getOrCreateWallet(opts: { business?: string; customer?: string }) {
+    const { business, customer } = opts;
     if (!business && !customer) {
       throw new BadRequestException('business or customer is required');
     }
@@ -65,7 +66,7 @@ export class WalletsService {
     customerId?: string,
     businessId?: string,
   ) {
-    const wallet = await this.getOrCreateWallet(businessId, customerId);
+    const wallet = await this.getOrCreateWallet({ business: businessId, customer: customerId });
 
     const transaction = await this.transactionService.create({
       initiator: wallet.customer,
@@ -117,7 +118,7 @@ export class WalletsService {
 
   // Get wallet balance
   async getWallet(customerId?: string, businessId?: string) {
-    const wallet = await this.getOrCreateWallet(businessId, customerId);
+    const wallet = await this.getOrCreateWallet({ business: businessId, customer: customerId });
     return wallet;
   }
 }
