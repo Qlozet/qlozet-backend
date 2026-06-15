@@ -16,6 +16,8 @@ import {
 import { CurrencyService } from '../currency/currency.service';
 import { WalletsService } from './wallets.service';
 import { PlatformService } from '../platform/platform.service';
+import { TransactionService } from '../transactions/transactions.service';
+import { TransactionType } from '../transactions/schema/transaction.schema';
 
 @Injectable()
 export class TokenService {
@@ -23,9 +25,10 @@ export class TokenService {
     private readonly currencyService: CurrencyService,
     private readonly walletService: WalletsService,
     private readonly platformService: PlatformService,
+    private readonly transactionService: TransactionService,
     @InjectModel(Token.name) private tokenModel: Model<TokenDocument>,
     @InjectModel(TokenTransaction.name)
-    private transactionModel: Model<TokenTransactionDocument>,
+    private tokenTransactionModel: Model<TokenTransactionDocument>,
   ) {}
 
   async findOrCreate(user?: string, business?: string) {
@@ -64,7 +67,7 @@ export class TokenService {
     );
 
     // Record transaction (non-critical)
-    await this.transactionModel.create({
+    await this.tokenTransactionModel.create({
       wallet: wallet._id,
       type: TokenTransactionType.EARN,
       amount,
@@ -111,7 +114,7 @@ export class TokenService {
     }
 
     // Record transaction (non-critical, fire-and-forget safe)
-    await this.transactionModel.create({
+    await this.tokenTransactionModel.create({
       token: tokenWallet._id,
       type: TokenTransactionType.SPEND,
       amount,
@@ -149,11 +152,21 @@ export class TokenService {
       { new: true, upsert: true },
     );
 
-    // Record transaction (non-critical)
-    await this.transactionModel.create({
+    // Record token transaction
+    await this.tokenTransactionModel.create({
       token: tokenWallet._id,
       type: TokenTransactionType.PURCHASE,
       amount: tokenAmount,
+    });
+
+    // Record wallet transaction (visible in transaction history)
+    await this.transactionService.create({
+      initiator: new Types.ObjectId(customer || business),
+      wallet: wallet._id,
+      amount: tokenPrice.amount,
+      type: TransactionType.DEBIT,
+      channel: 'wallet_topup',
+      description: `Purchased ${tokenAmount} token${tokenAmount > 1 ? 's' : ''}`,
     });
 
     return { wallet: updatedWallet, tokenWallet };
@@ -167,14 +180,14 @@ export class TokenService {
 
     const skip = (page - 1) * size;
 
-    const items = await this.transactionModel
+    const items = await this.tokenTransactionModel
       .find({ wallet: wallet._id })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(size)
       .lean();
 
-    const total = await this.transactionModel.countDocuments({
+    const total = await this.tokenTransactionModel.countDocuments({
       wallet: wallet._id,
     });
 
@@ -210,7 +223,7 @@ export class TokenService {
     );
 
     // Record transaction (non-critical)
-    await this.transactionModel.create({
+    await this.tokenTransactionModel.create({
       wallet: wallet._id,
       type,
       amount,
