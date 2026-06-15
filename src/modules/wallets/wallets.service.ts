@@ -28,7 +28,7 @@ export class WalletsService {
     let wallet: any | null = null;
 
     if (business) {
-      wallet = await this.walletModel.find({
+      wallet = await this.walletModel.findOne({
         business: new Types.ObjectId(business),
       });
     }
@@ -117,7 +117,7 @@ export class WalletsService {
 
   // Get wallet balance
   async getWallet(customerId?: string, businessId?: string) {
-    const wallet = await this.getOrCreateWallet(customerId, businessId);
+    const wallet = await this.getOrCreateWallet(businessId, customerId);
     return wallet;
   }
 }
