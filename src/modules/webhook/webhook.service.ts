@@ -88,14 +88,23 @@ export class WebhookService {
       transaction.type === TransactionType.FUND &&
       transaction.wallet != null;
 
+    this.logger.log(
+      `handleChargeSuccess: type=${transaction.type}, wallet=${transaction.wallet}, isWalletFunding=${isWalletFunding}`,
+    );
+
     if (isWalletFunding) {
-      this.logger.log(
-        `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
-      );
-      await this.walletsService.creditWallet(
-        transaction.wallet!.toString(),
-        transaction.amount,
-      );
+      try {
+        this.logger.log(
+          `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
+        );
+        await this.walletsService.creditWallet(
+          transaction.wallet!.toString(),
+          transaction.amount,
+        );
+        this.logger.log(`Wallet ${transaction.wallet} credited successfully`);
+      } catch (error) {
+        this.logger.error(`Failed to credit wallet: ${error.message}`, error.stack);
+      }
     }
 
     const isCheckoutOrder =
@@ -103,17 +112,21 @@ export class WebhookService {
       transaction.order != null;
 
     if (isCheckoutOrder) {
-      const orderId = transaction.order!._id;
+      try {
+        const orderId = transaction.order!._id;
 
-      await this.orderModel.updateOne(
-        { _id: orderId },
-        { status: 'processing' },
-      );
+        await this.orderModel.updateOne(
+          { _id: orderId },
+          { status: 'processing' },
+        );
 
-      await Promise.all([
-        this.businessService.recordBusinessEarnings(orderId),
-        this.productService.updateInventory(orderId),
-      ]);
+        await Promise.all([
+          this.businessService.recordBusinessEarnings(orderId),
+          this.productService.updateInventory(orderId),
+        ]);
+      } catch (error) {
+        this.logger.error(`Failed to process checkout order: ${error.message}`, error.stack);
+      }
     }
 
     return isWalletFunding;
