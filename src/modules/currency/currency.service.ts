@@ -24,16 +24,22 @@ export class CurrencyService {
       return cached.data;
     }
 
-    const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbols.join(',')}`;
+    try {
+      const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbols.join(',')}`;
 
-    const { data } = await firstValueFrom(this.http.get(url));
+      const { data } = await firstValueFrom(this.http.get(url));
 
-    this.rateCache.set(cacheKey, {
-      data,
-      expiresAt: Date.now() + this.CACHE_TTL_MS,
-    });
+      this.rateCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + this.CACHE_TTL_MS,
+      });
 
-    return data;
+      return data;
+    } catch (error) {
+      this.logger.warn(`Exchange rate API failed (${error.message}), using stale cache`);
+      if (cached) return cached.data;
+      throw new BadRequestException('Exchange rate unavailable');
+    }
   }
 
   async convert(amount: number, from: string, to: string) {
