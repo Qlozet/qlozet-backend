@@ -42,7 +42,6 @@ export class TokenService {
   }
 
   async get(userId: string) {
-
     const wallet = await this.tokenModel.findOne({
       user: new Types.ObjectId(userId),
     });
