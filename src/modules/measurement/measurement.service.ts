@@ -46,11 +46,23 @@ export class MeasurementService {
       const prompt = buildPrompt(user_prompt);
       const view = config.view ?? 'front';
       const client = await this.gradio.getClient(this.ig);
+      // Download reference images and convert to blobs for Gradio
+      const imageBlobs: Blob[] = [];
+      for (const url of reference_image_urls) {
+        try {
+          const response = await fetch(url);
+          const arrayBuffer = await response.arrayBuffer();
+          imageBlobs.push(new Blob([arrayBuffer], { type: 'image/png' }));
+        } catch (err) {
+          this.logger.warn(`Failed to download reference image: ${url}`);
+        }
+      }
 
       const result = await client.predict('/generate_handler', {
         prompt,
         view,
         image_inputs: reference_image_urls.join(','),
+        image_uploads: imageBlobs.length > 0 ? imageBlobs : [],
         metadata_json: metadataJson,
       });
 
