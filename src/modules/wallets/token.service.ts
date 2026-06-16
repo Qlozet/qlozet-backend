@@ -29,7 +29,7 @@ export class TokenService {
     @InjectModel(Token.name) private tokenModel: Model<TokenDocument>,
     @InjectModel(TokenTransaction.name)
     private tokenTransactionModel: Model<TokenTransactionDocument>,
-  ) {}
+  ) { }
 
   async findOrCreate(user?: string, business?: string) {
     const query: any = {};
@@ -42,6 +42,7 @@ export class TokenService {
   }
 
   async get(userId: string) {
+
     const wallet = await this.tokenModel.findOne({
       user: new Types.ObjectId(userId),
     });
