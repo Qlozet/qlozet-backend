@@ -17,7 +17,7 @@ import {
   UpdatePlatformStyleDto,
   QueryPlatformStyleDto,
 } from './dto/platform-style.dto';
-import * as seedData from './data/seed-styles.json';
+import seedData = require('./data/seed-styles.json');
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
