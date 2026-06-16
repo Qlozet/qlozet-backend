@@ -62,6 +62,14 @@ export class StyleLibraryController {
     return this.service.seed();
   }
 
+  @Post('regenerate-images')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Generate images for styles missing them (admin only)' })
+  regenerateImages() {
+    return this.service.regenerateImages();
+  }
+
   // ─── Vendor Endpoints ───
 
   @Post('add-to-product/:product_id')

@@ -158,6 +158,34 @@ export class StyleLibraryService {
     return { created, skipped, failed };
   }
 
+  async regenerateImages(): Promise<{ updated: number; failed: number; total: number }> {
+    const stylesWithoutImages = await this.styleModel.find({
+      $or: [{ image_url: null }, { image_url: '' }, { image_url: { $exists: false } }],
+      is_active: true,
+    });
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const style of stylesWithoutImages) {
+      const imageUrl = await this.generateStyleImage(
+        style.name,
+        style.category,
+        style.description,
+      );
+
+      if (imageUrl) {
+        await this.styleModel.updateOne({ _id: style._id }, { image_url: imageUrl });
+        updated++;
+      } else {
+        failed++;
+      }
+    }
+
+    this.logger.log(`Image regeneration: ${updated} updated, ${failed} failed out of ${stylesWithoutImages.length}`);
+    return { updated, failed, total: stylesWithoutImages.length };
+  }
+
   async getCategories() {
     const categories = await this.styleModel.distinct('category', {
       is_active: true,
@@ -292,14 +320,18 @@ export class StyleLibraryService {
         prompt,
         n: 1,
         size: '1024x1024',
-        response_format: 'b64_json',
       });
 
-      const b64 = response.data?.[0]?.b64_json;
-      if (!b64) {
+      const imageUrl = response.data?.[0]?.url;
+      if (!imageUrl) {
         this.logger.warn(`No image data returned for "${name}"`);
         return undefined;
       }
+
+      // Download image and convert to base64
+      const imageResponse = await fetch(imageUrl);
+      const arrayBuffer = await imageResponse.arrayBuffer();
+      const b64 = Buffer.from(arrayBuffer).toString('base64');
 
       // Upload to Cloudinary
       const result = await this.cloudinaryService.uploadBase64(
