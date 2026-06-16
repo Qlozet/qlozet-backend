@@ -158,16 +158,32 @@ export class StyleLibraryService {
     return { created, skipped, failed };
   }
 
-  async regenerateImages(): Promise<{ updated: number; failed: number; total: number }> {
+  async regenerateImages(): Promise<{ message: string; total: number }> {
     const stylesWithoutImages = await this.styleModel.find({
       $or: [{ image_url: null }, { image_url: '' }, { image_url: { $exists: false } }],
       is_active: true,
     });
 
+    if (stylesWithoutImages.length === 0) {
+      return { message: 'All styles already have images', total: 0 };
+    }
+
+    // Fire-and-forget: process in background to avoid request timeout
+    this.processImageGeneration(stylesWithoutImages).catch((err) =>
+      this.logger.error(`Background image generation failed: ${err.message}`),
+    );
+
+    return {
+      message: `Started generating images for ${stylesWithoutImages.length} styles in background. Check server logs for progress.`,
+      total: stylesWithoutImages.length,
+    };
+  }
+
+  private async processImageGeneration(styles: PlatformStyleDocument[]): Promise<void> {
     let updated = 0;
     let failed = 0;
 
-    for (const style of stylesWithoutImages) {
+    for (const style of styles) {
       const imageUrl = await this.generateStyleImage(
         style.name,
         style.category,
@@ -177,13 +193,14 @@ export class StyleLibraryService {
       if (imageUrl) {
         await this.styleModel.updateOne({ _id: style._id }, { image_url: imageUrl });
         updated++;
+        this.logger.log(`[${updated}/${styles.length}] ✅ ${style.name}`);
       } else {
         failed++;
+        this.logger.warn(`[${updated + failed}/${styles.length}] ❌ ${style.name}`);
       }
     }
 
-    this.logger.log(`Image regeneration: ${updated} updated, ${failed} failed out of ${stylesWithoutImages.length}`);
-    return { updated, failed, total: stylesWithoutImages.length };
+    this.logger.log(`Image generation complete: ${updated} updated, ${failed} failed out of ${styles.length}`);
   }
 
   async getCategories() {
