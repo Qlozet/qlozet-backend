@@ -339,25 +339,36 @@ export class StyleLibraryService {
         size: '1024x1024',
       });
 
-      const imageUrl = response.data?.[0]?.url;
-      if (!imageUrl) {
+      const responseData = response.data?.[0];
+      const b64 = (responseData as any)?.b64_json;
+      const imageUrl = responseData?.url;
+
+      if (b64) {
+        // Direct base64 response — upload to Cloudinary
+        const result = await this.cloudinaryService.uploadBase64(
+          b64,
+          'platform-styles',
+        ) as { fileUrl: string };
+
+        this.logger.log(`Image generated and uploaded for "${name}": ${result.fileUrl}`);
+        return result.fileUrl;
+      } else if (imageUrl) {
+        // URL response — download, convert to base64, upload to Cloudinary
+        const imageResponse = await fetch(imageUrl);
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        const downloadedB64 = Buffer.from(arrayBuffer).toString('base64');
+
+        const result = await this.cloudinaryService.uploadBase64(
+          downloadedB64,
+          'platform-styles',
+        ) as { fileUrl: string };
+
+        this.logger.log(`Image generated and uploaded for "${name}": ${result.fileUrl}`);
+        return result.fileUrl;
+      } else {
         this.logger.warn(`No image data returned for "${name}"`);
         return undefined;
       }
-
-      // Download image and convert to base64
-      const imageResponse = await fetch(imageUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      const b64 = Buffer.from(arrayBuffer).toString('base64');
-
-      // Upload to Cloudinary
-      const result = await this.cloudinaryService.uploadBase64(
-        b64,
-        'platform-styles',
-      ) as { fileUrl: string };
-
-      this.logger.log(`Image generated and uploaded for "${name}": ${result.fileUrl}`);
-      return result.fileUrl;
     } catch (err) {
       this.logger.error(`Image generation failed for "${name}": ${err.message}`);
       return undefined;
