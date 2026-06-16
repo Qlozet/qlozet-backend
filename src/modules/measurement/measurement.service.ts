@@ -47,23 +47,31 @@ export class MeasurementService {
       const view = config.view ?? 'front';
       const client = await this.gradio.getClient(this.ig);
       // Download reference images and convert to blobs for Gradio
-      const imageBlobs: Blob[] = [];
-      for (const url of reference_image_urls) {
+      // image_uploads expects a single File/Blob, not an array
+      let imageUploadBlob: Blob | null = null;
+      if (reference_image_urls.length > 0) {
         try {
-          const response = await fetch(url);
+          const response = await fetch(reference_image_urls[0]);
           const arrayBuffer = await response.arrayBuffer();
-          imageBlobs.push(new Blob([arrayBuffer], { type: 'image/png' }));
+          imageUploadBlob = new Blob([arrayBuffer], { type: 'image/png' });
         } catch (err) {
-          this.logger.warn(`Failed to download reference image: ${url}`);
+          this.logger.warn(`Failed to download reference image: ${reference_image_urls[0]}`);
         }
+      }
+
+      // Use a placeholder 1x1 PNG if no reference images provided
+      if (!imageUploadBlob) {
+        imageUploadBlob = this.gradio.createPlaceholderImage();
       }
 
       const result = await client.predict('/generate_handler', {
         prompt,
         view,
         image_inputs: reference_image_urls.join(','),
-        image_uploads: imageBlobs.length > 0 ? imageBlobs : [],
-        metadata_json: metadataJson,
+        image_uploads: imageUploadBlob,
+        metadata_json_str: metadataJson,
+        provider: 'openai',
+        model: 'gpt-5.1',
       });
 
       // Return generated image path
