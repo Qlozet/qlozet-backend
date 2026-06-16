@@ -46,35 +46,43 @@ export class MeasurementService {
       const prompt = buildPrompt(user_prompt);
       const view = config.view ?? 'front';
       const client = await this.gradio.getClient(this.ig);
-      // Download reference images and convert to blobs for Gradio
-      // image_uploads expects a single File/Blob, not an array
+
+      // Download reference images and convert to blob for Gradio
       let imageUploadBlob: Blob | null = null;
       if (reference_image_urls.length > 0) {
         try {
           const response = await fetch(reference_image_urls[0]);
           const arrayBuffer = await response.arrayBuffer();
           imageUploadBlob = new Blob([arrayBuffer], { type: 'image/png' });
+          this.logger.log(`Downloaded reference image (${arrayBuffer.byteLength} bytes)`);
         } catch (err) {
           this.logger.warn(`Failed to download reference image: ${reference_image_urls[0]}`);
         }
       }
 
-      // Use a placeholder 1x1 PNG if no reference images provided
-      if (!imageUploadBlob) {
-        imageUploadBlob = this.gradio.createPlaceholderImage();
-      }
+      // Log what we're sending to Gradio
+      this.logger.log(`Gradio /generate_handler call:`);
+      this.logger.log(`  prompt: ${prompt.slice(0, 100)}...`);
+      this.logger.log(`  view: ${view}`);
+      this.logger.log(`  image_inputs: ${reference_image_urls.join(',') || '(empty)'}`);
+      this.logger.log(`  image_uploads: ${imageUploadBlob ? `Blob(${imageUploadBlob.size}b)` : 'null'}`);
+      this.logger.log(`  metadata_json_str: ${metadataJson.slice(0, 200)}...`);
+      this.logger.log(`  provider: openai, model: gpt-5.1`);
 
       const result = await client.predict('/generate_handler', {
         prompt,
         view,
-        image_inputs: reference_image_urls.join(','),
-        image_uploads: imageUploadBlob,
+        image_inputs: reference_image_urls.join(',') || '',
+        image_uploads: imageUploadBlob ? [imageUploadBlob] : [],
         metadata_json_str: metadataJson,
         provider: 'openai',
         model: 'gpt-5.1',
       });
 
-      // Return generated image path
+      this.logger.log(`Gradio result keys: ${JSON.stringify(Object.keys(result))}`);
+      this.logger.log(`Gradio result.data length: ${result.data?.length}`);
+
+      // Return generated image — result.data[0] is data URL, result.data[1] is image path
       const dataUrl = result.data[0] as string;
       const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       const uploadResult = await this.cloudinary.uploadBase64(
@@ -84,8 +92,10 @@ export class MeasurementService {
       this.logger.log('Outfit generation completed successfully');
       return uploadResult;
     } catch (error) {
-      console.error('Error generating outfit image:', error);
-      throw new Error('Failed to generate outfit image. Please try again.');
+      this.logger.error(`Outfit generation error: ${JSON.stringify(error, null, 2)}`);
+      this.logger.error(`Error message: ${error?.message || 'unknown'}`);
+      this.logger.error(`Error stage: ${error?.stage || 'unknown'}`);
+      throw new Error(`Failed to generate outfit image: ${error?.message || error?.stage || 'unknown error'}`);
     }
   }
 
