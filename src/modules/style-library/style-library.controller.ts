@@ -23,7 +23,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 
 @ApiTags('Style Library')
-@ApiBearerAuth()
+@ApiBearerAuth('access-token')
 @Controller('style-library')
 export class StyleLibraryController {
   constructor(private readonly service: StyleLibraryService) {}

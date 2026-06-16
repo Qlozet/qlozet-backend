@@ -635,6 +635,57 @@ export class AuthService {
   }
 
   /**
+   * Platform admin login
+   */
+  async loginPlatform(email: string, password: string) {
+    try {
+      const user = await this.userModel
+        .findOne({ email, type: UserType.PLATFORM })
+        .select('+hashed_password')
+        .populate('role', 'name type')
+        .exec();
+
+      if (!user) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      if (user.status !== 'active') {
+        throw new UnauthorizedException(
+          'Your account is not active. Please contact support.',
+        );
+      }
+
+      const validPassword = await bcrypt.compare(
+        password,
+        user.hashed_password,
+      );
+      if (!validPassword) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const token = await this.generateToken({
+        id: user._id,
+        email: user.email,
+      });
+      const hashedRt = await bcrypt.hash(token.refresh_token, 10);
+      await this.userModel.findByIdAndUpdate(user._id, {
+        refreshToken: hashedRt,
+      });
+
+      return {
+        message: 'Platform admin login successful.',
+        data: {
+          user: sanitizeUser(user),
+          token,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Platform login failed: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
    * Refresh access token using refresh token
    */
   async refreshTokens(userId: string, refreshToken: string): Promise<Tokens> {

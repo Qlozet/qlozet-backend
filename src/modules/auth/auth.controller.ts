@@ -148,6 +148,30 @@ export class AuthController {
     return this.authService.loginVendor(loginDto.email, loginDto.password);
   }
 
+  // Platform Admin Login
+  @Post('login/platform')
+  @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Platform admin login',
+    description: 'Authenticate platform admin and return access token.',
+  })
+  @ApiBody({
+    description: 'Platform admin login credentials.',
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'admin@qlozet.com' },
+        password: { type: 'string', example: 'Password123!' },
+      },
+      required: ['email', 'password'],
+    },
+  })
+  async loginPlatform(@Body() loginDto: LoginDto) {
+    return this.authService.loginPlatform(loginDto.email, loginDto.password);
+  }
+
   @Post('login/customer')
   @Public()
   @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
