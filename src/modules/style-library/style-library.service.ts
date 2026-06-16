@@ -316,10 +316,10 @@ export class StyleLibraryService {
       this.logger.log(`Generating image for "${name}"...`);
 
       const response = await this.openai.images.generate({
-        model: 'dall-e-3',
+        model: 'dall-e-2',
         prompt,
         n: 1,
-        size: '1024x1024',
+        size: '512x512',
       });
 
       const imageUrl = response.data?.[0]?.url;
