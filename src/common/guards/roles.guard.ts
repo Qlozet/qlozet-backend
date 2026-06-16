@@ -83,6 +83,13 @@ export class RolesGuard implements CanActivate {
         throw new ForbiddenException('No role assigned to platform user');
       }
 
+      // Platform admins have full access to all endpoints
+      const adminRoles = ['admin', 'super_admin'];
+      if (adminRoles.includes(role.name.toLowerCase())) {
+        request.user = user;
+        return true;
+      }
+
       const hasRole = normalizedRequiredRoles.includes(role.name.toLowerCase());
       if (!hasRole) {
         throw new ForbiddenException(
