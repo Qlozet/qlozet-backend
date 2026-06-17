@@ -50,9 +50,14 @@ export class TokenService {
   }
 
   async balance(business?: string, customer?: string): Promise<number> {
+    // Customer wallets are stored as { customer: id, business: null }.
+    // If both are provided, prefer customer to avoid a query mismatch.
     const filter: any = {};
-    if (business) filter.business = new Types.ObjectId(business);
-    if (customer) filter.customer = new Types.ObjectId(customer);
+    if (customer) {
+      filter.customer = new Types.ObjectId(customer);
+    } else if (business) {
+      filter.business = new Types.ObjectId(business);
+    }
     const wallet = await this.tokenModel.findOne(filter).lean();
     return wallet?.tokens ?? 0;
   }
@@ -97,9 +102,14 @@ export class TokenService {
 
     const amount = priceMap[type] ?? settings.edit_garment_token_price;
 
+    // Customer wallets are stored as { customer: id, business: null }.
+    // If both are provided, prefer customer to avoid a query mismatch.
     const tokenWalletFilter: any = {};
-    if (business) tokenWalletFilter.business = new Types.ObjectId(business);
-    if (customer) tokenWalletFilter.customer = new Types.ObjectId(customer);
+    if (customer) {
+      tokenWalletFilter.customer = new Types.ObjectId(customer);
+    } else if (business) {
+      tokenWalletFilter.business = new Types.ObjectId(business);
+    }
 
     // Atomic deduct: only succeeds if tokens >= amount (no session needed)
     const tokenWallet = await this.tokenModel.findOneAndUpdate(
