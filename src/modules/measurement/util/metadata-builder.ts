@@ -11,7 +11,7 @@ const BRAND_PROFILE = {
   price_tier: 'mid to premium',
 };
 const RENDER_PREFS = {
-  background: 'plain white background',
+  background: 'transparent background',
   camera: 'front-facing garment-only view',
   lighting: 'soft studio lighting',
   mannequin: 'none',
