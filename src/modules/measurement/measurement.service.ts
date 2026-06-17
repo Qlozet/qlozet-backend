@@ -16,6 +16,7 @@ import { PlatformService } from '../platform/platform.service';
 import { GenerateOutfitRequestDto } from './dto/generate-outfit.dto';
 import { buildMetadataFromConfig } from './util/metadata-builder';
 import { buildPrompt } from './util/constructionBuilder';
+import { StyleLibraryService } from '../style-library/style-library.service';
 import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
 import {
   AutoMaskPredictBodyDto,
@@ -36,6 +37,7 @@ export class MeasurementService {
     private readonly cloudinary: CloudinaryService,
     private readonly tokenService: TokenService,
     private readonly platformService: PlatformService,
+    private readonly styleLibrary: StyleLibraryService,
   ) {}
 
   async generateOutfitImageFromConfig(params: GenerateOutfitRequestDto) {
@@ -373,5 +375,153 @@ export class MeasurementService {
         'Image editing failed. Please try again.',
       );
     }
+  }
+
+  /**
+   * Upload a raw buffer to Cloudinary and return the URL.
+   * Used by the controller to persist file uploads before queueing.
+   */
+  async uploadBufferToCloudinary(
+    buffer: Buffer,
+    mimetype: string,
+  ): Promise<string> {
+    const base64 = buffer.toString('base64');
+    const result: any = await this.cloudinary.uploadBase64(base64, 'references');
+    return result.secure_url || result.url;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  ANALYZE REFERENCE IMAGE
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * Analyze a reference image using Gradio /analyze_handler.
+   * Returns a suggested prompt and extracted metadata JSON.
+   */
+  async analyzeReferenceImage(params: {
+    imageUrl?: string;
+    imageBlob?: Blob;
+    provider?: string;
+    model?: string;
+  }) {
+    try {
+      const client = await this.gradio.getClient(this.ig);
+
+      // Build image input — either from uploaded blob or URL download
+      let imageNp: Blob;
+      if (params.imageBlob) {
+        imageNp = params.imageBlob;
+        this.logger.log(`Using uploaded blob (${imageNp.size} bytes)`);
+      } else if (params.imageUrl) {
+        const response = await fetch(params.imageUrl);
+        const buffer = await response.arrayBuffer();
+        imageNp = new Blob([buffer], { type: 'image/png' });
+        this.logger.log(`Downloaded reference image (${buffer.byteLength} bytes)`);
+      } else {
+        throw new BadRequestException('Either image_url or file upload is required');
+      }
+
+      const provider = params.provider || process.env.ANALYZE_PROVIDER || 'openai';
+      const model = params.model || process.env.ANALYZE_MODEL || 'gpt-5.5';
+
+      this.logger.log(`Gradio /analyze_handler call: provider=${provider}, model=${model}`);
+
+      const result = await client.predict('/analyze_handler', {
+        image_np: imageNp,
+        image_url: params.imageUrl || '',
+        provider,
+        model,
+      });
+
+      // result.data[0] = suggested prompt (string)
+      // result.data[1] = extracted metadata (JSON string)
+      const suggestedPrompt = result.data[0] as string;
+      const metadataRaw = result.data[1] as string;
+
+      let metadata: Record<string, any>;
+      try {
+        metadata = JSON.parse(metadataRaw);
+      } catch {
+        this.logger.warn(`Failed to parse metadata JSON, using raw string`);
+        metadata = { raw: metadataRaw };
+      }
+
+      this.logger.log(`Analysis complete: prompt=${suggestedPrompt.slice(0, 80)}...`);
+
+      return { suggested_prompt: suggestedPrompt, metadata };
+    } catch (error) {
+      this.logger.error(`Analyze reference error: ${error?.message || error}`);
+      throw new InternalServerErrorException(
+        `Failed to analyze reference image: ${error?.message || 'unknown error'}`,
+      );
+    }
+  }
+
+  /**
+   * Match extracted metadata fields to platform style IDs.
+   * Returns a map of category → matched style info.
+   */
+  async matchMetadataToStyles(
+    metadata: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    // Get all active platform styles
+    const styles = await this.styleLibrary.findAllActive();
+
+    const matched: Record<string, any> = {};
+
+    // Map metadata field names to style categories
+    const fieldToCategoryMap: Record<string, string> = {
+      neckline: 'neckline',
+      sleeve: 'sleeve',
+      sleeve_style: 'sleeve',
+      collar: 'collar',
+      collar_style: 'collar',
+      skirt_style: 'skirt',
+      skirt: 'skirt',
+      trouser_style: 'trouser',
+      trouser: 'trouser',
+      silhouette: 'full_body',
+      bodice: 'bodice',
+      bodice_fit: 'bodice',
+      hemline: 'hemline',
+      back: 'back',
+      back_detail: 'back',
+    };
+
+    // Look inside construction sub-object if present, otherwise use top-level
+    const construction = metadata.construction || metadata;
+
+    for (const [field, category] of Object.entries(fieldToCategoryMap)) {
+      const value = construction[field];
+      if (!value || typeof value !== 'string') continue;
+      if (matched[category]) continue; // already matched this category
+
+      const valueLower = value.toLowerCase();
+
+      // Find best match: exact name → alias → partial contains
+      const match = styles.find((s: any) => {
+        if (s.category !== category) return false;
+        const nameLower = s.name.toLowerCase();
+        // Exact name match
+        if (nameLower === valueLower) return true;
+        // Alias match
+        if (s.aliases?.some((a: string) => a.toLowerCase() === valueLower)) return true;
+        // Partial match (either direction)
+        if (nameLower.includes(valueLower) || valueLower.includes(nameLower)) return true;
+        return false;
+      });
+
+      if (match) {
+        matched[category] = {
+          style_id: (match as any)._id?.toString(),
+          style_name: match.name,
+          style_code: match.style_code,
+          image_url: match.image_url,
+          matched_from: value,
+        };
+      }
+    }
+
+    return matched;
   }
 }

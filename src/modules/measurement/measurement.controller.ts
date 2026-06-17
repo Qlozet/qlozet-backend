@@ -260,6 +260,87 @@ export class MeasurementController {
     return this.outfitService.queueOutfitGeneration(payload);
   }
 
+  @Roles(UserType.CUSTOMER)
+  @Post('analyze-reference')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data', 'application/json')
+  @ApiOperation({
+    summary: 'Analyze a reference image to extract style metadata and suggested prompt',
+    description:
+      'Upload a reference photo or provide a Cloudinary URL. ' +
+      'Returns a jobId — poll GET /measurement/job/:jobId for the result. ' +
+      'Result contains: suggested_prompt, metadata, matched_styles (mapped to platform style IDs).',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Reference image file (JPEG/PNG)',
+        },
+        image_url: {
+          type: 'string',
+          description: 'Cloudinary URL of the reference image (alternative to file upload)',
+          example: 'https://res.cloudinary.com/.../reference.jpg',
+        },
+        provider: {
+          type: 'string',
+          description: 'AI provider',
+          default: 'openai',
+        },
+        model: {
+          type: 'string',
+          description: 'AI model for analysis',
+          default: 'gpt-5.5',
+        },
+      },
+    },
+  })
+  async analyzeReference(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('image_url') imageUrl?: string,
+    @Body('provider') provider?: string,
+    @Body('model') model?: string,
+    @Req() req?: any,
+  ) {
+    if (!file && !imageUrl) {
+      throw new BadRequestException('Provide either a file upload or image_url');
+    }
+
+    // Token check
+    const business = req?.business?.id;
+    const customer = req?.user?.id;
+    const [settings, tokenBalance] = await Promise.all([
+      this.platformService.getSettings(),
+      this.tokenService.balance(business, customer),
+    ]);
+
+    const price = (settings as any).analyze_reference_token_price ?? 10;
+    if (tokenBalance < price) {
+      throw new BadRequestException(
+        'Insufficient tokens, please fund your wallet',
+      );
+    }
+
+    // If file uploaded, upload to Cloudinary first to get a stable URL
+    let finalImageUrl = imageUrl;
+    if (file) {
+      const uploaded = await this.measurement.uploadBufferToCloudinary(
+        file.buffer,
+        file.mimetype,
+      );
+      finalImageUrl = uploaded;
+    }
+
+    return this.outfitService.queueAnalyzeReference({
+      imageUrl: finalImageUrl,
+      provider,
+      model,
+    });
+  }
+
   @Public()
   @Post('edit-garment-image')
   async editGarmentImage(@Body() payload: EditGarmentDto, @Req() req: any) {

@@ -88,6 +88,34 @@ export class OutfitQueueService {
     };
   }
 
+  /** Queue reference image analysis */
+  async queueAnalyzeReference(payload: {
+    imageUrl?: string;
+    provider?: string;
+    model?: string;
+  }) {
+    const jobId = randomUUID();
+    await this.queue.add(
+      'analyzeReference',
+      {
+        type: 'analyzeReference',
+        ...payload,
+      },
+      {
+        jobId,
+      },
+    );
+
+    await this.jobService.create(jobId, payload);
+    return {
+      data: {
+        jobId,
+        status: 'queued',
+      },
+      message: 'Analysis started. Use the jobId to check the status.',
+    };
+  }
+
   /** Queue video pipeline job */
   async queueVideoPipeline(payload: VideoPipelineSwaggerDto) {
     await this.clearRedis();

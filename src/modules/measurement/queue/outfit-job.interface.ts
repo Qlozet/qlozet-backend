@@ -27,10 +27,18 @@ export interface RunPredictionJobData extends RunPredictBodyDto {
   type: 'runPrediction';
 }
 
+export interface AnalyzeReferenceJobData {
+  type: 'analyzeReference';
+  imageUrl?: string;
+  provider?: string;
+  model?: string;
+}
+
 export type OutfitJobData =
   | GenerateOutfitJobData
   | VideoPipelineJobData
   | AutoMaskJobData
   | AvatarJobData
   | EditGarmentJobData
-  | RunPredictionJobData;
+  | RunPredictionJobData
+  | AnalyzeReferenceJobData;

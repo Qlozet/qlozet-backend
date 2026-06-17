@@ -45,6 +45,9 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 0 })
   ai_ask_token_price: number;
 
+  @Prop({ type: Number, default: 10 })
+  analyze_reference_token_price: number;
+
   @Prop({ type: Boolean, default: false })
   ai_ask_requires_auth: boolean;
 

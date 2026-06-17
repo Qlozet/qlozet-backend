@@ -13,6 +13,7 @@ import { OutfitProcessor } from './queue/outfit.processor';
 import { UmsModule } from '../ums/ums.module';
 import { PlatformModule } from '../platform/platform.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
+import { StyleLibraryModule } from '../style-library/style-library.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { CloudinaryModule } from '../cloudinary/cloudinary.module';
     UmsModule,
     PlatformModule,       // provides PlatformService
     CloudinaryModule,     // provides CloudinaryService
+    StyleLibraryModule,   // provides StyleLibraryService (for style matching)
     BullModule.registerQueue({
       name: 'outfit-generation',
       defaultJobOptions: {
