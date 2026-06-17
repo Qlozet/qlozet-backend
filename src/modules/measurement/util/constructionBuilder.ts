@@ -17,9 +17,11 @@ export type ConstructionSchemas = {
 };
 
 export const DEFAULT_BASE_PROMPT =
-  'Generate a clean, garment-only render of the requested outfit using the provided reference images and metadata. ' +
-  'Use the fabric swatch and embroidery references exactly as given, without changing their colours or motifs. ' +
-  'Do not show any mannequin, human body, or face. Show only the garment on a plain white background.';
+  'Generate a clean, garment-only render of the requested outfit using the provided metadata. ' +
+  'Follow the construction details (neckline, sleeve, silhouette, fit) exactly as specified in the metadata. ' +
+  'If fabric reference images are provided, match the fabric texture and color exactly. ' +
+  'Do NOT add any embroidery, patterns, prints, or decorative elements unless explicitly specified in the metadata. ' +
+  'Do not show any mannequin, human body, or face. Show only the garment on a transparent background.';
 export function buildPrompt(userPrompt?: string): string {
   if (!userPrompt) return DEFAULT_BASE_PROMPT;
   return `${DEFAULT_BASE_PROMPT} Additional user direction:
