@@ -97,6 +97,13 @@ export class StyleLibraryService {
     return this.styleModel.find({ _id: { $in: ids }, is_active: true });
   }
 
+  /**
+   * Return all active platform styles as a flat array (for matching).
+   */
+  async findAllActive(): Promise<PlatformStyleDocument[]> {
+    return this.styleModel.find({ is_active: true }).lean();
+  }
+
   async update(
     id: string,
     dto: UpdatePlatformStyleDto,

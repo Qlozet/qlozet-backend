@@ -87,6 +87,19 @@ export class OutfitProcessor extends WorkerHost {
           result = await this.measurement.generateAvatar(job.data);
           break;
 
+        case 'analyzeReference': {
+          const analysis = await this.measurement.analyzeReferenceImage(job.data);
+          // Also match metadata to platform styles
+          const matchedStyles = await this.measurement.matchMetadataToStyles(
+            analysis.metadata,
+          );
+          result = {
+            ...analysis,
+            matched_styles: matchedStyles,
+          };
+          break;
+        }
+
         default: {
           throw new Error(`Unknown job type: ${(job.data as any).type}`);
         }
