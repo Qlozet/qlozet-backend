@@ -251,6 +251,10 @@ export class MeasurementController {
         'Insufficient tokens, please fund your wallet',
       );
     }
+
+    // Pre-deduct tokens before queuing
+    await this.tokenService.spend('outfit', business, customer);
+
     const payload: GenerateOutfitRequestDto = {
       config,
       user_prompt: userPrompt,
@@ -324,6 +328,9 @@ export class MeasurementController {
       );
     }
 
+    // Pre-deduct tokens before queuing
+    await this.tokenService.spend('analyze', business, customer);
+
     // If file uploaded, upload to Cloudinary first to get a stable URL
     let finalImageUrl = imageUrl;
     if (file) {
@@ -356,6 +363,10 @@ export class MeasurementController {
         'Insufficient tokens, please fund your wallet',
       );
     }
+
+    // Pre-deduct tokens before queuing
+    await this.tokenService.spend('edit', business, customer);
+
     return this.outfitService.queueEditGarmentGeneration({
       ...payload,
       business,
