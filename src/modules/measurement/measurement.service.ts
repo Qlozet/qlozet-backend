@@ -76,7 +76,7 @@ export class MeasurementService {
         image_uploads: imageUploadBlob ? [imageUploadBlob] : [],
         metadata_json_str: metadataJson,
         provider: 'openai',
-        model: 'gpt-image-2',
+        model: 'gpt-image-1',
       });
 
       this.logger.log(`Gradio result keys: ${JSON.stringify(Object.keys(result))}`);
