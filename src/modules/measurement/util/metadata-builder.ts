@@ -24,7 +24,19 @@ export function buildConstructionMetadata(
   selections: ConstructionSelection = {},
 ): Record<string, string | boolean> {
   const config = CONSTRUCTION_SCHEMAS.garment_types[garmentType];
-  if (!config) return {};
+
+  // If no schema exists for this garment type, pass through all selections as-is
+  // This allows the AI to use whatever the frontend sends without being blocked
+  if (!config) {
+    const passthrough: Record<string, string | boolean> = {};
+    for (const [key, val] of Object.entries(selections)) {
+      if (val !== undefined && val !== null) {
+        passthrough[key] = val;
+      }
+    }
+    return passthrough;
+  }
+
   const construction: Record<string, string | boolean> = {};
   for (const [fieldKey, fieldSchema] of Object.entries(config.fields)) {
     const { metadata_key, type, options, default: defaultValue } = fieldSchema;
@@ -32,8 +44,18 @@ export function buildConstructionMetadata(
     const rawValue = selections[fieldKey];
     let finalValue: string | boolean | undefined = rawValue as any;
     if (type === 'enum') {
-      if (typeof rawValue === 'string' && options?.includes(rawValue)) {
-        finalValue = rawValue;
+      if (typeof rawValue === 'string') {
+        // Case-insensitive match against options
+        const match = options?.find(
+          (o) => o.toLowerCase() === rawValue.toLowerCase(),
+        );
+        if (match) {
+          finalValue = match;
+        } else {
+          // No match in options — still use the raw value from the frontend
+          // rather than falling back to a default that ignores the user's choice
+          finalValue = rawValue;
+        }
       } else if (typeof defaultValue === 'string') {
         finalValue = defaultValue;
       } else if (options?.length) {
@@ -63,6 +85,17 @@ export function buildConstructionMetadata(
       construction[metadata_key] = finalValue;
     }
   }
+
+  // Also include any extra selections not defined in the schema
+  // (e.g., full_body_style, silhouette — fields the frontend sends
+  //  that don't have a schema entry yet)
+  const schemaFieldKeys = new Set(Object.keys(config.fields));
+  for (const [key, val] of Object.entries(selections)) {
+    if (!schemaFieldKeys.has(key) && val !== undefined && val !== null) {
+      construction[key] = val;
+    }
+  }
+
   return construction;
 }
 
@@ -82,8 +115,9 @@ export function buildMetadataFromConfig(config: GarmentConfigDto): any {
     construction,
     fabric: {},
     colors: {},
-    brand_profile: BRAND_PROFILE,
-    render_prefs: RENDER_PREFS,
+    // Use frontend overrides if provided, otherwise use defaults
+    brand_profile: (config as any).brand_profile ?? BRAND_PROFILE,
+    render_prefs: (config as any).render_prefs ?? RENDER_PREFS,
     references: [] as string[],
   };
   if (config.fabricRefId) {
