@@ -109,6 +109,52 @@ export class BespokeService {
     return { message: 'Design saved successfully', data: design };
   }
 
+  async updateDesign(designId: string, dto: CreateDesignDto, customer: any) {
+    const design = await this.designModel.findOne({
+      _id: new Types.ObjectId(designId),
+      customer: new Types.ObjectId(customer.id),
+    });
+
+    if (!design) throw new NotFoundException('Design not found');
+
+    if (
+      design.status !== BespokeDesignStatus.DRAFT &&
+      design.status !== BespokeDesignStatus.REQUESTING_QUOTES
+    ) {
+      throw new BadRequestException(
+        'Cannot update a design already in production',
+      );
+    }
+
+    // Validate fabric if provided
+    if (dto.fabric_id) {
+      const fabric = await this.productModel.findById(dto.fabric_id);
+      if (!fabric || fabric.kind !== 'fabric') {
+        throw new BadRequestException(
+          'Invalid fabric: product not found or not a fabric type',
+        );
+      }
+    }
+
+    design.name = dto.name;
+    design.category = dto.category;
+    design.gender = dto.gender;
+    design.design_images = dto.design_images;
+    design.reference_images = dto.reference_images || [];
+    design.description = dto.description || (null as any);
+    if (dto.fabric_id) design.fabric = new Types.ObjectId(dto.fabric_id);
+    if (dto.measurement_id)
+      design.measurement = new Types.ObjectId(dto.measurement_id);
+
+    await design.save();
+
+    this.logger.log(
+      `Design updated: ${design.reference} by customer ${customer.id}`,
+    );
+
+    return { message: 'Design updated successfully', data: design };
+  }
+
   async getMyDesigns(
     customerId: string,
     page = 1,

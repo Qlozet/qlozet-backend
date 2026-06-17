@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Put,
   Patch,
   Param,
   Body,
@@ -46,6 +47,18 @@ export class BespokeController {
   @ApiOperation({ summary: 'Save a bespoke design from the studio' })
   async createDesign(@Body() dto: CreateDesignDto, @Req() req: any) {
     return this.bespokeService.createDesign(dto, req.user);
+  }
+
+  @Put('designs/:id')
+  @Roles(UserType.CUSTOMER)
+  @ApiOperation({ summary: 'Update an existing bespoke design (draft or requesting quotes)' })
+  @ApiParam({ name: 'id', description: 'Design ID' })
+  async updateDesign(
+    @Param('id') id: string,
+    @Body() dto: CreateDesignDto,
+    @Req() req: any,
+  ) {
+    return this.bespokeService.updateDesign(id, dto, req.user);
   }
 
   @Get('designs')
