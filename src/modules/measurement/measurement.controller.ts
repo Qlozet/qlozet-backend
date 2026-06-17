@@ -179,7 +179,7 @@ export class MeasurementController {
     }
   }
 
-  @Public()
+  @Roles(UserType.CUSTOMER)
   @Post('generate-outfit')
   @ApiBody({
     description: 'Generate outfit using image URLs',
@@ -348,7 +348,7 @@ export class MeasurementController {
     });
   }
 
-  @Public()
+  @Roles(UserType.CUSTOMER)
   @Post('edit-garment-image')
   async editGarmentImage(@Body() payload: EditGarmentDto, @Req() req: any) {
     const business = req.business?.id;
