@@ -437,6 +437,105 @@ export class ProductService {
       ratings: product.ratings,
     };
   }
+
+  /**
+   * Get all reviews across all products for a specific vendor, paginated.
+   * Uses $unwind to flatten the embedded ratings array.
+   */
+  async getVendorReviews(
+    businessId: string,
+    page = 1,
+    size = 20,
+    sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
+  ) {
+    const skip = (page - 1) * size;
+
+    const sortStage: Record<string, 1 | -1> =
+      sortBy === 'highest'
+        ? { 'ratings.value': -1 }
+        : sortBy === 'lowest'
+          ? { 'ratings.value': 1 }
+          : { 'ratings._id': -1 }; // recent (default, by ObjectId descending)
+
+    const pipeline: any[] = [
+      { $match: { business: new Types.ObjectId(businessId), 'ratings.0': { $exists: true } } },
+      { $unwind: '$ratings' },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'ratings.user',
+          foreignField: '_id',
+          as: 'ratings.user_info',
+        },
+      },
+      { $unwind: { path: '$ratings.user_info', preserveNullAndEmptyArrays: true } },
+      { $sort: sortStage },
+      {
+        $facet: {
+          reviews: [
+            { $skip: skip },
+            { $limit: size },
+            {
+              $project: {
+                _id: 0,
+                product_id: '$_id',
+                product_name: { $ifNull: ['$clothing.name', { $ifNull: ['$fabric.name', '$accessory.name'] }] },
+                product_kind: '$kind',
+                rating: '$ratings.value',
+                comment: '$ratings.comment',
+                reviewer: {
+                  _id: '$ratings.user_info._id',
+                  name: '$ratings.user_info.name',
+                  email: '$ratings.user_info.email',
+                },
+                created_at: '$ratings._id',
+              },
+            },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                total_reviews: { $sum: 1 },
+                average_rating: { $avg: '$ratings.value' },
+                five_star: { $sum: { $cond: [{ $eq: ['$ratings.value', 5] }, 1, 0] } },
+                four_star: { $sum: { $cond: [{ $eq: ['$ratings.value', 4] }, 1, 0] } },
+                three_star: { $sum: { $cond: [{ $eq: ['$ratings.value', 3] }, 1, 0] } },
+                two_star: { $sum: { $cond: [{ $eq: ['$ratings.value', 2] }, 1, 0] } },
+                one_star: { $sum: { $cond: [{ $eq: ['$ratings.value', 1] }, 1, 0] } },
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    const [result] = await this.productModel.aggregate(pipeline);
+
+    const summary = result.summary[0] || {
+      total_reviews: 0,
+      average_rating: 0,
+      five_star: 0,
+      four_star: 0,
+      three_star: 0,
+      two_star: 0,
+      one_star: 0,
+    };
+
+    return {
+      summary: {
+        ...summary,
+        average_rating: Math.round((summary.average_rating || 0) * 10) / 10,
+      },
+      reviews: result.reviews,
+      pagination: {
+        page,
+        size,
+        total: summary.total_reviews,
+        pages: Math.ceil(summary.total_reviews / size),
+      },
+    };
+  }
   async toggleWishlist(userId: string, productId: string) {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');

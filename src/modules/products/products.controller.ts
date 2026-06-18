@@ -257,6 +257,36 @@ export class ProductsController {
       data: ratingSummary,
     };
   }
+
+  @Roles(UserType.VENDOR)
+  @Get('reviews/vendor')
+  @ApiOperation({
+    summary: 'Get all reviews across all products for the authenticated vendor',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'size', required: false, type: Number })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: ['recent', 'highest', 'lowest'],
+  })
+  async getVendorReviews(
+    @Req() req: any,
+    @Query('page') page?: number,
+    @Query('size') size?: number,
+    @Query('sort') sort?: 'recent' | 'highest' | 'lowest',
+  ) {
+    const reviews = await this.productService.getVendorReviews(
+      req.business.id,
+      page || 1,
+      size || 20,
+      sort || 'recent',
+    );
+    return {
+      message: 'Vendor reviews fetched successfully',
+      data: reviews,
+    };
+  }
   @Roles(UserType.CUSTOMER)
   @Post(':id/wishlist')
   async toggleWishlist(@Param('id') id: string, @Req() req: any) {
