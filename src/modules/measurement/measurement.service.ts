@@ -50,15 +50,17 @@ export class MeasurementService {
       const client = await this.gradio.getClient(this.ig);
 
       // Download reference images and convert to blob for Gradio
-      let imageUploadBlob: Blob | null = null;
+      let imageUploads: any[] = [];
       if (reference_image_urls.length > 0) {
-        try {
-          const response = await fetch(reference_image_urls[0]);
-          const arrayBuffer = await response.arrayBuffer();
-          imageUploadBlob = new Blob([arrayBuffer], { type: 'image/png' });
-          this.logger.log(`Downloaded reference image (${arrayBuffer.byteLength} bytes)`);
-        } catch (err) {
-          this.logger.warn(`Failed to download reference image: ${reference_image_urls[0]}`);
+        for (const url of reference_image_urls) {
+          try {
+            // Use handle_file for proper Gradio file handling
+            const fileRef = await handle_file(url);
+            imageUploads.push(fileRef);
+            this.logger.log(`Added reference image via handle_file: ${url}`);
+          } catch (err) {
+            this.logger.warn(`Failed to handle reference image: ${url} — ${err?.message}`);
+          }
         }
       }
 
@@ -67,15 +69,15 @@ export class MeasurementService {
       this.logger.log(`  prompt: ${prompt.slice(0, 100)}...`);
       this.logger.log(`  view: ${view}`);
       this.logger.log(`  image_inputs: ${reference_image_urls.join(',') || '(empty)'}`);
-      this.logger.log(`  image_uploads: ${imageUploadBlob ? `Blob(${imageUploadBlob.size}b)` : 'null'}`);
+      this.logger.log(`  image_uploads: ${imageUploads.length} file(s)`);
       this.logger.log(`  metadata_json_str: ${metadataJson.slice(0, 200)}...`);
-      this.logger.log(`  provider: openai, model: gpt-5.1`);
+      this.logger.log(`  provider: openai, model: gpt-image-1`);
 
       const result = await client.predict('/generate_handler', {
         prompt,
         view,
         image_inputs: reference_image_urls.join(',') || '',
-        image_uploads: imageUploadBlob ? [imageUploadBlob] : [],
+        image_uploads: imageUploads,
         metadata_json_str: metadataJson,
         provider: 'openai',
         model: 'gpt-image-1',
