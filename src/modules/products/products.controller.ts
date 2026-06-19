@@ -203,7 +203,7 @@ export class ProductsController {
     );
   }
   @Get(':id')
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
   @ApiOperation({ summary: 'Get product by ID' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({
