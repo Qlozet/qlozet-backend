@@ -260,7 +260,7 @@ export class ProductsController {
   }
 
   @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
-  @Get('reviews/vendor')
+  @Get('ratings/vendor')
   @ApiOperation({
     summary: 'Get all reviews for a vendor. Vendors auto-resolve; customers pass business_id.',
   })
