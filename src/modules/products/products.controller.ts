@@ -6,6 +6,7 @@ import {
   UsePipes,
   ValidationPipe,
   UseGuards,
+  BadRequestException,
   Req,
   Get,
   Param,
@@ -258,11 +259,12 @@ export class ProductsController {
     };
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
   @Get('reviews/vendor')
   @ApiOperation({
-    summary: 'Get all reviews across all products for the authenticated vendor',
+    summary: 'Get all reviews for a vendor. Vendors auto-resolve; customers pass business_id.',
   })
+  @ApiQuery({ name: 'business_id', required: false, type: String, description: 'Vendor business ID (required for customers)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'size', required: false, type: Number })
   @ApiQuery({
@@ -272,12 +274,19 @@ export class ProductsController {
   })
   async getVendorReviews(
     @Req() req: any,
+    @Query('business_id') businessId?: string,
     @Query('page') page?: number,
     @Query('size') size?: number,
     @Query('sort') sort?: 'recent' | 'highest' | 'lowest',
   ) {
+    // Vendors use their own business; customers must pass business_id
+    const resolvedBusinessId = req.business?.id || businessId;
+    if (!resolvedBusinessId) {
+      throw new BadRequestException('business_id query parameter is required');
+    }
+
     const reviews = await this.productService.getVendorReviews(
-      req.business.id,
+      resolvedBusinessId,
       page || 1,
       size || 20,
       sort || 'recent',
