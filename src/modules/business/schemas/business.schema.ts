@@ -70,6 +70,9 @@ export class Business extends Document {
   business_logo_url?: string;
 
   @Prop({ required: false })
+  business_logo_svg_url?: string;
+
+  @Prop({ required: false })
   cover_image_url?: string;
 
   @Prop({ default: false })
