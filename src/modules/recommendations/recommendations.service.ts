@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { RetrievalService } from './retrieval/retrieval.service';
 import { FiltersService } from './filters/filters.service';
 import { RankersService } from './rankers/rankers.service';
@@ -13,6 +15,7 @@ import {
 import { FeedItemDto } from './dto/feed-response.dto';
 import { v4 as uuid } from 'uuid';
 import { CatalogService } from './catalog/catalog.service';
+import { Order, OrderDocument } from '../orders/schemas/orders.schema';
 
 @Injectable()
 export class RecommendationsService {
@@ -27,6 +30,7 @@ export class RecommendationsService {
     private eventsService: EventsService,
     private businessService: BusinessService,
     private catalogService: CatalogService,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
   ) {}
 
   async getHomeFeed(options: {
@@ -428,7 +432,7 @@ export class RecommendationsService {
     const startTime = Date.now();
     const { itemId, limit } = options;
 
-    // Fetch only the reference item (not entire catalog)
+    // Fetch the reference item
     const item = await this.catalogService.findById(itemId);
 
     if (!item) {
@@ -438,21 +442,80 @@ export class RecommendationsService {
       };
     }
 
-    // Targeted query: find items from same vendor OR overlapping tags
-    const candidates = await this.catalogService.findSimilar({
-      excludeIds: [itemId],
-      vendor: item.vendor,
-      tags: item.tags,
-      limit: limit * 3,
-    });
+    // --- Real co-purchase analysis from completed orders ---
+    let coProductIds: string[] = [];
+    let usedOrderData = false;
 
-    // Score candidates in memory (small set now)
-    const scored = candidates.map((candidate) => {
+    try {
+      // Find completed orders containing this product
+      const orders = await this.orderModel.find({
+        'items.product': new Types.ObjectId(itemId),
+        status: 'completed',
+      }).select('items.product').lean().limit(200);
+
+      if (orders.length > 0) {
+        // Count co-occurrence of other products in the same orders
+        const coProductCounts = new Map<string, number>();
+        for (const order of orders) {
+          for (const orderItem of order.items) {
+            const pid = orderItem.product.toString();
+            if (pid !== itemId) {
+              coProductCounts.set(pid, (coProductCounts.get(pid) || 0) + 1);
+            }
+          }
+        }
+
+        // Sort by co-occurrence frequency and take top results
+        coProductIds = [...coProductCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, limit * 2)
+          .map(([id]) => id);
+
+        usedOrderData = coProductIds.length > 0;
+      }
+    } catch (e) {
+      this.logger.warn(`Co-purchase analysis failed for ${itemId}: ${e.message}`);
+    }
+
+    // --- Fetch candidates: order-based or heuristic fallback ---
+    let candidates: any[];
+
+    if (usedOrderData && coProductIds.length >= limit) {
+      // We have enough real co-purchase data
+      candidates = await this.catalogService.findByIds(coProductIds);
+    } else {
+      // Fallback/supplement with vendor + tag heuristic
+      const heuristicCandidates = await this.catalogService.findSimilar({
+        excludeIds: [itemId, ...coProductIds],
+        vendor: item.vendor,
+        tags: item.tags,
+        limit: limit * 3,
+      });
+
+      if (usedOrderData) {
+        // Merge: order-based items first, then heuristic
+        const orderItems = await this.catalogService.findByIds(coProductIds);
+        candidates = [...orderItems, ...heuristicCandidates];
+      } else {
+        candidates = heuristicCandidates;
+      }
+    }
+
+    // Score candidates in memory
+    const scored = candidates.map((candidate, index) => {
       let score = 0;
-      if (candidate.vendor === item.vendor) score += 0.5;
-      const tagOverlap =
-        item.tags?.filter((tag) => candidate.tags?.includes(tag)).length || 0;
-      score += (tagOverlap / (item.tags?.length || 1)) * 0.5;
+
+      // If from order data, boost by position (first = highest co-occurrence)
+      if (usedOrderData && coProductIds.includes(candidate.itemId)) {
+        const orderRank = coProductIds.indexOf(candidate.itemId);
+        score += 1.0 - (orderRank / coProductIds.length) * 0.5; // 1.0 to 0.5
+      } else {
+        // Heuristic scoring
+        if (candidate.vendor === item.vendor) score += 0.3;
+        const tagOverlap =
+          item.tags?.filter((tag: string) => candidate.tags?.includes(tag)).length || 0;
+        score += (tagOverlap / (item.tags?.length || 1)) * 0.3;
+      }
 
       return { ...candidate, score };
     });
@@ -475,7 +538,10 @@ export class RecommendationsService {
       const explanation = this.explanationsService.generateExplanations(i, []);
       return {
         ...i,
-        explanations: ['Frequently bought together', ...explanation.texts],
+        explanations: [
+          usedOrderData ? 'Frequently bought together' : 'You might also like',
+          ...explanation.texts,
+        ],
         reasonCodes: ['BOUGHT_TOGETHER', ...explanation.codes],
       };
     });
@@ -484,6 +550,8 @@ export class RecommendationsService {
     this.logger.log({
       msg: 'Bought Together Stats',
       itemId,
+      usedOrderData,
+      ordersAnalyzed: usedOrderData ? 'yes' : 'no',
       candidatesFound: candidates.length,
       returned: results.length,
       durationMs: duration,
@@ -496,6 +564,7 @@ export class RecommendationsService {
         name: item.name,
       },
       debug: {
+        usedOrderData,
         candidateCount: candidates.length,
         durationMs: duration,
       },
