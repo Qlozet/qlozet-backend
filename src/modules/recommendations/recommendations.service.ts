@@ -41,7 +41,7 @@ export class RecommendationsService {
 
     // 1. User Context & Embeddings
     const userProfileVector =
-      await this.userEmbeddingsService.computeUserStyleVector(userId);
+      await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
     let sessionVector: number[] | null = null;
     if (sessionId) {
       sessionVector =
@@ -174,7 +174,7 @@ export class RecommendationsService {
 
     // 1. User Context & Embeddings
     const userProfileVector =
-      await this.userEmbeddingsService.computeUserStyleVector(userId);
+      await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
     const blendedVector = this.userEmbeddingsService.blendVectors(
       userProfileVector,
       null,

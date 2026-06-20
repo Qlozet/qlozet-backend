@@ -227,4 +227,46 @@ export class UserEmbeddingsService {
         const doc = await this.userEmbeddingModel.findOne({ userId }).exec();
         return doc ? doc.u_style : null;
     }
+
+    /**
+     * Returns a cached user style vector if fresh (< 1 hour old),
+     * otherwise recomputes and caches it.
+     * This avoids calling the OpenAI embedding API on every feed request.
+     */
+    async getOrComputeUserStyleVector(userId: string): Promise<number[] | null> {
+        const STALENESS_MS = 60 * 60 * 1000; // 1 hour
+
+        try {
+            const cached = await this.userEmbeddingModel.findOne({ userId }).lean();
+            if (cached && cached.u_style && cached.u_style.length > 0 && cached.lastUpdated) {
+                const age = Date.now() - new Date(cached.lastUpdated).getTime();
+                if (age < STALENESS_MS) {
+                    this.logger.debug(`Using cached embedding for user ${userId} (age: ${Math.round(age / 1000)}s)`);
+                    return cached.u_style;
+                }
+                this.logger.debug(`Cached embedding stale for user ${userId} (age: ${Math.round(age / 1000)}s), recomputing`);
+            }
+        } catch (e) {
+            this.logger.warn(`Cache lookup failed for user ${userId}: ${e.message}`);
+        }
+
+        // Cache miss or stale — recompute (this calls saveEmbedding internally)
+        return this.computeUserStyleVector(userId);
+    }
+
+    /**
+     * Invalidates the cached embedding by back-dating lastUpdated,
+     * so the next feed request triggers a fresh recompute.
+     */
+    async invalidateCache(userId: string): Promise<void> {
+        try {
+            await this.userEmbeddingModel.updateOne(
+                { userId },
+                { $set: { lastUpdated: new Date(0) } }, // epoch = always stale
+            );
+            this.logger.debug(`Invalidated embedding cache for user ${userId}`);
+        } catch (e) {
+            this.logger.warn(`Failed to invalidate cache for user ${userId}: ${e.message}`);
+        }
+    }
 }
