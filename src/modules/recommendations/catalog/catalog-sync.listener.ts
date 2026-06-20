@@ -3,12 +3,16 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { CatalogService } from './catalog.service';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
 import { CatalogItemType } from './enums/catalog-item-type.enum';
+import { EmbeddingsService } from '../embeddings/embeddings.service';
 
 @Injectable()
 export class CatalogSyncListener {
   private readonly logger = new Logger(CatalogSyncListener.name);
 
-  constructor(private readonly catalogService: CatalogService) {}
+  constructor(
+    private readonly catalogService: CatalogService,
+    private readonly embeddingsService: EmbeddingsService,
+  ) {}
 
   @OnEvent('product.upserted')
   async handleProductUpsertedEvent(product: any) {
@@ -73,6 +77,11 @@ export class CatalogSyncListener {
         await this.catalogService.create(dto as any);
         this.logger.debug(`Created new catalog item ${dto.itemId}`);
       }
+
+      // Auto-generate embedding (fire-and-forget)
+      this.embeddingsService.embedSingleItem(dto.itemId).catch(err => {
+        this.logger.warn(`Auto-embed failed for ${dto.itemId}: ${err.message}`);
+      });
     } catch (error) {
       this.logger.error(`Failed to sync product ${product._id} to catalog`, error);
     }

@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards, Query } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
 import { CatalogBackfillService } from './catalog-backfill.service';
+import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -13,6 +14,7 @@ export class CatalogController {
     constructor(
         private readonly catalogService: CatalogService,
         private readonly backfillService: CatalogBackfillService,
+        private readonly embeddingsService: EmbeddingsService,
     ) { }
 
     @Post('backfill')
@@ -22,6 +24,17 @@ export class CatalogController {
     @ApiOperation({ summary: 'Backfill catalog from existing products (admin only)' })
     async backfill() {
         return this.backfillService.backfillAll();
+    }
+
+    @Post('backfill-embeddings')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Generate embeddings for catalog items without them (admin only)' })
+    async backfillEmbeddings(@Query('limit') limit?: string) {
+        return this.embeddingsService.backfillItemEmbeddings({
+            limit: limit ? Number(limit) : undefined,
+        });
     }
 
     @Post()
@@ -41,4 +54,3 @@ export class CatalogController {
         return this.catalogService.findById(id);
     }
 }
-

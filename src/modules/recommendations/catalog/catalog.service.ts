@@ -48,6 +48,16 @@ export class CatalogService {
     }
 
     /**
+     * Find catalog items matching a custom filter.
+     * Used by embedding backfill to query items without embeddings.
+     */
+    async findByFilter(filter: Record<string, any>, limit: number = 0): Promise<CatalogItemDocument[]> {
+        const query = this.catalogModel.find(filter);
+        if (limit > 0) query.limit(limit);
+        return query.exec();
+    }
+
+    /**
      * Find items similar to a reference (same vendor OR overlapping tags).
      * Excludes specified item IDs. Used by getBoughtTogether().
      */
