@@ -69,41 +69,32 @@ export class UserEmbeddingsService {
             this.logger.warn(`Failed to fetch user profile for efficiency: ${e.message}`);
         }
 
-        // 3. Compute Implicit (Behavioral) Vector
-        let pooledVector: number[] | null = null;
-        let totalWeight = 0;
-        const now = Date.now();
-        const vectorDim = 1536; // OpenAI embedding size
-        const implicitAccumulator = new Array(vectorDim).fill(0);
-
-        for (const event of events) {
-            if (!event.properties?.item_id && !event.properties?.itemId) continue; // Need item ID match to get item vector (in real app, we join with catalog)
-            // Note: In this snippet we assume event DOES NOT contain the vector directly. 
-            // We would ideally need to fetch CatalogItems for these events. 
-            // For this implementation step, let's assume we can't easily fetch 100 items efficiently without a data loader.
-            // Optimization: We skip efficient vector pooling here if we don't have vectors. 
-            // *Wait*: The prompt implies we SHOULD do pooling. 
-            // Let's assume for now we rely on explicit if implicit is hard, OR we assume `event.properties.vector` exists (unlikely),
-            // OR we construct a placeholder. 
-            // *Correction*: In a real implementation, we would `catalogService.findMany(ids)`.
-            // Let's proceed with ONLY explicit vector if implicit matches are 0, or just simplified scalar weights.
-
-            // ... (Existing pooling logic assumed access to item vectors. 
-            // If we cannot modify EventsService/CatalogService here to join, we focus on the structure)
+        // 3. Compute Implicit (Behavioral) Vector from event history
+        // Uses computeVectorFromEvents which fetches catalog items,
+        // applies time-decayed weighted pooling on their e_style embeddings
+        let implicitVector: number[] | null = null;
+        try {
+            implicitVector = await this.computeVectorFromEvents(events);
+        } catch (e) {
+            this.logger.warn(`Failed to compute implicit vector for user ${userId}: ${e.message}`);
         }
 
-        // Since I cannot easily fetch 100 items here without injecting CatalogService and potentially slowing down, 
-        // I will retain the logic structure but focus on the Explicit Blend which is the new requirement.
-        // Assuming `pooledVector` comes from valid logic or is null if no events.
-
-        // For demonstration, let's just use explicitVector if available, or mixed.
-        // If we had implicit vector (let's say we have a helper or previous cache):
-        // blended = 0.7 * implicit + 0.3 * explicit
-
-        // Re-implementing simplified pooling assuming we MIGHT have vectors or just rely on explicit for now 
-        // to satisfy the "Update computeUserStyleVector" requirement without massive refactor of event ingestion.
-
-        let finalVector = explicitVector;
+        // 4. Blend Explicit (stated preferences) + Implicit (behavior)
+        // - Both available: 70% implicit (what they actually do) + 30% explicit (what they say)
+        // - Only implicit: use implicit (warm user with no profile prefs)
+        // - Only explicit: use explicit (new user who set preferences)
+        // - Neither: null (cold start)
+        let finalVector: number[] | null = null;
+        if (implicitVector && explicitVector) {
+            finalVector = this.blendVectors(implicitVector, explicitVector, 0.7);
+            this.logger.debug(`Blended implicit + explicit vectors for user ${userId}`);
+        } else if (implicitVector) {
+            finalVector = implicitVector;
+            this.logger.debug(`Using implicit-only vector for user ${userId}`);
+        } else if (explicitVector) {
+            finalVector = explicitVector;
+            this.logger.debug(`Using explicit-only vector for user ${userId}`);
+        }
 
         // Save
         if (finalVector || userFitVector) {
@@ -159,8 +150,16 @@ export class UserEmbeddingsService {
             return null;
         }
 
-        const itemIds = [...new Set(events.map(e => e.properties?.itemId).filter(id => !!id))];
-        const items = await Promise.all(itemIds.map(id => this.catalogService.findById(id)));
+        // Bulk fetch catalog items instead of N individual queries
+        const itemIds = [...new Set(
+            events
+                .map(e => e.properties?.itemId || e.properties?.item_id)
+                .filter(id => !!id)
+        )];
+
+        if (itemIds.length === 0) return null;
+
+        const items = await this.catalogService.findByIds(itemIds);
         const itemMap = new Map(items.filter(item => !!item).map(item => [item.itemId, item]));
 
         let weightedSum = new Array(1536).fill(0);
