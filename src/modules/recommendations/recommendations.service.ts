@@ -82,21 +82,12 @@ export class RecommendationsService {
     ];
     const businesses = new Map();
     // Assuming BusinessService has a findMany or similar. If not, parallel findOne.
-    // Optimizing: findMany needed. Using findAll loop or adding findMany to BusinessService.
-    // For now, assuming distinct fetch or mock since we didn't add findMany to BusinessService explicitly.
+    // Bulk fetch all businesses in a single query (instead of N individual lookups)
     try {
-      // Mocking bulk fetch for now or looping. Ideally db.collection('businesses').find({ _id: { $in: ids } })
-      // Let's assume we can loop for small batch (limit * 2 is small)
-      await Promise.all(
-        vendorIds.map(async (vid) => {
-          try {
-            const b = await this.businessService.findBusinessById(vid);
-            if (b) businesses.set(String(b._id), b);
-            // Also support 'vendor' field matching if it's not ID inside item.vendor (schema check needed)
-            // Assuming item.vendor IS business ID string.
-          } catch (e) {}
-        }),
-      );
+      const businessDocs = await this.businessService.findBusinessesByIds(vendorIds);
+      businessDocs.forEach((b) => {
+        if (b) businesses.set(String(b._id), b);
+      });
     } catch (e) {
       this.logger.warn('Failed to fetch businesses for gating', e);
     }
@@ -197,15 +188,12 @@ export class RecommendationsService {
       ...new Set(candidates.map((c) => c.vendor).filter(Boolean)),
     ];
     const businesses = new Map();
+    // Bulk fetch all businesses in a single query
     try {
-      await Promise.all(
-        vendorIds.map(async (vid) => {
-          try {
-            const b = await this.businessService.findBusinessById(vid);
-            if (b) businesses.set(String(b._id), b);
-          } catch (e) {}
-        }),
-      );
+      const businessDocs = await this.businessService.findBusinessesByIds(vendorIds);
+      businessDocs.forEach((b) => {
+        if (b) businesses.set(String(b._id), b);
+      });
     } catch (e) {
       this.logger.warn('Failed to fetch businesses for vendor feed', e);
     }
