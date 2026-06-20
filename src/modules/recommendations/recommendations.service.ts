@@ -376,25 +376,13 @@ export class RecommendationsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
 
-    // Fetch all catalog items and filter by creation date
-    const allItems = await this.catalogService.findAll();
-    const newItems = allItems.filter((item) => {
-      const createdAt =
-        (item as any).createdAt || (item as any)._id?.getTimestamp();
-      return createdAt && new Date(createdAt) >= cutoffDate;
-    });
-
-    // Sort by creation date (newest first)
-    newItems.sort((a, b) => {
-      const dateA = (a as any).createdAt || (a as any)._id?.getTimestamp();
-      const dateB = (b as any).createdAt || (b as any)._id?.getTimestamp();
-      return new Date(dateB).getTime() - new Date(dateA).getTime();
-    });
+    // Fetch only items created since cutoff (sorted newest-first by DB)
+    const newItems = await this.catalogService.findRecent(cutoffDate, limit * 2);
 
     // Apply filtering
     const filterSpec = this.filtersService.buildFilterSpecFromRequest({});
     const filterResult = this.filtersService.applyHardFilters(
-      newItems.slice(0, limit * 2),
+      newItems,
       filterSpec,
       new Map(),
     );
@@ -440,12 +428,8 @@ export class RecommendationsService {
     const startTime = Date.now();
     const { itemId, limit } = options;
 
-    // NOTE: This is a simplified implementation that uses similar items logic
-    // In a production system, you would analyze order history to find frequently co-purchased items
-
-    // For now, fetch the reference item
-    const referenceItem = await this.catalogService.findAll();
-    const item = referenceItem.find((i) => i.itemId === itemId);
+    // Fetch only the reference item (not entire catalog)
+    const item = await this.catalogService.findById(itemId);
 
     if (!item) {
       return {
@@ -454,20 +438,15 @@ export class RecommendationsService {
       };
     }
 
-    // Simple heuristic: Find items from the same vendor or similar tags
-    const allItems = await this.catalogService.findAll();
-    const candidates = allItems.filter((i) => {
-      if (i.itemId === itemId) return false;
-
-      // Score based on vendor match and tag overlap
-      const sameVendor = i.vendor === item.vendor;
-      const tagOverlap =
-        item.tags?.filter((tag) => i.tags?.includes(tag)).length || 0;
-
-      return sameVendor || tagOverlap > 0;
+    // Targeted query: find items from same vendor OR overlapping tags
+    const candidates = await this.catalogService.findSimilar({
+      excludeIds: [itemId],
+      vendor: item.vendor,
+      tags: item.tags,
+      limit: limit * 3,
     });
 
-    // Score candidates
+    // Score candidates in memory (small set now)
     const scored = candidates.map((candidate) => {
       let score = 0;
       if (candidate.vendor === item.vendor) score += 0.5;
@@ -531,9 +510,8 @@ export class RecommendationsService {
     const startTime = Date.now();
     const { itemIds, userId, limit } = options;
 
-    // Fetch the reference items (cart/wishlist items)
-    const allItems = await this.catalogService.findAll();
-    const referenceItems = allItems.filter((i) => itemIds.includes(i.itemId));
+    // Fetch only the reference items (not entire catalog)
+    const referenceItems = await this.catalogService.findByIds(itemIds);
 
     if (referenceItems.length === 0) {
       return {
@@ -546,18 +524,15 @@ export class RecommendationsService {
     const existingTypes = new Set(referenceItems.map((i) => i.type));
     const existingVendors = new Set(referenceItems.map((i) => i.vendor));
 
-    // Find complementary items (different types, preferably same vendor)
-    const candidates = allItems.filter((i) => {
-      // Don't recommend items already in the selection
-      if (itemIds.includes(i.itemId)) return false;
-
-      // Prefer different item types (to complete the look)
-      const isDifferentType = !existingTypes.has(i.type);
-
-      return isDifferentType;
+    // Targeted query: find items of different types (not entire catalog)
+    const candidates = await this.catalogService.findByTypesExcluding({
+      excludeTypes: Array.from(existingTypes),
+      excludeIds: itemIds,
+      limit: limit * 3,
     });
 
-    // Score candidates based on complementarity
+    // Score candidates based on complementarity (small set now)
+    const allTags = referenceItems.flatMap((r) => r.tags || []);
     const scored = candidates.map((candidate) => {
       let score = 0;
 
@@ -565,13 +540,12 @@ export class RecommendationsService {
       if (existingVendors.has(candidate.vendor)) score += 0.4;
 
       // Prefer items with tag overlap (style coherence)
-      const allTags = referenceItems.flatMap((r) => r.tags || []);
       const tagOverlap =
         candidate.tags?.filter((tag) => allTags.includes(tag)).length || 0;
       if (tagOverlap > 0) score += 0.3 * (tagOverlap / allTags.length);
 
-      // Prefer different types
-      if (!existingTypes.has(candidate.type)) score += 0.3;
+      // Prefer different types (always true since query excluded existing types)
+      score += 0.3;
 
       return { ...candidate, score };
     });
@@ -584,7 +558,7 @@ export class RecommendationsService {
     if (userId) {
       try {
         const userVector =
-          await this.userEmbeddingsService.computeUserStyleVector(userId);
+          await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
         if (userVector) {
           // Use vector search to re-rank based on user preferences
           // For simplicity, just take the scored candidates

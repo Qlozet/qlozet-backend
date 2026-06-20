@@ -24,6 +24,67 @@ export class CatalogService {
         return this.catalogModel.findOne({ itemId }).exec();
     }
 
+    /**
+     * Fetch items created after a given date, sorted newest-first.
+     * Used by getNewArrivalsFeed() instead of findAll() + in-memory filter.
+     */
+    async findRecent(since: Date, limit: number): Promise<CatalogItemDocument[]> {
+        return this.catalogModel
+            .find({ createdAt: { $gte: since } })
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .exec();
+    }
+
+    /**
+     * Bulk fetch catalog items by their itemIds.
+     * Used by bought-together, complete-the-look, and trending.
+     */
+    async findByIds(itemIds: string[]): Promise<CatalogItemDocument[]> {
+        if (!itemIds.length) return [];
+        return this.catalogModel
+            .find({ itemId: { $in: itemIds } })
+            .exec();
+    }
+
+    /**
+     * Find items similar to a reference (same vendor OR overlapping tags).
+     * Excludes specified item IDs. Used by getBoughtTogether().
+     */
+    async findSimilar(options: {
+        excludeIds: string[];
+        vendor?: string;
+        tags?: string[];
+        limit: number;
+    }): Promise<CatalogItemDocument[]> {
+        const query: any = {};
+        if (options.excludeIds.length) {
+            query.itemId = { $nin: options.excludeIds };
+        }
+        const orConditions: any[] = [];
+        if (options.vendor) orConditions.push({ vendor: options.vendor });
+        if (options.tags && options.tags.length) orConditions.push({ tags: { $in: options.tags } });
+        if (orConditions.length) query.$or = orConditions;
+
+        return this.catalogModel.find(query).limit(options.limit).exec();
+    }
+
+    /**
+     * Find items of different types than those provided (to complete a look).
+     * Excludes specified item IDs. Used by getCompleteTheLook().
+     */
+    async findByTypesExcluding(options: {
+        excludeTypes: string[];
+        excludeIds: string[];
+        limit: number;
+    }): Promise<CatalogItemDocument[]> {
+        const query: any = {};
+        if (options.excludeTypes.length) query.type = { $nin: options.excludeTypes };
+        if (options.excludeIds.length) query.itemId = { $nin: options.excludeIds };
+
+        return this.catalogModel.find(query).limit(options.limit).exec();
+    }
+
     async update(itemId: string, updateData: Partial<CatalogItem>): Promise<CatalogItem | null> {
         return this.catalogModel.findOneAndUpdate({ itemId }, updateData, { new: true }).exec();
     }
