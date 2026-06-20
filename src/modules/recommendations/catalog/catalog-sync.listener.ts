@@ -80,8 +80,12 @@ export class CatalogSyncListener {
 
   @OnEvent('product.deleted')
   async handleProductDeletedEvent(payload: { id: string }) {
-    this.logger.log(`Handling product deletion for ${payload.id}`);
-    // Note: If catalogService has a delete method, we should call it here.
-    // Currently CatalogService might not have delete() method. We should check and add if missing.
+    this.logger.log(`Removing catalog item for deleted product ${payload.id}`);
+    try {
+      await this.catalogService.delete(payload.id);
+      this.logger.debug(`Deleted catalog item ${payload.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to delete catalog item ${payload.id}`, error);
+    }
   }
 }

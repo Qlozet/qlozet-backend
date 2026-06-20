@@ -1,11 +1,28 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { CatalogBackfillService } from './catalog-backfill.service';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../../common/guards';
+import { RolesGuard } from '../../../common/guards/roles.guard';
+import { Roles } from '../../../common/decorators/roles.decorator';
+import { UserType } from '../../ums/schemas';
 
 @ApiTags('Catalog')
 @Controller('recommendations/catalog')
 export class CatalogController {
-    constructor(private readonly catalogService: CatalogService) { }
+    constructor(
+        private readonly catalogService: CatalogService,
+        private readonly backfillService: CatalogBackfillService,
+    ) { }
+
+    @Post('backfill')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Backfill catalog from existing products (admin only)' })
+    async backfill() {
+        return this.backfillService.backfillAll();
+    }
 
     @Post()
     @ApiOperation({ summary: 'Add item to catalog' })
@@ -24,3 +41,4 @@ export class CatalogController {
         return this.catalogService.findById(id);
     }
 }
+
