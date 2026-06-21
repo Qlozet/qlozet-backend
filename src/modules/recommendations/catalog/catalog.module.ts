@@ -7,6 +7,7 @@ import { CatalogSyncListener } from './catalog-sync.listener';
 import { CatalogBackfillService } from './catalog-backfill.service';
 import { Product, ProductSchema } from '../../products/schemas/product.schema';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
+import { RetrievalModule } from '../retrieval/retrieval.module';
 
 @Module({
     imports: [
@@ -15,6 +16,7 @@ import { EmbeddingsModule } from '../embeddings/embeddings.module';
             { name: Product.name, schema: ProductSchema },
         ]),
         forwardRef(() => EmbeddingsModule),
+        forwardRef(() => RetrievalModule),
     ],
     controllers: [CatalogController],
     providers: [CatalogService, CatalogSyncListener, CatalogBackfillService],

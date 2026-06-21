@@ -37,7 +37,8 @@ export class RetrievalService {
                 );
                 vectorResults.forEach((item) => candidates.set(item.itemId || item._id.toString(), item));
             } catch (e) {
-                this.logger.error(`Vector search failed, falling back: ${e.message}`);
+                this.logger.warn(`⚠️ Vector search FAILED — users getting trending-only feed. Error: ${e.message}`);
+                this.logger.warn('→ Fix: Create items_style_vindex in Atlas Console and run embedding backfill');
             }
         }
 

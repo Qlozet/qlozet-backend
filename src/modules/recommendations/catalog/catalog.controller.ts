@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, UseGuards, Query } from '@nestjs/co
 import { CatalogService } from './catalog.service';
 import { CatalogBackfillService } from './catalog-backfill.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
+import { VectorSearchService } from '../retrieval/vector-search.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -15,7 +16,10 @@ export class CatalogController {
         private readonly catalogService: CatalogService,
         private readonly backfillService: CatalogBackfillService,
         private readonly embeddingsService: EmbeddingsService,
+        private readonly vectorSearchService: VectorSearchService,
     ) { }
+
+    // ─── Admin: Backfill ─────────────────────────────────
 
     @Post('backfill')
     @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,6 +41,36 @@ export class CatalogController {
         });
     }
 
+    // ─── Admin: Diagnostics ──────────────────────────────
+
+    @Get('diagnostics/vector-search')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Test if Atlas vector search index exists and works (admin only)' })
+    async checkVectorSearch() {
+        const result = await this.vectorSearchService.testIndex('items_style_vindex');
+        return {
+            status: result.exists ? 'OK' : 'FAILED',
+            indexName: 'items_style_vindex',
+            ...result,
+            hint: result.exists
+                ? null
+                : 'Create the items_style_vindex in Atlas Console → Database → Search Indexes. See walkthrough for JSON definition.',
+        };
+    }
+
+    @Get('diagnostics/stats')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get catalog health stats: item count, embedding coverage (admin only)' })
+    async getStats() {
+        return this.catalogService.getStats();
+    }
+
+    // ─── CRUD ────────────────────────────────────────────
+
     @Post()
     @ApiOperation({ summary: 'Add item to catalog' })
     create(@Body() createItemDto: any) {
@@ -54,3 +88,4 @@ export class CatalogController {
         return this.catalogService.findById(id);
     }
 }
+

@@ -181,4 +181,22 @@ export class CatalogService {
             type: CatalogItemType.GARMENT,
         };
     }
+
+    /**
+     * Returns catalog health stats: total items, embedding coverage, etc.
+     * Used by the admin diagnostics endpoint.
+     */
+    async getStats() {
+        const [total, withEmbeddings] = await Promise.all([
+            this.catalogModel.countDocuments(),
+            this.catalogModel.countDocuments({ 'embeddings.e_style.0': { $exists: true } }),
+        ]);
+        return {
+            totalItems: total,
+            withEmbeddings,
+            withoutEmbeddings: total - withEmbeddings,
+            embeddingCoverage: total > 0 ? `${((withEmbeddings / total) * 100).toFixed(1)}%` : 'N/A',
+        };
+    }
 }
+
