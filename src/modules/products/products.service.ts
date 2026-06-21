@@ -29,6 +29,7 @@ import {
 } from '../orders/schemas/orders.schema';
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { FindAllProductsDto } from './dto/find-all-products.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class ProductService {
@@ -45,6 +46,7 @@ export class ProductService {
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
     @InjectConnection() private readonly connection: Connection,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -84,6 +86,9 @@ export class ProductService {
 
         await existing.save();
 
+        // Sync to recommendation catalog
+        this.eventEmitter.emit('product.upserted', existing.toObject());
+
         return {
           data: existing.toObject(),
           message: 'Product updated successfully',
@@ -98,6 +103,9 @@ export class ProductService {
       kind,
       base_price: totalPrice,
     });
+
+    // Sync to recommendation catalog
+    this.eventEmitter.emit('product.upserted', created.toObject());
 
     return {
       data: created.toObject(),

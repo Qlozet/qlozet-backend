@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { RetrievalService } from './retrieval/retrieval.service';
 import { FiltersService } from './filters/filters.service';
 import { RankersService } from './rankers/rankers.service';
@@ -13,6 +15,7 @@ import {
 import { FeedItemDto } from './dto/feed-response.dto';
 import { v4 as uuid } from 'uuid';
 import { CatalogService } from './catalog/catalog.service';
+import { Order, OrderDocument } from '../orders/schemas/orders.schema';
 
 @Injectable()
 export class RecommendationsService {
@@ -27,6 +30,7 @@ export class RecommendationsService {
     private eventsService: EventsService,
     private businessService: BusinessService,
     private catalogService: CatalogService,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
   ) {}
 
   async getHomeFeed(options: {
@@ -41,7 +45,7 @@ export class RecommendationsService {
 
     // 1. User Context & Embeddings
     const userProfileVector =
-      await this.userEmbeddingsService.computeUserStyleVector(userId);
+      await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
     let sessionVector: number[] | null = null;
     if (sessionId) {
       sessionVector =
@@ -78,21 +82,12 @@ export class RecommendationsService {
     ];
     const businesses = new Map();
     // Assuming BusinessService has a findMany or similar. If not, parallel findOne.
-    // Optimizing: findMany needed. Using findAll loop or adding findMany to BusinessService.
-    // For now, assuming distinct fetch or mock since we didn't add findMany to BusinessService explicitly.
+    // Bulk fetch all businesses in a single query (instead of N individual lookups)
     try {
-      // Mocking bulk fetch for now or looping. Ideally db.collection('businesses').find({ _id: { $in: ids } })
-      // Let's assume we can loop for small batch (limit * 2 is small)
-      await Promise.all(
-        vendorIds.map(async (vid) => {
-          try {
-            const b = await this.businessService.findBusinessById(vid);
-            if (b) businesses.set(String(b._id), b);
-            // Also support 'vendor' field matching if it's not ID inside item.vendor (schema check needed)
-            // Assuming item.vendor IS business ID string.
-          } catch (e) {}
-        }),
-      );
+      const businessDocs = await this.businessService.findBusinessesByIds(vendorIds);
+      businessDocs.forEach((b) => {
+        if (b) businesses.set(String(b._id), b);
+      });
     } catch (e) {
       this.logger.warn('Failed to fetch businesses for gating', e);
     }
@@ -174,7 +169,7 @@ export class RecommendationsService {
 
     // 1. User Context & Embeddings
     const userProfileVector =
-      await this.userEmbeddingsService.computeUserStyleVector(userId);
+      await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
     const blendedVector = this.userEmbeddingsService.blendVectors(
       userProfileVector,
       null,
@@ -193,15 +188,12 @@ export class RecommendationsService {
       ...new Set(candidates.map((c) => c.vendor).filter(Boolean)),
     ];
     const businesses = new Map();
+    // Bulk fetch all businesses in a single query
     try {
-      await Promise.all(
-        vendorIds.map(async (vid) => {
-          try {
-            const b = await this.businessService.findBusinessById(vid);
-            if (b) businesses.set(String(b._id), b);
-          } catch (e) {}
-        }),
-      );
+      const businessDocs = await this.businessService.findBusinessesByIds(vendorIds);
+      businessDocs.forEach((b) => {
+        if (b) businesses.set(String(b._id), b);
+      });
     } catch (e) {
       this.logger.warn('Failed to fetch businesses for vendor feed', e);
     }
@@ -376,25 +368,13 @@ export class RecommendationsService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
 
-    // Fetch all catalog items and filter by creation date
-    const allItems = await this.catalogService.findAll();
-    const newItems = allItems.filter((item) => {
-      const createdAt =
-        (item as any).createdAt || (item as any)._id?.getTimestamp();
-      return createdAt && new Date(createdAt) >= cutoffDate;
-    });
-
-    // Sort by creation date (newest first)
-    newItems.sort((a, b) => {
-      const dateA = (a as any).createdAt || (a as any)._id?.getTimestamp();
-      const dateB = (b as any).createdAt || (b as any)._id?.getTimestamp();
-      return new Date(dateB).getTime() - new Date(dateA).getTime();
-    });
+    // Fetch only items created since cutoff (sorted newest-first by DB)
+    const newItems = await this.catalogService.findRecent(cutoffDate, limit * 2);
 
     // Apply filtering
     const filterSpec = this.filtersService.buildFilterSpecFromRequest({});
     const filterResult = this.filtersService.applyHardFilters(
-      newItems.slice(0, limit * 2),
+      newItems,
       filterSpec,
       new Map(),
     );
@@ -440,12 +420,8 @@ export class RecommendationsService {
     const startTime = Date.now();
     const { itemId, limit } = options;
 
-    // NOTE: This is a simplified implementation that uses similar items logic
-    // In a production system, you would analyze order history to find frequently co-purchased items
-
-    // For now, fetch the reference item
-    const referenceItem = await this.catalogService.findAll();
-    const item = referenceItem.find((i) => i.itemId === itemId);
+    // Fetch the reference item
+    const item = await this.catalogService.findById(itemId);
 
     if (!item) {
       return {
@@ -454,26 +430,80 @@ export class RecommendationsService {
       };
     }
 
-    // Simple heuristic: Find items from the same vendor or similar tags
-    const allItems = await this.catalogService.findAll();
-    const candidates = allItems.filter((i) => {
-      if (i.itemId === itemId) return false;
+    // --- Real co-purchase analysis from completed orders ---
+    let coProductIds: string[] = [];
+    let usedOrderData = false;
 
-      // Score based on vendor match and tag overlap
-      const sameVendor = i.vendor === item.vendor;
-      const tagOverlap =
-        item.tags?.filter((tag) => i.tags?.includes(tag)).length || 0;
+    try {
+      // Find completed orders containing this product
+      const orders = await this.orderModel.find({
+        'items.product': new Types.ObjectId(itemId),
+        status: 'completed',
+      }).select('items.product').lean().limit(200);
 
-      return sameVendor || tagOverlap > 0;
-    });
+      if (orders.length > 0) {
+        // Count co-occurrence of other products in the same orders
+        const coProductCounts = new Map<string, number>();
+        for (const order of orders) {
+          for (const orderItem of order.items) {
+            const pid = orderItem.product.toString();
+            if (pid !== itemId) {
+              coProductCounts.set(pid, (coProductCounts.get(pid) || 0) + 1);
+            }
+          }
+        }
 
-    // Score candidates
-    const scored = candidates.map((candidate) => {
+        // Sort by co-occurrence frequency and take top results
+        coProductIds = [...coProductCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, limit * 2)
+          .map(([id]) => id);
+
+        usedOrderData = coProductIds.length > 0;
+      }
+    } catch (e) {
+      this.logger.warn(`Co-purchase analysis failed for ${itemId}: ${e.message}`);
+    }
+
+    // --- Fetch candidates: order-based or heuristic fallback ---
+    let candidates: any[];
+
+    if (usedOrderData && coProductIds.length >= limit) {
+      // We have enough real co-purchase data
+      candidates = await this.catalogService.findByIds(coProductIds);
+    } else {
+      // Fallback/supplement with vendor + tag heuristic
+      const heuristicCandidates = await this.catalogService.findSimilar({
+        excludeIds: [itemId, ...coProductIds],
+        vendor: item.vendor,
+        tags: item.tags,
+        limit: limit * 3,
+      });
+
+      if (usedOrderData) {
+        // Merge: order-based items first, then heuristic
+        const orderItems = await this.catalogService.findByIds(coProductIds);
+        candidates = [...orderItems, ...heuristicCandidates];
+      } else {
+        candidates = heuristicCandidates;
+      }
+    }
+
+    // Score candidates in memory
+    const scored = candidates.map((candidate, index) => {
       let score = 0;
-      if (candidate.vendor === item.vendor) score += 0.5;
-      const tagOverlap =
-        item.tags?.filter((tag) => candidate.tags?.includes(tag)).length || 0;
-      score += (tagOverlap / (item.tags?.length || 1)) * 0.5;
+
+      // If from order data, boost by position (first = highest co-occurrence)
+      if (usedOrderData && coProductIds.includes(candidate.itemId)) {
+        const orderRank = coProductIds.indexOf(candidate.itemId);
+        score += 1.0 - (orderRank / coProductIds.length) * 0.5; // 1.0 to 0.5
+      } else {
+        // Heuristic scoring
+        if (candidate.vendor === item.vendor) score += 0.3;
+        const tagOverlap =
+          item.tags?.filter((tag: string) => candidate.tags?.includes(tag)).length || 0;
+        score += (tagOverlap / (item.tags?.length || 1)) * 0.3;
+      }
 
       return { ...candidate, score };
     });
@@ -496,7 +526,10 @@ export class RecommendationsService {
       const explanation = this.explanationsService.generateExplanations(i, []);
       return {
         ...i,
-        explanations: ['Frequently bought together', ...explanation.texts],
+        explanations: [
+          usedOrderData ? 'Frequently bought together' : 'You might also like',
+          ...explanation.texts,
+        ],
         reasonCodes: ['BOUGHT_TOGETHER', ...explanation.codes],
       };
     });
@@ -505,6 +538,8 @@ export class RecommendationsService {
     this.logger.log({
       msg: 'Bought Together Stats',
       itemId,
+      usedOrderData,
+      ordersAnalyzed: usedOrderData ? 'yes' : 'no',
       candidatesFound: candidates.length,
       returned: results.length,
       durationMs: duration,
@@ -517,6 +552,7 @@ export class RecommendationsService {
         name: item.name,
       },
       debug: {
+        usedOrderData,
         candidateCount: candidates.length,
         durationMs: duration,
       },
@@ -531,9 +567,8 @@ export class RecommendationsService {
     const startTime = Date.now();
     const { itemIds, userId, limit } = options;
 
-    // Fetch the reference items (cart/wishlist items)
-    const allItems = await this.catalogService.findAll();
-    const referenceItems = allItems.filter((i) => itemIds.includes(i.itemId));
+    // Fetch only the reference items (not entire catalog)
+    const referenceItems = await this.catalogService.findByIds(itemIds);
 
     if (referenceItems.length === 0) {
       return {
@@ -546,18 +581,15 @@ export class RecommendationsService {
     const existingTypes = new Set(referenceItems.map((i) => i.type));
     const existingVendors = new Set(referenceItems.map((i) => i.vendor));
 
-    // Find complementary items (different types, preferably same vendor)
-    const candidates = allItems.filter((i) => {
-      // Don't recommend items already in the selection
-      if (itemIds.includes(i.itemId)) return false;
-
-      // Prefer different item types (to complete the look)
-      const isDifferentType = !existingTypes.has(i.type);
-
-      return isDifferentType;
+    // Targeted query: find items of different types (not entire catalog)
+    const candidates = await this.catalogService.findByTypesExcluding({
+      excludeTypes: Array.from(existingTypes),
+      excludeIds: itemIds,
+      limit: limit * 3,
     });
 
-    // Score candidates based on complementarity
+    // Score candidates based on complementarity (small set now)
+    const allTags = referenceItems.flatMap((r) => r.tags || []);
     const scored = candidates.map((candidate) => {
       let score = 0;
 
@@ -565,13 +597,12 @@ export class RecommendationsService {
       if (existingVendors.has(candidate.vendor)) score += 0.4;
 
       // Prefer items with tag overlap (style coherence)
-      const allTags = referenceItems.flatMap((r) => r.tags || []);
       const tagOverlap =
         candidate.tags?.filter((tag) => allTags.includes(tag)).length || 0;
       if (tagOverlap > 0) score += 0.3 * (tagOverlap / allTags.length);
 
-      // Prefer different types
-      if (!existingTypes.has(candidate.type)) score += 0.3;
+      // Prefer different types (always true since query excluded existing types)
+      score += 0.3;
 
       return { ...candidate, score };
     });
@@ -584,7 +615,7 @@ export class RecommendationsService {
     if (userId) {
       try {
         const userVector =
-          await this.userEmbeddingsService.computeUserStyleVector(userId);
+          await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
         if (userVector) {
           // Use vector search to re-rank based on user preferences
           // For simplicity, just take the scored candidates

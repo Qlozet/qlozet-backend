@@ -32,6 +32,7 @@ import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { BespokeModule } from './modules/bespoke/bespoke.module';
 import { FabricReservationModule } from './modules/fabric-reservation/fabric-reservation.module';
 import { StyleLibraryModule } from './modules/style-library/style-library.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { StyleLibraryModule } from './modules/style-library/style-library.module
     }),
 
     ScheduleModule.forRoot({}),
+    EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([
       {
         name: 'short',

@@ -69,40 +69,95 @@ export class EmbeddingsService {
         return parts.filter(p => !!p).join('. ');
     }
 
+    /**
+     * Embed a single catalog item. Used by CatalogSyncListener after product sync.
+     * Skips if item already has an embedding.
+     */
+    async embedSingleItem(itemId: string): Promise<boolean> {
+        const item = await this.catalogService.findById(itemId);
+        if (!item) {
+            this.logger.warn(`embedSingleItem: item ${itemId} not found`);
+            return false;
+        }
+
+        if (item.embeddings?.e_style?.length) {
+            this.logger.debug(`Item ${itemId} already has embedding, skipping`);
+            return false;
+        }
+
+        const canonicalText = this.buildCanonicalItemText(item);
+        const vector = await this.generateEmbedding(canonicalText);
+
+        await this.catalogService.update(itemId, {
+            embeddings: {
+                ...item.embeddings,
+                e_style: vector,
+            },
+            embeddingMetadata: {
+                model: this.embeddingModel,
+                dim: this.embeddingDim,
+                version: this.embeddingVersion,
+                embedded_at: new Date(),
+            },
+        });
+
+        this.logger.debug(`Embedded item ${itemId}`);
+        return true;
+    }
+
+    /**
+     * Backfill embeddings for all catalog items that don't have one yet.
+     * Uses targeted query instead of findAll() to avoid loading entire catalog.
+     * Includes rate limiting (50ms between calls) for OpenAI API.
+     */
     async backfillItemEmbeddings(options: { kind?: string; limit?: number } = {}) {
         this.logger.log('Starting embedding backfill...');
-        const items = await this.catalogService.findAll();
+
+        // Build query to only fetch items without embeddings
+        const filter: Record<string, any> = {
+            $or: [
+                { 'embeddings.e_style': { $exists: false } },
+                { 'embeddings.e_style': { $size: 0 } },
+                { 'embeddings.e_style': null },
+            ],
+        };
+        if (options.kind) filter.type = options.kind;
+
+        const items = await this.catalogService.findByFilter(filter, options.limit || 0);
         let count = 0;
+        let errors = 0;
 
         for (const item of items) {
-            if (options.limit && count >= options.limit) break;
-            // Skip if already embedded (check e_style existence)
-            if (item.embeddings?.e_style) continue;
+            try {
+                const canonicalText = this.buildCanonicalItemText(item);
+                const vector = await this.generateEmbedding(canonicalText);
 
-            if (options.kind && item.type !== options.kind) continue;
+                await this.catalogService.update(item.itemId, {
+                    embeddings: {
+                        ...item.embeddings,
+                        e_style: vector,
+                    },
+                    embeddingMetadata: {
+                        model: this.embeddingModel,
+                        dim: this.embeddingDim,
+                        version: this.embeddingVersion,
+                        embedded_at: new Date(),
+                    },
+                });
 
-            const canonicalText = this.buildCanonicalItemText(item);
-            const vector = await this.generateEmbedding(canonicalText);
+                count++;
+                this.logger.debug(`Embedded item ${item.itemId} (${count}/${items.length})`);
 
-            const updateData: Partial<CatalogItem> = {
-                embeddings: {
-                    ...item.embeddings,
-                    e_style: vector,
-                    // e_fabric optional logic could go here
-                },
-                embeddingMetadata: {
-                    model: this.embeddingModel,
-                    dim: this.embeddingDim,
-                    version: this.embeddingVersion,
-                    embedded_at: new Date(),
-                }
-            };
-
-            await this.catalogService.update(item.id, updateData);
-            count++;
-            this.logger.debug(`Embedded item ${item.itemId}`);
+                // Rate limit: 50ms between OpenAI calls
+                await new Promise(resolve => setTimeout(resolve, 50));
+            } catch (e) {
+                errors++;
+                this.logger.error(`Failed to embed item ${item.itemId}: ${e.message}`);
+            }
         }
-        this.logger.log(`Backfill complete. Processed ${count} items.`);
-        return { processed: count };
+
+        this.logger.log(`Backfill complete. Processed ${count}, errors ${errors}.`);
+        return { processed: count, errors, total: items.length };
     }
 }
+

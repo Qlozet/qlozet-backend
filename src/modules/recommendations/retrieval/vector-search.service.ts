@@ -29,10 +29,17 @@ export class VectorSearchService {
             },
             {
                 $project: {
+                    itemId: 1,
                     name: 1,
                     description: 1,
                     type: 1,
                     price: 1,
+                    currency: 1,
+                    vendor: 1,
+                    tags: 1,
+                    fitMeta: 1,
+                    fabricComposition: 1,
+                    material: 1,
                     score: { $meta: 'vectorSearchScore' },
                 },
             },
@@ -45,4 +52,34 @@ export class VectorSearchService {
             throw error;
         }
     }
+
+    /**
+     * Test if a vector search index exists and is responsive.
+     * Uses a dummy vector to probe the index.
+     */
+    async testIndex(indexName: string, dimensions: number = 1536): Promise<{
+        exists: boolean;
+        sampleCount: number;
+        sampleResult: any | null;
+        error: string | null;
+    }> {
+        const dummyVector = new Array(dimensions).fill(0.01);
+        try {
+            const results = await this.search(dummyVector, indexName, 3, 10);
+            return {
+                exists: true,
+                sampleCount: results.length,
+                sampleResult: results[0] ? { name: results[0].name, score: results[0].score } : null,
+                error: null,
+            };
+        } catch (error) {
+            return {
+                exists: false,
+                sampleCount: 0,
+                sampleResult: null,
+                error: (error as Error).message,
+            };
+        }
+    }
 }
+

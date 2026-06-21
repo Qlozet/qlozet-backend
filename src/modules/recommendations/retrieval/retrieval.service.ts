@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { VectorSearchService } from './vector-search.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
+import { Event, EventDocument } from '../events/schemas/event.schema';
 
 @Injectable()
 export class RetrievalService {
@@ -10,6 +13,7 @@ export class RetrievalService {
     constructor(
         private vectorSearchService: VectorSearchService,
         private catalogService: CatalogService,
+        @InjectModel(Event.name) private eventModel: Model<EventDocument>,
     ) { }
 
     async retrieveCandidatesForHomeFeed(options: {
@@ -33,7 +37,8 @@ export class RetrievalService {
                 );
                 vectorResults.forEach((item) => candidates.set(item.itemId || item._id.toString(), item));
             } catch (e) {
-                this.logger.error(`Vector search failed, falling back: ${e.message}`);
+                this.logger.warn(`⚠️ Vector search FAILED — users getting trending-only feed. Error: ${e.message}`);
+                this.logger.warn('→ Fix: Create items_style_vindex in Atlas Console and run embedding backfill');
             }
         }
 
@@ -54,10 +59,78 @@ export class RetrievalService {
         return Array.from(candidates.values()).slice(0, limit);
     }
 
+    /**
+     * Retrieve trending items based on real engagement events from the last 7 days.
+     * Weighted scoring: purchase(5) > add_to_cart(3) > save(2) > click(1) > view(0.5)
+     * Falls back to recent catalog items if no events exist.
+     */
     async retrieveTrendingCandidates(limit: number): Promise<CatalogItem[]> {
-        // Placeholder: In a real system, you'd sort by click_count_7d desc
-        // Here we just fetch recent items from CatalogService
-        const allItems = await this.catalogService.findAll();
-        return allItems.slice(0, limit);
+        try {
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+            // Aggregate engagement events by item with weighted scoring
+            const trending = await this.eventModel.aggregate([
+                {
+                    $match: {
+                        timestamp: { $gte: sevenDaysAgo },
+                        eventType: {
+                            $in: ['click_item', 'view_item', 'add_to_cart', 'purchase', 'save_item'],
+                        },
+                        'properties.itemId': { $exists: true, $ne: null },
+                    },
+                },
+                {
+                    $group: {
+                        _id: '$properties.itemId',
+                        score: {
+                            $sum: {
+                                $switch: {
+                                    branches: [
+                                        { case: { $eq: ['$eventType', 'purchase'] }, then: 5 },
+                                        { case: { $eq: ['$eventType', 'add_to_cart'] }, then: 3 },
+                                        { case: { $eq: ['$eventType', 'save_item'] }, then: 2 },
+                                        { case: { $eq: ['$eventType', 'click_item'] }, then: 1 },
+                                        { case: { $eq: ['$eventType', 'view_item'] }, then: 0.5 },
+                                    ],
+                                    default: 0,
+                                },
+                            },
+                        },
+                        uniqueUsers: { $addToSet: '$userId' },
+                    },
+                },
+                {
+                    $addFields: {
+                        uniqueUserCount: { $size: '$uniqueUsers' },
+                    },
+                },
+                { $sort: { score: -1 } },
+                { $limit: limit },
+                { $project: { _id: 1, score: 1, uniqueUserCount: 1 } },
+            ]).exec();
+
+            if (trending.length > 0) {
+                const itemIds = trending.map((t) => t._id);
+                const items = await this.catalogService.findByIds(itemIds);
+
+                // Preserve the trending order (highest score first)
+                const itemMap = new Map(items.map((item) => [item.itemId, item]));
+                const ordered = itemIds
+                    .map((id) => itemMap.get(id))
+                    .filter((item) => !!item) as CatalogItem[];
+
+                this.logger.debug(`Trending: found ${ordered.length} items from ${trending.length} event groups`);
+                return ordered;
+            }
+        } catch (e) {
+            this.logger.warn(`Event-based trending failed, using fallback: ${e.message}`);
+        }
+
+        // Fallback: recent items from catalog (no events yet)
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        return this.catalogService.findRecent(cutoff, limit);
     }
 }
+

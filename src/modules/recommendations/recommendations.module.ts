@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 import { EventsModule } from './events/events.module';
@@ -14,9 +15,11 @@ import { EvaluationModule } from './evaluation/evaluation.module';
 
 import { FeedMixerService } from './feed-mixer/feed-mixer.service';
 import { BusinessModule } from '../business/business.module';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 
 @Module({
   imports: [
+    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
     EventsModule,
     CatalogModule,
     EmbeddingsModule,

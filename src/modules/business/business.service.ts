@@ -283,6 +283,23 @@ export class BusinessService {
     return Utils.getPagingData({ count, rows }, page, size);
   }
 
+  /**
+   * Bulk fetch businesses by their IDs in a single query.
+   * Used by the recommendation pipeline to avoid N+1 individual lookups.
+   */
+  async findBusinessesByIds(ids: string[]): Promise<any[]> {
+    if (!ids.length) return [];
+    const objectIds = ids
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    if (!objectIds.length) return [];
+
+    return this.businessModel
+      .find({ _id: { $in: objectIds } })
+      .lean()
+      .exec();
+  }
+
   async findBusinessById(businessId: string) {
     const result = await this.businessModel.aggregate([
       { $match: { _id: new Types.ObjectId(businessId) } },

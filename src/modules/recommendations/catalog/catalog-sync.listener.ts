@@ -3,12 +3,16 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { CatalogService } from './catalog.service';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
 import { CatalogItemType } from './enums/catalog-item-type.enum';
+import { EmbeddingsService } from '../embeddings/embeddings.service';
 
 @Injectable()
 export class CatalogSyncListener {
   private readonly logger = new Logger(CatalogSyncListener.name);
 
-  constructor(private readonly catalogService: CatalogService) {}
+  constructor(
+    private readonly catalogService: CatalogService,
+    private readonly embeddingsService: EmbeddingsService,
+  ) {}
 
   @OnEvent('product.upserted')
   async handleProductUpsertedEvent(product: any) {
@@ -73,6 +77,11 @@ export class CatalogSyncListener {
         await this.catalogService.create(dto as any);
         this.logger.debug(`Created new catalog item ${dto.itemId}`);
       }
+
+      // Auto-generate embedding (fire-and-forget)
+      this.embeddingsService.embedSingleItem(dto.itemId).catch(err => {
+        this.logger.warn(`Auto-embed failed for ${dto.itemId}: ${err.message}`);
+      });
     } catch (error) {
       this.logger.error(`Failed to sync product ${product._id} to catalog`, error);
     }
@@ -80,8 +89,12 @@ export class CatalogSyncListener {
 
   @OnEvent('product.deleted')
   async handleProductDeletedEvent(payload: { id: string }) {
-    this.logger.log(`Handling product deletion for ${payload.id}`);
-    // Note: If catalogService has a delete method, we should call it here.
-    // Currently CatalogService might not have delete() method. We should check and add if missing.
+    this.logger.log(`Removing catalog item for deleted product ${payload.id}`);
+    try {
+      await this.catalogService.delete(payload.id);
+      this.logger.debug(`Deleted catalog item ${payload.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to delete catalog item ${payload.id}`, error);
+    }
   }
 }
