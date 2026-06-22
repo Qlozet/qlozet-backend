@@ -474,7 +474,7 @@ export class UserController {
   @Roles(UserType.CUSTOMER)
   @Get('vendors')
   @ApiOkResponse({
-    description: 'Top vendors of the week sorted by total_items_sold',
+    description: 'Get vendors. No params = random 5. With page/limit = paginated sorted list.',
     schema: {
       example: [
         {
@@ -504,7 +504,18 @@ export class UserController {
       ],
     },
   })
-  async fetchVendors(@Req() req: any) {
+  async fetchVendors(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (page || limit) {
+      return this.businessService.getVendorsPaginated(
+        req.user?.id,
+        Number(page) || 1,
+        Number(limit) || 20,
+      );
+    }
     return this.businessService.getRandomBusinesses(req.user?.id);
   }
   @Roles(UserType.CUSTOMER)

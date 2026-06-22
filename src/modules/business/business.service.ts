@@ -563,52 +563,176 @@ export class BusinessService {
     );
   }
 
-  async getRandomBusinesses(user: string, limit = 5) {
+  /**
+   * Get a paginated, sorted list of all approved/verified vendors.
+   * Called when page/limit query params are provided.
+   */
+  async getVendorsPaginated(user: string, page = 1, limit = 20) {
     const userObjectId = new Types.ObjectId(user);
-    const randomSeed = Math.random();
+    const skip = (page - 1) * limit;
 
-    return this.businessModel.aggregate([
-      {
-        $addFields: {
-          randomSafe: { $ifNull: ['$random', Math.random()] },
-        },
+    const matchStage = {
+      $match: {
+        status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
       },
-      {
-        $match: {
-          status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
-          randomSafe: { $gte: randomSeed },
-        },
-      },
-      { $sort: { randomSafe: 1 } },
+    };
+
+    // Get total count for pagination metadata
+    const [countResult] = await this.businessModel.aggregate([
+      matchStage,
+      { $count: 'total' },
+    ]);
+    const total = countResult?.total || 0;
+
+    const vendors = await this.businessModel.aggregate([
+      matchStage,
+      { $sort: { total_items_sold: -1, createdAt: -1 } },
+      { $skip: skip },
       { $limit: limit },
 
       /**
-       * 🔁 Fallback window
+       * 🔹 LOOKUP: 3 sample products per vendor
        */
       {
-        $unionWith: {
-          coll: 'businesses',
+        $lookup: {
+          from: 'products',
+          let: { businessId: '$_id' },
           pipeline: [
             {
+              $match: {
+                $expr: { $eq: ['$business', '$$businessId'] },
+              },
+            },
+            { $sample: { size: 3 } },
+            {
               $addFields: {
-                randomSafe: { $ifNull: ['$random', Math.random()] },
+                images: {
+                  $cond: [
+                    { $eq: ['$kind', 'accessory'] },
+                    { $ifNull: ['$accessory.images', []] },
+                    {
+                      $cond: [
+                        { $eq: ['$kind', 'clothing'] },
+                        { $ifNull: ['$clothing.images', []] },
+                        {
+                          $cond: [
+                            { $eq: ['$kind', 'fabric'] },
+                            { $ifNull: ['$fabric.images', []] },
+                            [],
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
               },
             },
             {
-              $match: {
-                status: {
-                  $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED],
-                },
-                randomSafe: { $lt: randomSeed },
+              $project: {
+                _id: 1,
+                kind: 1,
+                base_price: 1,
+                images: { $slice: ['$images', 1] },
+                ratings: 1,
+                average_rating: 1,
               },
             },
-            { $sort: { randomSafe: 1 } },
-            { $limit: limit },
           ],
+          as: 'products',
         },
       },
 
-      { $limit: limit },
+      /**
+       * 🔹 COMPUTED METRICS
+       */
+      {
+        $addFields: {
+          total_products: { $size: '$products' },
+
+          total_number_of_ratings: {
+            $sum: {
+              $map: {
+                input: '$products',
+                as: 'p',
+                in: { $size: { $ifNull: ['$$p.ratings', []] } },
+              },
+            },
+          },
+
+          cumulative_rating: {
+            $cond: [
+              { $gt: [{ $size: '$products' }, 0] },
+              { $avg: '$products.average_rating' },
+              0,
+            ],
+          },
+
+          following: {
+            $in: [userObjectId, { $ifNull: ['$followers', []] }],
+          },
+
+          followers_count: {
+            $size: { $ifNull: ['$followers', []] },
+          },
+        },
+      },
+
+      /**
+       * 🔹 FINAL RESPONSE SHAPE
+       */
+      {
+        $project: {
+          _id: 1,
+          business_name: 1,
+          business_logo_url: 1,
+          description: 1,
+          city: 1,
+          country: 1,
+
+          total_items_sold: 1,
+          cumulative_rating: 1,
+          total_products: 1,
+          total_number_of_ratings: 1,
+
+          following: 1,
+          followers_count: 1,
+          products: {
+            _id: 1,
+            kind: 1,
+            base_price: 1,
+            images: 1,
+          },
+        },
+      },
+    ]);
+
+    return {
+      data: vendors,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getRandomBusinesses(user: string, limit = 5) {
+    const userObjectId = new Types.ObjectId(user);
+
+    return this.businessModel.aggregate([
+      /**
+       * 🔹 MATCH: Only approved/verified businesses
+       */
+      {
+        $match: {
+          status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+        },
+      },
+
+      /**
+       * 🔹 RANDOM SAMPLE: Reliable random selection via MongoDB $sample
+       * Fetch more than needed because we filter out businesses with no products later
+       */
+      { $sample: { size: limit * 3 } },
 
       /**
        * 🔹 RANDOM + MINIMAL PRODUCTS
@@ -674,6 +798,11 @@ export class BusinessService {
           products: { $ne: [], $exists: true },
         },
       },
+
+      /**
+       * 🔹 TRIM TO REQUESTED LIMIT (after filtering)
+       */
+      { $limit: limit },
 
       /**
        * 🔹 COMPUTED METRICS
