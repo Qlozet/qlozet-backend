@@ -565,50 +565,22 @@ export class BusinessService {
 
   async getRandomBusinesses(user: string, limit = 5) {
     const userObjectId = new Types.ObjectId(user);
-    const randomSeed = Math.random();
 
     return this.businessModel.aggregate([
-      {
-        $addFields: {
-          randomSafe: { $ifNull: ['$random', Math.random()] },
-        },
-      },
+      /**
+       * 🔹 MATCH: Only approved/verified businesses
+       */
       {
         $match: {
           status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
-          randomSafe: { $gte: randomSeed },
         },
       },
-      { $sort: { randomSafe: 1 } },
-      { $limit: limit },
 
       /**
-       * 🔁 Fallback window
+       * 🔹 RANDOM SAMPLE: Reliable random selection via MongoDB $sample
+       * Fetch more than needed because we filter out businesses with no products later
        */
-      {
-        $unionWith: {
-          coll: 'businesses',
-          pipeline: [
-            {
-              $addFields: {
-                randomSafe: { $ifNull: ['$random', Math.random()] },
-              },
-            },
-            {
-              $match: {
-                status: {
-                  $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED],
-                },
-                randomSafe: { $lt: randomSeed },
-              },
-            },
-            { $sort: { randomSafe: 1 } },
-            { $limit: limit },
-          ],
-        },
-      },
-
-      { $limit: limit },
+      { $sample: { size: limit * 3 } },
 
       /**
        * 🔹 RANDOM + MINIMAL PRODUCTS
@@ -674,6 +646,11 @@ export class BusinessService {
           products: { $ne: [], $exists: true },
         },
       },
+
+      /**
+       * 🔹 TRIM TO REQUESTED LIMIT (after filtering)
+       */
+      { $limit: limit },
 
       /**
        * 🔹 COMPUTED METRICS
