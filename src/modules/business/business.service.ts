@@ -1226,4 +1226,112 @@ export class BusinessService {
       },
     };
   }
+
+  async getVendorCustomers(
+    businessId: string,
+    page: number = 1,
+    limit: number = 20,
+    ordersLimit: number = 5,
+  ) {
+    const skip = (page - 1) * limit;
+    const businessObjectId = new Types.ObjectId(businessId);
+
+    const pipeline: any[] = [
+      // 1. Match orders that contain items from this vendor
+      {
+        $match: {
+          'items.business': businessObjectId,
+        },
+      },
+      // 2. Sort by newest orders first so the pushed array is ordered
+      {
+        $sort: { createdAt: -1 },
+      },
+      // 3. Group by customer to get their orders and count
+      {
+        $group: {
+          _id: '$customer',
+          total_orders: { $sum: 1 },
+          orders: {
+            $push: {
+              _id: '$_id',
+              reference: '$reference',
+              total: '$total',
+              status: '$status',
+              createdAt: '$createdAt',
+            },
+          },
+        },
+      },
+      // 4. Lookup the customer details from users collection
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'customer_info',
+        },
+      },
+      {
+        $unwind: '$customer_info',
+      },
+      // 5. Project the needed fields
+      {
+        $project: {
+          _id: 1,
+          username: '$customer_info.username',
+          full_name: '$customer_info.full_name',
+          profile_picture: '$customer_info.profile_picture',
+          status: '$customer_info.status',
+          total_orders: 1,
+          // Limit the orders array to ordersLimit
+          orders: { $slice: ['$orders', ordersLimit] },
+          // Get the default active measurement (first one that is active, or just the first)
+          default_measurement: {
+            $let: {
+              vars: {
+                activeMeasurements: {
+                  $filter: {
+                    input: { $ifNull: ['$customer_info.measurementSets', []] },
+                    as: 'm',
+                    cond: { $eq: ['$$m.active', true] },
+                  },
+                },
+              },
+              in: {
+                $cond: {
+                  if: { $gt: [{ $size: '$$activeMeasurements' }, 0] },
+                  then: { $arrayElemAt: ['$$activeMeasurements', 0] },
+                  else: null,
+                },
+              },
+            },
+          },
+        },
+      },
+      // 6. Sort by total orders (or can sort by newest first depending on preference, here total_orders)
+      {
+        $sort: { total_orders: -1 as const },
+      },
+      // 7. Facet for pagination
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          data: [{ $skip: skip }, { $limit: limit }],
+        },
+      },
+    ];
+
+    const result = await this.orderModel.aggregate(pipeline);
+    const total = result[0]?.metadata[0]?.total || 0;
+    const data = result[0]?.data || [];
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 }
