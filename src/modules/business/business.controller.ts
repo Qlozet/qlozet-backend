@@ -148,4 +148,33 @@ export class BusinessController {
   async getEarningChart(@Req() req: any) {
     return this.businessService.getEarningsChart(req.business?.id);
   }
+
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Get('customers')
+  @ApiOperation({ summary: 'Get paginated list of vendor customers' })
+  @ApiResponse({ status: 200, description: 'Paginated list of customers with stats and orders' })
+  async getVendorCustomers(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('orders_limit') ordersLimit?: string,
+  ) {
+    return this.businessService.getVendorCustomers(
+      req.business?.id,
+      Number(page) || 1,
+      Number(limit) || 20,
+      Number(ordersLimit) || 5,
+    );
+  }
+
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Get('customers/:id/wishlist')
+  @ApiOperation({ summary: 'Get a specific customer\'s wishlist items that belong to this vendor' })
+  @ApiResponse({ status: 200, description: 'List of wishlist products belonging to the vendor' })
+  async getVendorCustomerWishlist(
+    @Req() req: any,
+    @Param('id') customerId: string,
+  ) {
+    return this.businessService.getVendorCustomerWishlist(req.business?.id, customerId);
+  }
 }

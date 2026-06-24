@@ -563,4 +563,12 @@ export class UserController {
   async deleteUser(@Req() req: any) {
     return this.userService.deleteUser(req.user?.id);
   }
+
+  @Roles(UserType.CUSTOMER)
+  @Get('wishlist')
+  @ApiOperation({ summary: 'Get current customer wishlist' })
+  @ApiResponse({ status: 200, description: 'List of wishlist items populated with product details' })
+  async getWishlist(@Req() req: any) {
+    return this.userService.getWishlist(req.user.id);
+  }
 }
