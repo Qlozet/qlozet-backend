@@ -166,4 +166,15 @@ export class BusinessController {
       Number(ordersLimit) || 5,
     );
   }
+
+  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Get('customers/:id/wishlist')
+  @ApiOperation({ summary: 'Get a specific customer\'s wishlist items that belong to this vendor' })
+  @ApiResponse({ status: 200, description: 'List of wishlist products belonging to the vendor' })
+  async getVendorCustomerWishlist(
+    @Req() req: any,
+    @Param('id') customerId: string,
+  ) {
+    return this.businessService.getVendorCustomerWishlist(req.business?.id, customerId);
+  }
 }

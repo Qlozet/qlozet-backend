@@ -1334,4 +1334,18 @@ export class BusinessService {
       totalPages: Math.ceil(total / limit),
     };
   }
+
+  async getVendorCustomerWishlist(businessId: string, customerId: string) {
+    const customer = await this.userModel.findById(customerId).select('wishlist').populate({
+      path: 'wishlist',
+      match: { business: new Types.ObjectId(businessId) }
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    // Filter out nulls (products that didn't match the business filter)
+    return (customer.wishlist || []).filter(item => item !== null);
+  }
 }
