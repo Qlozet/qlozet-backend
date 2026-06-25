@@ -20,7 +20,7 @@ import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
 
-import { UserDocument } from '../ums/schemas';
+import { User, UserDocument } from '../ums/schemas';
 import { Cron } from '@nestjs/schedule';
 import {
   Order,
@@ -37,7 +37,7 @@ export class ProductService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel(Product.name)
+    @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
     @InjectModel(Accessory.name)
     private readonly accessoryModel: Model<AccessoryDocument>,
