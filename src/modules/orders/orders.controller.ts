@@ -119,7 +119,50 @@ export class OrderController {
   @Roles(UserType.VENDOR)
   @Get('vendor')
   @ApiOperation({ summary: 'Get paginated orders for the logged-in vendor' })
-  @ApiResponse({ status: 200, description: 'Paginated list of orders containing items from this vendor' })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated list of orders containing items from this vendor',
+    schema: {
+      example: {
+        data: [
+          {
+            _id: '60d5ecb8b392...',
+            reference: 'ORD-123456',
+            customer: {
+              _id: '60d5ecb8b392...',
+              email: 'customer@example.com'
+            },
+            status: 'pending',
+            total: 15000,
+            subtotal: 13000,
+            shipping_fee: 2000,
+            items: [
+              {
+                product_id: '60d5ecb8b392...',
+                product_name: 'Ankara Dress',
+                business: '60d5ecb8b392...',
+                selections: {
+                  color_variant_selection: [],
+                  style_selection: [],
+                  fabric_selection: [],
+                  accessory_selection: []
+                },
+                total_price: 13000
+              }
+            ],
+            createdAt: '2026-01-01T10:00:00.000Z',
+            updatedAt: '2026-01-01T10:00:00.000Z'
+          }
+        ],
+        total_items: 50,
+        total_pages: 5,
+        current_page: 1,
+        has_next_page: true,
+        has_previous_page: false,
+        page_size: 10
+      }
+    }
+  })
   @ApiQuery({
     name: 'status',
     required: false,
