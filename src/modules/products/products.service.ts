@@ -545,6 +545,10 @@ export class ProductService {
     };
   }
   async toggleWishlist(userId: string, productId: string) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new BadRequestException('Invalid product ID');
+    }
+
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
