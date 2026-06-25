@@ -85,6 +85,8 @@ export class OrderController {
   // In your controller
   @Get('customer')
   @Roles(UserType.CUSTOMER)
+  @ApiOperation({ summary: 'Get paginated orders for the logged-in customer' })
+  @ApiResponse({ status: 200, description: 'Paginated list of customer orders' })
   @ApiQuery({
     name: 'status',
     required: false,
@@ -116,6 +118,8 @@ export class OrderController {
 
   @Roles(UserType.VENDOR)
   @Get('vendor')
+  @ApiOperation({ summary: 'Get paginated orders for the logged-in vendor' })
+  @ApiResponse({ status: 200, description: 'Paginated list of orders containing items from this vendor' })
   @ApiQuery({
     name: 'status',
     required: false,
