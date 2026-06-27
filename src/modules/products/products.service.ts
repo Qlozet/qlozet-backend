@@ -352,7 +352,7 @@ export class ProductService {
     page: number = 1,
     size: number = 10,
   ) {
-    const filter: any = {};
+    const filter: any = { business: new Types.ObjectId(vendor) };
     if (kind) {
       filter.kind = kind;
     }
@@ -360,7 +360,7 @@ export class ProductService {
 
     const [rows, count] = await Promise.all([
       this.productModel
-        .find({ ...filter, vendor })
+        .find(filter)
         .skip(skip)
         .limit(take)
         .exec(),
