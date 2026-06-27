@@ -164,6 +164,7 @@ export class ProductsController {
     return this.productService.findAll(query);
   }
   @Get('by-vendor')
+  @Roles(UserType.VENDOR)
   @ApiOperation({
     summary:
       'Get all products by vendor with optional kind filter and pagination',

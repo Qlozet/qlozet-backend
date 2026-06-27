@@ -27,6 +27,8 @@ export class RecommendationsController {
     @Query('limit') limit: number = 30,
     @Query('budgetMax') budgetMax?: number,
     @Query('deadlineDays') deadlineDays?: number,
+    @Query('category') category?: string,
+    @Query('gender') gender?: string,
   ) {
     if (!userId) {
       return { error: 'userId required' };
@@ -38,6 +40,8 @@ export class RecommendationsController {
       limit: Number(limit),
       budgetMax: budgetMax ? Number(budgetMax) : undefined,
       deadlineDays: deadlineDays ? Number(deadlineDays) : undefined,
+      category,
+      gender,
     });
   }
 

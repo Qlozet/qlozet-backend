@@ -39,6 +39,8 @@ export class RecommendationsService {
     limit: number;
     budgetMax?: number;
     deadlineDays?: number;
+    category?: string;
+    gender?: string;
   }) {
     const startTime = Date.now();
     const { userId, sessionId, limit, budgetMax, deadlineDays } = options;
@@ -95,6 +97,8 @@ export class RecommendationsService {
     // 3. Filtering
     const filterSpec = this.filtersService.buildFilterSpecFromRequest({
       maxPrice: budgetMax,
+      category: options.category,
+      gender: options.gender,
     });
     if (deadlineDays) filterSpec.deadlineDays = deadlineDays;
 
