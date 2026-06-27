@@ -361,6 +361,7 @@ export class ProductService {
     const [rows, count] = await Promise.all([
       this.productModel
         .find(filter)
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(take)
         .exec(),
