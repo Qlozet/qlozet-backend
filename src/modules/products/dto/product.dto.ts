@@ -75,6 +75,15 @@ export class CreateProductDto {
   @IsOptional()
   @IsObject()
   metafields?: Record<string, any>;
+
+  @ApiPropertyOptional({
+    enum: ['active', 'draft', 'archived'],
+    description: 'Product status (defaults to draft)',
+    example: 'active'
+  })
+  @IsOptional()
+  @IsEnum(['active', 'draft', 'archived'])
+  status?: 'active' | 'draft' | 'archived';
 }
 
 // ---------- CLOTHING ----------
