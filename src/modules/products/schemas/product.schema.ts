@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 import { Clothing, ClothingSchema } from './clothing.schema';
@@ -38,20 +38,20 @@ export class Product extends Document {
   @Prop({ type: ClothingSchema, default: null })
   clothing?: Clothing;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
   @Prop({ type: Date, default: null })
   scheduled_activation_date?: Date;
 
-  @Prop({ type: Types.ObjectId, ref: 'Discount', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;
 
-  @Prop({ type: [Types.ObjectId], ref: 'Collection', default: [] })
+  @Prop({ type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Collection' }], default: [] })
   collections: Types.ObjectId[];
   @Prop({
     type: [
       {
-        user: { type: Types.ObjectId, ref: 'User', required: true },
+        user: { type: MongooseSchema.Types.ObjectId, ref: 'User', required: true },
         value: { type: Number, required: true, min: 1, max: 5 },
         comment: { type: String },
       },

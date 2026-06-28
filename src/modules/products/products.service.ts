@@ -132,7 +132,10 @@ export class ProductService {
 
     // ✅ BUSINESS FILTER (THIS IS THE KEY)
     if (business_id) {
-      filter.business = new Types.ObjectId(business_id);
+      filter.$or = [
+        { business: new Types.ObjectId(business_id) },
+        { business: business_id },
+      ];
     }
 
     if (kind) {
@@ -352,7 +355,12 @@ export class ProductService {
     page: number = 1,
     size: number = 10,
   ) {
-    const filter: any = { business: new Types.ObjectId(vendor) };
+    const filter: any = {
+      $or: [
+        { business: new Types.ObjectId(vendor) },
+        { business: vendor },
+      ],
+    };
     if (kind) {
       filter.kind = kind;
     }
