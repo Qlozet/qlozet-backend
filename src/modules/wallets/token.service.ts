@@ -84,9 +84,10 @@ export class TokenService {
   }
 
   async spend(
-    type: 'video' | 'image' | 'edit' | 'prediction' | 'ai_ask' | 'outfit' | 'analyze',
+    type: 'video' | 'image' | 'edit' | 'prediction' | 'ai_ask' | 'outfit' | 'analyze' | 'generate_style',
     business?: string,
     customer?: string,
+    amountOverride?: number,
   ) {
     const settings = await this.platformService.getSettings();
 
@@ -98,9 +99,10 @@ export class TokenService {
       ai_ask: settings.ai_ask_token_price,
       outfit: settings.outfit_generation_token_price,
       analyze: (settings as any).analyze_reference_token_price ?? 10,
+      generate_style: 10,
     };
 
-    const amount = priceMap[type] ?? settings.edit_garment_token_price;
+    const amount = amountOverride ?? priceMap[type] ?? settings.edit_garment_token_price;
 
     // Customer wallets are stored as { customer: id, business: null }.
     // If both are provided, prefer customer to avoid a query mismatch.

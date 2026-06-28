@@ -43,6 +43,8 @@ import {
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { Types } from 'mongoose';
 import { FabricParamDto, UpdateFabricStockDto } from './dto/fabric.dto';
+import { TokenService } from '../wallets/token.service';
+import { StyleLibraryService } from '../style-library/style-library.service';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -50,7 +52,11 @@ import { FabricParamDto, UpdateFabricStockDto } from './dto/fabric.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class ProductsController {
-  constructor(private readonly productService: ProductService) {}
+  constructor(
+    private readonly productService: ProductService,
+    private readonly tokenService: TokenService,
+    private readonly styleLibraryService: StyleLibraryService,
+  ) {}
 
   // ---------------- CLOTHING ----------------
   @Post('clothing')
@@ -66,6 +72,64 @@ export class ProductsController {
       req.business?.id,
       'clothing',
     );
+  }
+
+  @Post('clothing/styles/generate-image')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Generate an AI image for a custom style' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', example: 'Bishop Collar' },
+        category: { type: 'string', example: 'collar' },
+        description: { type: 'string', example: 'A tall, stand-up collar' },
+      },
+      required: ['name', 'category'],
+    },
+  })
+  async generateStyleImage(
+    @Body() body: { name: string; category: string; description?: string },
+    @Req() req: any,
+  ) {
+    const businessId = req.business?.id || req.business?._id;
+    if (!businessId) {
+      throw new BadRequestException('Vendor business ID is missing from your session.');
+    }
+
+    const tokenPrice = 10;
+    
+    // Check balance
+    const balance = await this.tokenService.balance(businessId, undefined);
+    if (balance < tokenPrice) {
+      throw new BadRequestException(`Insufficient tokens. This feature costs ${tokenPrice} tokens. Please fund your wallet.`);
+    }
+
+    // Generate image
+    const imageUrl = await this.styleLibraryService.generateStyleImage(
+      body.name,
+      body.category,
+      body.description,
+    );
+
+    if (!imageUrl) {
+      throw new BadRequestException('Failed to generate image. Please try again.');
+    }
+
+    // Deduct tokens
+    await this.tokenService.spend(
+      'generate_style',
+      businessId,
+      undefined,
+      tokenPrice,
+    );
+
+    return {
+      message: 'Image generated successfully',
+      url: imageUrl,
+      tokens_deducted: tokenPrice,
+      remaining_balance: balance - tokenPrice,
+    };
   }
 
   // ---------------- FABRIC ----------------

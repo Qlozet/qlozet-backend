@@ -18,6 +18,8 @@ import {
   Collection, CollectionSchema,
 } from './schemas';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import { WalletsModule } from '../wallets/wallets.module';
+import { StyleLibraryModule } from '../style-library/style-library.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
       { name: Collection.name, schema: CollectionSchema },
       { name: Order.name, schema: OrderSchema },
     ]),
+    WalletsModule,
+    StyleLibraryModule,
   ],
   controllers: [ProductsController, DiscountController, CollectionController],
   providers: [JwtService, ProductService, DiscountService, CollectionService],

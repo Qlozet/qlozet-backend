@@ -62,6 +62,9 @@ export class Style {
   price: number;
 
   @Prop()
+  description?: string;
+
+  @Prop()
   min_width_cm?: number;
 
   @Prop()
