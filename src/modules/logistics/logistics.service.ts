@@ -17,7 +17,7 @@ export class LogisticsService {
   private readonly token = process.env.SHIPBUBBLE_API_KEY;
 
   constructor(private readonly httpService: HttpService) {
-    if (!this.baseUrl) throw new Error('SHIPBUBBLE_URL is required');
+    if (!this.baseUrl) throw new Error('SHIPBUBBLE_BASE_URL is required');
     if (!this.token) throw new Error('SHIPBUBBLE_TOKEN is required');
   }
 

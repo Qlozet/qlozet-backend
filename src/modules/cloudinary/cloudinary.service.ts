@@ -54,8 +54,7 @@ export class CloudinaryService {
           }
           if (!result) {
             return reject(new Error('Upload result is undefined'));
-          }
-          resolve({ fileUrl: result.url, filePublicId: result.public_id });
+          resolve({ fileUrl: result.secure_url, filePublicId: result.public_id });
         },
       );
 
@@ -74,7 +73,7 @@ export class CloudinaryService {
         (error, result) => {
           if (error) return reject(error);
           if (!result) return reject(new Error('Upload result is undefined'));
-          resolve({ imageUrl: result.url, imagePublicId: result.public_id });
+          resolve({ imageUrl: result.secure_url, imagePublicId: result.public_id });
         },
       );
 
