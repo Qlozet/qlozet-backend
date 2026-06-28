@@ -312,7 +312,7 @@ export class StyleLibraryService {
    * Generate a minimal fashion sketch using DALL-E and upload to Cloudinary.
    * Returns the Cloudinary URL or undefined if generation fails.
    */
-  private async generateStyleImage(
+  public async generateStyleImage(
     name: string,
     category: string,
     description?: string,

@@ -68,6 +68,14 @@ export class CreateStyleDto {
   min_width_cm?: number;
 
   @ApiPropertyOptional({
+    example: 'A tall, stand-up collar with rounded edges',
+    description: 'Detailed description for AI image generation',
+  })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({
     example: 'Standard dress shirt',
     description: 'Additional notes',
   })
