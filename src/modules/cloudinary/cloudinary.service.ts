@@ -54,6 +54,7 @@ export class CloudinaryService {
           }
           if (!result) {
             return reject(new Error('Upload result is undefined'));
+          }
           resolve({ fileUrl: result.secure_url, filePublicId: result.public_id });
         },
       );
