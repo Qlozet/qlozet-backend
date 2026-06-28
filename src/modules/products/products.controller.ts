@@ -197,8 +197,13 @@ export class ProductsController {
     @Query('page') page = 1,
     @Query('size') size = 10,
   ) {
+    const businessId = req.business?.id || req.business?._id;
+    if (!businessId) {
+      throw new BadRequestException('Vendor business ID is missing from your session. Make sure you are logged in as a Vendor.');
+    }
+
     return this.productService.findByVendor(
-      req.business?.id,
+      businessId.toString(),
       kind,
       Number(page),
       Number(size),
