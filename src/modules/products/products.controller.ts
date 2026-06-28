@@ -43,6 +43,7 @@ import {
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { Types } from 'mongoose';
 import { FabricParamDto, UpdateFabricStockDto } from './dto/fabric.dto';
+import { ModuleRef } from '@nestjs/core';
 import { TokenService } from '../wallets/token.service';
 import { StyleLibraryService } from '../style-library/style-library.service';
 
@@ -54,8 +55,7 @@ import { StyleLibraryService } from '../style-library/style-library.service';
 export class ProductsController {
   constructor(
     private readonly productService: ProductService,
-    private readonly tokenService: TokenService,
-    private readonly styleLibraryService: StyleLibraryService,
+    private moduleRef: ModuleRef,
   ) {}
 
   // ---------------- CLOTHING ----------------
@@ -99,14 +99,18 @@ export class ProductsController {
 
     const tokenPrice = 10;
     
+    // Lazily load services to avoid circular dependency
+    const tokenService = this.moduleRef.get(TokenService, { strict: false });
+    const styleLibraryService = this.moduleRef.get(StyleLibraryService, { strict: false });
+    
     // Check balance
-    const balance = await this.tokenService.balance(businessId, undefined);
+    const balance = await tokenService.balance(businessId, undefined);
     if (balance < tokenPrice) {
       throw new BadRequestException(`Insufficient tokens. This feature costs ${tokenPrice} tokens. Please fund your wallet.`);
     }
 
     // Generate image
-    const imageUrl = await this.styleLibraryService.generateStyleImage(
+    const imageUrl = await styleLibraryService.generateStyleImage(
       body.name,
       body.category,
       body.description,
@@ -117,7 +121,7 @@ export class ProductsController {
     }
 
     // Deduct tokens
-    await this.tokenService.spend(
+    await tokenService.spend(
       'generate_style',
       businessId,
       undefined,
