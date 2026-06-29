@@ -9,8 +9,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsNumber, Min } from 'class-validator';
+import { IsNumber, Min, IsDateString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ProductStatus } from '../enums/product-status.enum';
 import { ClothingDto } from './clothing.dto';
 import { AccessoryDto } from './accessory.dto';
 import { FabricDto } from './fabric.dto';
@@ -87,13 +88,21 @@ export class CreateProductDto {
   metafields?: Record<string, any>;
 
   @ApiPropertyOptional({
-    enum: ['active', 'draft', 'archived'],
-    description: 'Product status (defaults to draft)',
-    example: 'active'
+    enum: ProductStatus,
+    description: 'Publication status',
+    example: ProductStatus.ACTIVE,
   })
   @IsOptional()
-  @IsEnum(['active', 'draft', 'archived'])
-  status?: 'active' | 'draft' | 'archived';
+  @IsEnum(ProductStatus)
+  status?: ProductStatus;
+
+  @ApiPropertyOptional({
+    description: 'Scheduled activation date for SCHEDULED products',
+    example: '2027-01-01T00:00:00.000Z',
+  })
+  @IsOptional()
+  @IsDateString()
+  scheduled_activation_date?: string;
 }
 
 // ---------- CLOTHING ----------

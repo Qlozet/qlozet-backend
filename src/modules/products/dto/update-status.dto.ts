@@ -3,13 +3,15 @@ import { IsDateString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
 
+import { ProductStatus } from '../enums/product-status.enum';
+
 export class UpdateStatusDto {
   @ApiProperty({
     description: 'New status of the product',
-    enum: ['active', 'draft', 'archived'],
+    enum: ProductStatus,
   })
-  @IsEnum(['active', 'draft', 'archived'])
-  status: 'active' | 'draft' | 'archived';
+  @IsEnum(ProductStatus)
+  status: ProductStatus;
 }
 
 export class ScheduleActivationDto {

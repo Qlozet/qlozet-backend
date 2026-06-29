@@ -291,13 +291,13 @@ export class ProductsController {
   }
 
   @Delete(':id')
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, UserType.ADMIN)
   @ApiOperation({ summary: 'Delete a product by ID' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async delete(@Param('id') id: string, @Req() req: any) {
-    await this.productService.delete(id, req.user.id);
+    await this.productService.delete(id, req.user.id, req.user.user_type);
     return { message: 'Product deleted successfully' };
   }
   @Post(':id/rate')

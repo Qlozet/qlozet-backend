@@ -5,12 +5,16 @@ import { Accessory, AccessorySchema } from './accessory.schema';
 import { Clothing, ClothingSchema } from './clothing.schema';
 
 export type ProductDocument = Product & Document;
+import { ProductStatus } from '../enums/product-status.enum';
 
 export enum ProductKind {
   CLOTHING = 'clothing',
   FABRIC = 'fabric',
   ACCESSORY = 'accessory',
 }
+
+
+
 // Main Product schema
 @Schema({ timestamps: true, discriminatorKey: 'kind', collection: 'products' })
 export class Product extends Document {
@@ -26,8 +30,8 @@ export class Product extends Document {
   @Prop({ required: true, min: 0 })
   base_price: number;
 
-  @Prop({ enum: ['active', 'draft', 'archived'], default: 'draft' })
-  status: 'active' | 'draft' | 'archived';
+  @Prop({ type: String, enum: ProductStatus, default: ProductStatus.DRAFT })
+  status: ProductStatus;
 
   @Prop({ type: FabricSchema, default: null })
   fabric?: Fabric;
