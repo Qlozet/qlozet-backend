@@ -57,14 +57,21 @@ export class ProductService {
     business: Types.ObjectId,
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
-    // 1. Compute price based on kind
-    let totalPrice = 0;
-    if (kind === 'clothing') {
-      totalPrice = this.computeClothingPrice(dto);
-    } else if (kind === 'accessory') {
-      totalPrice = this.computeAccessoryPrice(dto);
-    } else if (kind === 'fabric') {
-      totalPrice = this.computeFabricPrice(dto);
+    // 1. Determine base price
+    let totalPrice = dto.base_price;
+    
+    // Fallback if frontend hasn't updated to send base_price directly yet
+    if (totalPrice === undefined || totalPrice === null) {
+       if (dto.metafields?.base_price) {
+           totalPrice = Number(dto.metafields.base_price);
+       } else if (kind === 'accessory') {
+           totalPrice = (dto as any).accessory?.price || 0;
+       } else if (kind === 'fabric') {
+           const f = (dto as any).fabric;
+           totalPrice = (f?.price_per_yard || 0) * Math.max(f?.yard_length || 0, f?.min_cut || 0);
+       } else {
+           totalPrice = 0; 
+       }
     }
     if (dto.product_id) {
       const existing = await this.productModel.findById(dto.product_id);
@@ -219,135 +226,7 @@ export class ProductService {
 
   // 💰 Helper methods
 
-  private computeClothingPrice(dto: any): number {
-    const clothing = dto?.clothing;
-    if (!clothing) return 0;
 
-    const isCustomize = clothing?.type === ClothingType.CUSTOMIZE;
-    let total = 0;
-    // --- CUSTOMIZE ---
-    if (isCustomize) {
-      const hasFabric =
-        Array.isArray(clothing.fabrics) && clothing.fabrics.length > 0;
-      const hasColorVariants =
-        Array.isArray(clothing.color_variants) &&
-        clothing.color_variants.length > 0;
-      const hasStyles =
-        Array.isArray(clothing.styles) && clothing.styles.length > 0;
-      const hasAccessories =
-        Array.isArray(clothing.accessories) && clothing.accessories.length > 0;
-
-      // ✅ Validate rules
-      if (!hasStyles)
-        throw new Error('Styles are required for customized clothing.');
-      if (hasFabric && hasColorVariants)
-        throw new Error(
-          'Customized clothing cannot have both fabric and color variants.',
-        );
-
-      // 🎨 Styles (required)
-      total += clothing.styles.reduce((sum, s) => sum + (s.price || 0), 0);
-
-      // 🧵 Fabric (optional)
-      if (hasFabric) {
-        total += clothing.fabrics.reduce((sum, fabric) => {
-          const fabricBase =
-            (fabric.price_per_yard || 0) * (fabric.yard_length || 0);
-          const variantTotal = Array.isArray(fabric.variants)
-            ? fabric.variants.reduce(
-                (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
-                0,
-              )
-            : 0;
-          return sum + fabricBase + variantTotal;
-        }, 0);
-      }
-
-      // 🎨 Color Variants (optional, exclusive with fabric)
-      else if (hasColorVariants) {
-        total += clothing.color_variants.reduce((sum, color) => {
-          const colorSum = Array.isArray(color.variants)
-            ? color.variants.reduce(
-                (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
-                0,
-              )
-            : 0;
-          return sum + colorSum;
-        }, 0);
-      }
-
-      // 🧷 Accessories (optional)
-      if (hasAccessories) {
-        total += clothing.accessories.reduce((sum, accessory) => {
-          const basePrice = accessory.price || 0;
-          const variantStock =
-            accessory.variants?.reduce((vSum, v) => vSum + (v.stock || 0), 0) ||
-            0;
-          const accessoryTotal = variantStock
-            ? variantStock * basePrice
-            : basePrice;
-          console.log(accessoryTotal, 'accessoryTotal');
-          return sum + accessoryTotal;
-        }, 0);
-      }
-
-      return total;
-    }
-
-    // --- NON-CUSTOMIZE ---
-    const hasFabric =
-      Array.isArray(clothing.fabrics) && clothing.fabrics.length > 0;
-    const hasStyles =
-      Array.isArray(clothing.styles) && clothing.styles.length > 0;
-    const hasAccessories =
-      Array.isArray(clothing.accessories) && clothing.accessories.length > 0;
-
-    if (hasFabric || hasStyles || hasAccessories)
-      throw new BadRequestException(
-        'Fabric, styles, and accessories are not allowed for non-customized clothing.',
-      );
-
-    if (Array.isArray(clothing.color_variants)) {
-      total += clothing.color_variants.reduce((sum, color) => {
-        const colorSum = Array.isArray(color.variants)
-          ? color.variants.reduce(
-              (vSum, v) => vSum + (v.price || 0) * (v.stock || 0),
-              0,
-            )
-          : 0;
-        return sum + colorSum;
-      }, 0);
-    }
-
-    return total;
-  }
-
-  private computeAccessoryPrice(dto: any): number {
-    const accessory = dto?.accessory;
-    if (!accessory) return 0;
-
-    const basePrice = accessory.price || 0;
-    const variantStock =
-      Array.isArray(accessory.variants) && accessory.variants.length > 0
-        ? accessory.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-        : 0;
-    const total = variantStock > 0 ? basePrice * variantStock : basePrice;
-
-    return total;
-  }
-
-  private computeFabricPrice(dto: any): number {
-    const fabric = dto?.fabric;
-    if (!fabric.price_per_yard || !fabric.yard_length) {
-      throw new BadRequestException(
-        'Fabric must have both yard_length and price_per_yard',
-      );
-    }
-    const effectiveLength = Math.max(fabric.yard_length, fabric.min_cut || 0);
-    const total = fabric.price_per_yard * effectiveLength;
-
-    return total;
-  }
 
   async findByVendor(
     vendor: string,
