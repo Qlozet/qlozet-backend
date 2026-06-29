@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsNumber, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { ClothingDto } from './clothing.dto';
 import { AccessoryDto } from './accessory.dto';
@@ -57,6 +58,15 @@ export class CreateProductDto {
   @IsOptional()
   @IsMongoId()
   product_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'The base starting price of the product',
+    example: 5000,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  base_price?: number;
 
   @ApiPropertyOptional({
     type: Object,

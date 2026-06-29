@@ -247,6 +247,22 @@ export class PriceCalculationService {
   ): Promise<number> {
     const { selections } = item;
     let total = 0;
+
+    // Add base price for customized clothing (multiplied by the max quantity of any selection)
+    if (product.clothing?.type === 'customize') {
+      let baseQty = 1;
+      const allSelections = [
+        ...(selections.style_selection || []),
+        ...(selections.color_variant_selection || []),
+        ...(selections.accessory_selection || []),
+        ...(selections.fabric_selection || [])
+      ];
+      if (allSelections.length > 0) {
+        baseQty = Math.max(...allSelections.map((s: any) => s.quantity || 1));
+      }
+      total += (product.base_price || 0) * baseQty;
+    }
+
     if (selections.fabric_selection)
       total += await this.calculateFabricCost(
         selections.fabric_selection,
