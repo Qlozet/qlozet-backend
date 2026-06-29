@@ -17,6 +17,7 @@ import { TaxonomyDto } from './taxonomy.dto';
 import { ProductImageDto } from './product-image.dto';
 import { AccessoryDto } from './accessory.dto';
 import { ColorDto } from './product.dto';
+import { ProductStatus } from '../enums/product-status.enum';
 
 export enum ClothingType {
   CUSTOMIZE = 'customize',
@@ -69,12 +70,12 @@ export class ClothingDto {
   taxonomy: TaxonomyDto;
 
   @ApiProperty({
-    enum: ['active', 'draft', 'archived'],
+    enum: ProductStatus,
     description: 'Publication status',
-    example: 'active',
+    example: ProductStatus.ACTIVE,
   })
-  @IsEnum(['active', 'draft', 'archived'])
-  status: 'active' | 'draft' | 'archived';
+  @IsEnum(ProductStatus)
+  status: ProductStatus;
 
   // ✅ Images
   @ApiPropertyOptional({

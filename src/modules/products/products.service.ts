@@ -19,6 +19,7 @@ import {
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
+import { ProductStatus } from './enums/product-status.enum';
 
 import { User, UserDocument } from '../ums/schemas';
 import { Cron } from '@nestjs/schedule';
@@ -143,6 +144,10 @@ export class ProductService {
         { business: new Types.ObjectId(business_id) },
         { business: business_id },
       ];
+    } else {
+      // If business_id is NOT passed, it's a public storefront query
+      // Strictly enforce ACTIVE status to prevent leaking drafts/archived items
+      filter.status = ProductStatus.ACTIVE;
     }
 
     if (kind) {
@@ -212,17 +217,28 @@ export class ProductService {
   /**
    * Delete a product
    */
-  async delete(id: string, vendor: string): Promise<void> {
-    const deleted = await this.productModel.findOneAndDelete({
-      _id: new Types.ObjectId(id),
-    });
+  async delete(id: string, userId: string, userType: string): Promise<void> {
+    let result;
+    if (userType === 'vendor') {
+      result = await this.productModel.findOneAndUpdate(
+        { _id: new Types.ObjectId(id) },
+        { $set: { status: ProductStatus.ARCHIVED } },
+        { new: true }
+      );
+    } else if (userType === 'admin') {
+      result = await this.productModel.findOneAndDelete({
+        _id: new Types.ObjectId(id),
+      });
+    }
 
-    if (!deleted) {
+    if (!result) {
       throw new NotFoundException(
         'Product not found or you do not have permission to delete this product',
       );
     }
   }
+
+
 
   // 💰 Helper methods
 
@@ -545,7 +561,7 @@ export class ProductService {
   async updateStatus(
     productId: string,
     business: string,
-    status: 'active' | 'draft' | 'archived',
+    status: ProductStatus,
   ) {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -603,10 +619,10 @@ export class ProductService {
     const result = await this.productModel.updateMany(
       {
         scheduled_activation_date: { $lte: now },
-        status: { $ne: 'active' },
+        status: { $ne: ProductStatus.ACTIVE },
       },
       {
-        $set: { status: 'active', scheduled_activation_date: null },
+        $set: { status: ProductStatus.ACTIVE, scheduled_activation_date: null },
       },
     );
 
