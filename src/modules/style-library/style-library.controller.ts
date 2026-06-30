@@ -21,6 +21,7 @@ import {
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('Style Library')
 @ApiBearerAuth('access-token')
@@ -89,12 +90,44 @@ export class StyleLibraryController {
     );
   }
 
+  // ─── Vendor Custom Styles Endpoints ───
+
+  @Post('vendor')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Create a custom style for the vendor' })
+  createVendorStyle(@Body() dto: CreatePlatformStyleDto, @Req() req: any) {
+    return this.service.createVendorStyle(dto, req.business._id.toString());
+  }
+
+  @Patch('vendor/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Update a vendor custom style' })
+  updateVendorStyle(
+    @Param('id') id: string,
+    @Body() dto: UpdatePlatformStyleDto,
+    @Req() req: any,
+  ) {
+    return this.service.updateVendorStyle(id, dto, req.business._id.toString());
+  }
+
+  @Delete('vendor/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Deactivate a vendor custom style' })
+  deactivateVendorStyle(@Param('id') id: string, @Req() req: any) {
+    return this.service.deactivateVendorStyle(id, req.business._id.toString());
+  }
+
   // ─── Public Endpoints (any authenticated user) ───
 
   @Get()
-  @ApiOperation({ summary: 'Browse platform styles (filter by category/type/gender)' })
-  findAll(@Query() query: QueryPlatformStyleDto) {
-    return this.service.findAll(query);
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Browse platform styles (and custom styles if vendor)' })
+  findAll(@Query() query: QueryPlatformStyleDto, @Req() req: any) {
+    const businessId = req.user?.user_type === UserType.VENDOR ? req.business?._id?.toString() : undefined;
+    return this.service.findAll(query, businessId);
   }
 
   @Get('categories')

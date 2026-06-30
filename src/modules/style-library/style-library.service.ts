@@ -56,8 +56,16 @@ export class StyleLibraryService {
     return this.styleModel.create(dto);
   }
 
-  async findAll(query: QueryPlatformStyleDto) {
+  async findAll(query: QueryPlatformStyleDto, businessId?: string) {
     const filter: any = { is_active: true };
+
+    if (businessId) {
+      // Vendor sees global styles AND their own custom styles
+      filter.business = { $in: [null, businessId] };
+    } else {
+      // Non-vendors (or Admins if businessId is omitted) only see global styles
+      filter.business = null;
+    }
 
     if (query.category) filter.category = query.category;
     if (query.type) filter.type = query.type;
@@ -122,6 +130,69 @@ export class StyleLibraryService {
       { new: true },
     );
     if (!style) throw new NotFoundException('Platform style not found');
+    return style;
+  }
+
+  // ─── Vendor Custom Styles Methods ───
+
+  async createVendorStyle(
+    dto: CreatePlatformStyleDto,
+    businessId: string,
+  ): Promise<PlatformStyleDocument> {
+    const existing = await this.styleModel.findOne({
+      style_code: dto.style_code,
+      business: businessId,
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Custom style with code "${dto.style_code}" already exists for your business`,
+      );
+    }
+
+    if (!dto.image_url) {
+      dto.image_url = await this.generateStyleImage(
+        dto.name,
+        dto.category,
+        dto.description,
+      );
+    }
+
+    const payload = { ...dto, business: businessId };
+    return this.styleModel.create(payload);
+  }
+
+  async updateVendorStyle(
+    id: string,
+    dto: UpdatePlatformStyleDto,
+    businessId: string,
+  ): Promise<PlatformStyleDocument> {
+    const style = await this.styleModel.findOneAndUpdate(
+      { _id: id, business: businessId },
+      dto,
+      { new: true },
+    );
+    if (!style) {
+      throw new NotFoundException(
+        'Custom style not found or you do not have permission to edit it',
+      );
+    }
+    return style;
+  }
+
+  async deactivateVendorStyle(
+    id: string,
+    businessId: string,
+  ): Promise<PlatformStyleDocument> {
+    const style = await this.styleModel.findOneAndUpdate(
+      { _id: id, business: businessId },
+      { is_active: false },
+      { new: true },
+    );
+    if (!style) {
+      throw new NotFoundException(
+        'Custom style not found or you do not have permission to delete it',
+      );
+    }
     return style;
   }
 
