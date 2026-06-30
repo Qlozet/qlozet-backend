@@ -130,9 +130,11 @@ export class ProductsController {
 
     return {
       message: 'Image generated successfully',
-      url: imageUrl,
-      tokens_deducted: tokenPrice,
-      remaining_balance: balance - tokenPrice,
+      data: {
+        url: imageUrl,
+        tokens_deducted: tokenPrice,
+        remaining_balance: balance - tokenPrice,
+      },
     };
   }
 
