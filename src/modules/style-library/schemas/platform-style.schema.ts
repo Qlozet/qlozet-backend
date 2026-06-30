@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type PlatformStyleDocument = PlatformStyle & Document;
 
@@ -62,6 +62,9 @@ export class PlatformStyle {
 
   @Prop({ default: true })
   is_active: boolean;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
+  business?: Types.ObjectId;
 }
 
 export const PlatformStyleSchema =
