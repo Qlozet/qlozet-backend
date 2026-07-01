@@ -11,7 +11,32 @@ async function startServer() {
 
   SetupSwagger(app);
 
-  await app.listen(Number(process.env.PORT) || 8080, '0.0.0.0');
+  const port = Number(process.env.PORT) || 8080;
+  const host = '0.0.0.0';
+
+  console.log(`🚀 [BOOT] PORT env = "${process.env.PORT}", resolved port = ${port}, host = ${host}`);
+
+  // Initialize NestJS (DI, modules, etc.) without starting the HTTP listener
+  await app.init();
+
+  // Manually bind the underlying HTTP server so we can guarantee the 'listening' event fires
+  const httpServer = app.getHttpServer();
+
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once('error', (err: Error) => {
+      console.error(`❌ [BOOT] HTTP server error:`, err);
+      reject(err);
+    });
+
+    httpServer.listen(port, host, () => {
+      const addr = httpServer.address();
+      console.log(`✅ [BOOT] HTTP server bound successfully. address =`, JSON.stringify(addr));
+      resolve();
+    });
+  });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('💀 [BOOT] Fatal startup error:', err);
+  process.exit(1);
+});

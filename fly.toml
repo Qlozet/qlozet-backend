@@ -5,6 +5,7 @@
 
 app = 'qlozet-backend'
 primary_region = 'lhr'
+
 [env]
   PORT = "8080"
 
@@ -17,6 +18,18 @@ primary_region = 'lhr'
   auto_start_machines = true
   min_machines_running = 1
   processes = ['app']
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/api"
 
 [[vm]]
   memory = '2gb'
