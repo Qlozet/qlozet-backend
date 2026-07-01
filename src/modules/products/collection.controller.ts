@@ -13,16 +13,22 @@ import {
 import {
   ApiTags,
   ApiOperation,
-  ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiParam,
+  ApiCreatedResponse,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 import { CollectionService } from './collection.service';
-import { Collection } from './schemas/collection.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 import { CreateCollectionDto } from './dto/collection.dto';
+import {
+  CollectionResponseDto,
+  CollectionProductsResponseDto,
+  CollectionsWithProductsResponseDto,
+} from './dto/collection-response.dto';
 
 @ApiTags('Collections')
 @ApiBearerAuth('access-token')
@@ -35,33 +41,55 @@ export class CollectionController {
   @Post()
   @Roles(UserType.VENDOR)
   @ApiOperation({ summary: 'Create a new product collection' })
-  @ApiResponse({ status: 201, type: Collection })
+  @ApiCreatedResponse({
+    description: 'Collection created. Matching products are assigned in the background.',
+    type: CollectionResponseDto,
+  })
   async create(
     @Body() dto: CreateCollectionDto,
     @Req() req: any,
-  ): Promise<Collection> {
+  ) {
     return this.collectionService.create(dto, req.business.id);
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all collections' })
-  async findAll(): Promise<Collection[]> {
+  @ApiOkResponse({
+    description: 'Returns all collections across all vendors.',
+    type: [CollectionResponseDto],
+  })
+  async findAll() {
     return this.collectionService.findAll();
   }
 
   @Get('vendor')
   @ApiOperation({ summary: 'Get collections by vendor' })
-  async findByVendor(@Req() req: any): Promise<Collection[]> {
+  @ApiOkResponse({
+    description: 'Returns all collections owned by the authenticated vendor.',
+    type: [CollectionResponseDto],
+  })
+  async findByVendor(@Req() req: any) {
     return this.collectionService.findByVendor(req.user.id);
   }
 
   @Get(':collectionId/products')
   @ApiOperation({ summary: 'Get products under a collection' })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiOkResponse({
+    description: 'Returns paginated products belonging to this collection.',
+    type: CollectionProductsResponseDto,
+  })
   async getProductsByCollection(@Param('collectionId') collectionId: string) {
     return this.collectionService.getProductsByCollection(collectionId);
   }
+
   @Get(':collectionId')
   @ApiOperation({ summary: 'Get collection by ID' })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiOkResponse({
+    description: 'Returns a single collection by its ID.',
+    type: CollectionResponseDto,
+  })
   async getCollectionById(@Param('collectionId') collectionId: string) {
     return this.collectionService.getCollectionById(collectionId);
   }
@@ -87,6 +115,10 @@ export class CollectionController {
   })
   @Get('vendor/with-products')
   @ApiOperation({ summary: 'Get all vendor collections with their products' })
+  @ApiOkResponse({
+    description: 'Returns paginated collections, each with their matched products embedded.',
+    type: CollectionsWithProductsResponseDto,
+  })
   async getCollectionsWithProductsByVendor(
     @Query() query: any,
     @Req() req: any,
