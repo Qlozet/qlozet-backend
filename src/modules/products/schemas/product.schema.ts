@@ -70,6 +70,18 @@ export class Product extends Document {
 
   @Prop({ type: Number, default: 0 })
   average_rating: number;
+
+  @Prop({
+    type: [
+      {
+        name: { type: String, required: true },
+        slug: { type: String, required: true },
+        type: { type: String, enum: ['system', 'custom'], required: true },
+      },
+    ],
+    default: [],
+  })
+  tags: { name: string; slug: string; type: 'system' | 'custom' }[];
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

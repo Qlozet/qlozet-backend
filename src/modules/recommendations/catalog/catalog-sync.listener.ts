@@ -27,26 +27,41 @@ export class CatalogSyncListener {
       let tags: string[] = [];
       let fitType = '';
       let targetDemographic = 'unisex';
+      let productType = '';
 
       if (product.kind === 'clothing' && product.clothing) {
         name = product.clothing.name || 'Unnamed Clothing';
+        productType = product.clothing.taxonomy?.product_type || '';
+        targetDemographic = product.clothing.taxonomy?.audience || 'unisex';
         tags = [
           ...(product.clothing.taxonomy?.categories || []),
           ...(product.clothing.taxonomy?.attributes || []),
+          ...(product.tags?.map((t: any) => t.name) || []),
         ];
         fitType = product.clothing.taxonomy?.categories?.[0] || 'regular';
       } else if (product.kind === 'fabric' && product.fabric) {
         name = product.fabric.name || 'Unnamed Fabric';
+        productType = product.fabric.taxonomy?.product_type || '';
+        targetDemographic = product.fabric.taxonomy?.audience || 'unisex';
         tags = [
           ...(product.fabric.taxonomy?.categories || []),
           ...(product.fabric.taxonomy?.attributes || []),
+          ...(product.tags?.map((t: any) => t.name) || []),
         ];
       } else if (product.kind === 'accessory' && product.accessory) {
         name = product.accessory.name || 'Unnamed Accessory';
+        productType = product.accessory.taxonomy?.product_type || '';
+        targetDemographic = product.accessory.taxonomy?.audience || 'unisex';
         tags = [
           ...(product.accessory.taxonomy?.categories || []),
           ...(product.accessory.taxonomy?.attributes || []),
+          ...(product.tags?.map((t: any) => t.name) || []),
         ];
+      }
+
+      // Include productType in tags for the AI embedding
+      if (productType) {
+        tags = [productType, ...tags];
       }
 
       const dto: CreateCatalogItemDto = {
