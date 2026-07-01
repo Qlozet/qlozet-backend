@@ -234,7 +234,19 @@ export class TaxonomyService {
   // SEED
   // ─────────────────────────────────────────────────────────
 
-  async seed() {
+  async seed(force = false) {
+    let categoriesDeleted = 0;
+    let tagsDeleted = 0;
+
+    if (force) {
+      const catResult = await this.categoryModel.deleteMany({});
+      const tagResult = await this.tagModel.deleteMany({});
+      categoriesDeleted = catResult.deletedCount || 0;
+      tagsDeleted = tagResult.deletedCount || 0;
+      this.logger.warn(
+        `Force seed: deleted ${categoriesDeleted} categories and ${tagsDeleted} tags`,
+      );
+    }
 
     const categoryResult = await this.bulkImportCategories(SEED_CATEGORIES);
     
@@ -259,6 +271,8 @@ export class TaxonomyService {
     );
 
     return {
+      forced: force,
+      deleted: force ? { categories: categoriesDeleted, tags: tagsDeleted } : undefined,
       categories: categoryResult,
       tags: { inserted: tagsInserted, skipped: tagsSkipped },
     };
