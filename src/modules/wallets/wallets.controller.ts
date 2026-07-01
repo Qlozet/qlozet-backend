@@ -10,7 +10,15 @@ import {
   Req,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags, ApiBody } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+  ApiBody,
+  ApiOkResponse,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
@@ -18,6 +26,12 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
 import { TokenService } from './token.service';
 import { PaymentService } from '../payment/payment.service';
+import {
+  FundWalletResponseDto,
+  VerifyPaymentResponseDto,
+  WalletBalanceResponseDto,
+  TokenPriceResponseDto,
+} from './wallet-response.dto';
 
 @ApiTags('Wallets')
 @ApiBearerAuth('access-token')
@@ -35,6 +49,10 @@ export class WalletsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fund wallet via Paystack' })
   @ApiBody({ type: FundWalletDto })
+  @ApiOkResponse({
+    description: 'Wallet funding initialized. Redirect the user to the authorization_url.',
+    type: FundWalletResponseDto,
+  })
   async fundWallet(@Body() dto: FundWalletDto, @Req() req: any) {
     const business = req.business?.id;
     const user = req.user;
@@ -51,6 +69,10 @@ export class WalletsController {
   @Get('verify/:reference')
   @ApiOperation({ summary: 'Verify Paystack payment and credit wallet' })
   @ApiParam({ name: 'reference', description: 'Transaction reference' })
+  @ApiOkResponse({
+    description: 'Payment verification result. Wallet is credited if status is success.',
+    type: VerifyPaymentResponseDto,
+  })
   async verifyPayment(@Param('reference') reference: string) {
     const result = await this.paymentService.verifyPaystackPayment(reference);
 
@@ -73,6 +95,10 @@ export class WalletsController {
   @Roles(UserType.CUSTOMER, UserType.VENDOR)
   @Get('balance')
   @ApiOperation({ summary: 'Get wallet balance' })
+  @ApiOkResponse({
+    description: 'Returns the wallet object with current balance, status, and bank details.',
+    type: WalletBalanceResponseDto,
+  })
   async getBalance(@Req() req) {
     const business = req?.business?.id;
     const customerId = req.user.id;
@@ -83,6 +109,13 @@ export class WalletsController {
   }
 
   @Get('price')
+  @ApiOperation({ summary: 'Get token purchase price in a given currency' })
+  @ApiQuery({ name: 'tokens', required: true, description: 'Number of tokens to price', example: 100 })
+  @ApiQuery({ name: 'currency', required: false, description: 'Target currency (default: USD)', example: 'NGN' })
+  @ApiOkResponse({
+    description: 'Returns the price for the requested number of tokens in the specified currency.',
+    type: TokenPriceResponseDto,
+  })
   async price(
     @Query('tokens') tokens: number,
     @Query('currency') currency: string = 'USD',
