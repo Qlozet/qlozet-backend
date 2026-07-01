@@ -3,6 +3,11 @@ import { Document, Types } from 'mongoose';
 
 export type CollectionDocument = Collection & Document;
 
+export enum CollectionScope {
+  VENDOR = 'vendor',
+  PLATFORM = 'platform',
+}
+
 @Schema({ timestamps: true })
 export class Collection {
   @Prop({ required: true, trim: true })
@@ -29,10 +34,27 @@ export class Collection {
   @Prop({
     type: Types.ObjectId,
     ref: 'Business',
-    required: true,
+    required: false,
     index: true,
+    default: null,
   })
   business: Types.ObjectId;
+
+  @Prop({
+    default: CollectionScope.VENDOR,
+    enum: CollectionScope,
+    index: true,
+  })
+  scope: CollectionScope;
+
+  @Prop({ required: false, trim: true })
+  slug?: string;
+
+  @Prop({ required: false })
+  cover_image?: string;
+
+  @Prop({ default: 0 })
+  sort_order: number;
 }
 
 export const CollectionSchema = SchemaFactory.createForClass(Collection);

@@ -37,11 +37,33 @@ export class CollectionResponseDto {
   @ApiProperty({ example: true, description: 'Whether the collection is active' })
   is_active: boolean;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '6650a1b2c3d4e5f6a7b8c9d1',
-    description: 'Business ID that owns this collection',
+    description: 'Business ID (null for platform collections)',
   })
-  business: string;
+  business?: string;
+
+  @ApiProperty({
+    example: 'vendor',
+    enum: ['vendor', 'platform'],
+    description: 'Whether this is a vendor or platform-wide collection',
+  })
+  scope: string;
+
+  @ApiPropertyOptional({
+    example: 'trending-ankara-styles',
+    description: 'URL-safe slug (platform collections only)',
+  })
+  slug?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.qlozet.com/collections/cover.jpg',
+    description: 'Cover image for homepage display',
+  })
+  cover_image?: string;
+
+  @ApiProperty({ example: 0, description: 'Sort order for display' })
+  sort_order: number;
 
   @ApiProperty({ example: '2026-07-01T12:00:00.000Z' })
   createdAt: string;

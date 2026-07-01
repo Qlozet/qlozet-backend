@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
-import { Collection, CollectionDocument } from './schemas/collection.schema';
-import { CreateCollectionDto } from './dto/collection.dto';
+import { Collection, CollectionDocument, CollectionScope } from './schemas/collection.schema';
+import { CreateCollectionDto, CreatePlatformCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
 import { Product, ProductDocument } from './schemas';
 import { Utils } from '../../common/utils/pagination';
 
@@ -246,6 +246,186 @@ export class CollectionService {
 
   async getCollectionById(id: string) {
     return this.collectionModel.findById(id).lean();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // UPDATE & DELETE (Vendor)
+  // ─────────────────────────────────────────────────────────
+
+  async update(
+    collectionId: string,
+    dto: UpdateCollectionDto,
+    businessId: string,
+  ) {
+    const collection = await this.collectionModel.findById(collectionId);
+    if (!collection) throw new NotFoundException('Collection not found');
+
+    // Vendor can only edit their own collections
+    if (
+      collection.scope === CollectionScope.VENDOR &&
+      collection.business?.toString() !== businessId
+    ) {
+      throw new ForbiddenException('You can only edit your own collections');
+    }
+
+    Object.assign(collection, dto);
+    const saved = await collection.save();
+
+    // Re-apply conditions if they changed
+    if (dto.conditions) {
+      this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+    }
+
+    return saved;
+  }
+
+  async delete(collectionId: string, businessId: string) {
+    const collection = await this.collectionModel.findById(collectionId);
+    if (!collection) throw new NotFoundException('Collection not found');
+
+    if (
+      collection.scope === CollectionScope.VENDOR &&
+      collection.business?.toString() !== businessId
+    ) {
+      throw new ForbiddenException('You can only delete your own collections');
+    }
+
+    // Remove collection reference from all products
+    await this.productModel.updateMany(
+      { collections: collection._id },
+      { $pull: { collections: collection._id } },
+    );
+
+    await this.collectionModel.findByIdAndDelete(collectionId);
+    return { deleted: true, id: collectionId };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // PLATFORM COLLECTIONS (Admin)
+  // ─────────────────────────────────────────────────────────
+
+  async createPlatformCollection(dto: CreatePlatformCollectionDto) {
+    const slug = dto.slug || this.generateSlug(dto.title);
+
+    const collection = new this.collectionModel({
+      ...dto,
+      slug,
+      scope: CollectionScope.PLATFORM,
+      business: null,
+    });
+
+    const saved = await collection.save();
+
+    // Apply conditions to all platform products
+    this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+
+    return saved;
+  }
+
+  async updatePlatformCollection(id: string, dto: UpdateCollectionDto) {
+    const collection = await this.collectionModel.findOne({
+      _id: id,
+      scope: CollectionScope.PLATFORM,
+    });
+    if (!collection) throw new NotFoundException('Platform collection not found');
+
+    Object.assign(collection, dto);
+    const saved = await collection.save();
+
+    if (dto.conditions) {
+      this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+    }
+
+    return saved;
+  }
+
+  async deletePlatformCollection(id: string) {
+    const collection = await this.collectionModel.findOne({
+      _id: id,
+      scope: CollectionScope.PLATFORM,
+    });
+    if (!collection) throw new NotFoundException('Platform collection not found');
+
+    await this.productModel.updateMany(
+      { collections: collection._id },
+      { $pull: { collections: collection._id } },
+    );
+
+    await this.collectionModel.findByIdAndDelete(id);
+    return { deleted: true, id };
+  }
+
+  /**
+   * Get active platform collections for homepage/explore (PUBLIC)
+   */
+  async getPlatformCollections() {
+    return this.collectionModel
+      .find({ scope: CollectionScope.PLATFORM, is_active: true })
+      .sort({ sort_order: 1, createdAt: -1 })
+      .lean();
+  }
+
+  /**
+   * Get a platform collection with its matched products (PUBLIC)
+   */
+  async getPlatformCollectionWithProducts(
+    idOrSlug: string,
+    page = 1,
+    limit = 20,
+  ) {
+    const isObjectId = Types.ObjectId.isValid(idOrSlug);
+    const filter: any = {
+      scope: CollectionScope.PLATFORM,
+      is_active: true,
+    };
+    if (isObjectId) filter._id = idOrSlug;
+    else filter.slug = idOrSlug;
+
+    const collection = await this.collectionModel.findOne(filter).lean();
+    if (!collection) throw new NotFoundException('Collection not found');
+
+    const { take, skip } = await Utils.getPagination(page, limit);
+
+    const [products, totalCount] = await Promise.all([
+      this.productModel
+        .find({ collections: collection._id })
+        .skip(skip)
+        .limit(take)
+        .lean(),
+      this.productModel.countDocuments({ collections: collection._id }),
+    ]);
+
+    return {
+      collection,
+      products: Utils.getPagingData(
+        { count: totalCount, rows: products },
+        page,
+        limit,
+      ),
+    };
+  }
+
+  /**
+   * Admin: get ALL platform collections (including inactive)
+   */
+  async getAllPlatformCollections() {
+    return this.collectionModel
+      .find({ scope: CollectionScope.PLATFORM })
+      .sort({ sort_order: 1, createdAt: -1 })
+      .lean();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────
+
+  private generateSlug(title: string): string {
+    return title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
   }
 
   /**
