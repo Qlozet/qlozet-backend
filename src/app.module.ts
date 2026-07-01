@@ -33,6 +33,7 @@ import { BespokeModule } from './modules/bespoke/bespoke.module';
 import { FabricReservationModule } from './modules/fabric-reservation/fabric-reservation.module';
 import { StyleLibraryModule } from './modules/style-library/style-library.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
 
 @Module({
   imports: [
@@ -110,6 +111,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     FabricReservationModule,
     CurrencyModule,
     StyleLibraryModule,
+    TaxonomyModule,
   ],
   controllers: [AppController],
   providers: [
