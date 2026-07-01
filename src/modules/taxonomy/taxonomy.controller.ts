@@ -176,9 +176,14 @@ export class TaxonomyController {
   @ApiOperation({
     summary: 'Seed default taxonomy data (Admin only)',
     description:
-      'Populates the database with default Qlozet categories and tags. Safe to re-run — duplicates are skipped.',
+      'Populates the database with default Qlozet categories and tags. Safe to re-run — duplicates are skipped. Use ?force=true to wipe and re-seed.',
   })
-  seed() {
-    return this.taxonomyService.seed();
+  @ApiQuery({
+    name: 'force',
+    required: false,
+    description: 'If true, deletes all existing categories and tags before re-seeding',
+  })
+  seed(@Query('force') force?: string) {
+    return this.taxonomyService.seed(force === 'true');
   }
 }
