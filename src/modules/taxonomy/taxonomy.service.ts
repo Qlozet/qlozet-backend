@@ -15,7 +15,7 @@ import { CreateSystemCategoryDto } from './dto/create-system-category.dto';
 import { UpdateSystemCategoryDto } from './dto/update-system-category.dto';
 import { CreateSystemTagDto } from './dto/create-system-tag.dto';
 import { UpdateSystemTagDto } from './dto/update-system-tag.dto';
-import { SEED_CATEGORIES, SEED_TAGS } from '../../scripts/seed-taxonomy';
+import { SEED_CATEGORIES, SEED_TAGS } from './seed-taxonomy.data';
 
 @Injectable()
 export class TaxonomyService {

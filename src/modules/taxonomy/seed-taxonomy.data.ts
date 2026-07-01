@@ -1,5 +1,5 @@
-import { ProductKind } from '../modules/products/schemas/product.schema';
-import { TagAssignableBy } from '../modules/taxonomy/schemas/system-tag.schema';
+import { ProductKind } from '../products/schemas/product.schema';
+import { TagAssignableBy } from './schemas/system-tag.schema';
 
 /**
  * Default Qlozet Taxonomy Seed Data
