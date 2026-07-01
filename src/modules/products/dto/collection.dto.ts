@@ -3,7 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
-  IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -39,7 +39,7 @@ export class ConditionDto {
 }
 
 /**
- * DTO for creating a product collection.
+ * DTO for creating a vendor product collection.
  */
 export class CreateCollectionDto {
   @ApiProperty({
@@ -97,4 +97,75 @@ export class CreateCollectionDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+}
+
+/**
+ * DTO for updating a collection (all fields optional).
+ */
+export class UpdateCollectionDto {
+  @ApiPropertyOptional({ example: 'Updated Collection Title' })
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @ApiPropertyOptional({ example: 'Updated description.' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ enum: ['all', 'any'] })
+  @IsOptional()
+  @IsEnum(['all', 'any'])
+  condition_match?: 'all' | 'any';
+
+  @ApiPropertyOptional({ type: [ConditionDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConditionDto)
+  conditions?: ConditionDto[];
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+
+  @ApiPropertyOptional({ example: 'https://cdn.qlozet.com/cover.jpg' })
+  @IsOptional()
+  @IsString()
+  cover_image?: string;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  sort_order?: number;
+}
+
+/**
+ * DTO for creating a platform-wide collection (Admin only).
+ */
+export class CreatePlatformCollectionDto extends CreateCollectionDto {
+  @ApiPropertyOptional({
+    description: 'URL-safe slug for the collection (auto-generated from title if not provided)',
+    example: 'trending-ankara-styles',
+  })
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @ApiPropertyOptional({
+    description: 'Cover image URL for homepage/explore display',
+    example: 'https://cdn.qlozet.com/collections/trending-ankara.jpg',
+  })
+  @IsOptional()
+  @IsString()
+  cover_image?: string;
+
+  @ApiPropertyOptional({
+    description: 'Sort order for display on homepage',
+    default: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  sort_order?: number;
 }
