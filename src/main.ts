@@ -11,7 +11,7 @@ async function startServer() {
 
   SetupSwagger(app);
 
-  const port = Number(process.env.PORT) || 8080;
+  const port = Number(process.env.PORT) || 5000;
   const host = '0.0.0.0';
 
   console.log(`🚀 [BOOT] PORT env = "${process.env.PORT}", resolved port = ${port}, host = ${host}`);
