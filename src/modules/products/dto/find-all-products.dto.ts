@@ -40,6 +40,21 @@ export class FindAllProductsDto {
   @IsString()
   search?: string;
 
+  @ApiPropertyOptional({ description: 'Filter by exact product type (e.g. Dresses)' })
+  @IsOptional()
+  @IsString()
+  product_type?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by category (e.g. Casual)' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by audience (e.g. Women)' })
+  @IsOptional()
+  @IsString()
+  audience?: string;
+
   @ApiPropertyOptional({
     enum: ['active', 'draft', 'archived'],
   })
