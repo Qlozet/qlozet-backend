@@ -134,17 +134,16 @@ export class ProductService {
       sortBy,
       order = 'desc',
       business_id,
+      product_type,
+      category,
+      audience,
     } = dto;
 
     const filter: any = {};
 
     // ✅ BUSINESS FILTER (THIS IS THE KEY)
-    if (business_id) {
-      filter.$or = [
-        { business: new Types.ObjectId(business_id) },
-        { business: business_id },
-      ];
-    } else {
+    // Business filter is now handled below in the andClauses
+    if (!business_id) {
       // If business_id is NOT passed, it's a public storefront query
       // Strictly enforce ACTIVE status to prevent leaking drafts/archived items
       filter.status = ProductStatus.ACTIVE;
@@ -158,9 +157,38 @@ export class ProductService {
       filter.status = status;
     }
 
+    // 🏷️ TAXONOMY FILTERS
+    if (product_type) {
+      filter.$or = filter.$or || [];
+      filter.$or.push(
+        { 'clothing.taxonomy.product_type': product_type },
+        { 'accessory.taxonomy.product_type': product_type },
+        { 'fabric.taxonomy.product_type': product_type },
+      );
+    }
+
+    if (category) {
+      filter.$or = filter.$or || [];
+      filter.$or.push(
+        { 'clothing.taxonomy.categories': category },
+        { 'accessory.taxonomy.categories': category },
+        { 'fabric.taxonomy.categories': category },
+      );
+    }
+
+    if (audience) {
+      filter.$or = filter.$or || [];
+      filter.$or.push(
+        { 'clothing.taxonomy.audience': audience },
+        { 'accessory.taxonomy.audience': audience },
+        { 'fabric.taxonomy.audience': audience },
+      );
+    }
+
     // 🔍 SEARCH
     if (search) {
-      filter.$or = [
+      filter.$or = filter.$or || [];
+      filter.$or.push(
         { 'clothing.name': { $regex: search, $options: 'i' } },
         { 'accessory.name': { $regex: search, $options: 'i' } },
         { 'fabric.name': { $regex: search, $options: 'i' } },
@@ -172,8 +200,74 @@ export class ProductService {
         { 'clothing.taxonomy.attributes': { $regex: search, $options: 'i' } },
         { 'accessory.taxonomy.attributes': { $regex: search, $options: 'i' } },
         { 'fabric.taxonomy.attributes': { $regex: search, $options: 'i' } },
-      ];
+      );
     }
+
+    // ⚠️ MongoDB requires $and if we push multiple $or arrays, so we must combine them correctly if multiple exist.
+    // Let's refactor the $or combinations.
+    const andClauses: any[] = [];
+
+    if (business_id) {
+      andClauses.push({
+        $or: [
+          { business: new Types.ObjectId(business_id) },
+          { business: business_id },
+        ],
+      });
+    }
+
+    if (product_type) {
+      andClauses.push({
+        $or: [
+          { 'clothing.taxonomy.product_type': product_type },
+          { 'accessory.taxonomy.product_type': product_type },
+          { 'fabric.taxonomy.product_type': product_type },
+        ],
+      });
+    }
+
+    if (category) {
+      andClauses.push({
+        $or: [
+          { 'clothing.taxonomy.categories': category },
+          { 'accessory.taxonomy.categories': category },
+          { 'fabric.taxonomy.categories': category },
+        ],
+      });
+    }
+
+    if (audience) {
+      andClauses.push({
+        $or: [
+          { 'clothing.taxonomy.audience': audience },
+          { 'accessory.taxonomy.audience': audience },
+          { 'fabric.taxonomy.audience': audience },
+        ],
+      });
+    }
+
+    if (search) {
+      andClauses.push({
+        $or: [
+          { 'clothing.name': { $regex: search, $options: 'i' } },
+          { 'accessory.name': { $regex: search, $options: 'i' } },
+          { 'fabric.name': { $regex: search, $options: 'i' } },
+          { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
+          { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
+          { 'fabric.taxonomy.categories': { $regex: search, $options: 'i' } },
+          { 'clothing.taxonomy.attributes': { $regex: search, $options: 'i' } },
+          { 'accessory.taxonomy.attributes': { $regex: search, $options: 'i' } },
+          { 'fabric.taxonomy.attributes': { $regex: search, $options: 'i' } },
+        ],
+      });
+    }
+
+    if (andClauses.length > 0) {
+      filter.$and = andClauses;
+    }
+    
+    // Remove the old direct filter.$or as we've moved everything to $and
+    delete filter.$or;
 
     const { take, skip } = await Utils.getPagination(page, size);
 
