@@ -412,6 +412,16 @@ export class BusinessService {
     }
   }
 
+  async updateBusinessProfile(businessId: string, dto: any) {
+    const business = await this.businessModel.findByIdAndUpdate(
+      businessId,
+      { $set: dto },
+      { new: true },
+    );
+    if (!business) throw new NotFoundException('Business not found');
+    return business;
+  }
+
   async updateBusinessStatus(
     businessId: string,
     status: 'in-review' | 'approved' | 'verified' | 'rejected' | 'unverified',
