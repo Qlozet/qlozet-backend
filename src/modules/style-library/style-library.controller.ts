@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StyleLibraryService } from './style-library.service';
+import { UserService } from '../ums/services/users.service';
 import {
   CreatePlatformStyleDto,
   UpdatePlatformStyleDto,
@@ -27,7 +28,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 @ApiBearerAuth('access-token')
 @Controller('style-library')
 export class StyleLibraryController {
-  constructor(private readonly service: StyleLibraryService) {}
+  constructor(
+    private readonly service: StyleLibraryService,
+    private readonly userService: UserService
+  ) {}
 
   // ─── Admin Endpoints ───
 
@@ -125,8 +129,19 @@ export class StyleLibraryController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Browse platform styles (and custom styles if vendor)' })
-  findAll(@Query() query: QueryPlatformStyleDto, @Req() req: any) {
-    const businessId = req.user?.user_type === UserType.VENDOR ? req.business?._id?.toString() : undefined;
+  async findAll(@Query() query: QueryPlatformStyleDto, @Req() req: any) {
+    let businessId: string | undefined = undefined;
+    if (req.user?.id) {
+      try {
+        const user = await this.userService.findById(req.user.id);
+        if (user && user.type === UserType.VENDOR && user.business) {
+          // Mongoose populate might make business an object, or it might just be the ID
+          businessId = (user.business as any)._id?.toString() || user.business.toString();
+        }
+      } catch (e) {
+        // Ignore user not found error for token
+      }
+    }
     return this.service.findAll(query, businessId);
   }
 
