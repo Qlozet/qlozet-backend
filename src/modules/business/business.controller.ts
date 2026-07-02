@@ -31,6 +31,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRole } from '../ums/schemas';
 import { ValidatedAddressResponseDto } from '../logistics/dto/shipping.dto';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
+import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
 import { UserType } from '../auth/dto/base-login.dto';
 
 @ApiTags('Business')
@@ -131,6 +132,21 @@ export class BusinessController {
     @Req() req: any,
   ) {
     return this.businessService.updateBusinessAddress(req.business, dto);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Patch('profile')
+  @ApiOperation({
+    summary: 'Update general business profile fields',
+    description:
+      'Updates non-address fields like business_name, logo, cover image, description, NIN, BVN, etc.',
+  })
+  @ApiOkResponse({ description: 'Business profile updated successfully' })
+  async updateBusinessProfile(
+    @Body() dto: UpdateBusinessProfileDto,
+    @Req() req: any,
+  ) {
+    return this.businessService.updateBusinessProfile(req.business.id, dto);
   }
 
   @Roles(UserType.VENDOR)
