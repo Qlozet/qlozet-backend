@@ -152,12 +152,46 @@ export class PaymentService {
     if (!transaction) throw new NotFoundException('Transaction not found');
 
     // Guard: don't re-process already completed transactions
-    const alreadyProcessed = transaction.status === TransactionStatus.SUCCESS;
+    if (transaction.status === TransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        status: transaction.status,
+        reference,
+        amount: transaction.amount,
+        walletId: transaction.wallet?.toString() || null,
+        transactionType: transaction.type,
+        alreadyProcessed: true,
+        message: 'Payment verified successfully',
+      };
+    }
 
     if (data.status === 'success') {
+      // Atomic update to prevent race conditions during rapid requests
+      const updated = await (this.transactionService as any).transactionModel.findOneAndUpdate(
+        { _id: transaction._id, status: { $ne: TransactionStatus.SUCCESS } },
+        { 
+          $set: { 
+            status: TransactionStatus.SUCCESS, 
+            'metadata.paystack': data 
+          } 
+        },
+        { new: true }
+      );
+
+      if (!updated) {
+        return {
+          success: true,
+          status: TransactionStatus.SUCCESS,
+          reference,
+          amount: transaction.amount,
+          walletId: transaction.wallet?.toString() || null,
+          transactionType: transaction.type,
+          alreadyProcessed: true,
+          message: 'Payment verified successfully',
+        };
+      }
+      
       transaction.status = TransactionStatus.SUCCESS;
-      transaction.metadata = { ...transaction.metadata, paystack: data };
-      await transaction.save();
     } else {
       transaction.status = TransactionStatus.FAILED;
       await transaction.save();
@@ -170,7 +204,7 @@ export class PaymentService {
       amount: transaction.amount,
       walletId: transaction.wallet?.toString() || null,
       transactionType: transaction.type,
-      alreadyProcessed,
+      alreadyProcessed: false,
       message:
         transaction.status === TransactionStatus.SUCCESS
           ? 'Payment verified successfully'
