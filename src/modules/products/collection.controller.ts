@@ -165,6 +165,38 @@ export class CollectionController {
     return this.collectionService.delete(collectionId, req.business.id);
   }
 
+  @Post(':collectionId/include/:productId')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({
+    summary: 'Manually include a product in a collection',
+    description: 'Force-adds a product to this collection, overriding the smart rules.',
+  })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to include' })
+  async includeProduct(
+    @Param('collectionId') collectionId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
+  ) {
+    return this.collectionService.includeProduct(collectionId, productId, req.business.id);
+  }
+
+  @Post(':collectionId/exclude/:productId')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({
+    summary: 'Manually exclude a product from a collection',
+    description: 'Force-removes a product from this collection, even if the rules say it should match.',
+  })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to exclude' })
+  async excludeProduct(
+    @Param('collectionId') collectionId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
+  ) {
+    return this.collectionService.excludeProduct(collectionId, productId, req.business.id);
+  }
+
   // ─────────────────────────────────────────────────────────
   // ADMIN — Platform Collection Management
   // ─────────────────────────────────────────────────────────
@@ -209,5 +241,33 @@ export class CollectionController {
   @ApiOkResponse({ description: 'Platform collection deleted', schema: { properties: { deleted: { type: 'boolean' }, id: { type: 'string' } } } })
   async deletePlatformCollection(@Param('id') id: string) {
     return this.collectionService.deletePlatformCollection(id);
+  }
+
+  @Post('admin/platform/:id/include/:productId')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Manually include a product in a platform collection (Admin only)',
+  })
+  @ApiParam({ name: 'id', description: 'Platform collection ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to include' })
+  async includePlatformProduct(
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.collectionService.includeProduct(id, productId);
+  }
+
+  @Post('admin/platform/:id/exclude/:productId')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Manually exclude a product from a platform collection (Admin only)',
+  })
+  @ApiParam({ name: 'id', description: 'Platform collection ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to exclude' })
+  async excludePlatformProduct(
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.collectionService.excludeProduct(id, productId);
   }
 }

@@ -53,6 +53,18 @@ export class Collection {
   @Prop({ required: false })
   cover_image?: string;
 
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_includes: Types.ObjectId[];
+
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_excludes: Types.ObjectId[];
+
   @Prop({ default: 0 })
   sort_order: number;
 }

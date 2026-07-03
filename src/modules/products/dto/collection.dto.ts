@@ -97,6 +97,26 @@ export class CreateCollectionDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to forcibly include in this collection, even if they don\'t match the rules',
+    type: [String],
+    example: ['665a...', '665b...'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_includes?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to forcibly exclude from this collection, even if they match the rules',
+    type: [String],
+    example: ['665c...'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_excludes?: string[];
 }
 
 /**
@@ -139,6 +159,24 @@ export class UpdateCollectionDto {
   @IsOptional()
   @IsNumber()
   sort_order?: number;
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to forcibly include in this collection',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_includes?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to forcibly exclude from this collection',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_excludes?: string[];
 }
 
 /**
