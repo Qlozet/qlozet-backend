@@ -55,13 +55,14 @@ export class WalletsController {
     type: FundWalletResponseDto,
   })
   async fundWallet(@Body() dto: FundWalletDto, @Req() req: any) {
-    const business = req.business?.id;
+    const business = req.business?._id?.toString() || req.business?.id;
     const user = req.user;
     
-    // If vendor, only pass businessId. If customer, only pass customerId.
-    const isVendor = user.type === UserType.VENDOR && business;
-    const customerId = isVendor ? undefined : user.id;
-    const businessId = isVendor ? business : undefined;
+    // RolesGuard sets req.business for vendors. If it exists, this is a vendor request.
+    const customerId = business ? undefined : user.id;
+    const businessId = business || undefined;
+
+    console.log(`[WalletsController.fundWallet] business=${business}, customerId=${customerId}, businessId=${businessId}, user.id=${user.id}`);
 
     const result = await this.walletsService.fundWallet(
       dto.amount,
