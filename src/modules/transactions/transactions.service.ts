@@ -116,21 +116,45 @@ export class TransactionService {
           as: 'order',
         },
       },
-      { $unwind: '$order' },
+      { $unwind: { path: '$order', preserveNullAndEmptyArrays: true } },
 
-      // keep only transactions that have items for this business
+      {
+        $lookup: {
+          from: 'wallets',
+          localField: 'wallet',
+          foreignField: '_id',
+          as: 'walletDoc',
+        },
+      },
+      { $unwind: { path: '$walletDoc', preserveNullAndEmptyArrays: true } },
+
       {
         $addFields: {
           orderItemsForBusiness: {
             $filter: {
-              input: '$order.items',
+              input: { $ifNull: ['$order.items', []] },
               as: 'item',
               cond: { $eq: ['$$item.business', businessId] },
             },
           },
+          isWalletRelated: {
+            $eq: ['$walletDoc.business', businessId]
+          },
+          isInitiatorRelated: {
+            $eq: ['$initiator', businessId]
+          }
         },
       },
-      { $match: { 'orderItemsForBusiness.0': { $exists: true } } },
+      
+      {
+        $match: {
+          $or: [
+            { 'orderItemsForBusiness.0': { $exists: true } },
+            { isWalletRelated: true },
+            { isInitiatorRelated: true }
+          ]
+        }
+      },
 
       // project only minimal order object
       {
@@ -149,6 +173,9 @@ export class TransactionService {
           'order.createdAt': 0,
           'order.updatedAt': 0,
           orderItemsForBusiness: 0, // remove helper field
+          walletDoc: 0,
+          isWalletRelated: 0,
+          isInitiatorRelated: 0
         },
       },
     ];
