@@ -56,11 +56,17 @@ export class WalletsController {
   async fundWallet(@Body() dto: FundWalletDto, @Req() req: any) {
     const business = req.business?.id;
     const user = req.user;
+    
+    // If vendor, only pass businessId. If customer, only pass customerId.
+    const isVendor = user.type === UserType.VENDOR && business;
+    const customerId = isVendor ? undefined : user.id;
+    const businessId = isVendor ? business : undefined;
+
     const result = await this.walletsService.fundWallet(
       dto.amount,
       user.email,
-      user.id,
-      business,
+      customerId,
+      businessId,
     );
     return { message: 'Wallet funding initialized', data: result };
   }
