@@ -45,6 +45,7 @@ export class WalletsController {
   ) {}
 
   // Fund wallet
+  @Roles(UserType.CUSTOMER, UserType.VENDOR)
   @Post('fund')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fund wallet via Paystack' })
