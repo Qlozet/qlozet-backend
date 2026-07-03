@@ -1,13 +1,16 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
 import { Collection, CollectionDocument, CollectionScope } from './schemas/collection.schema';
 import { CreateCollectionDto, CreatePlatformCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
 import { Product, ProductDocument } from './schemas';
 import { Utils } from '../../common/utils/pagination';
+import { OnEvent } from '@nestjs/event-emitter';
 
 @Injectable()
 export class CollectionService {
+  private readonly logger = new Logger(CollectionService.name);
+
   constructor(
     @InjectModel(Collection.name)
     private readonly collectionModel: Model<CollectionDocument>,
@@ -36,114 +39,299 @@ export class CollectionService {
     createCollectionDto: CreateCollectionDto,
     business: string,
   ): Promise<CollectionDocument> {
-    console.log(
-      '🟢 [CollectionService] Creating new collection:',
-      createCollectionDto,
-    );
+    this.logger.log(`Creating new collection: ${createCollectionDto.title}`);
 
     const collection = new this.collectionModel({
       ...createCollectionDto,
       business: new Types.ObjectId(business),
       condition_match: createCollectionDto.condition_match || 'all',
+      manual_includes: (createCollectionDto.manual_includes || []).map(
+        (id) => new Types.ObjectId(id),
+      ),
+      manual_excludes: (createCollectionDto.manual_excludes || []).map(
+        (id) => new Types.ObjectId(id),
+      ),
     });
 
     const savedCollection = await collection.save();
-    console.log('✅ Collection saved successfully:', savedCollection._id);
+    this.logger.log(`Collection saved: ${savedCollection._id}`);
 
     // Run product assignment in background
     this.applyCollectionToMatchingProducts(savedCollection.id)
-      .then((result) => {
-        console.log(
-          `🎯 Applied collection ${savedCollection._id} to ${result.length} products`,
+      .then((count) => {
+        this.logger.log(
+          `Applied collection ${savedCollection._id} to ${count} products`,
         );
       })
       .catch((err) => {
-        console.error('❌ Error applying collection to products:', err);
+        this.logger.error('Error applying collection to products:', err);
       });
 
-    const newCollection = savedCollection.toObject();
-    return newCollection;
+    return savedCollection.toObject();
   }
 
   /**
-   * Apply collection rules to all products and attach collection IDs
+   * Apply collection rules to products and attach/remove collection IDs.
+   * - Vendor-scoped collections only scan that vendor's products.
+   * - Platform-scoped collections scan all products.
+   * - Respects manual_includes and manual_excludes overrides.
+   * - Removes the collection from products that no longer match.
    */
   async applyCollectionToMatchingProducts(
     collectionId: string,
-  ): Promise<ProductDocument[]> {
-    console.log(
-      '🟢 [applyCollectionToMatchingProducts] For collection ID:',
-      collectionId,
-    );
+  ): Promise<number> {
+    this.logger.log(`[applyCollection] For collection ID: ${collectionId}`);
 
     const collection = await this.collectionModel.findById(collectionId).exec();
     if (!collection) throw new NotFoundException('Collection not found');
     if (!collection.is_active) {
-      console.log('🚫 Collection is inactive, skipping:', collectionId);
-      return [];
+      this.logger.log(`Collection is inactive, skipping: ${collectionId}`);
+      return 0;
     }
 
-    const products = await this.productModel.find().exec();
-    console.log(`📦 Checking ${products.length} products for collection match`);
+    // Scope product query: vendor collections only check vendor's own products
+    const productFilter: FilterQuery<ProductDocument> = {};
+    if (
+      collection.scope === CollectionScope.VENDOR &&
+      collection.business
+    ) {
+      productFilter.business = collection.business;
+    }
 
-    const updatedProducts: ProductDocument[] = [];
+    const products = await this.productModel.find(productFilter).exec();
+    this.logger.log(`Checking ${products.length} products for collection match`);
+
+    const collectionObjectId = new Types.ObjectId(collectionId);
+    const includeSet = new Set(
+      (collection.manual_includes || []).map((id) => id.toString()),
+    );
+    const excludeSet = new Set(
+      (collection.manual_excludes || []).map((id) => id.toString()),
+    );
+
+    let updatedCount = 0;
 
     for (const product of products) {
-      let isApplicable = false;
+      const productIdStr = (product._id as Types.ObjectId).toString();
 
-      if (collection.conditions?.length) {
-        const matches = collection.conditions.map((cond) => {
-          const productValue = this.getNestedValue(product, cond.field);
-          const result = Array.isArray(productValue)
-            ? productValue.some((v) =>
-                this.evaluateOperator(v, cond.operator, cond.value),
-              )
-            : this.evaluateOperator(productValue, cond.operator, cond.value);
+      // Determine if product should belong to this collection
+      let shouldBelong: boolean;
 
-          console.log(
-            `🔍 Product ${product._id} | ${cond.field} ${cond.operator} ${cond.value} | result=${result}`,
-          );
-          return result;
-        });
-
-        isApplicable =
-          collection.condition_match === 'all'
-            ? matches.every((r) => r)
-            : matches.some((r) => r);
+      if (excludeSet.has(productIdStr)) {
+        // Manual exclude always wins
+        shouldBelong = false;
+      } else if (includeSet.has(productIdStr)) {
+        // Manual include always wins
+        shouldBelong = true;
+      } else {
+        // Fall back to automated rule evaluation
+        shouldBelong = this.evaluateProductAgainstConditions(product, collection);
       }
 
-      if (isApplicable) {
-        if (!product.collections) product.collections = [];
+      if (!product.collections) product.collections = [];
+      const alreadyIn = product.collections.some((id) =>
+        id.equals(collectionObjectId),
+      );
 
-        // Prevent duplicate collection IDs
-        const collectionObjectId = new Types.ObjectId(collection.id);
-        const alreadyExists = product.collections.some((id) =>
-          id.equals(collectionObjectId),
+      if (shouldBelong && !alreadyIn) {
+        // Add to collection
+        product.collections.push(collectionObjectId);
+        await product.save();
+        updatedCount++;
+      } else if (!shouldBelong && alreadyIn) {
+        // Remove from collection
+        product.collections = product.collections.filter(
+          (id) => !id.equals(collectionObjectId),
         );
-
-        if (!alreadyExists) {
-          product.collections.push(collectionObjectId);
-          await product.save();
-          console.log(
-            `💾 Product ${product._id} added to collection ${collectionId}`,
-          );
-          updatedProducts.push(product);
-        } else {
-          console.log(
-            `⚠️ Product ${product._id} already in collection ${collectionId}`,
-          );
-        }
-      } else {
-        console.log(
-          `🚫 Product ${product._id} does not meet collection conditions`,
-        );
+        await product.save();
+        updatedCount++;
       }
     }
 
-    console.log(
-      `✅ Finished applying collection ${collectionId}. ${updatedProducts.length} products updated.`,
+    this.logger.log(
+      `Finished applying collection ${collectionId}. ${updatedCount} products updated.`,
     );
-    return updatedProducts;
+    return updatedCount;
+  }
+
+  /**
+   * Sync a single product against all relevant collections.
+   * Called when a product is created or updated.
+   */
+  async syncProductWithCollections(productId: string): Promise<void> {
+    const product = await this.productModel.findById(productId).exec();
+    if (!product) return;
+
+    const businessId = product.business?.toString();
+
+    // Find all active collections this product could belong to:
+    // 1. Vendor collections for this product's business
+    // 2. All platform-wide collections
+    const collections = await this.collectionModel
+      .find({
+        is_active: true,
+        $or: [
+          { scope: CollectionScope.PLATFORM },
+          ...(businessId
+            ? [
+                {
+                  scope: CollectionScope.VENDOR,
+                  business: new Types.ObjectId(businessId),
+                },
+              ]
+            : []),
+        ],
+      })
+      .exec();
+
+    if (!product.collections) product.collections = [];
+
+    let changed = false;
+
+    for (const collection of collections) {
+      const collectionObjectId = new Types.ObjectId(String(collection._id));
+      const productIdStr = (product._id as Types.ObjectId).toString();
+
+      const includeSet = new Set(
+        (collection.manual_includes || []).map((id) => id.toString()),
+      );
+      const excludeSet = new Set(
+        (collection.manual_excludes || []).map((id) => id.toString()),
+      );
+
+      let shouldBelong: boolean;
+
+      if (excludeSet.has(productIdStr)) {
+        shouldBelong = false;
+      } else if (includeSet.has(productIdStr)) {
+        shouldBelong = true;
+      } else {
+        shouldBelong = this.evaluateProductAgainstConditions(product, collection);
+      }
+
+      const alreadyIn = product.collections.some((id) =>
+        id.equals(collectionObjectId),
+      );
+
+      if (shouldBelong && !alreadyIn) {
+        product.collections.push(collectionObjectId);
+        changed = true;
+      } else if (!shouldBelong && alreadyIn) {
+        product.collections = product.collections.filter(
+          (id) => !id.equals(collectionObjectId),
+        );
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await product.save();
+      this.logger.log(`Synced product ${productId} with ${collections.length} collections`);
+    }
+  }
+
+  /**
+   * Event listener: auto-sync product collections when a product is created or updated.
+   */
+  @OnEvent('product.upserted', { async: true })
+  async handleProductUpserted(product: any): Promise<void> {
+    const productId = product._id?.toString?.() || product._id;
+    if (!productId) return;
+
+    this.logger.log(`[Event] product.upserted → syncing collections for ${productId}`);
+    try {
+      await this.syncProductWithCollections(productId);
+    } catch (err) {
+      this.logger.error(`Failed to sync collections for product ${productId}:`, err);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // MANUAL INCLUDE / EXCLUDE
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Manually include a product in a collection (override rules)
+   */
+  async includeProduct(collectionId: string, productId: string, businessId?: string) {
+    const collection = await this.collectionModel.findById(collectionId);
+    if (!collection) throw new NotFoundException('Collection not found');
+
+    // Ownership check for vendor collections
+    if (
+      collection.scope === CollectionScope.VENDOR &&
+      businessId &&
+      collection.business?.toString() !== businessId
+    ) {
+      throw new ForbiddenException('You can only modify your own collections');
+    }
+
+    const productOid = new Types.ObjectId(productId);
+
+    // Remove from excludes if present
+    collection.manual_excludes = (collection.manual_excludes || []).filter(
+      (id) => !id.equals(productOid),
+    );
+
+    // Add to includes if not already present
+    const alreadyIncluded = (collection.manual_includes || []).some(
+      (id) => id.equals(productOid),
+    );
+    if (!alreadyIncluded) {
+      collection.manual_includes = [...(collection.manual_includes || []), productOid];
+    }
+
+    await collection.save();
+
+    // Add collection to the product
+    await this.productModel.updateOne(
+      { _id: productOid },
+      { $addToSet: { collections: new Types.ObjectId(collectionId) } },
+    );
+
+    return { message: 'Product included in collection', collectionId, productId };
+  }
+
+  /**
+   * Manually exclude a product from a collection (override rules)
+   */
+  async excludeProduct(collectionId: string, productId: string, businessId?: string) {
+    const collection = await this.collectionModel.findById(collectionId);
+    if (!collection) throw new NotFoundException('Collection not found');
+
+    // Ownership check for vendor collections
+    if (
+      collection.scope === CollectionScope.VENDOR &&
+      businessId &&
+      collection.business?.toString() !== businessId
+    ) {
+      throw new ForbiddenException('You can only modify your own collections');
+    }
+
+    const productOid = new Types.ObjectId(productId);
+
+    // Remove from includes if present
+    collection.manual_includes = (collection.manual_includes || []).filter(
+      (id) => !id.equals(productOid),
+    );
+
+    // Add to excludes if not already present
+    const alreadyExcluded = (collection.manual_excludes || []).some(
+      (id) => id.equals(productOid),
+    );
+    if (!alreadyExcluded) {
+      collection.manual_excludes = [...(collection.manual_excludes || []), productOid];
+    }
+
+    await collection.save();
+
+    // Remove collection from the product
+    await this.productModel.updateOne(
+      { _id: productOid },
+      { $pull: { collections: new Types.ObjectId(collectionId) } },
+    );
+
+    return { message: 'Product excluded from collection', collectionId, productId };
   }
 
   /**
@@ -268,11 +456,26 @@ export class CollectionService {
       throw new ForbiddenException('You can only edit your own collections');
     }
 
-    Object.assign(collection, dto);
+    // Convert string IDs to ObjectIds for manual overrides
+    if (dto.manual_includes) {
+      (collection as any).manual_includes = dto.manual_includes.map(
+        (id) => new Types.ObjectId(id),
+      );
+    }
+    if (dto.manual_excludes) {
+      (collection as any).manual_excludes = dto.manual_excludes.map(
+        (id) => new Types.ObjectId(id),
+      );
+    }
+
+    // Apply remaining DTO fields (excluding manual overrides already handled)
+    const { manual_includes, manual_excludes, ...rest } = dto;
+    Object.assign(collection, rest);
+
     const saved = await collection.save();
 
-    // Re-apply conditions if they changed
-    if (dto.conditions) {
+    // Re-apply conditions if rules, overrides, or active status changed
+    if (dto.conditions || dto.manual_includes || dto.manual_excludes || dto.is_active !== undefined) {
       this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
     }
 
@@ -312,6 +515,12 @@ export class CollectionService {
       slug,
       scope: CollectionScope.PLATFORM,
       business: null,
+      manual_includes: (dto.manual_includes || []).map(
+        (id) => new Types.ObjectId(id),
+      ),
+      manual_excludes: (dto.manual_excludes || []).map(
+        (id) => new Types.ObjectId(id),
+      ),
     });
 
     const saved = await collection.save();
@@ -329,10 +538,23 @@ export class CollectionService {
     });
     if (!collection) throw new NotFoundException('Platform collection not found');
 
-    Object.assign(collection, dto);
+    // Convert string IDs to ObjectIds for manual overrides
+    if (dto.manual_includes) {
+      (collection as any).manual_includes = dto.manual_includes.map(
+        (id) => new Types.ObjectId(id),
+      );
+    }
+    if (dto.manual_excludes) {
+      (collection as any).manual_excludes = dto.manual_excludes.map(
+        (id) => new Types.ObjectId(id),
+      );
+    }
+
+    const { manual_includes, manual_excludes, ...rest } = dto;
+    Object.assign(collection, rest);
     const saved = await collection.save();
 
-    if (dto.conditions) {
+    if (dto.conditions || dto.manual_includes || dto.manual_excludes || dto.is_active !== undefined) {
       this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
     }
 
@@ -419,6 +641,29 @@ export class CollectionService {
   // Helpers
   // ─────────────────────────────────────────────────────────
 
+  /**
+   * Evaluate a product against a collection's conditions.
+   */
+  private evaluateProductAgainstConditions(
+    product: ProductDocument,
+    collection: CollectionDocument,
+  ): boolean {
+    if (!collection.conditions?.length) return false;
+
+    const matches = collection.conditions.map((cond) => {
+      const productValue = this.getNestedValue(product, cond.field);
+      return Array.isArray(productValue)
+        ? productValue.some((v) =>
+            this.evaluateOperator(v, cond.operator, cond.value),
+          )
+        : this.evaluateOperator(productValue, cond.operator, cond.value);
+    });
+
+    return collection.condition_match === 'all'
+      ? matches.every((r) => r)
+      : matches.some((r) => r);
+  }
+
   private generateSlug(title: string): string {
     return title
       .toLowerCase()
@@ -468,8 +713,14 @@ export class CollectionService {
         return Number(value) > Number(expected);
       case 'less_than':
         return Number(value) < Number(expected);
+      case 'contains':
+        return String(value).toLowerCase().includes(String(expected).toLowerCase());
+      case 'starts_with':
+        return String(value).toLowerCase().startsWith(String(expected).toLowerCase());
+      case 'ends_with':
+        return String(value).toLowerCase().endsWith(String(expected).toLowerCase());
       default:
-        console.warn(`⚠️ Unknown operator "${operator}"`);
+        this.logger.warn(`Unknown operator "${operator}"`);
         return false;
     }
   }
