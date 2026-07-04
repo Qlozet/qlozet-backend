@@ -1,7 +1,8 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsNotEmpty,
+  IsOptional,
   IsString,
   ArrayMinSize,
   IsEnum,
@@ -29,15 +30,15 @@ export class TaxonomyDto {
   @ArrayMinSize(1)
   categories: string[];
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     type: [String],
     description: 'Associated attribute tags (e.g., ["premium", "cotton"])',
     example: ['premium', 'custom'],
   })
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  @ArrayMinSize(1)
-  attributes: string[];
+  attributes?: string[];
 
   @ApiProperty({
     description: 'Target audience (e.g., men, women, unisex, kids)',
