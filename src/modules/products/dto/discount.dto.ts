@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsBoolean,
   IsOptional,
+  IsNotEmpty,
   ValidateIf,
   IsDate,
   IsIn,
@@ -39,6 +40,14 @@ export class DiscountConditionDto {
 
 /** ---------------- CREATE DISCOUNT ---------------- */
 export class CreateDiscountDto {
+  @ApiProperty({
+    description: 'A name for this discount (e.g., "Summer Sale 20% Off")',
+    example: 'Summer Sale 20% Off',
+  })
+  @IsString()
+  @IsNotEmpty()
+  title: string;
+
   @ApiProperty({
     description: 'Discount type',
     enum: [

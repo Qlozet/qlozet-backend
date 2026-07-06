@@ -5,6 +5,9 @@ export type DiscountDocument = Discount & Document;
 
 @Schema({ timestamps: true })
 export class Discount {
+  @Prop({ required: true, trim: true })
+  title: string;
+
   @Prop({
     required: true,
     enum: [
