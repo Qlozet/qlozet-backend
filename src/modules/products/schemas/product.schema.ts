@@ -50,6 +50,12 @@ export class Product extends Document {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;
 
+  @Prop({ type: Number, default: null })
+  discounted_price: number;
+
+  @Prop({ type: Number, default: null })
+  discount_percentage: number;
+
   @Prop({ type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Collection' }], default: [] })
   collections: Types.ObjectId[];
   @Prop({

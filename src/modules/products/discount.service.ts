@@ -7,6 +7,7 @@ import { CreateDiscountDto } from './dto/discount.dto';
 import { Product, ProductDocument } from './schemas';
 import { Utils } from 'src/common/utils/pagination';
 import { ProductKind } from './schemas/product.schema';
+import { OnEvent } from '@nestjs/event-emitter';
 
 @Injectable()
 export class DiscountService {
@@ -19,26 +20,22 @@ export class DiscountService {
     private readonly productModel: Model<ProductDocument>,
   ) {}
 
-  /** 🔹 Get all discounts */
+  // ─────────────────────────────────────────────────────────
+  // QUERIES
+  // ─────────────────────────────────────────────────────────
+
+  /** Get all discounts for a business (paginated) */
   async findAll(
     business: string,
     query?: { page?: number; size?: number },
-  ): Promise<{
-    total_items: number;
-    data: DiscountDocument[];
-    total_pages: number;
-    current_page: number;
-    has_next_page: boolean;
-    has_previous_page: boolean;
-    page_size: number;
-  }> {
+  ) {
     const { page = 1, size = 10 } = query || {};
     const { take, skip } = await Utils.getPagination(page, size);
 
     const filter = { business: new Types.ObjectId(business) };
 
     const [discounts, totalCount] = await Promise.all([
-      this.discountModel.find(filter).skip(skip).limit(take).exec(),
+      this.discountModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(take).exec(),
       this.discountModel.countDocuments(filter),
     ]);
 
@@ -49,31 +46,34 @@ export class DiscountService {
     );
   }
 
+  /** Get only currently active discounts for a business */
   async findActive(
     business: string,
     query?: { page?: number; size?: number },
-  ): Promise<{
-    total_items: number;
-    data: DiscountDocument[];
-    total_pages: number;
-    current_page: number;
-    has_next_page: boolean;
-    has_previous_page: boolean;
-    page_size: number;
-  }> {
+  ) {
     const { page = 1, size = 10 } = query || {};
     const { take, skip } = await Utils.getPagination(page, size);
 
     const now = new Date();
     const filter = {
       business: new Types.ObjectId(business),
-      start_date: { $lte: now },
-      $or: [{ end_date: null }, { end_date: { $gte: now } }],
       is_active: true,
+      $or: [
+        { start_date: null },
+        { start_date: { $lte: now } },
+      ],
+      $and: [
+        {
+          $or: [
+            { end_date: null },
+            { end_date: { $gte: now } },
+          ],
+        },
+      ],
     };
 
     const [discounts, totalCount] = await Promise.all([
-      this.discountModel.find(filter).skip(skip).limit(take).exec(),
+      this.discountModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(take).exec(),
       this.discountModel.countDocuments(filter),
     ]);
 
@@ -84,12 +84,26 @@ export class DiscountService {
     );
   }
 
-  /** 🔹 Create discount and trigger async apply */
+  /** Get a single discount by ID */
+  async findById(id: string, business: string) {
+    const discount = await this.discountModel.findOne({
+      _id: id,
+      business: new Types.ObjectId(business),
+    });
+    if (!discount) throw new NotFoundException('Discount not found');
+    return discount;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // CREATE / UPDATE / DELETE
+  // ─────────────────────────────────────────────────────────
+
+  /** Create discount and trigger async apply */
   async create(
     createDiscountDto: CreateDiscountDto,
     business: string,
   ): Promise<DiscountDocument> {
-    this.logger.log(`Creating discount: ${JSON.stringify(createDiscountDto)}`);
+    this.logger.log(`Creating discount: type=${createDiscountDto.type}, value=${createDiscountDto.value}`);
 
     const discount = new this.discountModel({
       ...createDiscountDto,
@@ -98,26 +112,83 @@ export class DiscountService {
     });
 
     const savedDiscount = await discount.save();
-    this.logger.log(`✅ Discount created successfully: ${savedDiscount._id}`);
+    this.logger.log(`Discount created: ${savedDiscount._id}`);
 
     // Run background discount application
     this.applyDiscountToMatchingProducts(savedDiscount.id)
-      .then((updated) =>
+      .then((count) =>
         this.logger.log(
-          `🎯 Applied discount to ${updated.length} matching products (${savedDiscount._id})`,
+          `Applied discount ${savedDiscount._id} to ${count} products`,
         ),
       )
       .catch((err) =>
-        this.logger.error('❌ Failed to apply discount to products', err),
+        this.logger.error('Failed to apply discount to products', err),
       );
-    const newDiscount = savedDiscount.toObject();
-    return newDiscount;
+
+    return savedDiscount.toObject();
   }
 
-  /** 🔹 Apply discount to products that match its conditions */
+  /** Update an existing discount */
+  async update(
+    id: string,
+    dto: Partial<CreateDiscountDto>,
+    business: string,
+  ) {
+    const discount = await this.discountModel.findOne({
+      _id: id,
+      business: new Types.ObjectId(business),
+    });
+    if (!discount) throw new NotFoundException('Discount not found');
+
+    Object.assign(discount, dto);
+    const saved = await discount.save();
+
+    // Re-apply if conditions, value, type, or active status changed
+    if (dto.conditions || dto.value !== undefined || dto.type || dto.is_active !== undefined) {
+      this.applyDiscountToMatchingProducts(saved.id).catch(() => {});
+    }
+
+    return saved;
+  }
+
+  /** Delete a discount and clean up all products that had it applied */
+  async delete(id: string, business: string) {
+    const discount = await this.discountModel.findOne({
+      _id: id,
+      business: new Types.ObjectId(business),
+    });
+    if (!discount) throw new NotFoundException('Discount not found');
+
+    // Remove discount from all products
+    await this.productModel.updateMany(
+      { applied_discount: discount._id },
+      {
+        $set: {
+          applied_discount: null,
+          discounted_price: null,
+          discount_percentage: null,
+        },
+      },
+    );
+
+    await this.discountModel.findByIdAndDelete(id);
+    return { deleted: true, id };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // DISCOUNT APPLICATION ENGINE
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Apply a discount to all matching products.
+   * - Scoped to vendor's products only (not all products in the DB)
+   * - Calculates and stores discounted_price + discount_percentage on each product
+   * - Removes discount from products that no longer match
+   * - Picks the best discount if a product already has one (highest savings wins)
+   */
   async applyDiscountToMatchingProducts(
     discountId: string,
-  ): Promise<ProductDocument[]> {
+  ): Promise<number> {
     this.logger.log(`Applying discount: ${discountId}`);
 
     const discount = await this.discountModel.findById(discountId).exec();
@@ -126,44 +197,42 @@ export class DiscountService {
     const now = new Date();
     if (!discount.is_active) {
       this.logger.warn(`Discount inactive, skipping: ${discountId}`);
-      return [];
+      return 0;
     }
     if (discount.start_date && discount.start_date > now) {
       this.logger.warn(`Discount not started yet: ${discount.start_date}`);
-      return [];
+      return 0;
     }
     if (discount.end_date && discount.end_date < now) {
       this.logger.warn(`Discount expired: ${discount.end_date}`);
-      return [];
+      return 0;
     }
 
-    const products = await this.productModel.find().exec();
-    this.logger.log(`Found ${products.length} products to check`);
+    // Scope to vendor's products only
+    const products = await this.productModel
+      .find({ business: discount.business })
+      .exec();
+    this.logger.log(`Checking ${products.length} products for discount match`);
 
-    const updatedProducts: ProductDocument[] = [];
+    let updatedCount = 0;
 
     for (const product of products) {
+      const basePrice = product.base_price || 0;
       let isApplicable = false;
 
-      // 1️⃣ Store-wide discount
+      // Store-wide discount applies to everything
       if (discount.type === 'store_wide') {
         isApplicable = true;
       }
-
-      // 2️⃣ Conditional discounts
+      // Conditional discounts
       else if (discount.conditions?.length) {
         const results = discount.conditions.map((cond) => {
           const productValue = this.getNestedValue(product, cond.field);
-          const result = Array.isArray(productValue)
+          return Array.isArray(productValue)
             ? productValue.some((v) =>
                 this.evaluateOperator(v, cond.operator, cond.value),
               )
             : this.evaluateOperator(productValue, cond.operator, cond.value);
-
-          this.logger.debug(
-            `Check product ${product._id}: ${cond.field} ${cond.operator} ${cond.value} => ${result}`,
-          );
-          return result;
         });
 
         isApplicable =
@@ -172,58 +241,179 @@ export class DiscountService {
             : results.some(Boolean);
       }
 
-      if (!isApplicable) continue;
+      const currentDiscountId = product.applied_discount?.toString();
+      const thisDiscountId = String(discount._id);
 
-      // 3️⃣ Avoid duplicate application
-      const alreadyHasDiscount =
-        product.applied_discount &&
-        product.applied_discount.toString() === discount.id.toString();
+      if (isApplicable) {
+        // Calculate discount amount for this product
+        const { discountedPrice, savingsPercent } = this.calculateDiscountedPrice(
+          basePrice,
+          discount,
+        );
 
-      if (alreadyHasDiscount) {
-        this.logger.debug(`Product ${product._id} already has this discount`);
-        continue;
+        // Check if product already has a different discount — pick the best one
+        if (currentDiscountId && currentDiscountId !== thisDiscountId) {
+          const existingDiscount = await this.discountModel.findById(currentDiscountId).lean();
+          if (existingDiscount) {
+            const existingSavings = this.calculateDiscountedPrice(
+              basePrice,
+              existingDiscount,
+            );
+            // If the existing discount saves more money, skip this one
+            if (existingSavings.discountedPrice <= discountedPrice) {
+              continue;
+            }
+          }
+        }
+
+        await this.productModel.updateOne(
+          { _id: product._id },
+          {
+            $set: {
+              applied_discount: discount._id,
+              discounted_price: Math.round(discountedPrice * 100) / 100,
+              discount_percentage: Math.round(savingsPercent * 100) / 100,
+            },
+          },
+        );
+        updatedCount++;
+      } else if (currentDiscountId === thisDiscountId) {
+        // Product no longer matches — remove this discount
+        await this.productModel.updateOne(
+          { _id: product._id },
+          {
+            $set: {
+              applied_discount: null,
+              discounted_price: null,
+              discount_percentage: null,
+            },
+          },
+        );
+        updatedCount++;
+      }
+    }
+
+    this.logger.log(
+      `Finished applying discount ${discountId}. ${updatedCount} products updated.`,
+    );
+    return updatedCount;
+  }
+
+  /**
+   * Sync a single product against all active discounts for its vendor.
+   * Picks the discount that gives the biggest savings.
+   */
+  async syncProductWithDiscounts(productId: string): Promise<void> {
+    const product = await this.productModel.findById(productId).exec();
+    if (!product) return;
+
+    const businessId = product.business?.toString();
+    if (!businessId) return;
+
+    const now = new Date();
+    const activeDiscounts = await this.discountModel
+      .find({
+        business: new Types.ObjectId(businessId),
+        is_active: true,
+        $or: [{ start_date: null }, { start_date: { $lte: now } }],
+      })
+      .exec();
+
+    // Filter out expired discounts
+    const validDiscounts = activeDiscounts.filter(
+      (d) => !d.end_date || d.end_date >= now,
+    );
+
+    const basePrice = product.base_price || 0;
+    let bestDiscount: DiscountDocument | null = null;
+    let bestPrice = basePrice;
+    let bestPercent = 0;
+
+    for (const discount of validDiscounts) {
+      let isApplicable = false;
+
+      if (discount.type === 'store_wide') {
+        isApplicable = true;
+      } else if (discount.conditions?.length) {
+        const results = discount.conditions.map((cond) => {
+          const productValue = this.getNestedValue(product, cond.field);
+          return Array.isArray(productValue)
+            ? productValue.some((v) =>
+                this.evaluateOperator(v, cond.operator, cond.value),
+              )
+            : this.evaluateOperator(productValue, cond.operator, cond.value);
+        });
+
+        isApplicable =
+          discount.condition_match === 'all'
+            ? results.every(Boolean)
+            : results.some(Boolean);
       }
 
-      // 4️⃣ Apply discount calculation
-      const basePrice = product.base_price || 0;
-      let discountValue = 0;
-
-      if (
-        ['percentage', 'flash_percentage', 'store_wide'].includes(discount.type)
-      ) {
-        discountValue = discount.value;
-      } else {
-        discountValue = discount.value;
+      if (isApplicable) {
+        const { discountedPrice, savingsPercent } = this.calculateDiscountedPrice(
+          basePrice,
+          discount,
+        );
+        // Pick the discount that saves the customer the most money
+        if (discountedPrice < bestPrice) {
+          bestDiscount = discount;
+          bestPrice = discountedPrice;
+          bestPercent = savingsPercent;
+        }
       }
+    }
 
-      const finalPrice = Math.max(basePrice - discountValue, 0);
-
+    if (bestDiscount) {
       await this.productModel.updateOne(
         { _id: product._id },
         {
           $set: {
-            applied_discount: discount._id,
+            applied_discount: bestDiscount._id,
+            discounted_price: Math.round(bestPrice * 100) / 100,
+            discount_percentage: Math.round(bestPercent * 100) / 100,
           },
         },
       );
-
-      updatedProducts.push(product);
-      this.logger.log(
-        `✅ Applied discount ${discount._id} to product ${product._id}, new price: ${finalPrice}`,
+    } else if (product.applied_discount) {
+      // No discount applies anymore — clear it
+      await this.productModel.updateOne(
+        { _id: product._id },
+        {
+          $set: {
+            applied_discount: null,
+            discounted_price: null,
+            discount_percentage: null,
+          },
+        },
       );
     }
-
-    this.logger.log(
-      `✅ Finished applying discount to ${updatedProducts.length} products`,
-    );
-
-    return updatedProducts;
   }
 
-  /** 🔹 Cron job: runs every 10 minutes to refresh discounts */
+  /**
+   * Event listener: auto-sync discounts when a product is created or updated.
+   */
+  @OnEvent('product.upserted', { async: true })
+  async handleProductUpserted(product: any): Promise<void> {
+    const productId = product._id?.toString?.() || product._id;
+    if (!productId) return;
+
+    this.logger.log(`[Event] product.upserted → syncing discounts for ${productId}`);
+    try {
+      await this.syncProductWithDiscounts(productId);
+    } catch (err) {
+      this.logger.error(`Failed to sync discounts for product ${productId}:`, err);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // CRON JOB
+  // ─────────────────────────────────────────────────────────
+
+  /** Cron job: runs every 10 minutes to activate/expire discounts */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async refreshDiscountsJob() {
-    this.logger.log('🕒 Running scheduled discount refresh job...');
+    this.logger.log('Running scheduled discount refresh job...');
     const now = new Date();
 
     const allDiscounts = await this.discountModel.find().exec();
@@ -233,63 +423,63 @@ export class DiscountService {
         (!discount.end_date || discount.end_date >= now);
 
       if (shouldBeActive && !discount.is_active) {
+        // Activate a discount that has reached its start date
         discount.is_active = true;
         await discount.save();
-        this.logger.log(`✅ Activated discount ${discount.id}`);
+        this.logger.log(`Activated discount ${discount._id}`);
         await this.applyDiscountToMatchingProducts(discount.id);
       }
 
       if (!shouldBeActive && discount.is_active) {
+        // Expire a discount that has passed its end date
         discount.is_active = false;
         await discount.save();
-        this.logger.warn(`🚫 Expired discount ${discount._id}`);
+        this.logger.log(`Expired discount ${discount._id}`);
+
+        // Clean up: remove discount from all products that had it
+        await this.productModel.updateMany(
+          { applied_discount: discount._id },
+          {
+            $set: {
+              applied_discount: null,
+              discounted_price: null,
+              discount_percentage: null,
+            },
+          },
+        );
       }
     }
   }
 
-  /** 🔹 Get all products with currently active discounts */
+  // ─────────────────────────────────────────────────────────
+  // DISCOUNTED PRODUCT QUERIES
+  // ─────────────────────────────────────────────────────────
+
+  /** Get all products with currently active discounts */
   async getDiscountedProducts(
     business: string,
     query?: { page?: number; size?: number },
   ) {
     const { page = 1, size = 10 } = query || {};
     const { take, skip } = await Utils.getPagination(page, size);
-    const now = new Date();
 
-    // 1️⃣ Get all active discounts for this business
-    const activeDiscounts = await this.discountModel
-      .find({
-        business,
-        is_active: true,
-        start_date: { $lte: now },
-        $or: [{ end_date: null }, { end_date: { $gte: now } }],
-      })
-      .select('_id')
-      .lean()
-      .exec();
+    const filter = {
+      business: new Types.ObjectId(business),
+      applied_discount: { $ne: null },
+      discounted_price: { $ne: null },
+    };
 
-    if (!activeDiscounts.length) {
-      return Utils.getPagingData({ count: 0, rows: [] }, page, size);
-    }
-
-    const discountIds = activeDiscounts.map((d) => d._id);
-
-    // 2️⃣ Find products that have these active discounts
     const [products, totalCount] = await Promise.all([
       this.productModel
-        .find({ business, applied_discounts: { $in: discountIds } })
+        .find(filter)
         .skip(skip)
         .limit(take)
-        .populate('applied_discounts')
+        .populate('applied_discount')
         .lean()
         .exec(),
-      this.productModel.countDocuments({
-        business,
-        applied_discounts: { $in: discountIds },
-      }),
+      this.productModel.countDocuments(filter),
     ]);
 
-    // 3️⃣ Return paginated result
     return Utils.getPagingData(
       { count: totalCount, rows: products },
       page,
@@ -297,7 +487,94 @@ export class DiscountService {
     );
   }
 
-  /** 🔹 Helper: safely get nested object fields (supports arrays) */
+  /** Get discounted products per vendor */
+  async getDiscountedProductsByVendor(
+    business: string,
+    query?: { page?: number; size?: number; kind?: ProductKind },
+  ) {
+    const { page = 1, size = 10, kind } = query || {};
+    const { take, skip } = await Utils.getPagination(page, size);
+    const filter: any = {
+      business: new Types.ObjectId(business),
+      applied_discount: { $ne: null },
+    };
+    if (kind) filter.kind = kind;
+
+    const [products, totalCount] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .skip(skip)
+        .limit(take)
+        .populate('applied_discount')
+        .lean()
+        .exec(),
+      this.productModel.countDocuments(filter),
+    ]);
+
+    return Utils.getPagingData(
+      { count: totalCount, rows: products },
+      page,
+      size,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Calculate the final discounted price and savings percentage.
+   */
+  private calculateDiscountedPrice(
+    basePrice: number,
+    discount: any,
+  ): { discountedPrice: number; savingsPercent: number } {
+    if (!basePrice || basePrice <= 0) {
+      return { discountedPrice: 0, savingsPercent: 0 };
+    }
+
+    let discountAmount = 0;
+
+    switch (discount.type) {
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        // Store-wide uses value_type to determine if it's percentage or fixed
+        // Default to percentage if value_type is not set for store_wide
+        if (discount.type === 'store_wide' && discount.value_type === 'fixed') {
+          discountAmount = discount.value || 0;
+        } else {
+          discountAmount = (basePrice * (discount.value || 0)) / 100;
+        }
+        break;
+
+      case 'fixed':
+      case 'flash_fixed':
+        discountAmount = discount.value || 0;
+        break;
+
+      case 'category_specific':
+        if (discount.value_type === 'percentage') {
+          discountAmount = (basePrice * (discount.value || 0)) / 100;
+        } else {
+          discountAmount = discount.value || 0;
+        }
+        break;
+
+      default:
+        discountAmount = 0;
+    }
+
+    // Cap discount at the base price (can't go below ₦0)
+    discountAmount = Math.min(discountAmount, basePrice);
+
+    const discountedPrice = basePrice - discountAmount;
+    const savingsPercent = (discountAmount / basePrice) * 100;
+
+    return { discountedPrice, savingsPercent };
+  }
+
+  /** Helper: safely get nested object fields (supports arrays) */
   private getNestedValue(obj: any, path: string): any {
     const keys = path.split('.');
     let current: any = obj;
@@ -314,7 +591,7 @@ export class DiscountService {
     return current;
   }
 
-  /** 🔹 Helper: evaluate conditional operators */
+  /** Helper: evaluate conditional operators */
   private evaluateOperator(
     value: any,
     operator: string,
@@ -329,42 +606,15 @@ export class DiscountService {
         return Number(value) > Number(expected);
       case 'less_than':
         return Number(value) < Number(expected);
+      case 'contains':
+        return String(value).toLowerCase().includes(String(expected).toLowerCase());
+      case 'starts_with':
+        return String(value).toLowerCase().startsWith(String(expected).toLowerCase());
+      case 'ends_with':
+        return String(value).toLowerCase().endsWith(String(expected).toLowerCase());
       default:
-        this.logger.warn(`⚠️ Unknown operator "${operator}"`);
+        this.logger.warn(`Unknown operator "${operator}"`);
         return false;
     }
-  }
-
-  /** 🔹 Get discounted products per vendor */
-  async getDiscountedProductsByVendor(
-    business: string,
-    query?: { page?: number; size?: number; kind?: ProductKind },
-  ) {
-    const { page = 1, size = 10, kind } = query || {};
-    const { take, skip } = await Utils.getPagination(page, size);
-    const filter: any = {
-      business,
-      applied_discount: { $ne: null },
-    };
-    if (kind) filter.kind = kind;
-
-    // Get products and total count in parallel
-    const [products, totalCount] = await Promise.all([
-      this.productModel
-        .find(filter)
-        .skip(skip)
-        .limit(take)
-        .populate('applied_discount')
-        .lean()
-        .exec(),
-      this.productModel.countDocuments(filter),
-    ]);
-
-    // Return paginated data
-    return Utils.getPagingData(
-      { count: totalCount, rows: products },
-      page,
-      size,
-    );
   }
 }
