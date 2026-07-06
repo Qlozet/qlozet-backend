@@ -5,6 +5,9 @@ export type DiscountDocument = Discount & Document;
 
 @Schema({ timestamps: true })
 export class Discount {
+  @Prop({ required: true, trim: true })
+  title: string;
+
   @Prop({
     required: true,
     enum: [
@@ -64,6 +67,18 @@ export class Discount {
     index: true,
   })
   business: Types.ObjectId;
+
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_includes: Types.ObjectId[];
+
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_excludes: Types.ObjectId[];
 }
 
 export const DiscountSchema = SchemaFactory.createForClass(Discount);
