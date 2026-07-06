@@ -176,6 +176,88 @@ export class DiscountService {
   }
 
   // ─────────────────────────────────────────────────────────
+  // MANUAL OVERRIDES
+  // ─────────────────────────────────────────────────────────
+
+  /** Manually include a product in this discount (force-apply even if rules don't match) */
+  async includeProduct(discountId: string, productId: string, business: string) {
+    const discount = await this.discountModel.findOne({
+      _id: discountId,
+      business: new Types.ObjectId(business),
+    });
+    if (!discount) throw new NotFoundException('Discount not found');
+
+    const productObjectId = new Types.ObjectId(productId);
+
+    // Remove from excludes if present, add to includes
+    await this.discountModel.updateOne(
+      { _id: discountId },
+      {
+        $pull: { manual_excludes: productObjectId } as any,
+        $addToSet: { manual_includes: productObjectId },
+      },
+    );
+
+    // Re-apply discount to this single product
+    const product = await this.productModel.findById(productId);
+    if (product) {
+      const { discountedPrice, savingsPercent } = this.calculateDiscountedPrice(
+        product.base_price || 0,
+        discount,
+      );
+      await this.productModel.updateOne(
+        { _id: product._id },
+        {
+          $set: {
+            applied_discount: discount._id,
+            discounted_price: Math.round(discountedPrice * 100) / 100,
+            discount_percentage: Math.round(savingsPercent * 100) / 100,
+          },
+        },
+      );
+    }
+
+    return { message: `Product ${productId} manually included in discount ${discountId}` };
+  }
+
+  /** Manually exclude a product from this discount (remove even if rules match) */
+  async excludeProduct(discountId: string, productId: string, business: string) {
+    const discount = await this.discountModel.findOne({
+      _id: discountId,
+      business: new Types.ObjectId(business),
+    });
+    if (!discount) throw new NotFoundException('Discount not found');
+
+    const productObjectId = new Types.ObjectId(productId);
+
+    // Remove from includes if present, add to excludes
+    await this.discountModel.updateOne(
+      { _id: discountId },
+      {
+        $pull: { manual_includes: productObjectId } as any,
+        $addToSet: { manual_excludes: productObjectId },
+      },
+    );
+
+    // Remove discount from this product if it was applied
+    const product = await this.productModel.findById(productId);
+    if (product && product.applied_discount?.toString() === discountId) {
+      await this.productModel.updateOne(
+        { _id: product._id },
+        {
+          $set: {
+            applied_discount: null,
+            discounted_price: null,
+            discount_percentage: null,
+          },
+        },
+      );
+    }
+
+    return { message: `Product ${productId} manually excluded from discount ${discountId}` };
+  }
+
+  // ─────────────────────────────────────────────────────────
   // DISCOUNT APPLICATION ENGINE
   // ─────────────────────────────────────────────────────────
 
@@ -216,36 +298,55 @@ export class DiscountService {
 
     let updatedCount = 0;
 
+    // Build override sets for fast lookup
+    const includeSet = new Set(
+      (discount.manual_includes || []).map((id) => id.toString()),
+    );
+    const excludeSet = new Set(
+      (discount.manual_excludes || []).map((id) => id.toString()),
+    );
+
     for (const product of products) {
+      const productIdStr = (product._id as Types.ObjectId).toString();
       const basePrice = product.base_price || 0;
-      let isApplicable = false;
 
-      // Store-wide discount applies to everything
-      if (discount.type === 'store_wide') {
-        isApplicable = true;
-      }
-      // Conditional discounts
-      else if (discount.conditions?.length) {
-        const results = discount.conditions.map((cond) => {
-          const productValue = this.getNestedValue(product, cond.field);
-          return Array.isArray(productValue)
-            ? productValue.some((v) =>
-                this.evaluateOperator(v, cond.operator, cond.value),
-              )
-            : this.evaluateOperator(productValue, cond.operator, cond.value);
-        });
+      // Determine if product should get this discount
+      let shouldApply: boolean;
 
-        isApplicable =
-          discount.condition_match === 'all'
-            ? results.every(Boolean)
-            : results.some(Boolean);
+      // Manual overrides take priority
+      if (excludeSet.has(productIdStr)) {
+        shouldApply = false;
+      } else if (includeSet.has(productIdStr)) {
+        shouldApply = true;
+      } else {
+        // Evaluate rules
+        let isApplicable = false;
+
+        if (discount.type === 'store_wide') {
+          isApplicable = true;
+        } else if (discount.conditions?.length) {
+          const results = discount.conditions.map((cond) => {
+            const productValue = this.getNestedValue(product, cond.field);
+            return Array.isArray(productValue)
+              ? productValue.some((v) =>
+                  this.evaluateOperator(v, cond.operator, cond.value),
+                )
+              : this.evaluateOperator(productValue, cond.operator, cond.value);
+          });
+
+          isApplicable =
+            discount.condition_match === 'all'
+              ? results.every(Boolean)
+              : results.some(Boolean);
+        }
+
+        shouldApply = isApplicable;
       }
 
       const currentDiscountId = product.applied_discount?.toString();
       const thisDiscountId = String(discount._id);
 
-      if (isApplicable) {
-        // Calculate discount amount for this product
+      if (shouldApply) {
         const { discountedPrice, savingsPercent } = this.calculateDiscountedPrice(
           basePrice,
           discount,
@@ -259,7 +360,6 @@ export class DiscountService {
               basePrice,
               existingDiscount,
             );
-            // If the existing discount saves more money, skip this one
             if (existingSavings.discountedPrice <= discountedPrice) {
               continue;
             }

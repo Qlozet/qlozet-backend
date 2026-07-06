@@ -64,6 +64,18 @@ export class Discount {
     index: true,
   })
   business: Types.ObjectId;
+
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_includes: Types.ObjectId[];
+
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    default: [],
+  })
+  manual_excludes: Types.ObjectId[];
 }
 
 export const DiscountSchema = SchemaFactory.createForClass(Discount);

@@ -157,4 +157,40 @@ export class DiscountController {
   async getDiscountedProducts(@Query() query: any, @Req() req: any) {
     return this.discountService.getDiscountedProducts(req.business?.id, query);
   }
+
+  // ─────────────────────────────────────────────────────────
+  // MANUAL OVERRIDES
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Manually include a product in a discount (force-apply even if rules don't match)
+   */
+  @Post(':discountId/include/:productId')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Manually include a product in a discount' })
+  @ApiParam({ name: 'discountId', description: 'Discount ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to include' })
+  async includeProduct(
+    @Param('discountId') discountId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
+  ) {
+    return this.discountService.includeProduct(discountId, productId, req.business?.id);
+  }
+
+  /**
+   * Manually exclude a product from a discount (remove even if rules match)
+   */
+  @Post(':discountId/exclude/:productId')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Manually exclude a product from a discount' })
+  @ApiParam({ name: 'discountId', description: 'Discount ID' })
+  @ApiParam({ name: 'productId', description: 'Product ID to exclude' })
+  async excludeProduct(
+    @Param('discountId') discountId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
+  ) {
+    return this.discountService.excludeProduct(discountId, productId, req.business?.id);
+  }
 }

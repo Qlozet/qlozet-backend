@@ -5,6 +5,7 @@ import {
   IsString,
   IsNumber,
   IsBoolean,
+  IsOptional,
   ValidateIf,
   IsDate,
   IsIn,
@@ -141,4 +142,24 @@ export class CreateDiscountDto {
   })
   @IsBoolean()
   is_active: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to force-include in this discount (even if conditions do not match)',
+    type: [String],
+    example: ['665a1234abcdef0012345678'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_includes?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Product IDs to force-exclude from this discount (even if conditions match)',
+    type: [String],
+    example: ['665a1234abcdef0012345679'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  manual_excludes?: string[];
 }
