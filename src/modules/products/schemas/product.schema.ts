@@ -88,6 +88,9 @@ export class Product extends Document {
     default: [],
   })
   tags: { name: string; slug: string; type: 'system' | 'custom' }[];
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'SizeGuide', default: null })
+  size_guide: Types.ObjectId;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
