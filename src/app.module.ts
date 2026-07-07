@@ -34,6 +34,7 @@ import { FabricReservationModule } from './modules/fabric-reservation/fabric-res
 import { StyleLibraryModule } from './modules/style-library/style-library.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
+import { SizeGuideModule } from './modules/size-guide/size-guide.module';
 
 @Module({
   imports: [
@@ -112,6 +113,7 @@ import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
     CurrencyModule,
     StyleLibraryModule,
     TaxonomyModule,
+    SizeGuideModule,
   ],
   controllers: [AppController],
   providers: [
