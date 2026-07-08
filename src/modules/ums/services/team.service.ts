@@ -160,7 +160,33 @@ export class TeamService {
   async removeMember(teamId: string) {
     const team = await this.teamMemberModel.findById(teamId);
     if (!team) throw new NotFoundException('Team member not found');
+
+    const userId = team.user;
+    const businessId = team.business;
+
+    // Delete the team member record
     await team.deleteOne();
+
+    // Remove from business.team_members array
+    await this.businessModel.findByIdAndUpdate(businessId, {
+      $pull: { team_members: team._id },
+    });
+
+    // If the user's active business was this one, switch to their next available
+    if (userId) {
+      const user = await this.userModel.findById(userId);
+      if (user && user.business?.toString() === businessId.toString()) {
+        // Find next available team membership
+        const nextMembership = await this.teamMemberModel.findOne({
+          user: userId,
+          business: { $ne: businessId },
+        });
+        await this.userModel.findByIdAndUpdate(userId, {
+          business: nextMembership ? nextMembership.business : null,
+        });
+      }
+    }
+
     return { message: 'Team member removed successfully' };
   }
 }

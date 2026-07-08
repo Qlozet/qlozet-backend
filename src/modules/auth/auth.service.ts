@@ -598,7 +598,7 @@ export class AuthService {
   }
 
   /**
-   * Login vendor
+   * Login vendor (supports multi-business)
    */
   async loginVendor(email: string, password: string) {
     try {
@@ -641,25 +641,130 @@ export class AuthService {
         throw new UnauthorizedException('Invalid credentials');
       }
 
+      // Look up ALL businesses this user belongs to
+      const teamMemberships = await this.teamMemberModel
+        .find({ user: vendor._id })
+        .populate('business', 'business_name business_logo_url status')
+        .populate('role', 'name description')
+        .exec();
+
+      if (!teamMemberships.length) {
+        throw new UnauthorizedException(
+          'You are not a member of any business. Please contact your business owner.',
+        );
+      }
+
+      // Build businesses array
+      const businesses = teamMemberships
+        .filter((tm: any) => tm.business) // filter out orphaned records
+        .map((tm: any) => ({
+          _id: tm.business._id,
+          business_name: tm.business.business_name,
+          business_logo_url: tm.business.business_logo_url || null,
+          status: tm.business.status,
+          role: tm.role?.name || 'unknown',
+          role_id: tm.role?._id || null,
+          is_owner: tm.is_owner || false,
+        }));
+
+      if (!businesses.length) {
+        throw new UnauthorizedException(
+          'You are not a member of any active business.',
+        );
+      }
+
+      // Auto-select business: use current user.business if still valid, else first one
+      let activeBusiness = businesses[0];
+      if (vendor.business) {
+        const current = businesses.find(
+          (b: any) => b._id.toString() === vendor.business.toString(),
+        );
+        if (current) activeBusiness = current;
+      }
+
+      // Update user's active business
+      await this.userModel.findByIdAndUpdate(vendor._id, {
+        business: activeBusiness._id,
+      });
+
       const token = await this.generateToken({
         id: vendor._id,
         email: vendor.email,
       });
       const hashedRt = await bcrypt.hash(token.refresh_token, 10);
       await this.userModel.findByIdAndUpdate(vendor._id, {
-        refreshToken: hashedRt,
+        refresh_token: hashedRt,
       });
+
       return {
         message: 'Login successful. Welcome back!',
         data: {
           user: sanitizeUser(vendor),
           token,
+          businesses,
+          active_business: activeBusiness,
+          must_change_password: vendor.must_change_password || false,
         },
       };
     } catch (error) {
       this.logger.error(`Vendor login failed: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Switch active business for a vendor user
+   */
+  async switchBusiness(userId: string, businessId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    // Verify user is a team member of the target business
+    const membership = await this.teamMemberModel
+      .findOne({ user: userId, business: businessId })
+      .populate('business', 'business_name business_logo_url status')
+      .populate('role', 'name description')
+      .exec();
+
+    if (!membership) {
+      throw new UnauthorizedException(
+        'You are not a member of this business.',
+      );
+    }
+
+    // Update active business
+    await this.userModel.findByIdAndUpdate(userId, {
+      business: businessId,
+    });
+
+    // Generate fresh token
+    const token = await this.generateToken({
+      id: user._id,
+      email: user.email,
+    });
+    const hashedRt = await bcrypt.hash(token.refresh_token, 10);
+    await this.userModel.findByIdAndUpdate(userId, {
+      refresh_token: hashedRt,
+    });
+
+    const business: any = membership.business;
+    const role: any = membership.role;
+
+    return {
+      message: `Switched to ${business?.business_name || 'business'} successfully.`,
+      data: {
+        token,
+        active_business: {
+          _id: business._id,
+          business_name: business.business_name,
+          business_logo_url: business.business_logo_url || null,
+          status: business.status,
+          role: role?.name || 'unknown',
+          role_id: role?._id || null,
+          is_owner: (membership as any).is_owner || false,
+        },
+      },
+    };
   }
 
   /**

@@ -476,7 +476,7 @@ export class UserService {
       ...dto,
       name: dto.full_name || user.full_name,
       email: user.email,
-      phone: dto.phone_number ?? user.phone_number,
+      phone: dto.phone_number ?? user.phone_number ?? '',
       latitude: dto.latitude ?? 0,
       longitude: dto.longitude ?? 0,
     });

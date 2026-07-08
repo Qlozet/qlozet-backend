@@ -57,11 +57,11 @@ export class BusinessService implements OnModuleInit {
    * This is a one-time migration fix for E11000 duplicate key errors on null.
    */
   async onModuleInit() {
+    // Fix business_email index
     try {
       await this.businessModel.collection.dropIndex('business_email_1');
       this.logger.log('✅ Dropped old business_email_1 index (non-sparse)');
     } catch (e: any) {
-      // Index already doesn't exist or already sparse — that's fine
       if (e.codeName !== 'IndexNotFound') {
         this.logger.log(`ℹ️ business_email_1 index: ${e.message}`);
       }
@@ -70,7 +70,23 @@ export class BusinessService implements OnModuleInit {
       await this.businessModel.ensureIndexes();
       this.logger.log('✅ Business indexes ensured (with sparse)');
     } catch (e: any) {
-      this.logger.warn(`⚠️ ensureIndexes: ${e.message}`);
+      this.logger.warn(`⚠️ ensureIndexes (business): ${e.message}`);
+    }
+
+    // Fix user phone_number index
+    try {
+      await this.userModel.collection.dropIndex('phone_number_1');
+      this.logger.log('✅ Dropped old phone_number_1 index (non-sparse)');
+    } catch (e: any) {
+      if (e.codeName !== 'IndexNotFound') {
+        this.logger.log(`ℹ️ phone_number_1 index: ${e.message}`);
+      }
+    }
+    try {
+      await this.userModel.ensureIndexes();
+      this.logger.log('✅ User indexes ensured (with sparse)');
+    } catch (e: any) {
+      this.logger.warn(`⚠️ ensureIndexes (user): ${e.message}`);
     }
   }
 
