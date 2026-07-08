@@ -32,6 +32,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { PasswordResetDto } from './dto/password-reset.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { SwitchBusinessDto } from './dto/switch-business.dto';
 import { ApiResponseWrapper } from 'src/common/decorators/api-response.decorator';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
@@ -283,6 +284,23 @@ export class AuthController {
   ) {
     return this.authService.changePassword(req.user.id, changePasswordDto);
   }
+
+  // ✅ Switch Business (Authenticated)
+  @Post('switch-business')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Switch active business',
+    description:
+      'Switch the active business context for a vendor user who belongs to multiple businesses.',
+  })
+  @ApiBody({ type: SwitchBusinessDto })
+  async switchBusiness(
+    @Body() dto: SwitchBusinessDto,
+    @Req() req: any,
+  ) {
+    return this.authService.switchBusiness(req.user.id, dto.business_id);
+  }
+
   @Public()
   @Post('refresh')
   async refresh(@Body() dto: RefreshTokenDto) {
