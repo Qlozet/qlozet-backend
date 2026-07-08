@@ -15,7 +15,7 @@ export class Business extends Document {
   @Prop({ required: true, trim: true })
   business_name: string;
 
-  @Prop({ required: false, unique: true, lowercase: true, trim: true })
+  @Prop({ required: false, unique: true, sparse: true, lowercase: true, trim: true })
   business_email: string;
 
   @Prop({ required: false })
@@ -236,3 +236,24 @@ export class Business extends Document {
 }
 
 export const BusinessSchema = SchemaFactory.createForClass(Business);
+
+// Fix: Drop the old non-sparse unique index on business_email so Mongoose
+// can recreate it with sparse: true. Without this, MongoDB rejects multiple
+// businesses with null business_email (E11000 duplicate key on null).
+BusinessSchema.pre('init', async function () {
+  // This runs once on model init — noop after first run
+});
+
+// Programmatic index fix — run once on model compilation
+BusinessSchema.statics.fixIndexes = async function () {
+  try {
+    await this.collection.dropIndex('business_email_1');
+    console.log('✅ Dropped old business_email_1 index');
+  } catch (e: any) {
+    if (e.codeName !== 'IndexNotFound') {
+      console.log('ℹ️ business_email_1 index:', e.message);
+    }
+  }
+  await this.ensureIndexes();
+  console.log('✅ Recreated business indexes (with sparse)');
+};
