@@ -78,17 +78,28 @@ export class AuthService {
       ...businessData
     } = data;
 
-    const existingBusiness = await this.businessModel.findOne({
-      $or: [{ business_email }, { business_phone_number }],
-    });
-    if (existingBusiness) {
-      const field =
-        existingBusiness.business_email === business_email
-          ? 'email'
-          : 'phone number';
-      throw new ConflictException(
-        `A business with this ${field} already exists.`,
-      );
+    // Only check for conflicting businesses if email or phone were provided.
+    // When these optional fields are undefined, MongoDB treats { field: undefined }
+    // as { field: null }, which falsely matches any doc missing that field.
+    const businessOrConditions: Record<string, string>[] = [];
+    if (business_email) businessOrConditions.push({ business_email });
+    if (business_phone_number)
+      businessOrConditions.push({ business_phone_number });
+
+    if (businessOrConditions.length > 0) {
+      const existingBusiness = await this.businessModel.findOne({
+        $or: businessOrConditions,
+      });
+      if (existingBusiness) {
+        const field =
+          business_email &&
+          existingBusiness.business_email === business_email
+            ? 'email'
+            : 'phone number';
+        throw new ConflictException(
+          `A business with this ${field} already exists.`,
+        );
+      }
     }
 
     const existingUser = await this.userModel.findOne({
