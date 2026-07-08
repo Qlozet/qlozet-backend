@@ -81,13 +81,26 @@ export class AuthService {
     const existingBusiness = await this.businessModel.findOne({
       $or: [{ business_email }, { business_phone_number }],
     });
-    if (existingBusiness)
-      throw new ConflictException('Business already exists.');
+    if (existingBusiness) {
+      const field =
+        existingBusiness.business_email === business_email
+          ? 'email'
+          : 'phone number';
+      throw new ConflictException(
+        `A business with this ${field} already exists.`,
+      );
+    }
 
     const existingUser = await this.userModel.findOne({
       $or: [{ email: personal_email }, { phone_number: personal_phone_number }],
     });
-    if (existingUser) throw new ConflictException('User already exists.');
+    if (existingUser) {
+      const field =
+        existingUser.email === personal_email ? 'email' : 'phone number';
+      throw new ConflictException(
+        `A user with this ${field} already exists.`,
+      );
+    }
 
     const ownerRole = await this.roleModel.findOne({ name: VendorRole.OWNER });
     if (!ownerRole) throw new BadRequestException('Vendor role not found.');
