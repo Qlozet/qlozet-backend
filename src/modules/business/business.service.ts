@@ -82,6 +82,17 @@ export class BusinessService implements OnModuleInit {
         this.logger.log(`ℹ️ phone_number_1 index: ${e.message}`);
       }
     }
+
+    // Fix user username index
+    try {
+      await this.userModel.collection.dropIndex('username_1');
+      this.logger.log('✅ Dropped old username_1 index (non-sparse)');
+    } catch (e: any) {
+      if (e.codeName !== 'IndexNotFound') {
+        this.logger.log(`ℹ️ username_1 index: ${e.message}`);
+      }
+    }
+
     try {
       await this.userModel.ensureIndexes();
       this.logger.log('✅ User indexes ensured (with sparse)');
