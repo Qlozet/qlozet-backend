@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -32,7 +33,7 @@ import {
 import { sanitizeBusiness } from 'src/common/utils/sanitization';
 
 @Injectable()
-export class BusinessService {
+export class BusinessService implements OnModuleInit {
   private readonly logger = new Logger(BusinessService.name);
   constructor(
     @InjectModel(Business.name)
@@ -49,6 +50,29 @@ export class BusinessService {
     @InjectModel(BusinessEarning.name)
     private businessEarningsModel: Model<BusinessEarningDocument>,
   ) {}
+
+  /**
+   * On startup: drop old non-sparse unique index on business_email
+   * and let Mongoose recreate it with sparse: true.
+   * This is a one-time migration fix for E11000 duplicate key errors on null.
+   */
+  async onModuleInit() {
+    try {
+      await this.businessModel.collection.dropIndex('business_email_1');
+      this.logger.log('✅ Dropped old business_email_1 index (non-sparse)');
+    } catch (e: any) {
+      // Index already doesn't exist or already sparse — that's fine
+      if (e.codeName !== 'IndexNotFound') {
+        this.logger.log(`ℹ️ business_email_1 index: ${e.message}`);
+      }
+    }
+    try {
+      await this.businessModel.ensureIndexes();
+      this.logger.log('✅ Business indexes ensured (with sparse)');
+    } catch (e: any) {
+      this.logger.warn(`⚠️ ensureIndexes: ${e.message}`);
+    }
+  }
 
   async createWarehouse(
     dto: CreateWarehouseDto,
