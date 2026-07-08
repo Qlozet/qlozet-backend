@@ -83,10 +83,23 @@ export class BusinessService implements OnModuleInit {
       }
     }
 
-    // Fix user username index
+    // Fix user username index — sparse only skips undefined, NOT null
+    // So we must convert all null usernames to undefined (unset)
+    try {
+      const result = await this.userModel.collection.updateMany(
+        { username: null },
+        { $unset: { username: '' } },
+      );
+      if (result.modifiedCount > 0) {
+        this.logger.log(`✅ Unset ${result.modifiedCount} null usernames`);
+      }
+    } catch (e: any) {
+      this.logger.warn(`⚠️ Failed to unset null usernames: ${e.message}`);
+    }
+
     try {
       await this.userModel.collection.dropIndex('username_1');
-      this.logger.log('✅ Dropped old username_1 index (non-sparse)');
+      this.logger.log('✅ Dropped old username_1 index');
     } catch (e: any) {
       if (e.codeName !== 'IndexNotFound') {
         this.logger.log(`ℹ️ username_1 index: ${e.message}`);
