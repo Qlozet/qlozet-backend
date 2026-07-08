@@ -42,8 +42,8 @@ export class User extends Document {
     default: null,
   })
   role?: Types.ObjectId;
-  @Prop({ type: String, unique: true, sparse: true, lowercase: true, trim: true, default: null })
-  username: string;
+  @Prop({ type: String, unique: true, sparse: true, lowercase: true, trim: true })
+  username?: string;
   @Prop({ type: String, select: false })
   email_verification_token?: string;
 
