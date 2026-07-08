@@ -380,7 +380,7 @@ export class MailService {
         role,
         companyName: businessName,
         temporaryPassword,
-        loginUrl: `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qoobea.com'}/login`,
+        loginUrl: `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qlozet-vert.vercel.app'}/login`,
         supportEmail: process.env.SUPPORT_EMAIL || 'support@qoobea.com',
       });
 
