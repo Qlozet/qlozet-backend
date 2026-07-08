@@ -26,8 +26,10 @@ import { Discount } from './schemas/discount.schema';
 import { DiscountService } from './discount.service';
 import { CreateDiscountDto } from './dto/discount.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { Product } from '../products/schemas/product.schema';
 
 @ApiTags('Discounts')
@@ -43,6 +45,7 @@ export class DiscountController {
    */
   @Post()
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING, VendorRole.SALES)
   @ApiOperation({ summary: 'Create a new discount' })
   @ApiBody({ type: CreateDiscountDto })
   @ApiResponse({
@@ -97,6 +100,7 @@ export class DiscountController {
    */
   @Patch(':id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING, VendorRole.SALES)
   @ApiOperation({ summary: 'Update a discount' })
   @ApiParam({ name: 'id', description: 'Discount ID' })
   async update(
@@ -112,6 +116,7 @@ export class DiscountController {
    */
   @Delete(':id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING, VendorRole.SALES)
   @ApiOperation({ summary: 'Delete a discount and remove it from all products' })
   @ApiParam({ name: 'id', description: 'Discount ID' })
   async delete(@Param('id') id: string, @Req() req: any) {
@@ -123,6 +128,7 @@ export class DiscountController {
    */
   @Post('apply/:id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Manually trigger discount application to matching products' })
   @ApiParam({ name: 'id', description: 'Discount ID' })
   async applyDiscount(@Param('id') id: string) {
@@ -167,6 +173,7 @@ export class DiscountController {
    */
   @Post(':discountId/include/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Manually include a product in a discount' })
   @ApiParam({ name: 'discountId', description: 'Discount ID' })
   @ApiParam({ name: 'productId', description: 'Product ID to include' })
@@ -183,6 +190,7 @@ export class DiscountController {
    */
   @Post(':discountId/exclude/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Manually exclude a product from a discount' })
   @ApiParam({ name: 'discountId', description: 'Discount ID' })
   @ApiParam({ name: 'productId', description: 'Product ID to exclude' })

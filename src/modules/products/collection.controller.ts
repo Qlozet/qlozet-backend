@@ -24,7 +24,9 @@ import {
 import { CollectionService } from './collection.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import {
   CreateCollectionDto,
   CreatePlatformCollectionDto,
@@ -87,6 +89,7 @@ export class CollectionController {
 
   @Post()
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Create a new vendor collection' })
   @ApiCreatedResponse({ type: CollectionResponseDto })
   async create(@Body() dto: CreateCollectionDto, @Req() req: any) {
@@ -142,6 +145,7 @@ export class CollectionController {
 
   @Patch(':collectionId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Update a vendor collection' })
   @ApiParam({ name: 'collectionId', description: 'Collection ID' })
   @ApiOkResponse({ type: CollectionResponseDto })
@@ -155,6 +159,7 @@ export class CollectionController {
 
   @Delete(':collectionId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({ summary: 'Delete a vendor collection' })
   @ApiParam({ name: 'collectionId', description: 'Collection ID' })
   @ApiOkResponse({ description: 'Collection deleted', schema: { properties: { deleted: { type: 'boolean' }, id: { type: 'string' } } } })
@@ -167,6 +172,7 @@ export class CollectionController {
 
   @Post(':collectionId/include/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({
     summary: 'Manually include a product in a collection',
     description: 'Force-adds a product to this collection, overriding the smart rules.',
@@ -183,6 +189,7 @@ export class CollectionController {
 
   @Post(':collectionId/exclude/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
   @ApiOperation({
     summary: 'Manually exclude a product from a collection',
     description: 'Force-removes a product from this collection, even if the rules say it should match.',

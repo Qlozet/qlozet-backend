@@ -22,7 +22,9 @@ import {
 import { SizeGuideService } from './size-guide.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { CreateSizeGuideDto } from './dto/create-size-guide.dto';
 import { UpdateSizeGuideDto } from './dto/update-size-guide.dto';
 import {
@@ -95,6 +97,7 @@ export class SizeGuideController {
 
   @Post()
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
   @ApiOperation({ summary: 'Create a new size guide' })
   @ApiCreatedResponse({ type: SizeGuideResponseDto })
   create(@Body() dto: CreateSizeGuideDto, @Req() req: any) {
@@ -120,6 +123,7 @@ export class SizeGuideController {
 
   @Patch(':id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
   @ApiOperation({ summary: 'Update a size guide' })
   @ApiParam({ name: 'id', description: 'Size Guide ID' })
   @ApiOkResponse({ type: SizeGuideResponseDto })
@@ -133,6 +137,7 @@ export class SizeGuideController {
 
   @Delete(':id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @ApiOperation({
     summary: 'Delete a size guide and remove it from all products',
   })
@@ -147,6 +152,7 @@ export class SizeGuideController {
 
   @Post(':id/include/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @ApiOperation({
     summary: 'Manually include a product in a size guide',
     description:
@@ -164,6 +170,7 @@ export class SizeGuideController {
 
   @Post(':id/exclude/:productId')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @ApiOperation({
     summary: 'Manually exclude a product from a size guide',
     description:
@@ -189,6 +196,7 @@ export class SizeGuideController {
 
   @Post('apply/:id')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @ApiOperation({
     summary: 'Manually trigger size guide application to matching products',
   })

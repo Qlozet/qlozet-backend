@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString, IsMongoId } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, IsMongoId, IsOptional } from 'class-validator';
 import { Types } from 'mongoose';
 
 export class InviteTeamMemberDto {
@@ -16,8 +16,8 @@ export class InviteTeamMemberDto {
   @IsNotEmpty()
   full_name: string;
 
-  @ApiProperty({ description: 'Phone number of the member' })
+  @ApiPropertyOptional({ description: 'Phone number of the member (optional)' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  phone_number: string;
+  phone_number?: string;
 }
