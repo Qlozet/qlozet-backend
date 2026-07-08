@@ -376,10 +376,11 @@ export class MailService {
 
       const html = this.templates.inviteUser({
         userName: name,
+        email: to,
         role,
         companyName: businessName,
         temporaryPassword,
-        loginUrl: `${process.env.FRONTEND_URL || 'https://qoobea.com'}/login`,
+        loginUrl: `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qoobea.com'}/login`,
         supportEmail: process.env.SUPPORT_EMAIL || 'support@qoobea.com',
       });
 
