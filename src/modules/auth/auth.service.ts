@@ -1048,6 +1048,7 @@ export class AuthService {
     }
 
     user.hashed_password = await bcrypt.hash(new_password, 10);
+    user.must_change_password = false;
     await user.save();
 
     // Send password updated email
