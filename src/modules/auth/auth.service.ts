@@ -234,10 +234,14 @@ export class AuthService {
       };
     } catch (error) {
       await session.abortTransaction();
+      console.error('❌ Vendor registration error:', error?.message || error);
+      console.error('Stack:', error?.stack);
       throw error instanceof BadRequestException ||
         error instanceof ConflictException
         ? error
-        : new InternalServerErrorException('Vendor registration failed.');
+        : new InternalServerErrorException(
+            `Vendor registration failed: ${error?.message || 'Unknown error'}`,
+          );
     } finally {
       session.endSession();
     }
