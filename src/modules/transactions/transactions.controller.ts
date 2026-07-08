@@ -16,10 +16,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TransactionService } from './transactions.service';
 import { UserType } from '../ums/schemas';
+import { VendorRole } from '../ums/schemas/role.schema';
 
 @ApiTags('Transactions')
 @ApiBearerAuth('access-token')
@@ -29,6 +31,7 @@ export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.DATA_ANALYST, VendorRole.SALES)
   @Get('vendor')
   @ApiOperation({ summary: 'Get paginated transactions by business ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })

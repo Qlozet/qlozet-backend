@@ -21,7 +21,9 @@ import {
 } from './dto/platform-style.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('Style Library')
@@ -80,6 +82,7 @@ export class StyleLibraryController {
   @Post('add-to-product/:product_id')
   @UseGuards(RolesGuard)
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
   @ApiOperation({ summary: 'Add platform styles to a product (vendor only)' })
   addToProduct(
     @Param('product_id') productId: string,
@@ -99,6 +102,7 @@ export class StyleLibraryController {
   @Post('vendor')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
   @ApiOperation({ summary: 'Create a custom style for the vendor' })
   createVendorStyle(@Body() dto: CreatePlatformStyleDto, @Req() req: any) {
     return this.service.createVendorStyle(dto, req.business._id.toString());
@@ -107,6 +111,7 @@ export class StyleLibraryController {
   @Patch('vendor/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
   @ApiOperation({ summary: 'Update a vendor custom style' })
   updateVendorStyle(
     @Param('id') id: string,
@@ -119,6 +124,7 @@ export class StyleLibraryController {
   @Delete('vendor/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @ApiOperation({ summary: 'Deactivate a vendor custom style' })
   deactivateVendorStyle(@Param('id') id: string, @Req() req: any) {
     return this.service.deactivateVendorStyle(id, req.business._id.toString());

@@ -32,7 +32,9 @@ import {
 } from './dto/checkout-preview.dto';
 import { FulfillOrderDto } from './dto/fulfill-order.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../ums/schemas';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { OrderStatus } from './schemas/orders.schema';
 
@@ -193,6 +195,7 @@ export class OrderController {
    * 🚚 Vendor fulfills their portion of the order — creates Shipbubble label
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT)
   @Post(':reference/fulfill')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -220,6 +223,7 @@ export class OrderController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Patch('cancel/:reference')
   @ApiOperation({ summary: 'Cancel an order and refund customer' })
   async rejectOrder(@Param('reference') reference: string) {

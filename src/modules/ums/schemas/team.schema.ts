@@ -18,8 +18,8 @@ export class TeamMember {
   @Prop({ required: true })
   full_name: string;
 
-  @Prop({ required: true })
-  phone_number: string;
+  @Prop()
+  phone_number?: string;
 
   @Prop({ default: false })
   accepted: boolean;

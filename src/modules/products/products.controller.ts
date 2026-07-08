@@ -31,7 +31,9 @@ import {
   ProductListResponseDto,
 } from './dto/product.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { ProductService } from './products.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { RateProductDto } from './dto/rate-product.dto';
@@ -61,6 +63,7 @@ export class ProductsController {
   // ---------------- CLOTHING ----------------
   @Post('clothing')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @ApiOperation({ summary: 'Create a new clothing product' })
   @ApiResponse({ status: 201, description: 'Clothing product created' })
   async createClothing(
@@ -76,6 +79,7 @@ export class ProductsController {
 
   @Post('clothing/styles/generate-image')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @ApiOperation({ summary: 'Generate an AI image for a custom style' })
   @ApiBody({
     schema: {
@@ -141,6 +145,7 @@ export class ProductsController {
   // ---------------- FABRIC ----------------
   @Post('fabric')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @ApiOperation({ summary: 'Create a new fabric product' })
   @ApiResponse({ status: 201, description: 'Fabric product created' })
   async createFabric(@Body() fabricDto: CreateFabricDto, @Req() req: any) {
@@ -150,6 +155,7 @@ export class ProductsController {
   // ---------------- ACCESSORY ----------------
   @Post('accessory')
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @ApiOperation({ summary: 'Create a new accessory product' })
   @ApiResponse({ status: 201, description: 'Accessory product created' })
   async createAccessory(
@@ -294,6 +300,7 @@ export class ProductsController {
 
   @Delete(':id')
   @Roles(UserType.VENDOR, UserType.ADMIN)
+  @VendorRoles(VendorRole.OWNER)
   @ApiOperation({ summary: 'Delete a product by ID' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
@@ -418,6 +425,7 @@ export class ProductsController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @Patch(':product_id/status')
   async updateStatus(
     @Param('product_id') productId: string,
@@ -433,6 +441,7 @@ export class ProductsController {
 
   // Schedule automatic activation
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Patch(':product_id/schedule-activation')
   async scheduleActivation(
     @Param('product_id') productId: string,

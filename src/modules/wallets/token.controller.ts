@@ -10,7 +10,9 @@ import {
 import { TokenService } from './token.service';
 import { PurchaseDto } from './dto/token.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { VendorRoles } from 'src/common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
@@ -37,6 +39,7 @@ export class TokenController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('vendor/purchase')
   @ApiOperation({ summary: 'Purchase tokens for vendor business' })
   async VendorPurchase(@Body() dto: PurchaseDto, @Req() req: any) {

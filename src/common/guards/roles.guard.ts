@@ -20,6 +20,8 @@ import {
   TeamMemberDocument,
 } from '../../modules/ums/schemas/team.schema';
 import { UserType } from '../../modules/ums/schemas/user.schema';
+import { VendorRole } from '../../modules/ums/schemas/role.schema';
+import { VENDOR_ROLES_KEY } from '../decorators/vendor-roles.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -76,6 +78,7 @@ export class RolesGuard implements CanActivate {
     const normalizedRequiredRoles = requiredRoles.map((r) =>
       r.toString().toLowerCase(),
     );
+
     // ✅ Step 2: Check Platform roles
     if (user.type === UserType.PLATFORM) {
       const role = (user as any).role as RoleDocument | undefined;
@@ -109,24 +112,65 @@ export class RolesGuard implements CanActivate {
         throw new ForbiddenException('No active team members found for vendor');
       }
 
-      const hasRole = members.some((tm: any) => {
-        const role = tm.role.type as string;
-        return role && normalizedRequiredRoles.includes(role.toLowerCase());
-      });
-      if (!hasRole) {
+      // Check that @Roles() includes 'vendor' (the user type)
+      if (!normalizedRequiredRoles.includes(UserType.VENDOR.toLowerCase())) {
         throw new ForbiddenException(
           `Access denied — requires one of: ${requiredRoles.join(', ')}`,
         );
       }
 
+      // Find the CURRENT user's team member record
+      const currentMember = members.find(
+        (tm: any) => tm.user?.toString() === (user._id as any).toString(),
+      );
+
+      if (!currentMember) {
+        throw new ForbiddenException(
+          'You are not a member of this business team',
+        );
+      }
+
+      const memberRole = (currentMember as any).role as
+        | RoleDocument
+        | undefined;
+      const memberRoleName = memberRole?.name?.toLowerCase() || '';
+
+      // Owner always has full access — never locked out
+      const isOwner = memberRoleName === VendorRole.OWNER.toLowerCase();
+
+      // Check @VendorRoles() for granular role enforcement
+      const requiredVendorRoles = this.reflector.get<string[]>(
+        VENDOR_ROLES_KEY,
+        context.getHandler(),
+      );
+
+      if (requiredVendorRoles?.length && !isOwner) {
+        const normalizedVendorRoles = requiredVendorRoles.map((r) =>
+          r.toLowerCase(),
+        );
+
+        if (!normalizedVendorRoles.includes(memberRoleName)) {
+          throw new ForbiddenException(
+            `Access denied — your role "${memberRoleName}" is not authorized. ` +
+              `Required: ${requiredVendorRoles.join(', ')}`,
+          );
+        }
+      }
+
+      // Attach context to request
+      request.user = user;
       request.team_members = members;
       request.business = business;
+      request.currentMember = currentMember;
+      request.vendorRole = memberRoleName;
+
       return true;
     }
 
-    // ✅ Step 4: Customer routes (optional)
+    // ✅ Step 4: Customer routes
     if (user.type === UserType.CUSTOMER) {
       if (normalizedRequiredRoles.includes(UserType.CUSTOMER.toLowerCase())) {
+        request.user = user;
         return true;
       }
       throw new ForbiddenException('Customer access denied for this route');
@@ -143,3 +187,4 @@ export class RolesGuard implements CanActivate {
     return undefined;
   }
 }
+

@@ -28,7 +28,8 @@ import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { Warehouse } from './schemas/warehouse.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { VendorRole } from '../ums/schemas';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { ValidatedAddressResponseDto } from '../logistics/dto/shipping.dto';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
@@ -42,7 +43,8 @@ import { UserType } from '../auth/dto/base-login.dto';
 export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('warehouse')
   @ApiOperation({ summary: 'Create a new warehouse' })
   @ApiResponse({ status: 201, description: 'Warehouse successfully created' })
@@ -58,7 +60,8 @@ export class BusinessController {
       throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
     }
   }
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('warehouse/:id/activate')
   @ApiOperation({ summary: 'Activate a warehouse (only one active at a time)' })
   @ApiResponse({ status: 200, description: 'Warehouse activated successfully' })
@@ -80,7 +83,7 @@ export class BusinessController {
     }
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
   @Get('warehouse')
   @ApiOperation({ summary: 'Get all warehouses' })
   @ApiResponse({ status: 200, description: 'List of all warehouses' })
@@ -88,7 +91,7 @@ export class BusinessController {
     return this.businessService.findAllWarehouse(req.business?.id, query);
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
   @Get(':id/warehouse')
   @ApiOperation({ summary: 'Get a warehouse by ID' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -98,7 +101,8 @@ export class BusinessController {
     return this.businessService.findOneWarehouse(id);
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Put(':id/warehouse')
   @ApiOperation({ summary: 'Update warehouse details' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -111,7 +115,8 @@ export class BusinessController {
     return this.businessService.updateWarehouse(id, dto);
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Delete(':id/warehouse')
   @ApiOperation({ summary: 'Delete a warehouse' })
   @ApiParam({ name: 'id', description: 'Warehouse ID' })
@@ -121,6 +126,7 @@ export class BusinessController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Patch('address')
   @ApiOperation({ summary: 'Add or update business address' })
   @ApiOkResponse({
@@ -135,6 +141,7 @@ export class BusinessController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Patch('profile')
   @ApiOperation({
     summary: 'Update general business profile fields',
@@ -165,7 +172,7 @@ export class BusinessController {
     return this.businessService.getEarningsChart(req.business?.id);
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
   @Get('customers')
   @ApiOperation({ summary: 'Get paginated list of vendor customers' })
   @ApiResponse({ status: 200, description: 'Paginated list of customers with stats and orders' })
@@ -183,7 +190,7 @@ export class BusinessController {
     );
   }
 
-  @Roles(VendorRole.OWNER, UserType.VENDOR)
+  @Roles(UserType.VENDOR)
   @Get('customers/:id/wishlist')
   @ApiOperation({ summary: 'Get a specific customer\'s wishlist items that belong to this vendor' })
   @ApiResponse({ status: 200, description: 'List of wishlist products belonging to the vendor' })

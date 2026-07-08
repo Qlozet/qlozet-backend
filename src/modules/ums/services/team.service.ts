@@ -51,11 +51,12 @@ export class TeamService {
       const role = await this.roleModel.findById(dto.role).session(session);
       if (!role) throw new BadRequestException('Role not found.');
 
-      // ✅ Find user by email OR phone number
+      // ✅ Find user by email OR phone number (only check provided fields)
+      const userOrConditions: Record<string, string>[] = [{ email: dto.email }];
+      if (dto.phone_number) userOrConditions.push({ phone_number: dto.phone_number });
+
       let user = await this.userModel
-        .findOne({
-          $or: [{ email: dto.email }, { phone_number: dto.phone_number }],
-        })
+        .findOne({ $or: userOrConditions })
         .session(session);
 
       let isNewUser = false; // 👈 track user creation
@@ -65,7 +66,7 @@ export class TeamService {
         user = new this.userModel({
           full_name: dto.full_name,
           email: dto.email,
-          phone_number: dto.phone_number,
+          ...(dto.phone_number && { phone_number: dto.phone_number }),
           hashed_password: hashedPassword,
           business: business.id,
           role: dto.role,
@@ -101,7 +102,7 @@ export class TeamService {
         user: user._id,
         email: dto.email,
         full_name: dto.full_name,
-        phone_number: dto.phone_number,
+        ...(dto.phone_number && { phone_number: dto.phone_number }),
         invited_by: inviter.id,
         invite_token: token,
         invite_expires: expires,
