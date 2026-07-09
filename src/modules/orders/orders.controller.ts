@@ -36,7 +36,7 @@ import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../ums/schemas';
 import { VendorRole } from '../ums/schemas/role.schema';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { OrderStatus } from './schemas/orders.schema';
+import { OrderStatus, Order } from './schemas/orders.schema';
 
 const VALID_STATUSES = Object.values(OrderStatus);
 
@@ -57,6 +57,7 @@ export class OrderController {
   @HttpCode(HttpStatus.CREATED)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   @ApiOperation({ summary: 'Create a new order (direct or from cart)' })
+  @ApiResponse({ status: 201, description: 'Order created successfully', type: Order })
   async create(@Body() dto: CreateOrderDto, @Req() req) {
     const customer = req.user;
     return this.orderService.createOrder(dto, customer);
