@@ -50,13 +50,15 @@ export class TokenService {
   }
 
   async balance(business?: string, customer?: string): Promise<number> {
-    // Customer wallets are stored as { customer: id, business: null }.
-    // If both are provided, prefer customer to avoid a query mismatch.
+    // Vendor token wallets are stored as { business: id }.
+    // Customer token wallets are stored as { customer: id }.
+    // If both are provided (vendor request), prefer business since that's
+    // where vendor tokens are stored.
     const filter: any = {};
-    if (customer) {
-      filter.customer = new Types.ObjectId(customer);
-    } else if (business) {
+    if (business) {
       filter.business = new Types.ObjectId(business);
+    } else if (customer) {
+      filter.customer = new Types.ObjectId(customer);
     }
     const wallet = await this.tokenModel.findOne(filter).lean();
     return wallet?.tokens ?? 0;
