@@ -23,6 +23,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 export class TokenController {
   constructor(private readonly service: TokenService) {}
 
+  @Roles(UserType.VENDOR, UserType.CUSTOMER)
   @Get('balance')
   @ApiOperation({ summary: 'Get active token balance' })
   async getBalance(@Req() req: any) {
