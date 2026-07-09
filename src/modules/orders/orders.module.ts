@@ -5,6 +5,10 @@ import { OrderService } from './orders.service';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
 import { Order, OrderSchema } from './schemas/orders.schema';
+import {
+  CheckoutRateCache,
+  CheckoutRateCacheSchema,
+} from './schemas/checkout-rate-cache.schema';
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { JwtService } from '@nestjs/jwt';
 
@@ -21,6 +25,7 @@ import { CartModule } from '../cart/cart.module';
   imports: [
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
+      { name: CheckoutRateCache.name, schema: CheckoutRateCacheSchema },
       { name: Address.name, schema: AddressSchema },
     ]),
     TransactionsModule,  // provides TransactionService + Transaction model
