@@ -60,6 +60,10 @@ import {
 } from './dto/checkout-preview.dto';
 import { FulfillOrderDto } from './dto/fulfill-order.dto';
 import { Cart, CartDocument } from '../cart/schema/cart.schema';
+import {
+  CheckoutRateCache,
+  CheckoutRateCacheDocument,
+} from './schemas/checkout-rate-cache.schema';
 
 @Injectable()
 export class OrderService {
@@ -82,6 +86,8 @@ export class OrderService {
     private businessEarningsModel: Model<BusinessEarningDocument>,
     @InjectModel('Business') private businessModel: Model<BusinessDocument>,
     @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
+    @InjectModel(CheckoutRateCache.name)
+    private rateCacheModel: Model<CheckoutRateCacheDocument>,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -130,17 +136,43 @@ export class OrderService {
         }
 
         for (const selection of orderData.selected_shipping) {
+          // Look up the cached rate from checkout-preview instead of trusting the frontend
+          const cachedEntry = await this.rateCacheModel.findOne({
+            customer: new Types.ObjectId(customer.id),
+            request_token: selection.request_token,
+            business_id: selection.business_id,
+          });
+
+          if (!cachedEntry) {
+            throw new BadRequestException(
+              `Shipping quote expired for vendor ${selection.business_id}. Please re-run checkout preview.`,
+            );
+          }
+
+          const matchedRate = cachedEntry.rates.find(
+            (r) => r.courier_id === selection.courier_id && r.service_code === selection.service_code,
+          );
+
+          if (!matchedRate) {
+            throw new BadRequestException(
+              `Selected courier ${selection.courier_id} not found in cached rates. Please re-run checkout preview.`,
+            );
+          }
+
+          // Use the server-side cached rate, not the frontend's value
+          const verifiedShippingFee = matchedRate.rate_amount;
+
           shipments.push({
             business: new Types.ObjectId(selection.business_id),
             request_token: selection.request_token,
             service_code: selection.service_code,
             courier_id: selection.courier_id,
-            courier_name: selection.courier_name,
-            shipping_fee: selection.shipping_fee,
+            courier_name: matchedRate.courier_name || selection.courier_name,
+            shipping_fee: verifiedShippingFee,
             status: 'pending',
-            rate_fetched_at: new Date(),
+            rate_fetched_at: cachedEntry.createdAt,
           });
-          totalShippingFee += selection.shipping_fee;
+          totalShippingFee += verifiedShippingFee;
         }
       }
 
@@ -907,6 +939,27 @@ export class OrderService {
       0,
     );
     const subtotal = cart.subtotal || 0;
+
+    // Cache the rates in MongoDB for server-side validation during order creation
+    if (vendorShipping.length > 0) {
+      const customerId = customer.id || customer._id;
+      const cacheEntries = vendorShipping.map((vs) => ({
+        customer: new Types.ObjectId(customerId),
+        request_token: vs.request_token,
+        business_id: vs.business_id,
+        rates: vs.rates.map((r) => ({
+          courier_id: r.courier_id,
+          service_code: r.service_code,
+          courier_name: r.courier_name,
+          rate_amount: r.rate_amount,
+        })),
+      }));
+
+      // Fire-and-forget: don't block the response on cache writes
+      this.rateCacheModel.insertMany(cacheEntries).catch((err) => {
+        this.logger.warn(`Failed to cache checkout rates: ${err.message}`);
+      });
+    }
 
     return {
       vendor_shipping: vendorShipping,
