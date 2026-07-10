@@ -89,8 +89,9 @@ export class CartService {
         const itemId = (i.product_id as any)?._id?.toString() || i.product_id.toString();
         return itemId !== productId.toString();
       }
-    );
+    ) as any;
     this.calculateTotals(cart);
+    cart.markModified('items');
     await cart.save();
     return cart;
   }
