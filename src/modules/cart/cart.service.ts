@@ -59,7 +59,7 @@ export class CartService {
 
     const cart = await this.getCart(userId);
     const existingItem = cart.items.find(
-      (i) => i.product_id.toString() === productId.toString(),
+      (i) => (i.product_id as any)?._id?.toString() === productId.toString() || i.product_id.toString() === productId.toString(),
     );
 
     if (existingItem) {
@@ -85,9 +85,13 @@ export class CartService {
   async removeItem(userId: string, productId: string): Promise<CartDocument> {
     const cart = await this.getCart(userId);
     cart.items = cart.items.filter(
-      (i) => i.product_id.toString() !== productId.toString(),
-    );
+      (i) => {
+        const itemId = (i.product_id as any)?._id?.toString() || i.product_id.toString();
+        return itemId !== productId.toString();
+      }
+    ) as any;
     this.calculateTotals(cart);
+    cart.markModified('items');
     await cart.save();
     return cart;
   }
