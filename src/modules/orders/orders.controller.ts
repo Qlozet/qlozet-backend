@@ -237,5 +237,12 @@ export class OrderController {
   async getOrderChartData(@Req() req: any) {
     return this.orderService.getBusinessChart(req.business?.id);
   }
+
+  @Roles(UserType.VENDOR)
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Get comprehensive vendor dashboard metrics' })
+  async getVendorDashboard(@Req() req: any) {
+    return this.orderService.getVendorDashboardMetrics(req.business?.id);
+  }
 }
 

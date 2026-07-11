@@ -1347,11 +1347,13 @@ export class OrderService {
     const previousEnd = new Date(now);
     previousEnd.setDate(now.getDate() - 7);
 
-    const [ordersByGender, ordersByLocation, ordersByProduct] =
+    const [ordersByGender, ordersByLocation, ordersByProduct, ordersByProductKind, orderCountByDay] =
       await Promise.all([
         this.getBusinessOrdersByGenderChart(businessId),
         this.getBusinessOrdersByLocationChart(businessId),
         this.getBusinessOrdersByProductChart(businessId),
+        this.getBusinessOrdersByProductKindChart(businessId),
+        this.getBusinessOrderCountByDayChart(businessId),
       ]);
 
     /* ===================== ORDERS STATS (SINGLE QUERY) ===================== */
@@ -1489,6 +1491,8 @@ export class OrderService {
         ordersByGender: ordersByGender.data,
         ordersByLocation: ordersByLocation.data,
         ordersByProduct: ordersByProduct.data,
+        ordersByProductKind: ordersByProductKind.data,
+        orderCountByDay: orderCountByDay.data,
       },
     };
   }
@@ -1651,6 +1655,127 @@ export class OrderService {
         chartType: 'stacked_bar',
         title: 'Orders by Product',
         series: [maleSeries, femaleSeries],
+      },
+    };
+  }
+
+  /**
+   * Orders by Product Kind — groups orders into Accessory, Custom, Fabric, Non-Custom
+   */
+  async getBusinessOrdersByProductKindChart(businessId: string): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product_info',
+        },
+      },
+      { $unwind: '$product_info' },
+      {
+        $addFields: {
+          product_category: {
+            $switch: {
+              branches: [
+                { case: { $eq: ['$product_info.kind', 'accessory'] }, then: 'Accessory' },
+                { case: { $eq: ['$product_info.kind', 'fabric'] }, then: 'Fabric' },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      { $eq: ['$product_info.clothing.type', 'customize'] },
+                    ],
+                  },
+                  then: 'Custom',
+                },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      { $eq: ['$product_info.clothing.type', 'non_customize'] },
+                    ],
+                  },
+                  then: 'Non-Custom',
+                },
+              ],
+              default: 'Other',
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$product_category',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Product Kind',
+        series: [
+          {
+            key: 'product_kind',
+            name: 'Product Kind Distribution',
+            data: data.map((d) => ({
+              label: d._id || 'Unknown',
+              value: d.count,
+            })),
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * Order Count by Day of Week — counts orders grouped by weekday (Sun–Sat)
+   */
+  async getBusinessOrderCountByDayChart(businessId: string): Promise<any> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      {
+        $group: {
+          _id: '$_id',
+          createdAt: { $first: '$createdAt' },
+        },
+      },
+      {
+        $project: {
+          dayOfWeek: { $dayOfWeek: '$createdAt' }, // 1=Sun, 2=Mon, ... 7=Sat
+        },
+      },
+      {
+        $group: {
+          _id: '$dayOfWeek',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const ordersByDay = dayLabels.map((label, index) => {
+      const record = data.find((d) => d._id === index + 1);
+      return { label, value: record ? record.count : 0 };
+    });
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Order Count',
+        series: [
+          {
+            key: 'order_count',
+            name: 'Order Count',
+            color: '#c4b5a0',
+            data: ordersByDay,
+          },
+        ],
       },
     };
   }
