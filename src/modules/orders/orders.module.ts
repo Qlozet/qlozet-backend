@@ -20,6 +20,7 @@ import { PaymentModule } from '../payment/payment.module';
 import { CurrencyModule } from '../currency/currency.module';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { CartModule } from '../cart/cart.module';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CartModule } from '../cart/cart.module';
     CurrencyModule,      // provides CurrencyService
     LogisticsModule,     // provides LogisticsService
     CartModule,          // provides CartService + Cart model
+    WalletsModule,       // provides WalletsService for wallet payments
   ],
   controllers: [OrderController],
   providers: [
