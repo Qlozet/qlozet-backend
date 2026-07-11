@@ -2,6 +2,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsEnum,
   IsOptional,
   IsString,
   ValidateNested,
@@ -10,6 +11,11 @@ import { Type } from 'class-transformer';
 import { ProcessedOrderItemDto } from './order-item.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SelectedShippingDto } from './selected-shipping.dto';
+
+export enum PaymentMethod {
+  PAYSTACK = 'paystack',
+  WALLET = 'wallet',
+}
 
 export class CreateOrderDto {
   @ApiProperty({
@@ -74,4 +80,14 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   address_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'Payment method to use. Defaults to paystack (card/bank). Use wallet to pay from wallet balance.',
+    enum: PaymentMethod,
+    default: PaymentMethod.PAYSTACK,
+    example: 'wallet',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  payment_method?: PaymentMethod = PaymentMethod.PAYSTACK;
 }

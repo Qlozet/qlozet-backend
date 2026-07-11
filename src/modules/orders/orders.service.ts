@@ -19,7 +19,7 @@ import {
 } from './schemas/orders.schema';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, PaymentMethod } from './dto/create-order.dto';
 import {
   ClothingType,
   NormalizedSelections,
@@ -64,6 +64,7 @@ import {
   CheckoutRateCache,
   CheckoutRateCacheDocument,
 } from './schemas/checkout-rate-cache.schema';
+import { WalletsService } from '../wallets/wallets.service';
 
 @Injectable()
 export class OrderService {
@@ -88,6 +89,7 @@ export class OrderService {
     @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
     @InjectModel(CheckoutRateCache.name)
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
+    private readonly walletsService: WalletsService,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -192,37 +194,100 @@ export class OrderService {
 
       const savedOrder = await order.save();
 
-      const transaction = await this.transactionService.create({
-        initiator: new Types.ObjectId(customer.id),
-        order: savedOrder.id,
-        type: TransactionType.DEBIT,
-        amount: savedOrder.total,
-        description: `Order payment for order ${savedOrder.reference}`,
-        channel: 'checkout',
-        metadata: {
-          order_reference: savedOrder.reference,
-          items_count: savedOrder.items.length,
-        },
-      });
-      console.log(transaction, 'transaction');
-      const paymentInit = await this.paymentService.initializePaystackPayment(
-        transaction.reference,
-        customer.email,
-      );
+      // ==================== PAYMENT BRANCHING ====================
+      const paymentMethod = orderData.payment_method || PaymentMethod.PAYSTACK;
 
-      return {
-        message: 'Order created successfully. Redirect to payment.',
-        data: {
-          order: savedOrder,
-          transaction: {
-            reference: transaction.reference,
-            amount: transaction.amount,
-            status: transaction.status,
-            metadata: transaction.metadata,
+      if (paymentMethod === PaymentMethod.WALLET) {
+        // --- WALLET PAYMENT ---
+        const wallet = await this.walletsService.getOrCreateWallet({ customer: customer.id });
+
+        if (wallet.balance < savedOrder.total) {
+          // Clean up: delete the order since payment can't proceed
+          await this.orderModel.deleteOne({ _id: savedOrder._id });
+          throw new BadRequestException(
+            `Insufficient wallet balance. You have ₦${wallet.balance.toLocaleString()} but the order total is ₦${savedOrder.total.toLocaleString()}.`,
+          );
+        }
+
+        // Debit wallet
+        await this.walletsService.debitWallet(wallet._id.toString(), savedOrder.total);
+
+        // Create transaction record
+        const transaction = await this.transactionService.create({
+          initiator: new Types.ObjectId(customer.id),
+          order: savedOrder.id,
+          wallet: wallet._id,
+          type: TransactionType.DEBIT,
+          amount: savedOrder.total,
+          description: `Wallet payment for order ${savedOrder.reference}`,
+          channel: 'wallet_checkout',
+          metadata: {
+            order_reference: savedOrder.reference,
+            items_count: savedOrder.items.length,
+            payment_method: 'wallet',
           },
-          payment: paymentInit.data,
-        },
-      };
+        });
+
+        // Mark transaction as success immediately (wallet already debited)
+        transaction.status = 'success' as any;
+        await transaction.save();
+
+        // Mark order as processing (payment is complete)
+        savedOrder.status = OrderStatus.PROCESSING;
+        await savedOrder.save();
+
+        return {
+          message: 'Order created and paid via wallet successfully.',
+          data: {
+            order: savedOrder,
+            transaction: {
+              reference: transaction.reference,
+              amount: transaction.amount,
+              status: transaction.status,
+              metadata: transaction.metadata,
+            },
+            payment: {
+              method: 'wallet',
+              paid: true,
+              wallet_balance_after: wallet.balance - savedOrder.total,
+            },
+          },
+        };
+      } else {
+        // --- PAYSTACK PAYMENT (default) ---
+        const transaction = await this.transactionService.create({
+          initiator: new Types.ObjectId(customer.id),
+          order: savedOrder.id,
+          type: TransactionType.DEBIT,
+          amount: savedOrder.total,
+          description: `Order payment for order ${savedOrder.reference}`,
+          channel: 'checkout',
+          metadata: {
+            order_reference: savedOrder.reference,
+            items_count: savedOrder.items.length,
+            payment_method: 'paystack',
+          },
+        });
+
+        const paymentInit = await this.paymentService.initializePaystackPayment(
+          transaction.reference,
+          customer.email,
+        );
+
+        return {
+          message: 'Order created successfully. Redirect to payment.',
+          data: {
+            order: savedOrder,
+            transaction: {
+              reference: transaction.reference,
+              amount: transaction.amount,
+              status: transaction.status,
+              metadata: transaction.metadata,
+            },
+            payment: paymentInit.data,
+          },
+        };
+      }
     } catch (error: any) {
       if (error instanceof HttpException) {
         throw error;
