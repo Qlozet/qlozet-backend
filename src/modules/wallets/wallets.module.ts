@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { WalletsService } from './wallets.service';
 import { WalletsController } from './wallets.controller';
@@ -24,7 +24,7 @@ import { PlatformModule } from '../platform/platform.module';
     TransactionsModule,  // provides TransactionService
     PaymentModule,       // provides PaymentService
     CurrencyModule,      // provides CurrencyService
-    PlatformModule,      // provides PlatformService (needed by TokenService)
+    forwardRef(() => PlatformModule),      // forwardRef: avoids circular dep WalletsModule ↔ PlatformModule ↔ OrdersModule
   ],
   controllers: [WalletsController, TokenController],
   providers: [
