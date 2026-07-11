@@ -5,6 +5,8 @@ import {
   InternalServerErrorException,
   Logger,
   HttpException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -89,6 +91,7 @@ export class OrderService {
     @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
     @InjectModel(CheckoutRateCache.name)
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
+    @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
   ) {}
 
