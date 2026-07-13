@@ -67,6 +67,11 @@ import {
   CheckoutRateCacheDocument,
 } from './schemas/checkout-rate-cache.schema';
 import { WalletsService } from '../wallets/wallets.service';
+import { NotificationsService, CreateNotificationDto } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class OrderService {
@@ -93,6 +98,7 @@ export class OrderService {
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -239,6 +245,11 @@ export class OrderService {
         savedOrder.status = OrderStatus.PROCESSING;
         await savedOrder.save();
 
+        // Notify vendor(s) about new order
+        this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+          this.logger.error('Failed to send new order notifications', err),
+        );
+
         return {
           message: 'Order created and paid via wallet successfully.',
           data: {
@@ -275,6 +286,11 @@ export class OrderService {
         const paymentInit = await this.paymentService.initializePaystackPayment(
           transaction.reference,
           customer.email,
+        );
+
+        // Notify vendor(s) about new order
+        this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+          this.logger.error('Failed to send new order notifications', err),
         );
 
         return {
@@ -824,6 +840,14 @@ export class OrderService {
       { reference: orderReference },
       { $set: { status: OrderStatus.CANCELLED } },
     );
+
+    // Notify vendor(s) about cancellation
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (order) {
+      this.notifyVendorsOrderCancelled(order).catch((err) =>
+        this.logger.error('Failed to send cancellation notifications', err),
+      );
+    }
 
     return {
       message: 'Order cancelled and refunded successfully',
@@ -1846,5 +1870,97 @@ export class OrderService {
         ],
       },
     };
+  }
+
+  // ==================== NOTIFICATION HELPERS ====================
+
+  /**
+   * Notify all vendors in an order that a new order was placed.
+   * Finds the vendor user (owner) for each business via User.business reference.
+   */
+  private async notifyVendorsNewOrder(order: OrderDocument, customer: User) {
+    const businessIds = [
+      ...new Set(
+        order.items
+          .map((item: any) => item.business?.toString())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (businessIds.length === 0) return;
+
+    // Find vendor users who own these businesses
+    const vendorUsers = await this.businessModel.db
+      .model('User')
+      .find({
+        business: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        type: 'vendor',
+      })
+      .select('_id business full_name')
+      .lean();
+
+    const notifications: CreateNotificationDto[] = vendorUsers.map((user: any) => ({
+      recipient: user._id.toString(),
+      recipient_business: user.business?.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.NEW_ORDER,
+      title: 'New Order Received!',
+      body: `Order #${order.reference} has been placed (₦${order.total?.toLocaleString()}). Check your orders to review.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        total: order.total,
+        items_count: order.items.length,
+        customer_name: (customer as any).full_name || '',
+      },
+      action_url: `/orders`,
+    }));
+
+    if (notifications.length > 0) {
+      await this.notificationsService.createMany(notifications);
+    }
+  }
+
+  /**
+   * Notify vendors that an order was cancelled.
+   */
+  private async notifyVendorsOrderCancelled(order: OrderDocument) {
+    const businessIds = [
+      ...new Set(
+        order.items
+          .map((item: any) => item.business?.toString())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (businessIds.length === 0) return;
+
+    const vendorUsers = await this.businessModel.db
+      .model('User')
+      .find({
+        business: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        type: 'vendor',
+      })
+      .select('_id business')
+      .lean();
+
+    const notifications: CreateNotificationDto[] = vendorUsers.map((user: any) => ({
+      recipient: user._id.toString(),
+      recipient_business: user.business?.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_CANCELLED,
+      title: 'Order Cancelled',
+      body: `Order #${order.reference} has been cancelled and refunded.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        total: order.total,
+      },
+      action_url: `/orders`,
+    }));
+
+    if (notifications.length > 0) {
+      await this.notificationsService.createMany(notifications);
+    }
   }
 }
