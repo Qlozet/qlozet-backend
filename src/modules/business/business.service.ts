@@ -1447,13 +1447,14 @@ export class BusinessService implements OnModuleInit {
         topLocations: [],
         genderDistribution: [],
         wearsDistribution: [],
+        ageGenderDistribution: [],
       };
     }
 
-    // 2. Lookup customer details for gender/wears
+    // 2. Lookup customer details for gender/wears/dob
     const users = await this.userModel
       .find({ _id: { $in: customerIds } })
-      .select('gender wears_preference')
+      .select('gender wears_preference dob')
       .lean();
 
     // Gender distribution
@@ -1513,11 +1514,52 @@ export class BusinessService implements OnModuleInit {
       percentage: Math.round((loc.customerCount / totalCustomers) * 100),
     }));
 
+    // 4. Age × Gender distribution (for the demographics bar chart)
+    const AGE_BUCKETS = [
+      { label: '0 - 5', min: 0, max: 5 },
+      { label: '6 - 12', min: 6, max: 12 },
+      { label: '13 - 18', min: 13, max: 18 },
+      { label: '19 - 23', min: 19, max: 23 },
+      { label: '24 - 28', min: 24, max: 28 },
+      { label: '29 - 33', min: 29, max: 33 },
+      { label: '34 - 39', min: 34, max: 39 },
+      { label: '40 - 45', min: 40, max: 45 },
+      { label: '46 - 50', min: 46, max: 50 },
+      { label: '51 - 55', min: 51, max: 55 },
+      { label: '56 - 60', min: 56, max: 60 },
+      { label: '60 - 70+', min: 61, max: 200 },
+    ];
+
+    const ageGenderDistribution = AGE_BUCKETS.map((bucket) => ({
+      age: bucket.label,
+      male: 0,
+      female: 0,
+    }));
+
+    const now = new Date();
+    for (const user of users) {
+      const dob = (user as any).dob;
+      if (!dob) continue;
+      const birthDate = new Date(dob);
+      const age = Math.floor((now.getTime() - birthDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+      const gender = ((user as any).gender || '').toLowerCase();
+
+      const bucketIdx = AGE_BUCKETS.findIndex((b) => age >= b.min && age <= b.max);
+      if (bucketIdx === -1) continue;
+
+      if (gender === 'male') {
+        ageGenderDistribution[bucketIdx].male++;
+      } else if (gender === 'female') {
+        ageGenderDistribution[bucketIdx].female++;
+      }
+    }
+
     return {
       totalCustomers,
       topLocations,
       genderDistribution,
       wearsDistribution,
+      ageGenderDistribution,
     };
   }
 }
