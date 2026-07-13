@@ -345,10 +345,10 @@ export class ProductsController {
     };
   }
 
-  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
+  @Public()
   @Get('ratings/vendor')
   @ApiOperation({
-    summary: 'Get all reviews for a vendor. Vendors auto-resolve; customers pass business_id.',
+    summary: 'Get all reviews for a vendor (Public). Pass business_id query param.',
   })
   @ApiQuery({ name: 'business_id', required: false, type: String, description: 'Vendor business ID (required for customers)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
