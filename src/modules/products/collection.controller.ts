@@ -127,16 +127,18 @@ export class CollectionController {
     );
   }
 
+  @Public()
   @Get(':collectionId/products')
-  @ApiOperation({ summary: 'Get products under a collection' })
+  @ApiOperation({ summary: 'Get products under a collection (Public)' })
   @ApiParam({ name: 'collectionId', description: 'Collection ID' })
   @ApiOkResponse({ type: CollectionProductsResponseDto })
   async getProductsByCollection(@Param('collectionId') collectionId: string) {
     return this.collectionService.getProductsByCollection(collectionId);
   }
 
+  @Public()
   @Get(':collectionId')
-  @ApiOperation({ summary: 'Get collection by ID' })
+  @ApiOperation({ summary: 'Get collection by ID (Public)' })
   @ApiParam({ name: 'collectionId', description: 'Collection ID' })
   @ApiOkResponse({ type: CollectionResponseDto })
   async getCollectionById(@Param('collectionId') collectionId: string) {

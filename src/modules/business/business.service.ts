@@ -364,6 +364,113 @@ export class BusinessService implements OnModuleInit {
       .exec();
   }
 
+  /**
+   * Public storefront: list active vendors with basic profile info.
+   * Used by the customer shop for vendor carousels and listing pages.
+   */
+  async getPublicVendors(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [vendors, total] = await Promise.all([
+      this.businessModel
+        .find({ status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] } })
+        .select(
+          'business_name business_logo_url business_logo_svg_url cover_image_url ' +
+          'theme_color description business_category business_address city state country ' +
+          'website social_links average_rating total_ratings total_items_sold ' +
+          'success_rate is_featured year_founded createdAt'
+        )
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.businessModel.countDocuments({ status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] } }),
+    ]);
+    return { data: vendors, total, page, pages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Public storefront: get a single vendor's profile with product count.
+   * Excludes revenue, internal fields, and vendor user details.
+   */
+  async getPublicProfile(businessId: string) {
+    if (!Types.ObjectId.isValid(businessId)) {
+      throw new NotFoundException('Business not found');
+    }
+
+    const result = await this.businessModel.aggregate([
+      {
+        $match: {
+          _id: new Types.ObjectId(businessId),
+          status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+        },
+      },
+
+      // Count active products
+      {
+        $lookup: {
+          from: 'products',
+          let: { businessId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$business', '$$businessId'] },
+                status: 'active',
+              },
+            },
+            { $count: 'count' },
+          ],
+          as: 'productCount',
+        },
+      },
+
+      // Computed fields
+      {
+        $addFields: {
+          total_products: {
+            $ifNull: [{ $arrayElemAt: ['$productCount.count', 0] }, 0],
+          },
+          followers_count: { $size: { $ifNull: ['$followers', []] } },
+        },
+      },
+
+      // Public projection — include storefront fields, exclude sensitive data
+      {
+        $project: {
+          business_name: 1,
+          business_logo_url: 1,
+          business_logo_svg_url: 1,
+          cover_image_url: 1,
+          theme_color: 1,
+          description: 1,
+          business_category: 1,
+          business_address: 1,
+          city: 1,
+          state: 1,
+          country: 1,
+          website: 1,
+          social_links: 1,
+          average_rating: 1,
+          total_ratings: 1,
+          total_products: 1,
+          total_items_sold: 1,
+          success_rate: 1,
+          successful_deliveries: 1,
+          followers_count: 1,
+          is_featured: 1,
+          year_founded: 1,
+          createdAt: 1,
+          // Exclude: created_by, NIN, BVN, bvn, nin, revenue, orders,
+          // earnings, payout data, team_members, order_settings, etc.
+        },
+      },
+    ]);
+
+    if (!result || result.length === 0) {
+      throw new NotFoundException('Business not found');
+    }
+
+    return result[0];
+  }
+
   async findBusinessById(businessId: string) {
     const result = await this.businessModel.aggregate([
       { $match: { _id: new Types.ObjectId(businessId) } },
