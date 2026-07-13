@@ -48,6 +48,7 @@ import { FabricParamDto, UpdateFabricStockDto } from './dto/fabric.dto';
 import { ModuleRef } from '@nestjs/core';
 import { TokenService } from '../wallets/token.service';
 import { StyleLibraryService } from '../style-library/style-library.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -199,11 +200,12 @@ export class ProductsController {
       null, // optional session
     );
   }
+  @Public()
   @Get()
-  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
   @ApiOkResponse({ type: ProductListResponseDto })
   @ApiOperation({
     summary: 'Get all products with pagination and optional filters/search',
+    description: 'Public endpoint. Returns only active products when no business context is present.',
   })
   @ApiQuery({
     name: 'page',
@@ -285,9 +287,9 @@ export class ProductsController {
       Number(size),
     );
   }
+  @Public()
   @Get(':id')
-  @Roles(UserType.VENDOR, UserType.CUSTOMER, UserType.ADMIN)
-  @ApiOperation({ summary: 'Get product by ID' })
+  @ApiOperation({ summary: 'Get product by ID (Public)' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({
     status: 200,
@@ -332,8 +334,9 @@ export class ProductsController {
   }
 
   // ✅ Get Rating Summary for a Product
+  @Public()
   @Get(':id/ratings')
-  @ApiOperation({ summary: 'Get product rating summary and reviews' })
+  @ApiOperation({ summary: 'Get product rating summary and reviews (Public)' })
   async getProductRatings(@Param('id') id: string) {
     const ratingSummary = await this.productService.getProductRating(id);
     return {

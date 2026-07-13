@@ -34,6 +34,7 @@ import { ValidatedAddressResponseDto } from '../logistics/dto/shipping.dto';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto';
 import { UserType } from '../auth/dto/base-login.dto';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Business')
 @ApiBearerAuth('access-token')
@@ -42,6 +43,44 @@ import { UserType } from '../auth/dto/base-login.dto';
 @UsePipes(new ValidationPipe({ transform: true }))
 export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
+
+  // ─────────────────────────────────────────────────────────
+  // PUBLIC — Storefront endpoints (no auth required)
+  // ─────────────────────────────────────────────────────────
+
+  @Public()
+  @Get('public')
+  @ApiOperation({
+    summary: 'List active vendors (Public)',
+    description: 'Returns paginated list of active business profiles for the customer shop. No auth required.',
+  })
+  @ApiResponse({ status: 200, description: 'Paginated list of active vendors' })
+  async getPublicVendors(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.businessService.getPublicVendors(
+      Number(page) || 1,
+      Number(limit) || 20,
+    );
+  }
+
+  @Public()
+  @Get('public/:id')
+  @ApiOperation({
+    summary: 'Get vendor storefront profile (Public)',
+    description: 'Returns public profile for a single vendor: name, logo, description, rating, product count. No auth required.',
+  })
+  @ApiParam({ name: 'id', description: 'Business ID' })
+  @ApiResponse({ status: 200, description: 'Vendor public profile' })
+  @ApiResponse({ status: 404, description: 'Business not found' })
+  async getPublicProfile(@Param('id') id: string) {
+    return this.businessService.getPublicProfile(id);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // VENDOR — Authenticated endpoints
+  // ─────────────────────────────────────────────────────────
 
   @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER)
