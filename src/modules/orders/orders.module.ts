@@ -21,6 +21,7 @@ import { CurrencyModule } from '../currency/currency.module';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { CartModule } from '../cart/cart.module';
 import { WalletsModule } from '../wallets/wallets.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { WalletsModule } from '../wallets/wallets.module';
     LogisticsModule,     // provides LogisticsService
     CartModule,          // provides CartService + Cart model
     forwardRef(() => WalletsModule),  // forwardRef: avoids circular dep with PlatformModule
+    NotificationsModule,  // provides NotificationsService
   ],
   controllers: [OrderController],
   providers: [

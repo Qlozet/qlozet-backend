@@ -40,6 +40,11 @@ import {
   generateOtp,
   generateVerificationToken,
 } from 'src/common/utils/generateString';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class AuthService {
@@ -58,6 +63,7 @@ export class AuthService {
     @InjectConnection() private readonly connection: Connection,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -421,6 +427,27 @@ export class AuthService {
         error,
       );
       // Don't throw error as user is already verified
+    }
+
+    // In-app welcome notification
+    try {
+      const isVendor = user.type === UserType.VENDOR;
+      await this.notificationsService.create({
+        recipient: (user._id as Types.ObjectId).toString(),
+        category: NotificationCategory.SYSTEM,
+        type: NotificationType.WELCOME,
+        title: isVendor ? 'Welcome to Qlozet!' : 'Welcome to Qlozet!',
+        body: isVendor
+          ? `Your store ${business?.business_name || ''} is ready. Start adding products to your catalog!`
+          : 'Start exploring products from amazing vendors. Happy shopping!',
+        metadata: {
+          user_type: user.type,
+          business_name: business?.business_name,
+        },
+        action_url: isVendor ? '/products' : '/',
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to create welcome notification: ${err.message}`);
     }
   }
 

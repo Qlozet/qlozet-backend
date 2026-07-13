@@ -18,6 +18,11 @@ import {
   BusinessDocument,
   Business,
 } from '../../business/schemas/business.schema';
+import { NotificationsService } from '../../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../../notifications/schemas/notification.schema';
 
 @Injectable()
 export class TeamService {
@@ -32,6 +37,7 @@ export class TeamService {
     private readonly businessModel: Model<BusinessDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly mailService: MailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async inviteTeamMember(
@@ -130,6 +136,22 @@ export class TeamService {
         business.business_name,
         tempPassword,
       );
+
+      // In-app notification to business owner
+      this.notificationsService.create({
+        recipient: (business as any)._id?.toString(),
+        recipient_business: (business as any)._id?.toString(),
+        category: NotificationCategory.TEAM,
+        type: NotificationType.TEAM_MEMBER_JOINED,
+        title: 'New Team Member Added',
+        body: `${dto.full_name} has been invited as ${role.name}.`,
+        metadata: {
+          member_name: dto.full_name,
+          member_email: dto.email,
+          role: role.name,
+        },
+        action_url: '/settings',
+      }).catch((err) => this.logger.warn(`Failed to create team notification: ${err.message}`));
 
       return {
         message: isNewUser

@@ -42,6 +42,11 @@ import {
 import { ProductDocument } from '../products/schemas';
 import { User } from '../ums/schemas';
 import { Utils } from '../../common/utils/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
@@ -64,6 +69,7 @@ export class BespokeService {
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
     private readonly mailService: MailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ════════════════════════════════════════════════════════════════
@@ -345,6 +351,18 @@ export class BespokeService {
           `Failed to send quote request email to ${business.business_email}: ${err.message}`,
         );
       }
+
+      // In-app notification
+      this.notificationsService.create({
+        recipient: (business as any)._id?.toString(),
+        recipient_business: (business as any)._id?.toString(),
+        category: NotificationCategory.BESPOKE,
+        type: NotificationType.BESPOKE_QUOTE_REQUEST,
+        title: 'New Bespoke Quote Request',
+        body: `A customer wants a quote for "${design.name}". You have 7 days to respond.`,
+        metadata: { design_id: design._id, design_name: design.name },
+        action_url: `/bespoke/quotes`,
+      }).catch((err) => this.logger.warn(`Failed to create in-app notification: ${err.message}`));
     }
 
     this.logger.log(
@@ -530,6 +548,20 @@ export class BespokeService {
     } catch (err) {
       this.logger.warn(`Failed to send revision email: ${err.message}`);
     }
+
+    // In-app notification to vendor
+    const vendorBiz = quote.vendor as any;
+    const revDesign = quote.design as any;
+    this.notificationsService.create({
+      recipient: vendorBiz._id?.toString(),
+      recipient_business: vendorBiz._id?.toString(),
+      category: NotificationCategory.BESPOKE,
+      type: NotificationType.BESPOKE_QUOTE_REVISION,
+      title: 'Quote Revision Requested',
+      body: `A customer requested a revision on your quote for "${revDesign?.name || 'a design'}".`,
+      metadata: { quote_id: quote._id, design_name: revDesign?.name },
+      action_url: `/bespoke/quotes`,
+    }).catch((err) => this.logger.warn(`Failed to create revision notification: ${err.message}`));
 
     return { message: 'Revision requested', data: quote };
   }
@@ -727,6 +759,18 @@ export class BespokeService {
         `Failed to send quote submitted email: ${err.message}`,
       );
     }
+
+    // In-app notification to customer
+    const quoteCustomer = quote.customer as any;
+    this.notificationsService.create({
+      recipient: quoteCustomer._id?.toString() || quoteCustomer.id?.toString(),
+      category: NotificationCategory.BESPOKE,
+      type: NotificationType.BESPOKE_QUOTE_RECEIVED,
+      title: 'Quote Received!',
+      body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${quote.total?.toLocaleString()} for your bespoke design.`,
+      metadata: { quote_id: quote._id, vendor_name: business?.business_name, total: quote.total },
+      action_url: `/bespoke`,
+    }).catch((err) => this.logger.warn(`Failed to create quote notification: ${err.message}`));
 
     this.logger.log(
       `Quote ${quote.reference} submitted by vendor ${businessId}`,
