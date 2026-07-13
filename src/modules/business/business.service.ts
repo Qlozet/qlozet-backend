@@ -374,8 +374,10 @@ export class BusinessService implements OnModuleInit {
       this.businessModel
         .find({ status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] } })
         .select(
-          'business_name business_logo_url business_description business_category ' +
-          'business_address average_rating total_ratings'
+          'business_name business_logo_url business_logo_svg_url cover_image_url ' +
+          'theme_color description business_category business_address city state country ' +
+          'website social_links average_rating total_ratings total_items_sold ' +
+          'success_rate is_featured year_founded createdAt'
         )
         .skip(skip)
         .limit(limit)
@@ -426,22 +428,38 @@ export class BusinessService implements OnModuleInit {
           total_products: {
             $ifNull: [{ $arrayElemAt: ['$productCount.count', 0] }, 0],
           },
+          followers_count: { $size: { $ifNull: ['$followers', []] } },
         },
       },
 
-      // Public projection — exclude sensitive fields
+      // Public projection — include storefront fields, exclude sensitive data
       {
         $project: {
           business_name: 1,
           business_logo_url: 1,
-          business_description: 1,
+          business_logo_svg_url: 1,
+          cover_image_url: 1,
+          theme_color: 1,
+          description: 1,
           business_category: 1,
           business_address: 1,
+          city: 1,
+          state: 1,
+          country: 1,
+          website: 1,
+          social_links: 1,
           average_rating: 1,
           total_ratings: 1,
           total_products: 1,
+          total_items_sold: 1,
+          success_rate: 1,
+          successful_deliveries: 1,
+          followers_count: 1,
+          is_featured: 1,
+          year_founded: 1,
           createdAt: 1,
-          // Exclude: created_by, NIN, BVN, revenue, orders, etc.
+          // Exclude: created_by, NIN, BVN, bvn, nin, revenue, orders,
+          // earnings, payout data, team_members, order_settings, etc.
         },
       },
     ]);

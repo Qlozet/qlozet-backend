@@ -48,6 +48,33 @@ export class UpdateBusinessProfileDto {
   cover_image_url?: string;
 
   @ApiPropertyOptional({
+    example: '#8D7F72',
+    description: 'Storefront accent color (hex)',
+  })
+  @IsOptional()
+  @IsString()
+  theme_color?: string;
+
+  @ApiPropertyOptional({
+    example: {
+      instagram: 'https://instagram.com/qlozet',
+      twitter: 'https://twitter.com/qlozet',
+      pinterest: null,
+      youtube: null,
+      tiktok: null,
+    },
+    description: 'Vendor social media links',
+  })
+  @IsOptional()
+  social_links?: {
+    instagram?: string;
+    twitter?: string;
+    pinterest?: string;
+    youtube?: string;
+    tiktok?: string;
+  };
+
+  @ApiPropertyOptional({
     example: ['https://cdn.qlozet.com/docs/cac-cert.pdf'],
     description: 'Array of CAC document URLs',
   })

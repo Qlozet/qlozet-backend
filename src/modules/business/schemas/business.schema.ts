@@ -75,6 +75,27 @@ export class Business extends Document {
   @Prop({ required: false })
   cover_image_url?: string;
 
+  @Prop({ required: false })
+  theme_color?: string; // Vendor storefront accent color (hex, e.g. '#8D7F72')
+
+  @Prop({
+    type: {
+      instagram: { type: String, default: null },
+      twitter: { type: String, default: null },
+      pinterest: { type: String, default: null },
+      youtube: { type: String, default: null },
+      tiktok: { type: String, default: null },
+    },
+    default: {},
+  })
+  social_links?: {
+    instagram?: string;
+    twitter?: string;
+    pinterest?: string;
+    youtube?: string;
+    tiktok?: string;
+  };
+
   @Prop({ default: false })
   email_verified: boolean;
 
