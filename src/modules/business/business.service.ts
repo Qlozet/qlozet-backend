@@ -1422,4 +1422,144 @@ export class BusinessService implements OnModuleInit {
     // Filter out nulls (products that didn't match the business filter)
     return (customer.wishlist || []).filter(item => item !== null);
   }
+
+  /**
+   * Get customer demographics for a vendor:
+   * - Top customer locations (from shipping addresses)
+   * - Gender / wears_preference distribution
+   * - Total unique customers
+   */
+  async getCustomerDemographics(businessId: string) {
+    const businessObjectId = new Types.ObjectId(businessId);
+
+    // 1. Get unique customer IDs who have ordered from this vendor
+    const customerAgg = await this.orderModel.aggregate([
+      { $match: { 'items.business': businessObjectId } },
+      { $group: { _id: '$customer' } },
+    ]);
+
+    const customerIds = customerAgg.map((c) => c._id);
+    const totalCustomers = customerIds.length;
+
+    if (totalCustomers === 0) {
+      return {
+        totalCustomers: 0,
+        topLocations: [],
+        genderDistribution: [],
+        wearsDistribution: [],
+        ageGenderDistribution: [],
+      };
+    }
+
+    // 2. Lookup customer details for gender/wears/dob
+    const users = await this.userModel
+      .find({ _id: { $in: customerIds } })
+      .select('gender wears_preference dob')
+      .lean();
+
+    // Gender distribution
+    const genderMap: Record<string, number> = {};
+    for (const user of users) {
+      const gender = (user as any).gender || 'unspecified';
+      genderMap[gender] = (genderMap[gender] || 0) + 1;
+    }
+    const genderDistribution = Object.entries(genderMap).map(([label, value]) => ({
+      label,
+      value,
+    }));
+
+    // Wears preference distribution
+    const wearsMap: Record<string, number> = {};
+    for (const user of users) {
+      const pref = (user as any).wears_preference || 'unspecified';
+      wearsMap[pref] = (wearsMap[pref] || 0) + 1;
+    }
+    const wearsDistribution = Object.entries(wearsMap).map(([label, value]) => ({
+      label,
+      value,
+    }));
+
+    // 3. Top locations from shipping addresses on orders
+    const locationAgg = await this.orderModel.aggregate([
+      { $match: { 'items.business': businessObjectId } },
+      {
+        $project: {
+          state: '$address.state',
+          city: '$address.city',
+          customer: 1,
+        },
+      },
+      // Group by customer to avoid counting repeat orders
+      {
+        $group: {
+          _id: '$customer',
+          state: { $first: '$state' },
+          city: { $first: '$city' },
+        },
+      },
+      // Now group by state to count unique customers per location
+      {
+        $group: {
+          _id: { $ifNull: ['$state', 'Unknown'] },
+          customerCount: { $sum: 1 },
+        },
+      },
+      { $sort: { customerCount: -1 } },
+      { $limit: 10 },
+    ]);
+
+    const topLocations = locationAgg.map((loc) => ({
+      location: loc._id,
+      customerCount: loc.customerCount,
+      percentage: Math.round((loc.customerCount / totalCustomers) * 100),
+    }));
+
+    // 4. Age × Gender distribution (for the demographics bar chart)
+    const AGE_BUCKETS = [
+      { label: '0 - 5', min: 0, max: 5 },
+      { label: '6 - 12', min: 6, max: 12 },
+      { label: '13 - 18', min: 13, max: 18 },
+      { label: '19 - 23', min: 19, max: 23 },
+      { label: '24 - 28', min: 24, max: 28 },
+      { label: '29 - 33', min: 29, max: 33 },
+      { label: '34 - 39', min: 34, max: 39 },
+      { label: '40 - 45', min: 40, max: 45 },
+      { label: '46 - 50', min: 46, max: 50 },
+      { label: '51 - 55', min: 51, max: 55 },
+      { label: '56 - 60', min: 56, max: 60 },
+      { label: '60 - 70+', min: 61, max: 200 },
+    ];
+
+    const ageGenderDistribution = AGE_BUCKETS.map((bucket) => ({
+      age: bucket.label,
+      male: 0,
+      female: 0,
+    }));
+
+    const now = new Date();
+    for (const user of users) {
+      const dob = (user as any).dob;
+      if (!dob) continue;
+      const birthDate = new Date(dob);
+      const age = Math.floor((now.getTime() - birthDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+      const gender = ((user as any).gender || '').toLowerCase();
+
+      const bucketIdx = AGE_BUCKETS.findIndex((b) => age >= b.min && age <= b.max);
+      if (bucketIdx === -1) continue;
+
+      if (gender === 'male') {
+        ageGenderDistribution[bucketIdx].male++;
+      } else if (gender === 'female') {
+        ageGenderDistribution[bucketIdx].female++;
+      }
+    }
+
+    return {
+      totalCustomers,
+      topLocations,
+      genderDistribution,
+      wearsDistribution,
+      ageGenderDistribution,
+    };
+  }
 }
