@@ -191,6 +191,14 @@ export class BusinessController {
   }
 
   @Roles(UserType.VENDOR)
+  @Get('customers/demographics')
+  @ApiOperation({ summary: 'Get customer demographics: locations, gender, and wears preference distribution' })
+  @ApiResponse({ status: 200, description: 'Customer demographics data for charts' })
+  async getCustomerDemographics(@Req() req: any) {
+    return this.businessService.getCustomerDemographics(req.business?.id);
+  }
+
+  @Roles(UserType.VENDOR)
   @Get('customers/:id/wishlist')
   @ApiOperation({ summary: 'Get a specific customer\'s wishlist items that belong to this vendor' })
   @ApiResponse({ status: 200, description: 'List of wishlist products belonging to the vendor' })

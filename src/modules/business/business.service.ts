@@ -1422,4 +1422,102 @@ export class BusinessService implements OnModuleInit {
     // Filter out nulls (products that didn't match the business filter)
     return (customer.wishlist || []).filter(item => item !== null);
   }
+
+  /**
+   * Get customer demographics for a vendor:
+   * - Top customer locations (from shipping addresses)
+   * - Gender / wears_preference distribution
+   * - Total unique customers
+   */
+  async getCustomerDemographics(businessId: string) {
+    const businessObjectId = new Types.ObjectId(businessId);
+
+    // 1. Get unique customer IDs who have ordered from this vendor
+    const customerAgg = await this.orderModel.aggregate([
+      { $match: { 'items.business': businessObjectId } },
+      { $group: { _id: '$customer' } },
+    ]);
+
+    const customerIds = customerAgg.map((c) => c._id);
+    const totalCustomers = customerIds.length;
+
+    if (totalCustomers === 0) {
+      return {
+        totalCustomers: 0,
+        topLocations: [],
+        genderDistribution: [],
+        wearsDistribution: [],
+      };
+    }
+
+    // 2. Lookup customer details for gender/wears
+    const users = await this.userModel
+      .find({ _id: { $in: customerIds } })
+      .select('gender wears_preference')
+      .lean();
+
+    // Gender distribution
+    const genderMap: Record<string, number> = {};
+    for (const user of users) {
+      const gender = (user as any).gender || 'unspecified';
+      genderMap[gender] = (genderMap[gender] || 0) + 1;
+    }
+    const genderDistribution = Object.entries(genderMap).map(([label, value]) => ({
+      label,
+      value,
+    }));
+
+    // Wears preference distribution
+    const wearsMap: Record<string, number> = {};
+    for (const user of users) {
+      const pref = (user as any).wears_preference || 'unspecified';
+      wearsMap[pref] = (wearsMap[pref] || 0) + 1;
+    }
+    const wearsDistribution = Object.entries(wearsMap).map(([label, value]) => ({
+      label,
+      value,
+    }));
+
+    // 3. Top locations from shipping addresses on orders
+    const locationAgg = await this.orderModel.aggregate([
+      { $match: { 'items.business': businessObjectId } },
+      {
+        $project: {
+          state: '$address.state',
+          city: '$address.city',
+          customer: 1,
+        },
+      },
+      // Group by customer to avoid counting repeat orders
+      {
+        $group: {
+          _id: '$customer',
+          state: { $first: '$state' },
+          city: { $first: '$city' },
+        },
+      },
+      // Now group by state to count unique customers per location
+      {
+        $group: {
+          _id: { $ifNull: ['$state', 'Unknown'] },
+          customerCount: { $sum: 1 },
+        },
+      },
+      { $sort: { customerCount: -1 } },
+      { $limit: 10 },
+    ]);
+
+    const topLocations = locationAgg.map((loc) => ({
+      location: loc._id,
+      customerCount: loc.customerCount,
+      percentage: Math.round((loc.customerCount / totalCustomers) * 100),
+    }));
+
+    return {
+      totalCustomers,
+      topLocations,
+      genderDistribution,
+      wearsDistribution,
+    };
+  }
 }
