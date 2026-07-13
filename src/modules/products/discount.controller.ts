@@ -31,6 +31,7 @@ import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { UserType } from '../auth/dto/base-login.dto';
 import { VendorRole } from '../ums/schemas/role.schema';
 import { Product } from '../products/schemas/product.schema';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Discounts')
 @ApiBearerAuth('access-token')
@@ -39,6 +40,31 @@ import { Product } from '../products/schemas/product.schema';
 @UsePipes(new ValidationPipe({ transform: true }))
 export class DiscountController {
   constructor(private readonly discountService: DiscountService) {}
+
+  // ─────────────────────────────────────────────────────────
+  // PUBLIC — Storefront (no auth required)
+  // ─────────────────────────────────────────────────────────
+
+  @Public()
+  @Get('public/:businessId/products')
+  @ApiOperation({
+    summary: 'Get discounted products for a vendor (Public)',
+    description: 'Returns products with active discounts for a specific vendor. Used on vendor storefront deal sections.',
+  })
+  @ApiParam({ name: 'businessId', description: 'Business ID' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  @ApiQuery({ name: 'kind', required: false, enum: ['clothing', 'fabric', 'accessory'] })
+  async getPublicDiscountedProducts(
+    @Param('businessId') businessId: string,
+    @Query() query: any,
+  ) {
+    return this.discountService.getDiscountedProductsByVendor(businessId, query);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // VENDOR — Authenticated endpoints
+  // ─────────────────────────────────────────────────────────
 
   /**
    * Create a new discount
