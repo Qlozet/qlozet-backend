@@ -127,6 +127,30 @@ export class CollectionController {
     );
   }
 
+  // ─────────────────────────────────────────────────────────
+  // PUBLIC — Vendor Collections (Storefront)
+  // ─────────────────────────────────────────────────────────
+
+  @Public()
+  @Get('vendor/:businessId/public')
+  @ApiOperation({
+    summary: 'Get vendor collections with products (Public)',
+    description: 'Returns active collections for a vendor with their products. Used on vendor storefront pages.',
+  })
+  @ApiParam({ name: 'businessId', description: 'Business ID' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  async getPublicVendorCollections(
+    @Param('businessId') businessId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.collectionService.getCollectionsWithProductsByVendor(
+      businessId,
+      { page: Number(page) || 1, limit: Number(limit) || 10, is_active: true },
+    );
+  }
+
   @Public()
   @Get(':collectionId/products')
   @ApiOperation({ summary: 'Get products under a collection (Public)' })
