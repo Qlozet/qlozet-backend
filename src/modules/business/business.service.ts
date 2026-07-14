@@ -377,7 +377,7 @@ export class BusinessService implements OnModuleInit {
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
           'website social_links average_rating total_ratings total_items_sold ' +
-          'success_rate is_featured year_founded createdAt'
+          'success_rate is_featured year_founded accepts_external_fabric createdAt'
         )
         .skip(skip)
         .limit(limit)
@@ -457,6 +457,7 @@ export class BusinessService implements OnModuleInit {
           followers_count: 1,
           is_featured: 1,
           year_founded: 1,
+          accepts_external_fabric: 1,
           createdAt: 1,
           // Exclude: created_by, NIN, BVN, bvn, nin, revenue, orders,
           // earnings, payout data, team_members, order_settings, etc.

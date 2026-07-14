@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Cart, CartDocument } from './schema/cart.schema';
 import { Product, ProductDocument } from '../products/schemas';
+import { Business, BusinessDocument } from '../business/schemas/business.schema';
 
 @Injectable()
 export class CartService {
@@ -10,6 +11,8 @@ export class CartService {
     @InjectModel(Cart.name) private readonly cartModel: Model<CartDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
   ) {}
 
   async getCart(userId: string): Promise<CartDocument> {
@@ -43,6 +46,32 @@ export class CartService {
       }
       if (!fabricProduct.fabric) {
         throw new NotFoundException('Fabric data is missing from this product');
+      }
+
+      // ── Check if this is cross-vendor fabric ──
+      const clothingBizId = product.business?.toString();
+      const fabricBizId = fabricProduct.business?.toString();
+
+      if (clothingBizId && fabricBizId && clothingBizId !== fabricBizId) {
+        // Product-level override takes priority, then vendor-level default
+        const productAllows = product.clothing?.accepts_external_fabric;
+        let allowed: boolean;
+
+        if (productAllows !== null && productAllows !== undefined) {
+          // Product has explicit override
+          allowed = productAllows;
+        } else {
+          // Fall back to vendor-level setting
+          const vendorBusiness = await this.businessModel.findById(clothingBizId);
+          allowed = vendorBusiness?.accepts_external_fabric ?? true;
+        }
+
+        if (!allowed) {
+          throw new BadRequestException(
+            'This product does not accept external fabric from other vendors. ' +
+            'Please choose a fabric from the same vendor or remove the applied fabric.',
+          );
+        }
       }
       if (appliedFabricYards < fabricProduct.fabric.min_cut) {
         throw new BadRequestException(

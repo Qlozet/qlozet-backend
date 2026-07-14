@@ -44,6 +44,9 @@ export class Clothing {
 
   @Prop({ type: [FabricSchema], default: [] })
   fabrics?: Fabric[];
+
+  @Prop({ type: Boolean, default: null })
+  accepts_external_fabric?: boolean | null; // null = inherit from vendor, true/false = override
 }
 
 export const ClothingSchema = SchemaFactory.createForClass(Clothing);
