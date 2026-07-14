@@ -724,6 +724,9 @@ export class OrderService {
         this.orderModel
           .find(filter)
           .populate('customer', 'email')
+          .populate('shipments.business', 'business_name business_logo_url')
+          .populate('shipments.destination_business', 'business_name business_logo_url')
+          .populate('shipments.fabric_product', 'fabric.name base_price')
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(take)

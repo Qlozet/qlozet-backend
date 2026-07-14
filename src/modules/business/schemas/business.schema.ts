@@ -96,6 +96,9 @@ export class Business extends Document {
     tiktok?: string;
   };
 
+  @Prop({ type: Boolean, default: true })
+  accepts_external_fabric: boolean; // Whether this vendor accepts fabric from other vendors for bespoke orders
+
   @Prop({ default: false })
   email_verified: boolean;
 
