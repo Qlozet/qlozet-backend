@@ -17,6 +17,7 @@ import {
   OrderItem,
   OrderStatus,
   ShipmentStatus,
+  ShipmentType,
   VendorShipment,
 } from './schemas/orders.schema';
 import { OrderValidationService } from './orders.validation';
@@ -59,6 +60,7 @@ import {
   CheckoutPreviewResponse,
   CheckoutPreviewDto,
   VendorShippingRate,
+  FabricTransferRate,
 } from './dto/checkout-preview.dto';
 import { FulfillOrderDto } from './dto/fulfill-order.dto';
 import { Cart, CartDocument } from '../cart/schema/cart.schema';
@@ -187,6 +189,52 @@ export class OrderService {
         }
       }
 
+      // ── Build fabric transfer shipments (Fabric Vendor → Tailor) ──
+      if (orderData.selected_fabric_transfers?.length) {
+        for (const transfer of orderData.selected_fabric_transfers) {
+          // Validate against cached rates (same pattern as normal shipping)
+          const cachedEntry = await this.rateCacheModel.findOne({
+            customer: new Types.ObjectId(customer.id),
+            request_token: transfer.request_token,
+            business_id: transfer.fabric_vendor_id,
+          });
+
+          if (!cachedEntry) {
+            throw new BadRequestException(
+              `Fabric transfer shipping quote expired for vendor ${transfer.fabric_vendor_id}. Please re-run checkout preview.`,
+            );
+          }
+
+          const matchedRate = cachedEntry.rates.find(
+            (r) => r.courier_id === transfer.courier_id && r.service_code === transfer.service_code,
+          );
+
+          if (!matchedRate) {
+            throw new BadRequestException(
+              `Selected courier ${transfer.courier_id} not found in cached fabric transfer rates. Please re-run checkout preview.`,
+            );
+          }
+
+          const verifiedTransferFee = matchedRate.rate_amount;
+
+          shipments.push({
+            business: new Types.ObjectId(transfer.fabric_vendor_id),
+            destination_business: new Types.ObjectId(transfer.tailor_vendor_id),
+            shipment_type: ShipmentType.FABRIC_TRANSFER,
+            fabric_product: new Types.ObjectId(transfer.fabric_product_id),
+            fabric_yards: transfer.fabric_yards,
+            request_token: transfer.request_token,
+            service_code: transfer.service_code,
+            courier_id: transfer.courier_id,
+            courier_name: transfer.courier_name,
+            shipping_fee: verifiedTransferFee,
+            status: 'pending',
+            rate_fetched_at: cachedEntry.createdAt,
+          });
+          totalShippingFee += verifiedTransferFee;
+        }
+      }
+
       const finalTotal = total + totalShippingFee;
 
       const order = new this.orderModel({
@@ -250,6 +298,11 @@ export class OrderService {
           this.logger.error('Failed to send new order notifications', err),
         );
 
+        // Notify vendors about fabric transfers (if any)
+        this.notifyFabricTransfers(savedOrder).catch((err) =>
+          this.logger.error('Failed to send fabric transfer notifications', err),
+        );
+
         return {
           message: 'Order created and paid via wallet successfully.',
           data: {
@@ -291,6 +344,11 @@ export class OrderService {
         // Notify vendor(s) about new order
         this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
           this.logger.error('Failed to send new order notifications', err),
+        );
+
+        // Notify vendors about fabric transfers (if any)
+        this.notifyFabricTransfers(savedOrder).catch((err) =>
+          this.logger.error('Failed to send fabric transfer notifications', err),
         );
 
         return {
@@ -1025,36 +1083,156 @@ export class OrderService {
       )
       .map((r) => r.value!);
 
-    // 6. Calculate totals
-    const totalShippingFee = vendorShipping.reduce(
+    // ── 5b. Detect cross-vendor fabric transfers ──────────────────
+    const fabricTransfers: FabricTransferRate[] = [];
+
+    for (const cartItem of cart.items) {
+      if (!cartItem.applied_fabric_id) continue;
+
+      const fabricId = (cartItem.applied_fabric_id as any)?._id?.toString()
+        || cartItem.applied_fabric_id.toString();
+      const clothingId = (cartItem.product_id as any)?._id?.toString()
+        || cartItem.product_id.toString();
+
+      const clothingProduct = products.find((p) => String(p._id) === clothingId);
+      const fabricProduct = await this.productModel.findById(fabricId);
+
+      if (!clothingProduct || !fabricProduct) continue;
+
+      const clothingBizId = clothingProduct.business?.toString();
+      const fabricBizId = fabricProduct.business?.toString();
+
+      // Same vendor → no transfer needed
+      if (!clothingBizId || !fabricBizId || clothingBizId === fabricBizId) continue;
+
+      const fabricBiz = bizMap.get(fabricBizId)
+        || await this.businessModel.findById(fabricBizId);
+      const tailorBiz = bizMap.get(clothingBizId)
+        || await this.businessModel.findById(clothingBizId);
+
+      if (!fabricBiz || !tailorBiz) continue;
+
+      if (!fabricBiz.address_code || !tailorBiz.address_code) {
+        this.logger.warn(
+          `Cannot quote fabric transfer: missing address code for ${fabricBiz.business_name} or ${tailorBiz.business_name}`,
+        );
+        continue;
+      }
+
+      // Get fabric name
+      const fabricName = fabricProduct.fabric?.name || 'Fabric';
+      const fabricYards = cartItem.applied_fabric_yards || 1;
+
+      try {
+        const transferPayload = {
+          sender_address_code: fabricBiz.address_code,
+          reciever_address_code: tailorBiz.address_code,
+          pickup_date: pickupDate,
+          package_items: [{
+            name: fabricName,
+            description: `${fabricYards} yards of ${fabricName}`,
+            unit_weight: Math.ceil(fabricYards * 0.3), // ~0.3kg per yard
+            unit_amount: fabricProduct.base_price || 0,
+            quantity: 1,
+          }],
+          service_type: dto.service_type || 'pickup',
+          package_dimension: { length: 30, width: 20, height: 5 }, // Fabric roll dimensions
+        };
+
+        const transferRateResponse = await this.logisticService.fetchRates([], transferPayload);
+
+        const transferRates = (transferRateResponse.couriers || []).map((c) => ({
+          courier_id: String(c.courier_id),
+          courier_name: c.courier_name,
+          courier_image: c.courier_image,
+          service_code: c.service_code,
+          rate_amount: c.total,
+          delivery_eta: c.delivery_eta,
+          delivery_eta_time: c.delivery_eta_time,
+          insurance_fee: c.insurance?.fee || 0,
+          insurance_code: c.insurance?.code || '',
+        }));
+
+        fabricTransfers.push({
+          fabric_vendor_id: fabricBizId,
+          fabric_vendor_name: fabricBiz.business_name,
+          tailor_vendor_id: clothingBizId,
+          tailor_vendor_name: tailorBiz.business_name,
+          fabric_product_id: fabricId,
+          fabric_name: fabricName,
+          fabric_yards: fabricYards,
+          request_token: transferRateResponse.request_token,
+          rates: transferRates,
+          cheapest_rate: transferRateResponse.cheapest_courier?.total || 0,
+          fastest_rate: transferRateResponse.fastest_courier?.total || 0,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to fetch fabric transfer rates (${fabricBiz.business_name} → ${tailorBiz.business_name}): ${error.message}`,
+        );
+      }
+    }
+
+    // 6. Calculate totals (include fabric transfer fees)
+    const vendorShippingFee = vendorShipping.reduce(
       (sum, vs) => sum + vs.cheapest_rate,
       0,
     );
+    const fabricTransferFee = fabricTransfers.reduce(
+      (sum, ft) => sum + ft.cheapest_rate,
+      0,
+    );
+    const totalShippingFee = vendorShippingFee + fabricTransferFee;
     const subtotal = cart.subtotal || 0;
 
     // Cache the rates in MongoDB for server-side validation during order creation
+    const allCacheEntries: any[] = [];
+
     if (vendorShipping.length > 0) {
       const customerId = customer.id || customer._id;
-      const cacheEntries = vendorShipping.map((vs) => ({
-        customer: new Types.ObjectId(customerId),
-        request_token: vs.request_token,
-        business_id: vs.business_id,
-        rates: vs.rates.map((r) => ({
-          courier_id: r.courier_id,
-          service_code: r.service_code,
-          courier_name: r.courier_name,
-          rate_amount: r.rate_amount,
+      allCacheEntries.push(
+        ...vendorShipping.map((vs) => ({
+          customer: new Types.ObjectId(customerId),
+          request_token: vs.request_token,
+          business_id: vs.business_id,
+          rates: vs.rates.map((r) => ({
+            courier_id: r.courier_id,
+            service_code: r.service_code,
+            courier_name: r.courier_name,
+            rate_amount: r.rate_amount,
+          })),
         })),
-      }));
+      );
+    }
 
+    // Also cache fabric transfer rates
+    if (fabricTransfers.length > 0) {
+      const customerId = customer.id || customer._id;
+      allCacheEntries.push(
+        ...fabricTransfers.map((ft) => ({
+          customer: new Types.ObjectId(customerId),
+          request_token: ft.request_token,
+          business_id: ft.fabric_vendor_id,
+          rates: ft.rates.map((r) => ({
+            courier_id: r.courier_id,
+            service_code: r.service_code,
+            courier_name: r.courier_name,
+            rate_amount: r.rate_amount,
+          })),
+        })),
+      );
+    }
+
+    if (allCacheEntries.length > 0) {
       // Fire-and-forget: don't block the response on cache writes
-      this.rateCacheModel.insertMany(cacheEntries).catch((err) => {
+      this.rateCacheModel.insertMany(allCacheEntries).catch((err) => {
         this.logger.warn(`Failed to cache checkout rates: ${err.message}`);
       });
     }
 
     return {
       vendor_shipping: vendorShipping,
+      fabric_transfers: fabricTransfers,
       total_shipping_fee: totalShippingFee,
       subtotal,
       total: subtotal + totalShippingFee,
@@ -1105,6 +1283,37 @@ export class OrderService {
     }
 
     const order = claimed;
+
+    // ── Fabric transfer gating: block tailor until fabric arrives ──
+    // If this is a vendor_to_customer shipment, check if any fabric_transfer
+    // shipments are destined for this vendor and haven't been delivered yet.
+    const thisShipment = order.shipments.find(
+      (s) => s.business.toString() === businessId,
+    );
+    if (thisShipment?.shipment_type !== ShipmentType.FABRIC_TRANSFER) {
+      const pendingFabricTransfers = order.shipments.filter(
+        (s) =>
+          s.shipment_type === ShipmentType.FABRIC_TRANSFER &&
+          s.destination_business?.toString() === businessId &&
+          s.status !== ShipmentStatus.DELIVERED,
+      );
+
+      if (pendingFabricTransfers.length > 0) {
+        // Find the fabric vendor name for a helpful error message
+        const fabricVendorIds = pendingFabricTransfers.map((s) => s.business.toString());
+        const fabricVendors = await this.businessModel.find({
+          _id: { $in: fabricVendorIds },
+        });
+        const vendorNames = fabricVendors
+          .map((v) => v.business_name)
+          .join(', ');
+
+        throw new BadRequestException(
+          `Cannot fulfill: waiting for fabric delivery from ${vendorNames}. ` +
+          `Fabric must be marked as delivered before you can ship the finished garment.`,
+        );
+      }
+    }
 
     // Find the shipment for this vendor
     const shipmentIndex = order.shipments.findIndex(
@@ -1915,6 +2124,95 @@ export class OrderService {
       },
       action_url: `/orders`,
     }));
+
+    if (notifications.length > 0) {
+      await this.notificationsService.createMany(notifications);
+    }
+  }
+
+  /**
+   * Notify vendors about fabric transfer shipments.
+   * - Fabric vendor: "Ship X yards of [Fabric] to [Tailor]"
+   * - Tailor vendor: "[Fabric Vendor] will ship fabric to you"
+   */
+  private async notifyFabricTransfers(order: OrderDocument) {
+    const fabricTransferShipments = order.shipments.filter(
+      (s: any) => s.shipment_type === ShipmentType.FABRIC_TRANSFER,
+    );
+
+    if (fabricTransferShipments.length === 0) return;
+
+    const notifications: CreateNotificationDto[] = [];
+
+    for (const shipment of fabricTransferShipments as any[]) {
+      const fabricBizId = shipment.business?.toString();
+      const tailorBizId = shipment.destination_business?.toString();
+
+      if (!fabricBizId || !tailorBizId) continue;
+
+      // Look up both businesses
+      const [fabricBiz, tailorBiz] = await Promise.all([
+        this.businessModel.findById(fabricBizId),
+        this.businessModel.findById(tailorBizId),
+      ]);
+
+      if (!fabricBiz || !tailorBiz) continue;
+
+      // Look up vendor users
+      const [fabricUsers, tailorUsers] = await Promise.all([
+        this.businessModel.db.model('User').find({
+          business: new Types.ObjectId(fabricBizId),
+          type: 'vendor',
+        }).select('_id business').lean(),
+        this.businessModel.db.model('User').find({
+          business: new Types.ObjectId(tailorBizId),
+          type: 'vendor',
+        }).select('_id business').lean(),
+      ]);
+
+      const fabricYards = shipment.fabric_yards || 0;
+      const fabricName = 'fabric'; // We could look up the product but keeping it simple
+
+      // Notify fabric vendor: "Ship your fabric to the tailor"
+      for (const user of fabricUsers as any[]) {
+        notifications.push({
+          recipient: user._id.toString(),
+          recipient_business: user.business?.toString(),
+          category: NotificationCategory.ORDER,
+          type: NotificationType.NEW_ORDER,
+          title: 'Fabric Transfer Required',
+          body: `Order #${order.reference}: Ship ${fabricYards} yards of ${fabricName} to ${tailorBiz.business_name}. This is a cross-vendor bespoke order.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            shipment_type: 'fabric_transfer',
+            destination_business: tailorBizId,
+            destination_name: tailorBiz.business_name,
+          },
+          action_url: `/orders`,
+        });
+      }
+
+      // Notify tailor vendor: "Fabric is coming to you"
+      for (const user of tailorUsers as any[]) {
+        notifications.push({
+          recipient: user._id.toString(),
+          recipient_business: user.business?.toString(),
+          category: NotificationCategory.ORDER,
+          type: NotificationType.NEW_ORDER,
+          title: 'External Fabric Incoming',
+          body: `Order #${order.reference}: ${fabricBiz.business_name} will ship ${fabricYards} yards of ${fabricName} to you. You'll be notified when it arrives so you can start working.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            shipment_type: 'fabric_transfer_incoming',
+            source_business: fabricBizId,
+            source_name: fabricBiz.business_name,
+          },
+          action_url: `/orders`,
+        });
+      }
+    }
 
     if (notifications.length > 0) {
       await this.notificationsService.createMany(notifications);

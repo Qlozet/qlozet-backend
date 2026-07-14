@@ -82,11 +82,49 @@ export class VendorShippingRateDto {
   fastest_rate: number;
 }
 
+export class FabricTransferRateDto {
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  fabric_vendor_id: string;
+
+  @ApiProperty({ example: 'Qlozet Fabrics' })
+  fabric_vendor_name: string;
+
+  @ApiProperty({ example: '507f1f77bcf86cd799439022' })
+  tailor_vendor_id: string;
+
+  @ApiProperty({ example: 'Qlozet Fashion House' })
+  tailor_vendor_name: string;
+
+  @ApiProperty({ example: '507f1f77bcf86cd799439033' })
+  fabric_product_id: string;
+
+  @ApiProperty({ example: 'Ankara Wax Print' })
+  fabric_name: string;
+
+  @ApiProperty({ example: 3.5 })
+  fabric_yards: number;
+
+  @ApiProperty({ example: 'req_fabric_abc123', description: 'Shipbubble rate token for this leg' })
+  request_token: string;
+
+  @ApiProperty({ type: [CourierRateDto], description: 'Available couriers for fabric transfer' })
+  rates: CourierRateDto[];
+
+  @ApiProperty({ example: 1200, description: 'Cheapest courier rate for this transfer' })
+  cheapest_rate: number;
+
+  @ApiProperty({ example: 2200, description: 'Fastest courier rate for this transfer' })
+  fastest_rate: number;
+}
+
 export class CheckoutPreviewResponseDto {
-  @ApiProperty({ type: [VendorShippingRateDto], description: 'Shipping rates grouped by vendor' })
+  @ApiProperty({ type: [VendorShippingRateDto], description: 'Shipping rates grouped by vendor (Vendor → Customer)' })
   vendor_shipping: VendorShippingRateDto[];
 
-  @ApiProperty({ example: 4300, description: 'Sum of cheapest rates across all vendors' })
+  @ApiProperty({ type: [FabricTransferRateDto], description: 'Fabric transfer shipping rates (Fabric Vendor → Tailor)', default: [] })
+  fabric_transfers: FabricTransferRateDto[];
+
+  @ApiProperty({ example: 4300, description: 'Sum of cheapest rates across all vendors + fabric transfers' })
   total_shipping_fee: number;
 
   @ApiProperty({ example: 25000 })
@@ -99,4 +137,6 @@ export class CheckoutPreviewResponseDto {
 // Keep interfaces for internal use
 export type CourierRate = CourierRateDto;
 export type VendorShippingRate = VendorShippingRateDto;
+export type FabricTransferRate = FabricTransferRateDto;
 export type CheckoutPreviewResponse = CheckoutPreviewResponseDto;
+
