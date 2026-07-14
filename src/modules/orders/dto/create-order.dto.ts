@@ -11,6 +11,7 @@ import { Type } from 'class-transformer';
 import { ProcessedOrderItemDto } from './order-item.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SelectedShippingDto } from './selected-shipping.dto';
+import { SelectedFabricTransferDto } from './selected-fabric-transfer.dto';
 
 export enum PaymentMethod {
   PAYSTACK = 'paystack',
@@ -72,6 +73,18 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => SelectedShippingDto)
   selected_shipping?: SelectedShippingDto[];
+
+  @ApiPropertyOptional({
+    type: [SelectedFabricTransferDto],
+    description:
+      'Fabric transfer shipping selections from checkout-preview. Creates fabric_transfer VendorShipment entries (Fabric Vendor → Tailor).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SelectedFabricTransferDto)
+  selected_fabric_transfers?: SelectedFabricTransferDto[];
+
 
   @ApiPropertyOptional({
     description: 'Address ID to use for this order. Defaults to the default address.',

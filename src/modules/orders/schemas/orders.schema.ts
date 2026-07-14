@@ -22,6 +22,11 @@ export enum ShipmentStatus {
   FAILED = 'failed',
 }
 
+export enum ShipmentType {
+  VENDOR_TO_CUSTOMER = 'vendor_to_customer',
+  FABRIC_TRANSFER = 'fabric_transfer',
+}
+
 export type OrderDocument = Order & Document;
 
 /** ------------------ Sub-schemas for selections ------------------ */
@@ -153,6 +158,22 @@ export class VendorShipment {
     default: ShipmentStatus.PENDING,
   })
   status: ShipmentStatus;
+
+  @Prop({
+    type: String,
+    enum: Object.values(ShipmentType),
+    default: ShipmentType.VENDOR_TO_CUSTOMER,
+  })
+  shipment_type: ShipmentType;
+
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
+  destination_business?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
+  fabric_product?: Types.ObjectId;
+
+  @Prop({ type: Number, default: null })
+  fabric_yards?: number;
 
   @Prop({ type: Date })
   rate_fetched_at?: Date;
