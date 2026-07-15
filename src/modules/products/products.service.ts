@@ -186,9 +186,10 @@ export class ProductService {
         { 'clothing.taxonomy.audience': audienceMatch },
         { 'accessory.taxonomy.audience': audienceMatch },
         { 'fabric.taxonomy.audience': audienceMatch },
-        { 'clothing.taxonomy.audience': { $exists: false } },
-        { 'accessory.taxonomy.audience': { $exists: false } },
-        { 'fabric.taxonomy.audience': { $exists: false } },
+        // Only match untagged products against their own kind
+        { kind: 'clothing', 'clothing.taxonomy.audience': { $exists: false } },
+        { kind: 'accessory', 'accessory.taxonomy.audience': { $exists: false } },
+        { kind: 'fabric', 'fabric.taxonomy.audience': { $exists: false } },
       );
     }
 
@@ -253,9 +254,10 @@ export class ProductService {
           { 'clothing.taxonomy.audience': audienceMatch },
           { 'accessory.taxonomy.audience': audienceMatch },
           { 'fabric.taxonomy.audience': audienceMatch },
-          { 'clothing.taxonomy.audience': { $exists: false } },
-          { 'accessory.taxonomy.audience': { $exists: false } },
-          { 'fabric.taxonomy.audience': { $exists: false } },
+          // Only match untagged products against their own kind
+          { kind: 'clothing', 'clothing.taxonomy.audience': { $exists: false } },
+          { kind: 'accessory', 'accessory.taxonomy.audience': { $exists: false } },
+          { kind: 'fabric', 'fabric.taxonomy.audience': { $exists: false } },
         ],
       });
     }
