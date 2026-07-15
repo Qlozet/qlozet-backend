@@ -12,6 +12,7 @@ import { RankersService, RankingContext } from '../rankers/rankers.service';
 import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
 import { Product, ProductDocument } from '../../products/schemas/product.schema';
 import { User, UserDocument } from '../../ums/schemas/user.schema';
+import { classifyBodyType } from 'src/common/utils/body-type-classifier';
 
 @Injectable()
 export class AskService {
@@ -53,21 +54,47 @@ export class AskService {
           .lean();
 
         if (user) {
-          const btc = user.body_type_classification;
+          let btc = user.body_type_classification;
           const activeSet = (user.measurementSets || []).find((s) => s.active);
           const measurements = activeSet?.measurements;
 
-          if (btc?.bodyType && btc.bodyType !== 'unclassified') {
-            const measStr = measurements
-              ? Object.entries(
-                  measurements instanceof Map
-                    ? Object.fromEntries(measurements)
-                    : measurements,
-                )
-                  .map(([k, v]) => `${k}: ${v}${activeSet?.unit || 'cm'}`)
-                  .join(', ')
-              : 'not provided';
+          // Build measurement string if we have any measurements at all
+          let measStr = 'not provided';
+          if (measurements) {
+            const measObj =
+              measurements instanceof Map
+                ? Object.fromEntries(measurements)
+                : measurements;
+            const entries = Object.entries(measObj);
+            if (entries.length > 0) {
+              measStr = entries
+                .map(([k, v]) => `${k}: ${v}${activeSet?.unit || 'cm'}`)
+                .join(', ');
+            }
+          }
 
+          // If we have measurements but no classification, classify on-the-fly
+          if (measurements && (!btc?.bodyType || btc.bodyType === 'unclassified')) {
+            try {
+              const measObj =
+                measurements instanceof Map
+                  ? Object.fromEntries(measurements)
+                  : (measurements as Record<string, number>);
+              const result = classifyBodyType(measObj, user.gender);
+              btc = {
+                bodyType: result.bodyType,
+                confidence: result.confidence,
+                flattering_fits: result.flattering_fits,
+                avoid_fits: result.avoid_fits,
+                style_advice: result.styleAdvice,
+              } as any;
+            } catch {
+              // Classification failed, continue with raw measurements only
+            }
+          }
+
+          // Build the context string — even without classification, share measurements
+          if (btc?.bodyType && btc.bodyType !== 'unclassified') {
             bodyContext = `\nUSER BODY PROFILE:\n` +
               `- Gender: ${user.gender || 'not set'}\n` +
               `- Body Type: ${btc.bodyType} (${btc.confidence} confidence)\n` +
@@ -76,6 +103,13 @@ export class AskService {
               `- Flattering fits: ${(btc.flattering_fits || []).join(', ')}\n` +
               `- Avoid: ${(btc.avoid_fits || []).join(', ')}\n` +
               `Use this to recommend products that will fit and flatter this body type. Mention best matching size if relevant.`;
+          } else if (measStr !== 'not provided') {
+            // Has measurements but classification failed or is incomplete
+            bodyContext = `\nUSER MEASUREMENTS:\n` +
+              `- Gender: ${user.gender || 'not set'}\n` +
+              `- Measurements: ${measStr}\n` +
+              `- Fit preferences: ${(user.body_fit || []).join(', ') || 'none set'}\n` +
+              `The user has saved measurements. Use these to help with sizing and fit advice.`;
           }
         }
       } catch (err) {
@@ -295,7 +329,16 @@ STRICT RULES:
 - If no products match, say so honestly and suggest broadening the search
 - Be warm, helpful, and conversational — like a knowledgeable fashion friend
 - Use Nigerian Naira (₦) for prices
-
+${bodyContext ? `
+BODY & FIT RULES:
+- You DO have access to this user's body measurements and profile (shown below). Always acknowledge this when asked.
+- When recommending clothes, ALWAYS consider the user's body type and measurements.
+- Mention which styles/fits would flatter their specific body type.
+- If recommending a product, suggest the best matching size based on their measurements when possible.
+- If the user asks about their measurements or body type, share the data you have confidently.
+` : `
+- If the user asks about their measurements, let them know they can save their body measurements in the app so you can give personalized fit advice.
+`}
 CONTEXT:
 User intent: ${intent}
 Extracted constraints: ${JSON.stringify(constraints)}
