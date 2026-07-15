@@ -16,17 +16,19 @@ export class VectorSearchService {
         numCandidates: number = 100,
         filter?: Record<string, any>,
     ): Promise<any[]> {
+        const vectorSearchStage: Record<string, any> = {
+            index: indexName,
+            path: indexName === 'items_fabric_vindex' ? 'embeddings.e_fabric' : 'embeddings.e_style',
+            queryVector: embedding,
+            numCandidates: numCandidates,
+            limit: limit,
+        };
+        if (filter && Object.keys(filter).length > 0) {
+            vectorSearchStage.filter = filter;
+        }
+
         const pipeline: any[] = [
-            {
-                $vectorSearch: {
-                    index: indexName,
-                    path: indexName === 'items_fabric_vindex' ? 'embeddings.e_fabric' : 'embeddings.e_style',
-                    queryVector: embedding,
-                    numCandidates: numCandidates,
-                    limit: limit,
-                    filter: filter || undefined,
-                },
-            },
+            { $vectorSearch: vectorSearchStage },
             {
                 $project: {
                     itemId: 1,
