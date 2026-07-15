@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { RetrievalService } from './retrieval/retrieval.service';
 import { FiltersService } from './filters/filters.service';
 import { RankersService } from './rankers/rankers.service';
@@ -31,6 +32,7 @@ export class RecommendationsService {
     private businessService: BusinessService,
     private catalogService: CatalogService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
+    @InjectModel(Product.name) private productModel: Model<ProductDocument>,
   ) {}
 
   async getHomeFeed(options: {
@@ -152,7 +154,7 @@ export class RecommendationsService {
     });
 
     return {
-      items: results,
+      items: await this.hydrateWithProductData(results),
       debug: {
         coldStartLevel,
         usedSessionBlend,
@@ -307,6 +309,20 @@ export class RecommendationsService {
       totalProducts: filtered.length,
     });
 
+    // Hydrate vendor feed products with full product data
+    const allVendorProducts = vendorFeedItems.flatMap((v) => v.products);
+    const hydratedProducts = await this.hydrateWithProductData(allVendorProducts);
+
+    // Map hydrated products back into their vendor groups
+    let productIndex = 0;
+    for (const vendorItem of vendorFeedItems) {
+      vendorItem.products = hydratedProducts.slice(
+        productIndex,
+        productIndex + vendorItem.products.length,
+      );
+      productIndex += vendorItem.products.length;
+    }
+
     return {
       requestId: uuid(),
       vendors: vendorFeedItems,
@@ -355,7 +371,7 @@ export class RecommendationsService {
     });
 
     return {
-      items: results,
+      items: await this.hydrateWithProductData(results),
       debug: {
         candidateCount: trendingItems.length,
         filteredCount: filtered.length,
@@ -411,7 +427,7 @@ export class RecommendationsService {
     });
 
     return {
-      items: results,
+      items: await this.hydrateWithProductData(results),
       debug: {
         totalNewItems: newItems.length,
         cutoffDate: cutoffDate.toISOString(),
@@ -550,7 +566,7 @@ export class RecommendationsService {
     });
 
     return {
-      items: results,
+      items: await this.hydrateWithProductData(results),
       referenceItem: {
         itemId: item.itemId,
         name: item.name,
@@ -663,7 +679,7 @@ export class RecommendationsService {
     });
 
     return {
-      items: results,
+      items: await this.hydrateWithProductData(results),
       referenceItems: referenceItems.map((i) => ({
         itemId: i.itemId,
         name: i.name,
@@ -675,5 +691,67 @@ export class RecommendationsService {
         durationMs: duration,
       },
     };
+  }
+
+  /**
+   * Hydrate recommendation feed items with full product data from the products collection.
+   * Maps CatalogItem.itemId → Product._id and merges product fields into the feed item.
+   * The frontend gets everything it needs (images, business, clothing/fabric) in one call.
+   */
+  private async hydrateWithProductData(items: any[]): Promise<any[]> {
+    if (!items.length) return items;
+
+    // Extract itemIds and fetch full product documents
+    const itemIds = items
+      .map((i) => i.itemId)
+      .filter((id) => Types.ObjectId.isValid(id));
+
+    if (!itemIds.length) return items;
+
+    const products = await this.productModel
+      .find({ _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) } })
+      .populate('business', 'business_name business_logo_url accepts_external_fabric')
+      .select(
+        'name kind base_price images business clothing fabric status ' +
+        'average_rating total_ratings slug'
+      )
+      .lean();
+
+    // Build a lookup map: Product._id → Product
+    const productMap = new Map(
+      products.map((p: any) => [String(p._id), p]),
+    );
+
+    // Merge product data into feed items
+    return items.map((item) => {
+      const product = productMap.get(item.itemId);
+      if (!product) return item; // Catalog item without a matching product
+
+      return {
+        // Recommendation metadata (keep)
+        itemId: item.itemId,
+        position: item.position,
+        stream: item.stream,
+        reasonCodes: item.reasonCodes,
+        explanations: item.explanations,
+        finalScore: item.finalScore,
+
+        // Full product data (hydrated)
+        product: {
+          _id: product._id,
+          name: product.name,
+          kind: product.kind,
+          base_price: product.base_price,
+          images: product.images,
+          business: product.business,
+          clothing: product.clothing,
+          fabric: product.fabric,
+          average_rating: product.average_rating,
+          total_ratings: product.total_ratings,
+          slug: product.slug,
+          status: product.status,
+        },
+      };
+    });
   }
 }
