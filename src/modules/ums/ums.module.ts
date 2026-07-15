@@ -13,6 +13,7 @@ import { ProductModule } from '../products/products.module';
 import { PlatformModule } from '../platform/platform.module';
 import { BusinessModule } from '../business/business.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SizeGuideModule } from '../size-guide/size-guide.module';
 
 import { User, UserSchema } from './schemas/user.schema';
 import { Address, AddressSchema } from './schemas/address.schema';
@@ -36,6 +37,7 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
     forwardRef(() => PlatformModule),  // forwardRef: UmsModule ↔ PlatformModule circular
     BusinessModule,          // provides BusinessService (needed by UserController)
     NotificationsModule,     // provides MailService
+    forwardRef(() => SizeGuideModule),  // forwardRef: UmsModule ↔ SizeGuideModule (fitting products cache)
   ],
   controllers: [UserController],
   providers: [

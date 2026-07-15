@@ -113,10 +113,33 @@ export class RecommendationsService {
     const filtered = filterResult.items;
     const filterMetrics = filterResult.metrics;
 
+    // 3.5 Read Cached Perfect Fit Products (pre-computed when measurements change)
+    let perfectFitProducts = new Set<string>();
+    try {
+      const fitUser = await this.productModel.db
+        .collection('users')
+        .findOne(
+          { _id: new Types.ObjectId(userId) },
+          { projection: { fitting_products_cache: 1 } },
+        );
+
+      const cache = fitUser?.fitting_products_cache;
+      const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+      if (cache?.product_ids?.length && cache.computed_at) {
+        const age = Date.now() - new Date(cache.computed_at).getTime();
+        if (age < CACHE_TTL_MS) {
+          perfectFitProducts = new Set(cache.product_ids);
+        }
+      }
+    } catch (e) {
+      this.logger.warn('Failed to read fitting products cache', e);
+    }
+
     // 4. Ranking
     const rankingContext = {
       budgetMax,
       businesses, // Pass businesses for scoring
+      perfectFitProducts,
     };
     const ranked = this.rankersService.rankCandidates(filtered, rankingContext);
 

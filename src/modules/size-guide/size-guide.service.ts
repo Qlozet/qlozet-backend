@@ -350,6 +350,102 @@ export class SizeGuideService {
     };
   }
 
+  /**
+   * Find products that have sizes matching the user's measurements.
+   */
+  async findProductsThatFit(userId: string, options?: { category?: string; limit?: number }) {
+    const user = await this.userModel.findById(userId).select('measurementSets').lean();
+    if (!user) return [];
+
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+    if (!activeSet || !activeSet.measurements) return [];
+
+    const userMeasurements = activeSet.measurements instanceof Map
+      ? Object.fromEntries(activeSet.measurements)
+      : (activeSet.measurements as Record<string, number>);
+
+    // Ensure we have at least some basic measurements before trying to match
+    if (Object.keys(userMeasurements).length < 2) return [];
+
+    // Fetch all active size guides
+    const guides = await this.sizeGuideModel.find({ is_active: true }).lean().exec();
+
+    const fittingGuides: { guideId: Types.ObjectId; bestSize: string; fitScore: number }[] = [];
+
+    for (const guide of guides) {
+      if (!guide.sizes || guide.sizes.length === 0) continue;
+
+      const customerMeasurements = this.normalizeMeasurements(
+        userMeasurements,
+        activeSet.unit,
+        guide.unit,
+      );
+
+      let bestScore = 0;
+      let bestSizeLabel = '';
+
+      for (const size of guide.sizes) {
+        let matchingParts = 0;
+        let totalParts = 0;
+
+        for (const bodyPart of guide.body_parts) {
+          const customerValue = customerMeasurements[bodyPart];
+          const range = size.measurements.find((m) => m.body_part === bodyPart);
+
+          if (!range || customerValue === undefined) continue;
+
+          totalParts++;
+          if (customerValue >= range.min && customerValue <= range.max) {
+            matchingParts++;
+          }
+        }
+
+        const confidence = totalParts > 0 ? matchingParts / totalParts : 0;
+        if (confidence > bestScore) {
+          bestScore = confidence;
+          bestSizeLabel = size.label;
+        }
+      }
+
+      // If confidence > 0.6 (more than 60% of body parts fit a particular size perfectly)
+      if (bestScore > 0.6) {
+        fittingGuides.push({
+          guideId: guide._id as Types.ObjectId,
+          bestSize: bestSizeLabel,
+          fitScore: bestScore,
+        });
+      }
+    }
+
+    if (fittingGuides.length === 0) return [];
+
+    // Fetch products tied to these guides
+    const query: any = {
+      status: 'active',
+      size_guide: { $in: fittingGuides.map((g) => g.guideId) },
+    };
+    if (options?.category) {
+      query.category = options.category; // Assuming you have category linking or taxonomy filtering
+    }
+
+    const products = await this.productModel
+      .find(query)
+      .limit(options?.limit || 50)
+      .select('name base_price kind size_guide business')
+      .populate('business', 'business_name')
+      .lean()
+      .exec();
+
+    return products.map((product) => {
+      const match = fittingGuides.find((g) => g.guideId.equals(product.size_guide as Types.ObjectId));
+      return {
+        product,
+        bestSize: match?.bestSize || 'Unknown',
+        fitScore: match?.fitScore || 0,
+      };
+    }).sort((a, b) => b.fitScore - a.fitScore);
+  }
+
   /* ═══════════════════════════════════════════════════════
    *  CONDITION-BASED PRODUCT MATCHING (auto-sync)
    * ═══════════════════════════════════════════════════════ */

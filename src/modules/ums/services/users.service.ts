@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Inject,
   Logger,
   NotFoundException,
   ConflictException,
   HttpException,
+  forwardRef,
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -17,6 +19,8 @@ import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
+import { classifyBodyType } from 'src/common/utils/body-type-classifier';
+import { SizeGuideService } from 'src/modules/size-guide/size-guide.service';
 
 @Injectable()
 export class UserService {
@@ -28,6 +32,8 @@ export class UserService {
     private readonly addressModel: Model<AddressDocument>,
     private readonly mailService: MailService,
     private readonly logisticService: LogisticsService,
+    @Inject(forwardRef(() => SizeGuideService))
+    private readonly sizeGuideService: SizeGuideService,
   ) {}
 
   async fetchCustomers(
@@ -758,6 +764,15 @@ export class UserService {
     user.measurementSets = user.measurementSets || [];
     user.measurementSets.push(newSet);
 
+    // Auto-classify body type from the new measurements
+    if (isFirstSet || newSet.active) {
+      await this.recomputeBodyType(user, newSet);
+      // Fire-and-forget: refresh fitting products cache in the background
+      this.recomputeFittingProducts(userId).catch((e) =>
+        this.logger.warn('Background fitting products cache refresh failed', e),
+      );
+    }
+
     await user.save();
     return newSet;
   }
@@ -785,6 +800,21 @@ export class UserService {
       for (const [key, value] of Object.entries(dto.measurements)) {
         (set.measurements as any).set(key, value);
       }
+    }
+
+    // Re-classify body type if this is the active set
+    if (set.active) {
+      const plainMeasurements: Record<string, number> = {};
+      if (set.measurements instanceof Map) {
+        (set.measurements as any).forEach((v: number, k: string) => { plainMeasurements[k] = v; });
+      } else {
+        Object.assign(plainMeasurements, set.measurements);
+      }
+      await this.recomputeBodyType(user, { ...set, measurements: plainMeasurements });
+      // Fire-and-forget: refresh fitting products cache in the background
+      this.recomputeFittingProducts(userId).catch((e) =>
+        this.logger.warn('Background fitting products cache refresh failed', e),
+      );
     }
 
     await user.save();
@@ -851,5 +881,158 @@ export class UserService {
       message: `Measurement set "${setName}" deleted successfully`,
       remaining: user.measurementSets.length,
     };
+  }
+
+  /* ═══════════════════════════════════════════════════════
+   *  BODY TYPE CLASSIFICATION
+   * ═══════════════════════════════════════════════════════ */
+
+  /**
+   * Recompute body type classification from measurements and cache on user.
+   */
+  private async recomputeBodyType(
+    user: any,
+    measurementSet: { name: string; measurements: Record<string, number> },
+  ) {
+    try {
+      const result = classifyBodyType(measurementSet.measurements, user.gender);
+      user.body_type_classification = {
+        bodyType: result.bodyType,
+        confidence: result.confidence,
+        flattering_fits: result.flattering_fits,
+        avoid_fits: result.avoid_fits,
+        style_advice: result.styleAdvice,
+        computed_at: new Date(),
+        from_set: measurementSet.name,
+      };
+      this.logger.log(
+        `Body type classified for user ${user._id}: ${result.bodyType} (${result.confidence})`,
+      );
+    } catch (error) {
+      this.logger.error(`Body type classification failed for user ${user._id}`, error);
+    }
+  }
+
+  /**
+   * Get body type classification for a user. Returns cached version or computes fresh.
+   */
+  async getBodyType(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('gender body_type_classification measurementSets body_fit')
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+
+    // If already classified, return cached
+    if (user.body_type_classification?.bodyType) {
+      return {
+        ...user.body_type_classification,
+        body_fit_preferences: user.body_fit || [],
+      };
+    }
+
+    // Try to classify from active measurement set
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+    if (!activeSet) {
+      return {
+        bodyType: 'unclassified',
+        confidence: 'low',
+        flattering_fits: [],
+        avoid_fits: [],
+        style_advice: ['Save your measurements to get body type classification'],
+        body_fit_preferences: user.body_fit || [],
+      };
+    }
+
+    // Classify and cache
+    const measurements =
+      activeSet.measurements instanceof Map
+        ? Object.fromEntries(activeSet.measurements)
+        : (activeSet.measurements as Record<string, number>);
+
+    const result = classifyBodyType(measurements, user.gender);
+
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        body_type_classification: {
+          bodyType: result.bodyType,
+          confidence: result.confidence,
+          flattering_fits: result.flattering_fits,
+          avoid_fits: result.avoid_fits,
+          style_advice: result.styleAdvice,
+          computed_at: new Date(),
+          from_set: activeSet.name,
+        },
+      },
+    );
+
+    return {
+      ...result,
+      body_fit_preferences: user.body_fit || [],
+      computed_at: new Date(),
+      from_set: activeSet.name,
+    };
+  }
+
+  /**
+   * Force recalculate body type from current active measurement set.
+   */
+  async recalculateBodyType(userId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+    if (!activeSet) {
+      throw new BadRequestException('No active measurement set. Save measurements first.');
+    }
+
+    const measurements =
+      activeSet.measurements instanceof Map
+        ? Object.fromEntries(activeSet.measurements)
+        : (activeSet.measurements as Record<string, number>);
+
+    await this.recomputeBodyType(user, {
+      name: activeSet.name,
+      measurements,
+    });
+    await user.save();
+
+    return user.body_type_classification;
+  }
+
+  /* ═══════════════════════════════════════════════════════
+   *  FITTING PRODUCTS CACHE
+   * ═══════════════════════════════════════════════════════ */
+
+  /**
+   * Recompute fitting products and cache the result on the user document.
+   * Called as fire-and-forget after measurement changes.
+   */
+  async recomputeFittingProducts(userId: string) {
+    try {
+      const fits = await this.sizeGuideService.findProductsThatFit(userId, { limit: 200 });
+      const productIds = fits.map((f) => String(f.product._id));
+
+      const user = await this.userModel.findById(userId).select('measurementSets');
+      const activeSet = (user?.measurementSets || []).find((s) => s.active);
+
+      await this.userModel.updateOne(
+        { _id: userId },
+        {
+          fitting_products_cache: {
+            product_ids: productIds,
+            computed_at: new Date(),
+            from_set: activeSet?.name || 'unknown',
+          },
+        },
+      );
+
+      this.logger.log(
+        `Fitting products cache updated for user ${userId}: ${productIds.length} products`,
+      );
+    } catch (error) {
+      this.logger.error(`Fitting products cache refresh failed for user ${userId}`, error);
+    }
   }
 }

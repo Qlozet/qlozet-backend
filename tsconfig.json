@@ -18,7 +18,7 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "exclude": ["node_modules", "dist"]
-  }
+    "esModuleInterop": true
+  },
+  "exclude": ["node_modules", "dist"]
 }
