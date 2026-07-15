@@ -559,25 +559,30 @@ export class ProductService {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
-    const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
+    const oid = new Types.ObjectId(productId);
 
-    if (!user.wishlist) user.wishlist = [];
+    // Try to remove first (atomic, no version conflict)
+    const pullResult = await this.userModel.updateOne(
+      { _id: userId, wishlist: oid },
+      { $pull: { wishlist: oid } },
+    );
 
-    const index = user.wishlist.findIndex((p) => p.toString() === productId);
-
-    if (index === -1) {
-      user.wishlist.push(new Types.ObjectId(productId));
-      await user.save();
-      return { message: 'Product added to wishlist', data: user.wishlist };
-    } else {
-      user.wishlist.splice(index, 1);
-      await user.save();
+    if (pullResult.modifiedCount > 0) {
+      // Was in wishlist → removed
+      const user = await this.userModel.findById(userId).select('wishlist').lean();
       return {
         message: 'Product removed from wishlist',
-        data: user.wishlist,
+        data: user?.wishlist || [],
       };
     }
+
+    // Not in wishlist → add
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $addToSet: { wishlist: oid } },
+    );
+    const user = await this.userModel.findById(userId).select('wishlist').lean();
+    return { message: 'Product added to wishlist', data: user?.wishlist || [] };
   }
 
   async getCustomizableWishlist(userId: string) {
