@@ -123,7 +123,18 @@ export class AskService {
       score: item.finalScore,
     }));
 
-    // ─── Step 8: Generate Conversational Reply ───────────────────
+    // ─── Step 8: Hydrate with full product data (before reply) ────
+    const hydratedProducts = await this.hydrateProducts(productSummaries);
+
+    // Build summaries from hydrated (active-only) products for GPT context
+    const activeProductSummaries = hydratedProducts.map((item: any) => ({
+      name: item.product?.name || item.name,
+      price: item.product?.base_price || item.price,
+      vendor: item.vendor,
+      type: item.type,
+    }));
+
+    // ─── Step 9: Generate Conversational Reply ───────────────────
     let reply: string | null = null;
     let fallback = false;
 
@@ -131,7 +142,7 @@ export class AskService {
     try {
       reply = await this.generateConversationalReply(
         query,
-        productSummaries,
+        activeProductSummaries,
         classification.intent,
         constraints,
       );
@@ -143,10 +154,7 @@ export class AskService {
     }
     debug.replyMs = Date.now() - replyStart;
     debug.totalMs = Date.now() - startTime;
-    debug.returnedCount = productSummaries.length;
-
-    // ─── Step 9: Hydrate with full product data ──────────────────
-    const hydratedProducts = await this.hydrateProducts(productSummaries);
+    debug.returnedCount = hydratedProducts.length;
 
     return {
       reply,
