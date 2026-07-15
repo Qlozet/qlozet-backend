@@ -34,12 +34,12 @@ export class VendorRegisterDto {
   business_email?: string;
 
   @ApiPropertyOptional({
-    description: 'Business phone number (Nigerian format) (optional)',
+    description: 'Business phone number (optional)',
     example: '+2348012345678',
   })
   @IsOptional()
-  @IsPhoneNumber('NG', {
-    message: 'Please provide a valid Nigerian business_phone_number',
+  @IsPhoneNumber(undefined, {
+    message: 'Please provide a valid business_phone_number',
   })
   business_phone_number?: string;
 
@@ -61,10 +61,10 @@ export class VendorRegisterDto {
   personal_name: string;
 
   @ApiProperty({
-    description: 'Personal phone number (Nigerian format)',
+    description: 'Personal phone number',
     example: '+2348012345679',
   })
-  @IsPhoneNumber('NG', {
+  @IsPhoneNumber(undefined, {
     message: 'Please provide a valid personal_phone_number',
   })
   @IsNotEmpty({ message: 'personal_phone_number is required' })

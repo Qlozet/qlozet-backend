@@ -558,6 +558,14 @@ export class BusinessService implements OnModuleInit {
     business: Business,
     dto: CreateBusinessAddressDto,
   ) {
+    // Vendor warehouse addresses must be in Nigeria (Shipbubble coverage)
+    const country = (dto.country || '').trim().toLowerCase();
+    if (country && country !== 'nigeria' && country !== 'ng') {
+      throw new BadRequestException(
+        'Vendor warehouse addresses are currently limited to Nigeria. Please provide a Nigerian address.',
+      );
+    }
+
     try {
       const validateAddress = await this.logisticService.validateAddress({
         ...dto,
