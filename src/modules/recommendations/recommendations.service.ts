@@ -712,8 +712,8 @@ export class RecommendationsService {
       .find({ _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) } })
       .populate('business', 'business_name business_logo_url accepts_external_fabric')
       .select(
-        'name kind base_price images business clothing fabric status ' +
-        'average_rating total_ratings slug'
+        'name kind base_price business clothing fabric accessory status ' +
+        'average_rating total_ratings slug',
       )
       .lean();
 
@@ -742,10 +742,10 @@ export class RecommendationsService {
           name: product.name,
           kind: product.kind,
           base_price: product.base_price,
-          images: product.images,
           business: product.business,
           clothing: product.clothing,
           fabric: product.fabric,
+          accessory: product.accessory,
           average_rating: product.average_rating,
           total_ratings: product.total_ratings,
           slug: product.slug,
