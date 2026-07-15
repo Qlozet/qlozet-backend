@@ -83,6 +83,7 @@ export class RouterController {
       dto.userId || req.user?.id,
       dto.sessionId,
       dto.limit || 10,
+      dto.history,
     );
 
     // ─── Deduct tokens after success (only if price > 0) ──────

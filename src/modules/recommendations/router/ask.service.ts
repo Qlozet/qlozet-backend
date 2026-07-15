@@ -36,6 +36,7 @@ export class AskService {
     userId?: string,
     sessionId?: string,
     limit: number = 10,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ) {
     const startTime = Date.now();
     const debug: Record<string, number> = {};
@@ -145,6 +146,7 @@ export class AskService {
         activeProductSummaries,
         classification.intent,
         constraints,
+        history,
       );
       // Sanitize the output
       reply = this.guardrailsService.sanitizeReply(reply);
@@ -215,6 +217,7 @@ export class AskService {
     products: any[],
     intent: string,
     constraints: Record<string, any>,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): Promise<string> {
     if (this.openai.apiKey === 'dummy') {
       this.logger.warn('Skipping reply generation (no API key)');
@@ -255,12 +258,25 @@ Extracted constraints: ${JSON.stringify(constraints)}
 Matching products:
 ${productContext}`;
 
+    // Build message array with conversation history
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    // Add previous conversation turns (limit to last 10 for token safety)
+    if (history?.length) {
+      const recentHistory = history.slice(-10);
+      for (const msg of recentHistory) {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    // Add current query
+    messages.push({ role: 'user', content: query });
+
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: query },
-      ],
+      messages,
       temperature: 0.7,
       max_tokens: 300,
     });
