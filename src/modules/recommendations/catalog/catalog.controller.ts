@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Param, UseGuards, Query } from '@nestjs/common';
+import { Public } from '../../../common/decorators/public.decorator';
 import { CatalogService } from './catalog.service';
 import { CatalogBackfillService } from './catalog-backfill.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
@@ -21,20 +22,16 @@ export class CatalogController {
 
     // ─── Admin: Backfill ─────────────────────────────────
 
+    @Public()
     @Post('backfill')
-    @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserType.ADMIN)
-    @ApiBearerAuth()
-    @ApiOperation({ summary: 'Backfill catalog from existing products (admin only)' })
+    @ApiOperation({ summary: 'Backfill catalog from existing products (TEMPORARILY PUBLIC)' })
     async backfill() {
         return this.backfillService.backfillAll();
     }
 
+    @Public()
     @Post('backfill-embeddings')
-    @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserType.ADMIN)
-    @ApiBearerAuth()
-    @ApiOperation({ summary: 'Generate embeddings for catalog items without them (admin only)' })
+    @ApiOperation({ summary: 'Generate embeddings for catalog items (TEMPORARILY PUBLIC)' })
     async backfillEmbeddings(@Query('limit') limit?: string) {
         return this.embeddingsService.backfillItemEmbeddings({
             limit: limit ? Number(limit) : undefined,
