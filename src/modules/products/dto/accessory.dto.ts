@@ -50,7 +50,7 @@ export class AccessoryDto {
       product_type: 'accessory',
       categories: ['Belt'],
       attributes: ['leather', 'fashion', 'men', 'qlozet'],
-      audience: 'men',
+      audience: 'male',
     },
   })
   @ValidateNested({ each: true })

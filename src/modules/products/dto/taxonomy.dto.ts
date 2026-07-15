@@ -9,8 +9,8 @@ import {
 } from 'class-validator';
 
 export enum AudienceType {
-  MEN = 'men',
-  WOMEN = 'women',
+  MALE = 'male',
+  FEMALE = 'female',
   UNISEX = 'unisex',
   KIDS = 'kids',
 }
@@ -41,13 +41,13 @@ export class TaxonomyDto {
   attributes?: string[];
 
   @ApiProperty({
-    description: 'Target audience (e.g., men, women, unisex, kids)',
-    example: 'men',
+    description: 'Target audience (e.g., male, female, unisex, kids)',
+    example: 'male',
   })
   @IsString()
   @IsNotEmpty()
   @IsEnum(AudienceType, {
-    message: 'audience must be one of: men, women, unisex, kids',
+    message: 'audience must be one of: male, female, unisex, kids',
   })
   audience: AudienceType;
 }

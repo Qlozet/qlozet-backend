@@ -62,7 +62,7 @@ export class ClothingDto {
       product_type: 'Clothing',
       categories: ['Men’s Wear'],
       attributes: ['traditional', 'cotton', 'qlozet', 'men'],
-      audience: 'men',
+      audience: 'male',
     },
   })
   @ValidateNested()
