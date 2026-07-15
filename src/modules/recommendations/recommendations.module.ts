@@ -19,8 +19,6 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 
-import { SizeGuideModule } from '../size-guide/size-guide.module';
-
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -39,7 +37,6 @@ import { SizeGuideModule } from '../size-guide/size-guide.module';
     RouterModule,
     EvaluationModule,
     BusinessModule,
-    SizeGuideModule,
   ],
   controllers: [RecommendationsController],
   providers: [RecommendationsService, FeedMixerService],

@@ -57,7 +57,7 @@ export class AskService {
           const activeSet = (user.measurementSets || []).find((s) => s.active);
           const measurements = activeSet?.measurements;
 
-          if (btc?.type && btc.type !== 'unclassified') {
+          if (btc?.bodyType && btc.bodyType !== 'unclassified') {
             const measStr = measurements
               ? Object.entries(
                   measurements instanceof Map
@@ -70,7 +70,7 @@ export class AskService {
 
             bodyContext = `\nUSER BODY PROFILE:\n` +
               `- Gender: ${user.gender || 'not set'}\n` +
-              `- Body Type: ${btc.type} (${btc.confidence} confidence)\n` +
+              `- Body Type: ${btc.bodyType} (${btc.confidence} confidence)\n` +
               `- Key measurements: ${measStr}\n` +
               `- Fit preferences: ${(user.body_fit || []).join(', ') || 'none set'}\n` +
               `- Flattering fits: ${(btc.flattering_fits || []).join(', ')}\n` +

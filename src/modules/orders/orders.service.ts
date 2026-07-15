@@ -244,12 +244,18 @@ export class OrderService {
         (item) => item.clothing_type === ClothingType.CUSTOMIZE,
       );
 
-      let customer_body_profile = undefined;
+      let customer_body_profile: {
+        body_type: string;
+        confidence: string;
+        measurements: Record<string, number>;
+        unit: string;
+        fit_preferences: string[];
+      } | undefined = undefined;
       if (isBespoke && fullCustomer?.body_type_classification && fullCustomer?.measurementSets?.length) {
         const activeSet = fullCustomer.measurementSets.find((s) => s.active);
         if (activeSet) {
           customer_body_profile = {
-            body_type: fullCustomer.body_type_classification.type,
+            body_type: fullCustomer.body_type_classification.bodyType,
             confidence: fullCustomer.body_type_classification.confidence,
             measurements: activeSet.measurements,
             unit: activeSet.unit,

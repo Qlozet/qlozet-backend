@@ -18,8 +18,6 @@ import { v4 as uuid } from 'uuid';
 import { CatalogService } from './catalog/catalog.service';
 import { Order, OrderDocument } from '../orders/schemas/orders.schema';
 
-import { SizeGuideService } from '../size-guide/size-guide.service';
-
 @Injectable()
 export class RecommendationsService {
   private readonly logger = new Logger(RecommendationsService.name);
@@ -33,7 +31,6 @@ export class RecommendationsService {
     private eventsService: EventsService,
     private businessService: BusinessService,
     private catalogService: CatalogService,
-    private sizeGuideService: SizeGuideService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
   ) {}
@@ -116,15 +113,26 @@ export class RecommendationsService {
     const filtered = filterResult.items;
     const filterMetrics = filterResult.metrics;
 
-    // 3.5 Fetch Perfect Fit Products to Boost
+    // 3.5 Read Cached Perfect Fit Products (pre-computed when measurements change)
     let perfectFitProducts = new Set<string>();
     try {
-      const fits = await this.sizeGuideService.findProductsThatFit(userId, { limit: 100 });
-      fits.forEach((f) => {
-        perfectFitProducts.add(String(f.product._id));
-      });
+      const fitUser = await this.productModel.db
+        .collection('users')
+        .findOne(
+          { _id: new Types.ObjectId(userId) },
+          { projection: { fitting_products_cache: 1 } },
+        );
+
+      const cache = fitUser?.fitting_products_cache;
+      const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+      if (cache?.product_ids?.length && cache.computed_at) {
+        const age = Date.now() - new Date(cache.computed_at).getTime();
+        if (age < CACHE_TTL_MS) {
+          perfectFitProducts = new Set(cache.product_ids);
+        }
+      }
     } catch (e) {
-      this.logger.warn('Failed to fetch perfect fit products for ranking', e);
+      this.logger.warn('Failed to read fitting products cache', e);
     }
 
     // 4. Ranking
