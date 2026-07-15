@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsArray, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateBusinessProfileDto {
@@ -91,4 +91,12 @@ export class UpdateBusinessProfileDto {
   @IsOptional()
   @IsString()
   bvn?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Whether to accept fabric from other vendors for bespoke orders',
+  })
+  @IsOptional()
+  @IsBoolean()
+  accepts_external_fabric?: boolean;
 }
