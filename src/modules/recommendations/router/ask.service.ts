@@ -176,7 +176,7 @@ export class AskService {
       .find({ _id: { $in: validIds.map((id) => new Types.ObjectId(id)) } })
       .populate('business', 'business_name business_logo_url')
       .select(
-        'name kind base_price images business clothing fabric status ' +
+        'name kind base_price business clothing fabric accessory status ' +
         'average_rating total_ratings slug',
       )
       .lean();
