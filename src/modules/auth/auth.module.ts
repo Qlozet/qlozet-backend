@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -22,6 +22,7 @@ import { PermissionService } from '../ums/services/permissions.service';
 import { UserService } from '../ums/services';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SizeGuideModule } from '../size-guide/size-guide.module';
 
 @Global()
 @Module({
@@ -49,6 +50,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     }),
     LogisticsModule,       // provides LogisticsService
     NotificationsModule,   // provides MailService
+    forwardRef(() => SizeGuideModule),  // provides SizeGuideService (needed by UserService)
   ],
   controllers: [AuthController],
   providers: [
