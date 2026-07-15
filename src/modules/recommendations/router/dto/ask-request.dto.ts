@@ -5,10 +5,31 @@ import {
   MaxLength,
   IsOptional,
   IsNumber,
+  IsArray,
+  IsEnum,
+  ValidateNested,
   Max,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class ChatMessageDto {
+  @ApiProperty({
+    description: 'Role of the message sender',
+    enum: ['user', 'assistant'],
+    example: 'user',
+  })
+  @IsEnum(['user', 'assistant'])
+  role: 'user' | 'assistant';
+
+  @ApiProperty({
+    description: 'Message content',
+    example: 'Show me agbada styles',
+  })
+  @IsString()
+  @MaxLength(1000)
+  content: string;
+}
 
 export class AskRequestDto {
   @ApiProperty({
@@ -43,4 +64,19 @@ export class AskRequestDto {
   @Min(1)
   @Max(20, { message: 'Limit must be ≤ 20' })
   limit?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Previous conversation messages for multi-turn context (max 10 turns)',
+    type: [ChatMessageDto],
+    example: [
+      { role: 'user', content: 'Show me agbada styles' },
+      { role: 'assistant', content: 'Here are some agbada options...' },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ChatMessageDto)
+  history?: ChatMessageDto[];
 }
