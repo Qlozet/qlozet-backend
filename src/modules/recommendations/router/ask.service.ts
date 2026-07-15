@@ -1,5 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import OpenAI from 'openai';
 import { RouterService } from './router.service';
 import { GuardrailsService } from './guardrails.service';
@@ -8,6 +10,7 @@ import { RetrievalService } from '../retrieval/retrieval.service';
 import { FiltersService } from '../filters/filters.service';
 import { RankersService, RankingContext } from '../rankers/rankers.service';
 import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
+import { Product, ProductDocument } from '../../products/schemas/product.schema';
 
 @Injectable()
 export class AskService {
@@ -22,6 +25,7 @@ export class AskService {
     private retrievalService: RetrievalService,
     private filtersService: FiltersService,
     private rankersService: RankersService,
+    @InjectModel(Product.name) private productModel: Model<ProductDocument>,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = new OpenAI({ apiKey: apiKey || 'dummy' });
@@ -141,9 +145,12 @@ export class AskService {
     debug.totalMs = Date.now() - startTime;
     debug.returnedCount = productSummaries.length;
 
+    // ─── Step 9: Hydrate with full product data ──────────────────
+    const hydratedProducts = await this.hydrateProducts(productSummaries);
+
     return {
       reply,
-      products: productSummaries,
+      products: hydratedProducts,
       intent: classification.intent,
       confidence: classification.confidence,
       constraints,
@@ -151,6 +158,40 @@ export class AskService {
       tokensCost: 0, // Will be set by controller when token gating is active
       debug,
     };
+  }
+
+  /**
+   * Hydrate catalog-based product summaries with full Product collection data.
+   */
+  private async hydrateProducts(summaries: any[]): Promise<any[]> {
+    if (!summaries.length) return summaries;
+
+    const validIds = summaries
+      .map((s) => s.itemId)
+      .filter((id) => Types.ObjectId.isValid(id));
+
+    if (!validIds.length) return summaries;
+
+    const products = await this.productModel
+      .find({ _id: { $in: validIds.map((id) => new Types.ObjectId(id)) } })
+      .populate('business', 'business_name business_logo_url')
+      .select(
+        'name kind base_price images business clothing fabric status ' +
+        'average_rating total_ratings slug',
+      )
+      .lean();
+
+    const productMap = new Map(
+      products.map((p: any) => [String(p._id), p]),
+    );
+
+    return summaries.map((summary) => {
+      const product = productMap.get(summary.itemId);
+      return {
+        ...summary,
+        product: product || null,
+      };
+    });
   }
 
   // ─── Private: GPT-4o Reply Generation ────────────────────────────
