@@ -177,9 +177,9 @@ export class ProductService {
     }
 
     if (audience) {
-      // Include exact match + legacy synonym + unisex + untagged products
-      const legacyMap: Record<string, string> = { male: 'men', female: 'women' };
-      const matchValues = [audience, 'unisex', ...(legacyMap[audience] ? [legacyMap[audience]] : [])];
+      // Bidirectional synonym map: male↔men, female↔women
+      const synonymMap: Record<string, string> = { male: 'men', female: 'women', men: 'male', women: 'female' };
+      const matchValues = [audience, 'unisex', ...(synonymMap[audience] ? [synonymMap[audience]] : [])];
       const audienceMatch = { $in: matchValues };
       filter.$or = filter.$or || [];
       filter.$or.push(
@@ -244,9 +244,9 @@ export class ProductService {
     }
 
     if (audience) {
-      // Include exact match + legacy synonym + unisex + untagged products
-      const legacyMap: Record<string, string> = { male: 'men', female: 'women' };
-      const matchValues = [audience, 'unisex', ...(legacyMap[audience] ? [legacyMap[audience]] : [])];
+      // Bidirectional synonym map: male↔men, female↔women
+      const synonymMap: Record<string, string> = { male: 'men', female: 'women', men: 'male', women: 'female' };
+      const matchValues = [audience, 'unisex', ...(synonymMap[audience] ? [synonymMap[audience]] : [])];
       const audienceMatch = { $in: matchValues };
       andClauses.push({
         $or: [
