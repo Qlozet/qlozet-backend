@@ -709,7 +709,10 @@ export class RecommendationsService {
     if (!itemIds.length) return items;
 
     const products = await this.productModel
-      .find({ _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) } })
+      .find({
+        _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) },
+        status: 'active',
+      })
       .populate('business', 'business_name business_logo_url accepts_external_fabric')
       .select(
         'name kind base_price business clothing fabric accessory status ' +
@@ -722,36 +725,38 @@ export class RecommendationsService {
       products.map((p: any) => [String(p._id), p]),
     );
 
-    // Merge product data into feed items
-    return items.map((item) => {
-      const product = productMap.get(item.itemId);
-      if (!product) return item; // Catalog item without a matching product
+    // Merge product data into feed items, dropping items without an active product
+    return items
+      .map((item) => {
+        const product = productMap.get(item.itemId);
+        if (!product) return null; // Skip: no matching active product
 
-      return {
-        // Recommendation metadata (keep)
-        itemId: item.itemId,
-        position: item.position,
-        stream: item.stream,
-        reasonCodes: item.reasonCodes,
-        explanations: item.explanations,
-        finalScore: item.finalScore,
+        return {
+          // Recommendation metadata (keep)
+          itemId: item.itemId,
+          position: item.position,
+          stream: item.stream,
+          reasonCodes: item.reasonCodes,
+          explanations: item.explanations,
+          finalScore: item.finalScore,
 
-        // Full product data (hydrated)
-        product: {
-          _id: product._id,
-          name: product.name,
-          kind: product.kind,
-          base_price: product.base_price,
-          business: product.business,
-          clothing: product.clothing,
-          fabric: product.fabric,
-          accessory: product.accessory,
-          average_rating: product.average_rating,
-          total_ratings: product.total_ratings,
-          slug: product.slug,
-          status: product.status,
-        },
-      };
-    });
+          // Full product data (hydrated)
+          product: {
+            _id: product._id,
+            name: product.name,
+            kind: product.kind,
+            base_price: product.base_price,
+            business: product.business,
+            clothing: product.clothing,
+            fabric: product.fabric,
+            accessory: product.accessory,
+            average_rating: product.average_rating,
+            total_ratings: product.total_ratings,
+            slug: product.slug,
+            status: product.status,
+          },
+        };
+      })
+      .filter(Boolean);
   }
 }
