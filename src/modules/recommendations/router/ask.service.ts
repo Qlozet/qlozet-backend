@@ -173,7 +173,10 @@ export class AskService {
     if (!validIds.length) return summaries;
 
     const products = await this.productModel
-      .find({ _id: { $in: validIds.map((id) => new Types.ObjectId(id)) } })
+      .find({
+        _id: { $in: validIds.map((id) => new Types.ObjectId(id)) },
+        status: 'active',
+      })
       .populate('business', 'business_name business_logo_url')
       .select(
         'name kind base_price business clothing fabric accessory status ' +
@@ -185,13 +188,16 @@ export class AskService {
       products.map((p: any) => [String(p._id), p]),
     );
 
-    return summaries.map((summary) => {
-      const product = productMap.get(summary.itemId);
-      return {
-        ...summary,
-        product: product || null,
-      };
-    });
+    return summaries
+      .map((summary) => {
+        const product = productMap.get(summary.itemId);
+        if (!product) return null; // Skip draft/deleted products
+        return {
+          ...summary,
+          product,
+        };
+      })
+      .filter(Boolean);
   }
 
   // ─── Private: GPT-4o Reply Generation ────────────────────────────
