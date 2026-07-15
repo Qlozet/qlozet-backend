@@ -50,7 +50,7 @@ export class FindAllProductsDto {
   @IsString()
   category?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by audience (e.g. Women)' })
+  @ApiPropertyOptional({ description: 'Filter by audience (e.g. male, female, unisex, kids)' })
   @IsOptional()
   @IsString()
   audience?: string;

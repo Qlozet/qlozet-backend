@@ -177,11 +177,18 @@ export class ProductService {
     }
 
     if (audience) {
+      // Include exact match + legacy synonym + unisex + untagged products
+      const legacyMap: Record<string, string> = { male: 'men', female: 'women' };
+      const matchValues = [audience, 'unisex', ...(legacyMap[audience] ? [legacyMap[audience]] : [])];
+      const audienceMatch = { $in: matchValues };
       filter.$or = filter.$or || [];
       filter.$or.push(
-        { 'clothing.taxonomy.audience': audience },
-        { 'accessory.taxonomy.audience': audience },
-        { 'fabric.taxonomy.audience': audience },
+        { 'clothing.taxonomy.audience': audienceMatch },
+        { 'accessory.taxonomy.audience': audienceMatch },
+        { 'fabric.taxonomy.audience': audienceMatch },
+        { 'clothing.taxonomy.audience': { $exists: false } },
+        { 'accessory.taxonomy.audience': { $exists: false } },
+        { 'fabric.taxonomy.audience': { $exists: false } },
       );
     }
 
@@ -237,11 +244,18 @@ export class ProductService {
     }
 
     if (audience) {
+      // Include exact match + legacy synonym + unisex + untagged products
+      const legacyMap: Record<string, string> = { male: 'men', female: 'women' };
+      const matchValues = [audience, 'unisex', ...(legacyMap[audience] ? [legacyMap[audience]] : [])];
+      const audienceMatch = { $in: matchValues };
       andClauses.push({
         $or: [
-          { 'clothing.taxonomy.audience': audience },
-          { 'accessory.taxonomy.audience': audience },
-          { 'fabric.taxonomy.audience': audience },
+          { 'clothing.taxonomy.audience': audienceMatch },
+          { 'accessory.taxonomy.audience': audienceMatch },
+          { 'fabric.taxonomy.audience': audienceMatch },
+          { 'clothing.taxonomy.audience': { $exists: false } },
+          { 'accessory.taxonomy.audience': { $exists: false } },
+          { 'fabric.taxonomy.audience': { $exists: false } },
         ],
       });
     }
