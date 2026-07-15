@@ -997,8 +997,7 @@ export class OrderService {
     // 3. Get all products with business info
     const productIds = cart.items.map((i) => i.product_id);
     const products = await this.productModel
-      .find({ _id: { $in: productIds } })
-      .populate('business');
+      .find({ _id: { $in: productIds } });
 
     // 4. Group items by business_id — batch lookup businesses
     const bizIds = [...new Set(
