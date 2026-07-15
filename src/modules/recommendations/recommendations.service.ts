@@ -18,6 +18,8 @@ import { v4 as uuid } from 'uuid';
 import { CatalogService } from './catalog/catalog.service';
 import { Order, OrderDocument } from '../orders/schemas/orders.schema';
 
+import { SizeGuideService } from '../size-guide/size-guide.service';
+
 @Injectable()
 export class RecommendationsService {
   private readonly logger = new Logger(RecommendationsService.name);
@@ -31,6 +33,7 @@ export class RecommendationsService {
     private eventsService: EventsService,
     private businessService: BusinessService,
     private catalogService: CatalogService,
+    private sizeGuideService: SizeGuideService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
   ) {}
@@ -113,10 +116,22 @@ export class RecommendationsService {
     const filtered = filterResult.items;
     const filterMetrics = filterResult.metrics;
 
+    // 3.5 Fetch Perfect Fit Products to Boost
+    let perfectFitProducts = new Set<string>();
+    try {
+      const fits = await this.sizeGuideService.findProductsThatFit(userId, { limit: 100 });
+      fits.forEach((f) => {
+        perfectFitProducts.add(String(f.product._id));
+      });
+    } catch (e) {
+      this.logger.warn('Failed to fetch perfect fit products for ranking', e);
+    }
+
     // 4. Ranking
     const rankingContext = {
       budgetMax,
       businesses, // Pass businesses for scoring
+      perfectFitProducts,
     };
     const ranked = this.rankersService.rankCandidates(filtered, rankingContext);
 

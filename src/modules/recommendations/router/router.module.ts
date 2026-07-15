@@ -18,10 +18,14 @@ import { DatabaseModule } from 'src/database/database.module';
 import { AuthModule } from 'src/modules/auth/auth.module';
 import { PlatformModule } from 'src/modules/platform/platform.module';
 import { Product, ProductSchema } from '../../products/schemas/product.schema';
+import { User, UserSchema } from '../../ums/schemas/user.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }]),
+    MongooseModule.forFeature([
+      { name: Product.name, schema: ProductSchema },
+      { name: User.name, schema: UserSchema },
+    ]),
     ConfigModule,
     UserEmbeddingsModule,
     RetrievalModule,

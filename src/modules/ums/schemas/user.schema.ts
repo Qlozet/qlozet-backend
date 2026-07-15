@@ -131,6 +131,28 @@ export class User extends Document {
   }[];
 
   @Prop({
+    type: {
+      type: { type: String },
+      confidence: { type: String, enum: ['high', 'medium', 'low'] },
+      flattering_fits: { type: [String], default: [] },
+      avoid_fits: { type: [String], default: [] },
+      style_advice: { type: [String], default: [] },
+      computed_at: { type: Date },
+      from_set: { type: String },
+    },
+    default: null,
+  })
+  body_type_classification?: {
+    type: string;
+    confidence: string;
+    flattering_fits: string[];
+    avoid_fits: string[];
+    style_advice: string[];
+    computed_at: Date;
+    from_set: string;
+  };
+
+  @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'Business',
     default: null,

@@ -91,6 +91,17 @@ export class SizeGuideController {
     return this.sizeGuideService.recommendSize(id, req.user.id, dto);
   }
 
+  @Get('fits-me')
+  @Roles(UserType.CUSTOMER)
+  @ApiOperation({
+    summary: 'Find clothes that fit me',
+    description: 'Matches the logged-in customer\'s measurements against vendor size guides to find products that actually fit.',
+  })
+  @ApiOkResponse({ description: 'Products that fit the user' })
+  findProductsThatFit(@Req() req: any) {
+    return this.sizeGuideService.findProductsThatFit(req.user.id);
+  }
+
   // ─────────────────────────────────────────────────────────
   // VENDOR — CRUD
   // ─────────────────────────────────────────────────────────

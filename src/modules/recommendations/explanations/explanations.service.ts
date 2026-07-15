@@ -55,6 +55,12 @@ export class ExplanationsService {
             if (item.price > 0) texts.push('Within your budget');
         }
 
+        // 6. Perfect Fit
+        if (item.scoringDebug?.fitBoost && item.scoringDebug.fitBoost > 0) {
+            texts.push('Perfect match for your body measurements');
+            codes.push(ReasonCode.FIT_COMPATIBLE);
+        }
+
         return { texts, codes };
     }
 

@@ -4,6 +4,7 @@ import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
 export interface RankingContext {
     budgetMax?: number;
     businesses?: Map<string, any>;
+    perfectFitProducts?: Set<string>;
     // userProfile info could go here
 }
 
@@ -58,18 +59,25 @@ export class RankersService {
             }
         }
 
-        // Formula: 0.70*vScore + 0.15*vendorQuality + 0.10*etaScore + 0.05*priceFit + boost
+        // 5. Perfect Fit Boost
+        let fitBoost = 0;
+        if (context.perfectFitProducts?.has(item.itemId)) {
+            fitBoost = 0.3; // Boost products that perfectly fit the customer's size
+        }
+
+        // Formula: 0.70*vScore + 0.15*vendorQuality + 0.10*etaScore + 0.05*priceFit + boost + fitBoost
         const finalScore =
             (0.70 * vScore) +
             (0.15 * vendorQualityScore) +
             (0.10 * etaScore) +
             (0.05 * priceFit) +
-            vendorBoost;
+            vendorBoost +
+            fitBoost;
 
         return {
             ...item,
             finalScore,
-            scoringDebug: { vScore, vendorQualityScore, etaScore, priceFit, vendorBoost }
+            scoringDebug: { vScore, vendorQualityScore, etaScore, priceFit, vendorBoost, fitBoost }
         };
     }
 }

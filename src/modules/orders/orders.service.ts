@@ -98,6 +98,7 @@ export class OrderService {
     @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
     @InjectModel(CheckoutRateCache.name)
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
+    @InjectModel('User') private userModel: Model<User>,
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
@@ -105,10 +106,11 @@ export class OrderService {
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
     try {
-      const [, shippingAddress, processedItems] = await Promise.all([
+      const [, shippingAddress, processedItems, fullCustomer] = await Promise.all([
         this.validationService.validateCompleteOrder(orderData.items),
         this.resolveShippingAddress(customer.id, orderData.address_id),
         this.processOrderItems(orderData.items),
+        this.userModel.findById(customer.id).lean(),
       ]);
       const [orderReference, { total, subtotal }] = await Promise.all([
         generateUniqueQlozetReference(this.orderModel, 'ORD'),
@@ -237,6 +239,25 @@ export class OrderService {
 
       const finalTotal = total + totalShippingFee;
 
+      // Check if any item is bespoke/customize to attach body profile
+      const isBespoke = processedItems.some(
+        (item) => item.clothing_type === ClothingType.CUSTOMIZE,
+      );
+
+      let customer_body_profile = undefined;
+      if (isBespoke && fullCustomer?.body_type_classification && fullCustomer?.measurementSets?.length) {
+        const activeSet = fullCustomer.measurementSets.find((s) => s.active);
+        if (activeSet) {
+          customer_body_profile = {
+            body_type: fullCustomer.body_type_classification.type,
+            confidence: fullCustomer.body_type_classification.confidence,
+            measurements: activeSet.measurements,
+            unit: activeSet.unit,
+            fit_preferences: fullCustomer.body_fit || [],
+          };
+        }
+      }
+
       const order = new this.orderModel({
         reference: orderReference,
         customer: new Types.ObjectId(customer.id),
@@ -247,6 +268,7 @@ export class OrderService {
         shipping_fee: totalShippingFee,
         total: finalTotal,
         shipments,
+        customer_body_profile,
       });
 
       const savedOrder = await order.save();

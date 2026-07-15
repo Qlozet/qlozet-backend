@@ -465,4 +465,32 @@ export class MeasurementController {
   async getJobStatus(@Param('job_id') jobId: string) {
     return await this.jobService.findByJobId(jobId);
   }
+
+  /* ═══════════════════════════════════════════════════════
+   *  BODY TYPE CLASSIFICATION
+   * ═══════════════════════════════════════════════════════ */
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('body-type')
+  @ApiOperation({ summary: 'Get body type classification for the current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Body type classification (cached or freshly computed)',
+  })
+  async getBodyType(@Req() req: any) {
+    return this.userService.getBodyType(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('body-type/recalculate')
+  @ApiOperation({ summary: 'Force recalculate body type from current measurements' })
+  @ApiResponse({
+    status: 201,
+    description: 'Body type recalculated from active measurement set',
+  })
+  async recalculateBodyType(@Req() req: any) {
+    return this.userService.recalculateBodyType(req.user.id);
+  }
 }

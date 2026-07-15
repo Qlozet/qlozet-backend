@@ -252,6 +252,23 @@ export class Order {
     default: 'pending',
   })
   payout_status?: 'pending' | 'eligible' | 'paid';
-}
 
+  @Prop({
+    type: {
+      body_type: { type: String },
+      confidence: { type: String },
+      measurements: { type: Object },
+      unit: { type: String },
+      fit_preferences: { type: [String], default: [] },
+    },
+    default: null,
+  })
+  customer_body_profile?: {
+    body_type: string;
+    confidence: string;
+    measurements: Record<string, number>;
+    unit: string;
+    fit_preferences: string[];
+  };
+}
 export const OrderSchema = SchemaFactory.createForClass(Order);

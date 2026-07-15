@@ -17,6 +17,7 @@ import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
+import { classifyBodyType } from 'src/common/utils/body-type-classifier';
 
 @Injectable()
 export class UserService {
@@ -758,6 +759,11 @@ export class UserService {
     user.measurementSets = user.measurementSets || [];
     user.measurementSets.push(newSet);
 
+    // Auto-classify body type from the new measurements
+    if (isFirstSet || newSet.active) {
+      await this.recomputeBodyType(user, newSet);
+    }
+
     await user.save();
     return newSet;
   }
@@ -785,6 +791,17 @@ export class UserService {
       for (const [key, value] of Object.entries(dto.measurements)) {
         (set.measurements as any).set(key, value);
       }
+    }
+
+    // Re-classify body type if this is the active set
+    if (set.active) {
+      const plainMeasurements: Record<string, number> = {};
+      if (set.measurements instanceof Map) {
+        (set.measurements as any).forEach((v: number, k: string) => { plainMeasurements[k] = v; });
+      } else {
+        Object.assign(plainMeasurements, set.measurements);
+      }
+      await this.recomputeBodyType(user, { ...set, measurements: plainMeasurements });
     }
 
     await user.save();
@@ -851,5 +868,123 @@ export class UserService {
       message: `Measurement set "${setName}" deleted successfully`,
       remaining: user.measurementSets.length,
     };
+  }
+
+  /* ═══════════════════════════════════════════════════════
+   *  BODY TYPE CLASSIFICATION
+   * ═══════════════════════════════════════════════════════ */
+
+  /**
+   * Recompute body type classification from measurements and cache on user.
+   */
+  private async recomputeBodyType(
+    user: any,
+    measurementSet: { name: string; measurements: Record<string, number> },
+  ) {
+    try {
+      const result = classifyBodyType(measurementSet.measurements, user.gender);
+      user.body_type_classification = {
+        type: result.bodyType,
+        confidence: result.confidence,
+        flattering_fits: result.flattering_fits,
+        avoid_fits: result.avoid_fits,
+        style_advice: result.styleAdvice,
+        computed_at: new Date(),
+        from_set: measurementSet.name,
+      };
+      this.logger.log(
+        `Body type classified for user ${user._id}: ${result.bodyType} (${result.confidence})`,
+      );
+    } catch (error) {
+      this.logger.error(`Body type classification failed for user ${user._id}`, error);
+    }
+  }
+
+  /**
+   * Get body type classification for a user. Returns cached version or computes fresh.
+   */
+  async getBodyType(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('gender body_type_classification measurementSets body_fit')
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+
+    // If already classified, return cached
+    if (user.body_type_classification?.type) {
+      return {
+        ...user.body_type_classification,
+        body_fit_preferences: user.body_fit || [],
+      };
+    }
+
+    // Try to classify from active measurement set
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+    if (!activeSet) {
+      return {
+        type: 'unclassified',
+        confidence: 'low',
+        flattering_fits: [],
+        avoid_fits: [],
+        style_advice: ['Save your measurements to get body type classification'],
+        body_fit_preferences: user.body_fit || [],
+      };
+    }
+
+    // Classify and cache
+    const measurements =
+      activeSet.measurements instanceof Map
+        ? Object.fromEntries(activeSet.measurements)
+        : (activeSet.measurements as Record<string, number>);
+
+    const result = classifyBodyType(measurements, user.gender);
+
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        body_type_classification: {
+          type: result.bodyType,
+          confidence: result.confidence,
+          flattering_fits: result.flattering_fits,
+          avoid_fits: result.avoid_fits,
+          style_advice: result.styleAdvice,
+          computed_at: new Date(),
+          from_set: activeSet.name,
+        },
+      },
+    );
+
+    return {
+      ...result,
+      body_fit_preferences: user.body_fit || [],
+      computed_at: new Date(),
+      from_set: activeSet.name,
+    };
+  }
+
+  /**
+   * Force recalculate body type from current active measurement set.
+   */
+  async recalculateBodyType(userId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+    if (!activeSet) {
+      throw new BadRequestException('No active measurement set. Save measurements first.');
+    }
+
+    const measurements =
+      activeSet.measurements instanceof Map
+        ? Object.fromEntries(activeSet.measurements)
+        : (activeSet.measurements as Record<string, number>);
+
+    await this.recomputeBodyType(user, {
+      name: activeSet.name,
+      measurements,
+    });
+    await user.save();
+
+    return user.body_type_classification;
   }
 }

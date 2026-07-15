@@ -11,6 +11,7 @@ import { FiltersService } from '../filters/filters.service';
 import { RankersService, RankingContext } from '../rankers/rankers.service';
 import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
 import { Product, ProductDocument } from '../../products/schemas/product.schema';
+import { User, UserDocument } from '../../ums/schemas/user.schema';
 
 @Injectable()
 export class AskService {
@@ -26,6 +27,7 @@ export class AskService {
     private filtersService: FiltersService,
     private rankersService: RankersService,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = new OpenAI({ apiKey: apiKey || 'dummy' });
@@ -40,6 +42,46 @@ export class AskService {
   ) {
     const startTime = Date.now();
     const debug: Record<string, number> = {};
+
+    // ─── Step 0: Fetch User Body Profile ──────────────────────────
+    let bodyContext = '';
+    if (userId) {
+      try {
+        const user = await this.userModel
+          .findById(userId)
+          .select('gender body_type_classification measurementSets body_fit')
+          .lean();
+
+        if (user) {
+          const btc = user.body_type_classification;
+          const activeSet = (user.measurementSets || []).find((s) => s.active);
+          const measurements = activeSet?.measurements;
+
+          if (btc?.type && btc.type !== 'unclassified') {
+            const measStr = measurements
+              ? Object.entries(
+                  measurements instanceof Map
+                    ? Object.fromEntries(measurements)
+                    : measurements,
+                )
+                  .map(([k, v]) => `${k}: ${v}${activeSet?.unit || 'cm'}`)
+                  .join(', ')
+              : 'not provided';
+
+            bodyContext = `\nUSER BODY PROFILE:\n` +
+              `- Gender: ${user.gender || 'not set'}\n` +
+              `- Body Type: ${btc.type} (${btc.confidence} confidence)\n` +
+              `- Key measurements: ${measStr}\n` +
+              `- Fit preferences: ${(user.body_fit || []).join(', ') || 'none set'}\n` +
+              `- Flattering fits: ${(btc.flattering_fits || []).join(', ')}\n` +
+              `- Avoid: ${(btc.avoid_fits || []).join(', ')}\n` +
+              `Use this to recommend products that will fit and flatter this body type. Mention best matching size if relevant.`;
+          }
+        }
+      } catch (err) {
+        this.logger.warn('Failed to fetch user body profile for Ask', err);
+      }
+    }
 
     // ─── Step 1: Validate & Moderate ─────────────────────────────
     const validation = this.guardrailsService.validateInput(query);
@@ -147,6 +189,7 @@ export class AskService {
         classification.intent,
         constraints,
         history,
+        bodyContext,
       );
       // Sanitize the output
       reply = this.guardrailsService.sanitizeReply(reply);
@@ -218,6 +261,7 @@ export class AskService {
     intent: string,
     constraints: Record<string, any>,
     history?: Array<{ role: 'user' | 'assistant'; content: string }>,
+    bodyContext?: string,
   ): Promise<string> {
     if (this.openai.apiKey === 'dummy') {
       this.logger.warn('Skipping reply generation (no API key)');
@@ -256,7 +300,8 @@ CONTEXT:
 User intent: ${intent}
 Extracted constraints: ${JSON.stringify(constraints)}
 Matching products:
-${productContext}`;
+${productContext}
+${bodyContext || ''}`;
 
     // Build message array with conversation history
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
