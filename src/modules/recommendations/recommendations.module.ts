@@ -16,10 +16,14 @@ import { EvaluationModule } from './evaluation/evaluation.module';
 import { FeedMixerService } from './feed-mixer/feed-mixer.service';
 import { BusinessModule } from '../business/business.module';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
+    MongooseModule.forFeature([
+      { name: Order.name, schema: OrderSchema },
+      { name: Product.name, schema: ProductSchema },
+    ]),
     EventsModule,
     CatalogModule,
     EmbeddingsModule,

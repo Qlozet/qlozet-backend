@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { RouterService } from './router.service';
 import { RouterController } from './router.controller';
 import { AskService } from './ask.service';
@@ -16,9 +17,11 @@ import { WalletsModule } from '../../wallets/wallets.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { AuthModule } from 'src/modules/auth/auth.module';
 import { PlatformModule } from 'src/modules/platform/platform.module';
+import { Product, ProductSchema } from '../../products/schemas/product.schema';
 
 @Module({
   imports: [
+    MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }]),
     ConfigModule,
     UserEmbeddingsModule,
     RetrievalModule,
