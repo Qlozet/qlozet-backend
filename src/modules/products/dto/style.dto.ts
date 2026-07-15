@@ -14,8 +14,8 @@ import { Type } from 'class-transformer';
 import { ProductImageDto } from './product-image.dto';
 
 export enum AudienceType {
-  MALE = 'male',
-  FEMALE = 'female',
+  MEN = 'men',
+  WOMEN = 'women',
   UNISEX = 'unisex',
   KIDS = 'kids',
 }
