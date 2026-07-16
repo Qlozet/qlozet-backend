@@ -317,22 +317,33 @@ export class PriceCalculationService {
           );
         }
 
-        if (fabric.min_cut < s.yardage) {
+        // Auto-resolve yardage from yard_per_order if not provided
+        let resolvedYardage = s.yardage;
+        if (!resolvedYardage && s.size && fabric.variants?.length) {
+          const matchingVariant = fabric.variants.find(
+            (v) => v.size?.toLowerCase() === s.size.toLowerCase(),
+          );
+          if (matchingVariant?.yard_per_order) {
+            resolvedYardage = matchingVariant.yard_per_order;
+          }
+        }
+        if (!resolvedYardage) resolvedYardage = 0;
+
+        if (fabric.min_cut < resolvedYardage) {
           throw new BadRequestException(
-            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${s.yardage} yards.`,
+            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${resolvedYardage} yards.`,
           );
         }
 
         // Check if there is enough yardage remaining
-        if ((fabric.yard_length ?? 0) < s.yardage) {
+        if ((fabric.yard_length ?? 0) < resolvedYardage) {
           throw new BadRequestException(
             `Not enough yardage for fabric "${fabric.name}". Remaining: ${fabric.yard_length}`,
           );
         }
 
-        const yardage = s.yardage ?? 0;
         const qty = s.quantity ?? 1;
-        const cost = yardage * fabric.price_per_yard;
+        const cost = resolvedYardage * fabric.price_per_yard;
 
         total += cost * qty;
       }
@@ -348,21 +359,33 @@ export class PriceCalculationService {
             'Selected fabric not found in clothing',
           );
         }
-        if (fabric.min_cut < s.yardage) {
+
+        // Auto-resolve yardage from yard_per_order if not provided
+        let resolvedYardage = s.yardage;
+        if (!resolvedYardage && s.size && fabric.variants?.length) {
+          const matchingVariant = fabric.variants.find(
+            (v) => v.size?.toLowerCase() === s.size.toLowerCase(),
+          );
+          if (matchingVariant?.yard_per_order) {
+            resolvedYardage = matchingVariant.yard_per_order;
+          }
+        }
+        if (!resolvedYardage) resolvedYardage = 0;
+
+        if (fabric.min_cut < resolvedYardage) {
           throw new BadRequestException(
-            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${s.yardage} yards.`,
+            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${resolvedYardage} yards.`,
           );
         }
         // Check remaining yardage
-        if ((fabric.yard_length ?? 0) < s.yardage) {
+        if ((fabric.yard_length ?? 0) < resolvedYardage) {
           throw new BadRequestException(
             `Not enough yardage for fabric "${fabric.name}" in clothing. Remaining: ${fabric.yard_length}`,
           );
         }
 
-        const yardage = s.yardage ?? 0;
         const qty = s.quantity ?? 1;
-        const cost = yardage * fabric.price_per_yard;
+        const cost = resolvedYardage * fabric.price_per_yard;
 
         total += cost * qty;
       }
