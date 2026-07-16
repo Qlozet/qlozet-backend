@@ -197,6 +197,13 @@ export class FetchRatePayload {
     example: { length: 10, width: 15, height: 5 },
   })
   package_dimension?: PackageDimensions;
+
+  @ApiProperty({
+    required: false,
+    description: 'Shipbubble package category (e.g. fashionwares, electronics)',
+    example: 'fashionwares',
+  })
+  category?: string;
 }
 
 export class Station {

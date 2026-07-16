@@ -1051,6 +1051,7 @@ export class OrderService {
 
     // 5. Fetch rates per vendor — PARALLEL
     const pickupDate = new Date().toISOString().split('T')[0];
+    const _debug: any[] = [];
 
     const ratePromises = Array.from(vendorGroups.entries())
       .filter(([, group]) => {
@@ -1058,6 +1059,7 @@ export class OrderService {
           this.logger.warn(
             `Vendor ${group.business.business_name} has no validated address`,
           );
+          _debug.push({ vendor: group.business.business_name, reason: 'no_address_code' });
           return false;
         }
         return true;
@@ -1077,6 +1079,7 @@ export class OrderService {
               quantity: 1,
             })),
             service_type: dto.service_type || 'pickup',
+            category: 'fashionwares',
             package_dimension: { length: 12, width: 10, height: 10 },
           };
 
@@ -1113,6 +1116,13 @@ export class OrderService {
           this.logger.error(
             `Failed to fetch rates for vendor ${biz.business_name}: ${error.message}`,
           );
+          _debug.push({
+            vendor: biz.business_name,
+            reason: 'rate_fetch_failed',
+            error: error.message || String(error),
+            sender_address_code: biz.address_code,
+            receiver_address_code: customerAddress.address_code,
+          });
           return null;
         }
       });
@@ -1178,6 +1188,7 @@ export class OrderService {
             quantity: 1,
           }],
           service_type: dto.service_type || 'pickup',
+          category: 'fashionwares',
           package_dimension: { length: 30, width: 20, height: 5 }, // Fabric roll dimensions
         };
 
@@ -1420,6 +1431,7 @@ export class OrderService {
         pickup_date: new Date().toISOString().split('T')[0],
         package_items: shippingItems,
         service_type: 'pickup',
+        category: 'fashionwares',
         package_dimension: { length: 12, width: 10, height: 10 },
       });
 
