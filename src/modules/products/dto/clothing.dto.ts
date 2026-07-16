@@ -16,6 +16,7 @@ import { CreateStyleDto } from './style.dto';
 import { TaxonomyDto } from './taxonomy.dto';
 import { ProductImageDto } from './product-image.dto';
 import { AccessoryDto } from './accessory.dto';
+import { AddOnDto } from './addon.dto';
 import { ColorDto } from './product.dto';
 import { ProductStatus } from '../enums/product-status.enum';
 
@@ -204,4 +205,26 @@ export class ClothingDto {
   @ValidateNested({ each: true })
   @Type(() => FabricDto)
   fabrics?: FabricDto[];
+
+  // ✅ Add-ons (only allowed for CUSTOMIZE)
+  @ValidateIf((o) => o.type === ClothingType.CUSTOMIZE)
+  @ApiPropertyOptional({
+    type: [AddOnDto],
+    description: 'Customization add-ons like buttons, thread, etc. (only for customize type)',
+    example: [
+      {
+        name: 'Buttons',
+        display_type: 'colour',
+        variants: [
+          { name: 'Gold', price: 500, color_hex: '#D4AF37' },
+          { name: 'Silver', price: 400, color_hex: '#C0C0C0' },
+        ],
+      },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddOnDto)
+  addons?: AddOnDto[];
 }
