@@ -99,7 +99,7 @@ export class LogisticsService {
     payload: FetchRatePayload,
   ): Promise<FetchRateResponse> {
     try {
-      this.logger.debug(`[fetchRates] Payload: ${JSON.stringify(payload)}`);
+      this.logger.warn(`[fetchRates] Payload: ${JSON.stringify(payload)}`);
       const response: AxiosResponse<{ data: FetchRateResponse }> =
         await firstValueFrom(
           this.httpService.post(
