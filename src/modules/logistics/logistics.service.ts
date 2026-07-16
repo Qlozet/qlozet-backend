@@ -1,4 +1,4 @@
-import { Injectable, HttpException } from '@nestjs/common';
+import { Injectable, HttpException, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosResponse } from 'axios';
@@ -13,6 +13,7 @@ import {
 
 @Injectable()
 export class LogisticsService {
+  private readonly logger = new Logger(LogisticsService.name);
   private readonly baseUrl = process.env.SHIPBUBBLE_BASE_URL;
   private readonly token = process.env.SHIPBUBBLE_API_KEY;
 
@@ -98,6 +99,7 @@ export class LogisticsService {
     payload: FetchRatePayload,
   ): Promise<FetchRateResponse> {
     try {
+      this.logger.debug(`[fetchRates] Payload: ${JSON.stringify(payload)}`);
       const response: AxiosResponse<{ data: FetchRateResponse }> =
         await firstValueFrom(
           this.httpService.post(
@@ -109,7 +111,7 @@ export class LogisticsService {
         );
       return response?.data?.data;
     } catch (error: any) {
-      console.log(error.response?.status);
+      this.logger.error(`[fetchRates] Status: ${error.response?.status}, Body: ${JSON.stringify(error.response?.data)}`);
       throw new HttpException(
         error.response?.data || error.message,
         error.response?.status || 500,
