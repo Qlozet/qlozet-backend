@@ -36,7 +36,12 @@ export class FabricSelectionDto {
 
   @IsNumber()
   @Min(0.1)
-  yardage: number;
+  @IsOptional()
+  yardage: number; // If omitted, backend resolves from yard_per_order via `size`
+
+  @IsString()
+  @IsOptional()
+  size?: string; // Used to look up yard_per_order when yardage is not provided
 
   @IsNumber()
   @IsPositive()

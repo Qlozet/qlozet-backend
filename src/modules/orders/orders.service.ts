@@ -614,12 +614,24 @@ export class OrderService {
 
       if (!isFabricExist) continue;
 
-      const quantity = (fs.quantity ?? 1) * (fs.yardage ?? 1);
+      // Auto-resolve yardage from yard_per_order if not explicitly provided
+      let yardage = fs.yardage;
+      if (!yardage && fs.size && isFabricExist.variants?.length) {
+        const matchingVariant = isFabricExist.variants.find(
+          (v) => v.size?.toLowerCase() === fs.size.toLowerCase(),
+        );
+        if (matchingVariant?.yard_per_order) {
+          yardage = matchingVariant.yard_per_order;
+        }
+      }
+      if (!yardage) yardage = 1; // fallback
+
+      const quantity = (fs.quantity ?? 1) * yardage;
       normalizedFabrics.push({
         fabric_id: new Types.ObjectId(isFabricExist._id),
         price: isFabricExist.price_per_yard,
         quantity,
-        yardage: fs.yardage,
+        yardage,
         total_amount: isFabricExist.price_per_yard * quantity,
       });
     }

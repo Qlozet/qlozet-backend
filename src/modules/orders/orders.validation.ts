@@ -113,17 +113,29 @@ export class OrderValidationService {
           if (!fabric)
             throw new BadRequestException(`Fabric not found: ${f.fabric_id}`);
 
-          if ((fabric.yard_length ?? 0) < (f.yardage ?? 0))
+          // Auto-resolve yardage from yard_per_order if not provided
+          let resolvedYardage = f.yardage;
+          if (!resolvedYardage && f.size && fabric.variants?.length) {
+            const matchingVariant = fabric.variants.find(
+              (v) => v.size?.toLowerCase() === f.size.toLowerCase(),
+            );
+            if (matchingVariant?.yard_per_order) {
+              resolvedYardage = matchingVariant.yard_per_order;
+            }
+          }
+          if (!resolvedYardage) resolvedYardage = 0;
+
+          if ((fabric.yard_length ?? 0) < resolvedYardage)
             throw new BadRequestException(
               `Insufficient fabric stock for "${fabric.name}". Remaining: ${fabric.yard_length}`,
             );
 
-          const price = (fabric.price_per_yard ?? 0) * (f.yardage ?? 0);
+          const price = (fabric.price_per_yard ?? 0) * resolvedYardage;
           totalPrice += price * (f.quantity ?? 1);
 
           breakdown.fabrics.push({
             name: fabric.name,
-            yardage: f.yardage,
+            yardage: resolvedYardage,
             price,
           });
         }
