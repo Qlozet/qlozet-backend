@@ -1287,7 +1287,6 @@ export class OrderService {
       total_shipping_fee: totalShippingFee,
       subtotal,
       total: subtotal + totalShippingFee,
-      _debug,
     };
   }
 
