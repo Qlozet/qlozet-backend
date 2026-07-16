@@ -6,6 +6,7 @@ import { Style, StyleSchema } from './style.schema';
 import { Taxonomy, TaxonomySchema } from './taxonomy.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 import { ColorVariant, ColorVariantSchema } from './color.schema';
+import { AddOn, AddOnSchema } from './addon.schema';
 
 export enum ClothingType {
   CUSTOMIZE = 'customize',
@@ -47,6 +48,9 @@ export class Clothing {
 
   @Prop({ type: Boolean, default: null })
   accepts_external_fabric?: boolean | null; // null = inherit from vendor, true/false = override
+
+  @Prop({ type: [AddOnSchema], default: [] })
+  addons?: AddOn[];
 }
 
 export const ClothingSchema = SchemaFactory.createForClass(Clothing);
