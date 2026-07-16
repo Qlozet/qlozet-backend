@@ -5,8 +5,10 @@ export function getNestedValue(obj, path) {
 export function evaluateCondition(fieldValue, operator, conditionValue) {
   switch (operator) {
     case 'equals':
+    case 'is_equal_to':
       return fieldValue === conditionValue;
     case 'not_equals':
+    case 'not_equal_to':
       return fieldValue !== conditionValue;
     case 'in':
       if (Array.isArray(fieldValue)) {

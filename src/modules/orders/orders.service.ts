@@ -618,7 +618,7 @@ export class OrderService {
       let yardage = fs.yardage;
       if (!yardage && fs.size && isFabricExist.variants?.length) {
         const matchingVariant = isFabricExist.variants.find(
-          (v) => v.size?.toLowerCase() === fs.size.toLowerCase(),
+          (v) => v.size?.toLowerCase() === fs.size!.toLowerCase(),
         );
         if (matchingVariant?.yard_per_order) {
           yardage = matchingVariant.yard_per_order;
