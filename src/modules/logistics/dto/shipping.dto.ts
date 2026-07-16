@@ -200,8 +200,8 @@ export class FetchRatePayload {
 
   @ApiProperty({
     required: false,
-    description: 'Shipbubble package category ID (e.g. 98246239 for Fashion wears)',
-    example: 98246239,
+    description: 'Shipbubble package category ID (e.g. 74794423 for Fashion wears)',
+    example: 74794423,
   })
   category_id?: number;
 }
