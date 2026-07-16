@@ -117,7 +117,7 @@ export class OrderValidationService {
           let resolvedYardage = f.yardage;
           if (!resolvedYardage && f.size && fabric.variants?.length) {
             const matchingVariant = fabric.variants.find(
-              (v) => v.size?.toLowerCase() === f.size.toLowerCase(),
+              (v) => v.size?.toLowerCase() === f.size!.toLowerCase(),
             );
             if (matchingVariant?.yard_per_order) {
               resolvedYardage = matchingVariant.yard_per_order;

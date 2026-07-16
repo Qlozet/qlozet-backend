@@ -321,7 +321,7 @@ export class PriceCalculationService {
         let resolvedYardage = s.yardage;
         if (!resolvedYardage && s.size && fabric.variants?.length) {
           const matchingVariant = fabric.variants.find(
-            (v) => v.size?.toLowerCase() === s.size.toLowerCase(),
+            (v) => v.size?.toLowerCase() === s.size!.toLowerCase(),
           );
           if (matchingVariant?.yard_per_order) {
             resolvedYardage = matchingVariant.yard_per_order;
@@ -364,7 +364,7 @@ export class PriceCalculationService {
         let resolvedYardage = s.yardage;
         if (!resolvedYardage && s.size && fabric.variants?.length) {
           const matchingVariant = fabric.variants.find(
-            (v) => v.size?.toLowerCase() === s.size.toLowerCase(),
+            (v) => v.size?.toLowerCase() === s.size!.toLowerCase(),
           );
           if (matchingVariant?.yard_per_order) {
             resolvedYardage = matchingVariant.yard_per_order;
