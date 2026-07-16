@@ -99,16 +99,6 @@ export class LogisticsService {
     payload: FetchRatePayload,
   ): Promise<FetchRateResponse> {
     try {
-      // TEMPORARY: fetch and log real categories from Shipbubble
-      try {
-        const catRes = await firstValueFrom(
-          this.httpService.get(this.buildUrl('/shipping/labels/categories'), { headers: this.headers })
-        );
-        this.logger.warn(`[REAL CATEGORIES] ${JSON.stringify(catRes.data)}`);
-      } catch (e: any) {
-        this.logger.error(`[fetchRates] Failed to fetch real categories: ${e.message}`);
-      }
-
       this.logger.warn(`[fetchRates] Payload: ${JSON.stringify(payload)}`);
       const response: AxiosResponse<{ data: FetchRateResponse }> =
         await firstValueFrom(
