@@ -1051,6 +1051,7 @@ export class OrderService {
 
     // 5. Fetch rates per vendor — PARALLEL
     const pickupDate = new Date().toISOString().split('T')[0];
+    const _debug: any[] = [];
 
     const ratePromises = Array.from(vendorGroups.entries())
       .filter(([, group]) => {
@@ -1058,6 +1059,7 @@ export class OrderService {
           this.logger.warn(
             `Vendor ${group.business.business_name} has no validated address`,
           );
+          _debug.push({ vendor: group.business.business_name, reason: 'no_address_code' });
           return false;
         }
         return true;
@@ -1113,6 +1115,13 @@ export class OrderService {
           this.logger.error(
             `Failed to fetch rates for vendor ${biz.business_name}: ${error.message}`,
           );
+          _debug.push({
+            vendor: biz.business_name,
+            reason: 'rate_fetch_failed',
+            error: error.message || String(error),
+            sender_address_code: biz.address_code,
+            receiver_address_code: customerAddress.address_code,
+          });
           return null;
         }
       });
@@ -1278,6 +1287,7 @@ export class OrderService {
       total_shipping_fee: totalShippingFee,
       subtotal,
       total: subtotal + totalShippingFee,
+      _debug,
     };
   }
 
