@@ -33,7 +33,7 @@ export class Fabric {
   price_per_yard: number;
   @Prop({ type: [ProductImageSchema], default: [] })
   images?: ProductImage[];
-  // @Prop({ type: [VariantSchema], default: null })
-  // variants: Variant[];
+  @Prop({ type: [VariantSchema], default: [] })
+  variants?: Variant[];
 }
 export const FabricSchema = SchemaFactory.createForClass(Fabric);
