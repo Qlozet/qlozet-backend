@@ -45,6 +45,7 @@ import { Utils } from '../../common/utils/pagination';
 import { AddressDocument } from '../ums/schemas/address.schema';
 import {
   AccessorySelectionDto,
+  AddonSelectionDto,
   FabricSelectionDto,
   OrderItemSelectionsDto,
   StyleSelectionDto,
@@ -134,6 +135,7 @@ export class OrderService {
           fabric_selections: selections.fabric_selection || [],
           style_selections: selections.style_selection || [],
           accessory_selections: selections.accessory_selection || [],
+          addon_selections: selections.addon_selection || [],
           total_price: total ?? 0,
           subtotal,
         };
@@ -470,6 +472,10 @@ export class OrderService {
           rawSelections.color_variant_selection ??
           rawSelections.color_variant_selection ??
           [];
+        const addonSelections =
+          rawSelections.addon_selection ??
+          rawSelections.addon_selection ??
+          [];
 
         const [
           styleSnapshots,
@@ -526,6 +532,7 @@ export class OrderService {
           style_selection: styleSelections,
           fabric_selection: fabricSelections,
           accessory_selection: accessorySelections,
+          addon_selection: addonSelections,
         };
 
         return {
@@ -677,11 +684,31 @@ export class OrderService {
       });
     }
 
+    // --- Addons ---
+    const normalizedAddons: AddonSelectionDto[] = [];
+    for (const ads of selections.addon_selections || []) {
+      const addon = clothing?.addons?.find(a => a._id?.equals(ads.addon_id));
+      if (!addon) continue;
+
+      const variant = addon.variants?.find(v => v._id?.equals(ads.variant_id));
+      if (!variant) continue;
+
+      const quantity = ads.quantity ?? 1;
+      normalizedAddons.push({
+        addon_id: new Types.ObjectId(addon._id),
+        variant_id: new Types.ObjectId(variant._id),
+        price: variant.price || 0,
+        quantity,
+        total_amount: (variant.price || 0) * quantity,
+      });
+    }
+
     return {
       color_variant_selection: normalizedColorVariants,
       style_selection: normalizedStyles,
       fabric_selection: normalizedFabrics,
       accessory_selection: normalizedAccessories,
+      addon_selection: normalizedAddons,
     };
   }
 

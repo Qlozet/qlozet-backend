@@ -122,7 +122,7 @@ export class OrderItem {
   @Prop({ type: [FabricSelection], default: [] })
   fabric_selections?: FabricSelection[];
 
-  @Prop({ type: [MongooseSchema.Types.ObjectId], default: [] })
+  @Prop({ type: [StyleSelection], default: [] })
   style_selections?: StyleSelection[];
 
   @Prop({ type: [AccessorySelection], default: [] })

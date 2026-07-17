@@ -1,10 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type AddOnVariantDocument = AddOnVariant & Document;
 
 @Schema({ _id: true })
 export class AddOnVariant {
+  _id?: Types.ObjectId;
+
   @Prop({ required: true })
   name: string;
 
@@ -24,6 +26,8 @@ export type AddOnDocument = AddOn & Document;
 
 @Schema({ _id: true })
 export class AddOn {
+  _id?: Types.ObjectId;
+
   @Prop({ required: true })
   name: string; // e.g., "Buttons", "Thread"
 
