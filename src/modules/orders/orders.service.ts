@@ -76,6 +76,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class OrderService {
@@ -1145,6 +1146,112 @@ export class OrderService {
       },
       action_url: `/orders`,
     });
+  }
+
+  // ==================== CRON: 24h Auto-Reject ====================
+
+  /**
+   * Runs every hour. Finds orders in 'in_review' with unconfirmed shipments
+   * older than 24 hours, and auto-rejects those vendor shipments.
+   */
+  @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
+  async autoRejectStaleShipments() {
+    const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+
+    try {
+      // Find orders that are in_review and were created more than 24h ago
+      const staleOrders = await this.orderModel.find({
+        status: OrderStatus.IN_REVIEW,
+        createdAt: { $lte: cutoff },
+      });
+
+      if (staleOrders.length === 0) return;
+
+      this.logger.log(
+        `[AutoReject] Found ${staleOrders.length} order(s) with stale shipments`,
+      );
+
+      for (const order of staleOrders) {
+        let orderChanged = false;
+
+        for (const shipment of order.shipments) {
+          // Skip already confirmed or rejected shipments
+          if (shipment.confirmed || shipment.rejected) continue;
+
+          // Auto-reject this vendor's unconfirmed shipment
+          shipment.rejected = true;
+          shipment.rejected_at = new Date();
+          shipment.rejection_reason = 'Auto-rejected: vendor did not confirm within 24 hours';
+          shipment.status = ShipmentStatus.FAILED;
+          orderChanged = true;
+
+          // Calculate refund for this vendor's portion
+          const vendorItems = order.items.filter(
+            (i) => i.business?.toString() === shipment.business.toString(),
+          );
+          const vendorItemsTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).total_price || 0),
+            0,
+          );
+          const vendorShippingFee = shipment.shipping_fee || 0;
+          const refundAmount = vendorItemsTotal + vendorShippingFee;
+
+          // Update order totals
+          order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+          order.shipping_fee = Math.max(0, (order.shipping_fee || 0) - vendorShippingFee);
+          order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+          // Look up vendor name for notification
+          const business = await this.businessModel.findById(shipment.business);
+          const businessName = business?.business_name || 'A vendor';
+
+          this.logger.log(
+            `[AutoReject] Auto-rejected shipment for ${businessName} on order ${order.reference}. Refund: ₦${refundAmount}`,
+          );
+
+          // Notify customer
+          this.notificationsService.create({
+            recipient: order.customer.toString(),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.ORDER_CANCELLED,
+            title: 'Vendor Did Not Respond',
+            body: `${businessName} did not confirm your order #${order.reference} within 24 hours. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              business_name: businessName,
+              refund_amount: refundAmount,
+              reason: 'auto_reject_24h',
+            },
+            action_url: `/orders`,
+          }).catch((err) =>
+            this.logger.error(`[AutoReject] Failed to notify customer: ${err.message}`),
+          );
+        }
+
+        if (orderChanged) {
+          // Check if ALL shipments are now rejected → cancel entire order
+          const allRejected = order.shipments.every((s) => s.rejected);
+          if (allRejected) {
+            order.status = OrderStatus.CANCELLED;
+          } else {
+            // Check if remaining are all confirmed → processing
+            const activeShipments = order.shipments.filter((s) => !s.rejected);
+            const allConfirmed = activeShipments.every((s) => s.confirmed);
+            if (allConfirmed) {
+              order.status = OrderStatus.PROCESSING;
+            }
+          }
+
+          await order.save();
+        }
+      }
+
+      this.logger.log(`[AutoReject] Finished processing ${staleOrders.length} stale order(s)`);
+    } catch (error) {
+      this.logger.error(`[AutoReject] Cron failed: ${error.message}`, error.stack);
+    }
   }
 
   /**
