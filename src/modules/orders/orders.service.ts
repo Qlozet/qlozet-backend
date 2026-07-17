@@ -998,6 +998,30 @@ export class OrderService {
     shipment.confirmed = true;
     shipment.confirmed_at = new Date();
 
+    // Calculate fulfillment deadline based on product turnaround_days
+    const DEFAULT_TURNAROUND_DAYS = 3; // For fabrics/accessories
+    const vendorItems = order.items.filter(
+      (i) => i.business?.toString() === businessId,
+    );
+    const productIds = vendorItems.map((i) => i.product);
+    const products = await this.productModel.find({ _id: { $in: productIds } }).lean();
+
+    let maxTurnaroundDays = DEFAULT_TURNAROUND_DAYS;
+    for (const product of products) {
+      const turnaround = (product as any).clothing?.turnaround_days ?? DEFAULT_TURNAROUND_DAYS;
+      if (turnaround > maxTurnaroundDays) {
+        maxTurnaroundDays = turnaround;
+      }
+    }
+
+    const deadline = new Date(shipment.confirmed_at);
+    deadline.setDate(deadline.getDate() + maxTurnaroundDays);
+    shipment.fulfillment_deadline = deadline;
+
+    this.logger.log(
+      `[Confirm] Fulfillment deadline set to ${deadline.toISOString()} (${maxTurnaroundDays} days) for vendor ${businessId} on order ${orderReference}`,
+    );
+
     // Check if ALL non-rejected shipments are confirmed
     const activeShipments = order.shipments.filter((s) => !s.rejected);
     const allConfirmed = activeShipments.every((s) => s.confirmed);
@@ -1377,6 +1401,159 @@ export class OrderService {
       this.logger.log(`[AutoReject] Finished processing ${staleOrders.length} stale order(s)`);
     } catch (error) {
       this.logger.error(`[AutoReject] Cron failed: ${error.message}`, error.stack);
+    }
+  }
+
+  // ==================== CRON: Late Fulfillment Penalty ====================
+
+  /**
+   * Runs every hour. Finds confirmed-but-unfulfilled vendor shipments
+   * that have passed their fulfillment_deadline, and applies a progressive
+   * penalty: 5% of vendor items total per day late, capped at 25%.
+   * The penalty is deducted from vendor earnings and refunded to the customer.
+   */
+  @Cron('30 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour at :30
+  async checkLateFulfillments() {
+    const PENALTY_PERCENT_PER_DAY = 5;
+    const MAX_PENALTY_PERCENT = 25;
+
+    try {
+      // Find orders with confirmed shipments that have a deadline in the past
+      const orders = await this.orderModel.find({
+        status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+        'shipments.confirmed': true,
+        'shipments.fulfillment_deadline': { $lte: new Date() },
+      });
+
+      if (orders.length === 0) return;
+
+      this.logger.log(
+        `[LatePenalty] Checking ${orders.length} order(s) for overdue shipments`,
+      );
+
+      for (const order of orders) {
+        for (const shipment of order.shipments) {
+          // Skip shipments that aren't overdue or are already shipped/rejected
+          if (!shipment.confirmed || shipment.rejected) continue;
+          if (!shipment.fulfillment_deadline) continue;
+          if (
+            shipment.status === ShipmentStatus.SHIPPED ||
+            shipment.status === ShipmentStatus.IN_TRANSIT ||
+            shipment.status === ShipmentStatus.DELIVERED
+          ) continue;
+
+          const now = new Date();
+          if (now <= shipment.fulfillment_deadline) continue;
+
+          // Calculate days late
+          const msLate = now.getTime() - shipment.fulfillment_deadline.getTime();
+          const daysLate = Math.ceil(msLate / (24 * 60 * 60 * 1000));
+
+          // Skip if we've already penalized for this many (or more) days
+          if (daysLate <= (shipment.late_penalty_days || 0)) continue;
+
+          const businessId = shipment.business.toString();
+
+          // Calculate vendor items total
+          const vendorItems = order.items.filter(
+            (i) => i.business?.toString() === businessId,
+          );
+          const vendorItemsTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).total_price || 0),
+            0,
+          );
+
+          if (vendorItemsTotal <= 0) continue;
+
+          // Calculate total penalty (cumulative)
+          const penaltyPercent = Math.min(daysLate * PENALTY_PERCENT_PER_DAY, MAX_PENALTY_PERCENT);
+          const totalPenaltyAmount = Math.round(vendorItemsTotal * (penaltyPercent / 100));
+
+          // Calculate incremental penalty (what hasn't been applied yet)
+          const previouslyApplied = shipment.late_penalty_amount || 0;
+          const incrementalPenalty = totalPenaltyAmount - previouslyApplied;
+
+          if (incrementalPenalty <= 0) continue;
+
+          // Look up vendor name
+          const business = await this.businessModel.findById(businessId);
+          const businessName = business?.business_name || 'A vendor';
+
+          this.logger.log(
+            `[LatePenalty] Vendor "${businessName}" is ${daysLate} day(s) late on order ${order.reference}. ` +
+            `Applying incremental penalty of ₦${incrementalPenalty} (total: ₦${totalPenaltyAmount}, ${penaltyPercent}%)`,
+          );
+
+          // Update shipment penalty tracking
+          shipment.late_penalty_applied = true;
+          shipment.late_penalty_amount = totalPenaltyAmount;
+          shipment.late_penalty_days = daysLate;
+
+          // Deduct from vendor earnings on the order
+          order.vendor_earnings = Math.max(0, (order.vendor_earnings || 0) - incrementalPenalty);
+
+          await order.save();
+
+          // Refund the incremental amount to the customer
+          this.processPartialRefund(
+            order as OrderDocument,
+            incrementalPenalty,
+            `Late fulfillment penalty: ${businessName} is ${daysLate} day(s) past deadline`,
+          ).catch((err) =>
+            this.logger.error(
+              `[LatePenalty] Refund failed for order ${order.reference}: ${err.message}`,
+            ),
+          );
+
+          // Notify customer
+          this.notificationsService.create({
+            recipient: order.customer.toString(),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.LATE_FULFILLMENT_PENALTY,
+            title: 'Late Fulfillment Compensation',
+            body: `${businessName} is ${daysLate} day(s) late fulfilling order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} compensation has been credited to you.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              business_name: businessName,
+              penalty_amount: incrementalPenalty,
+              total_penalty: totalPenaltyAmount,
+              days_late: daysLate,
+              reason: 'late_fulfillment_penalty',
+            },
+            action_url: `/orders`,
+          }).catch((err) =>
+            this.logger.error(`[LatePenalty] Failed to notify customer: ${err.message}`),
+          );
+
+          // Notify vendor
+          if (business?.created_by?.id) {
+            this.notificationsService.create({
+              recipient: business.created_by.id.toString(),
+              category: NotificationCategory.ORDER,
+              type: NotificationType.LATE_FULFILLMENT_PENALTY,
+              title: 'Late Fulfillment Penalty',
+              body: `You are ${daysLate} day(s) past the fulfillment deadline for order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} penalty has been applied. Please fulfill this order immediately.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                penalty_amount: incrementalPenalty,
+                total_penalty: totalPenaltyAmount,
+                days_late: daysLate,
+                max_penalty_percent: MAX_PENALTY_PERCENT,
+                reason: 'late_fulfillment_penalty',
+              },
+              action_url: `/orders`,
+            }).catch((err) =>
+              this.logger.error(`[LatePenalty] Failed to notify vendor: ${err.message}`),
+            );
+          }
+        }
+      }
+
+      this.logger.log(`[LatePenalty] Finished checking late fulfillments`);
+    } catch (error) {
+      this.logger.error(`[LatePenalty] Cron failed: ${error.message}`, error.stack);
     }
   }
 

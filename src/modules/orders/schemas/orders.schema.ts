@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types, Schema as MongooseSchema } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
 export enum OrderStatus {
@@ -27,7 +27,7 @@ export enum ShipmentType {
   FABRIC_TRANSFER = 'fabric_transfer',
 }
 
-export type OrderDocument = Order & Document;
+export type OrderDocument = HydratedDocument<Order>;
 
 /** ------------------ Sub-schemas for selections ------------------ */
 @Schema({ _id: false })
@@ -201,6 +201,19 @@ export class VendorShipment {
 
   @Prop({ type: Date })
   delivered_at?: Date;
+
+  // Late fulfillment penalty tracking
+  @Prop({ type: Date, default: null })
+  fulfillment_deadline?: Date;
+
+  @Prop({ type: Boolean, default: false })
+  late_penalty_applied: boolean;
+
+  @Prop({ type: Number, default: 0 })
+  late_penalty_amount: number;
+
+  @Prop({ type: Number, default: 0 })
+  late_penalty_days: number;
 }
 
 export const VendorShipmentSchema = SchemaFactory.createForClass(VendorShipment);
