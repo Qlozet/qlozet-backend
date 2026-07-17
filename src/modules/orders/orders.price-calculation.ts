@@ -58,16 +58,13 @@ export class PriceCalculationService {
       subtotal += calculatedPrice;
     }
 
-    const tax = subtotal * 0.08;
-    const shipping = this.calculateShippingCost(items, subtotal);
-    const discount = this.calculateDiscount(subtotal);
-    const total = subtotal + tax + shipping - discount;
+    // Note: Tax and platform discounts removed.
+    // Shipping is handled externally via Shipbubble.
+    // Product-level discounts are already applied in calculateItemTotal().
+    const total = subtotal;
 
     return {
       subtotal: this.round(subtotal),
-      tax: this.round(tax),
-      shipping: this.round(shipping),
-      discount: this.round(discount),
       total: this.round(total),
       itemBreakdown,
     };
@@ -526,20 +523,7 @@ export class PriceCalculationService {
     return this.round(total);
   }
 
-  // ========== SHIPPING / DISCOUNT / HELPERS ==========
-
-  private calculateShippingCost(
-    items: ProcessedOrderItem[],
-    subtotal: number,
-  ): number {
-    if (subtotal > 200) return 0;
-    // const count = items.reduce((sum, i) => sum + i.quantity, 0);
-    return 0;
-  }
-
-  private calculateDiscount(subtotal: number): number {
-    return subtotal > 500 ? subtotal * 0.1 : 0;
-  }
+  // ========== HELPERS ==========
 
   private round(n: number): number {
     return Math.round(n * 100) / 100;

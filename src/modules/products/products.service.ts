@@ -430,6 +430,19 @@ export class ProductService {
       throw new NotFoundException('Product not found');
     }
 
+    // Verify the customer has purchased this product in a completed order
+    const hasPurchased = await this.orderModel.exists({
+      customer: new Types.ObjectId(userId),
+      'items.product': new Types.ObjectId(productId),
+      status: { $in: ['completed', 'delivered'] },
+    });
+
+    if (!hasPurchased) {
+      throw new BadRequestException(
+        'You can only review products you have purchased and received.',
+      );
+    }
+
     const existingRating = product.ratings.find((r) =>
       r.user.equals(new Types.ObjectId(userId)),
     );

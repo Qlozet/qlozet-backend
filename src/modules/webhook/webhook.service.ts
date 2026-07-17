@@ -16,6 +16,11 @@ import {
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class WebhookService {
@@ -26,6 +31,7 @@ export class WebhookService {
     private readonly walletsService: WalletsService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
+    private readonly notificationsService: NotificationsService,
 
     @InjectModel('Order') private orderModel: Model<Order>,
   ) {}
@@ -117,7 +123,7 @@ export class WebhookService {
 
         await this.orderModel.updateOne(
           { _id: orderId },
-          { status: 'processing' },
+          { status: 'in_review' },
         );
 
         await Promise.all([
@@ -276,11 +282,67 @@ export class WebhookService {
 
     await order.save();
 
+    // ── Notify customer about delivery status ──
+    this.notifyCustomerShippingUpdate(order, mappedStatus, trackingNumber).catch((err) =>
+      this.logger.error('Failed to send customer shipping notification', err),
+    );
+
     return {
       status: 'success',
       tracking_number: trackingNumber,
       shipment_status: mappedStatus,
       order_status: order.status,
     };
+  }
+
+  /**
+   * Send customer notifications for shipping status changes.
+   */
+  private async notifyCustomerShippingUpdate(
+    order: OrderDocument,
+    status: ShipmentStatus,
+    trackingNumber: string,
+  ) {
+    const customerId = order.customer?.toString();
+    if (!customerId) return;
+
+    let title: string;
+    let body: string;
+    let type: NotificationType;
+
+    switch (status) {
+      case ShipmentStatus.IN_TRANSIT:
+        title = 'Your order is on its way! 🚚';
+        body = `Order #${order.reference} is now in transit. Tracking: ${trackingNumber}`;
+        type = NotificationType.ORDER_SHIPPED;
+        break;
+      case ShipmentStatus.DELIVERED:
+        title = 'Order delivered! ✅';
+        body = `Order #${order.reference} has been delivered. Enjoy your purchase!`;
+        type = NotificationType.ORDER_DELIVERED;
+        break;
+      case ShipmentStatus.FAILED:
+        title = 'Delivery issue ⚠️';
+        body = `There was a problem delivering order #${order.reference}. We're looking into it.`;
+        type = NotificationType.ORDER_STATUS_CHANGED;
+        break;
+      default:
+        return;
+    }
+
+    await this.notificationsService.create({
+      recipient: customerId,
+      category: NotificationCategory.SHIPPING,
+      type,
+      title,
+      body,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        tracking_number: trackingNumber,
+        shipment_status: status,
+      },
+      action_url: `/orders`,
+    });
   }
 }

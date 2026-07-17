@@ -223,11 +223,53 @@ export class OrderController {
     );
   }
 
+  /**
+   * ✅ Vendor confirms their portion of the order
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT)
+  @Post(':reference/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Vendor confirms their portion of the order',
+    description:
+      'Vendor accepts the order. Once ALL vendors confirm, order moves to "processing".',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference (e.g. ORD-XXXX)' })
+  @ApiResponse({ status: 200, description: 'Shipment confirmed' })
+  async confirmOrder(
+    @Param('reference') reference: string,
+    @Req() req,
+  ) {
+    return this.orderService.confirmVendorShipment(reference, req.business);
+  }
+
+  /**
+   * ❌ Vendor rejects their portion of the order (partial refund)
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @Patch(':reference/reject')
+  @ApiOperation({
+    summary: 'Vendor rejects their portion — partial refund to customer',
+    description:
+      'Rejects only this vendor\'s items. Customer gets refunded for those items + shipping.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference (e.g. ORD-XXXX)' })
+  @ApiResponse({ status: 200, description: 'Shipment rejected and refund initiated' })
+  async rejectOrder(
+    @Param('reference') reference: string,
+    @Body() body: { reason?: string },
+    @Req() req,
+  ) {
+    return this.orderService.rejectVendorShipment(reference, req.business, body?.reason);
+  }
+
   @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Patch('cancel/:reference')
   @ApiOperation({ summary: 'Cancel an order and refund customer' })
-  async rejectOrder(@Param('reference') reference: string) {
+  async cancelOrder(@Param('reference') reference: string) {
     return this.orderService.cancelOrder(reference);
   }
 

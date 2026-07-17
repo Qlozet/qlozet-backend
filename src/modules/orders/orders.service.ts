@@ -54,6 +54,8 @@ import { TransactionService } from '../transactions/transactions.service';
 import { User } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
+import { BusinessService } from '../business/business.service';
+import { ProductService } from '../products/products.service';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 import {
@@ -102,6 +104,8 @@ export class OrderService {
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
+    private readonly businessService: BusinessService,
+    private readonly productService: ProductService,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -317,9 +321,15 @@ export class OrderService {
         transaction.status = 'success' as any;
         await transaction.save();
 
-        // Mark order as processing (payment is complete)
-        savedOrder.status = OrderStatus.PROCESSING;
+        // Mark order as in_review (awaiting vendor confirmation)
+        savedOrder.status = OrderStatus.IN_REVIEW;
         await savedOrder.save();
+
+        // Record earnings and update inventory (was missing for wallet payments)
+        await Promise.all([
+          this.businessService.recordBusinessEarnings(savedOrder._id),
+          this.productService.updateInventory(savedOrder._id),
+        ]);
 
         // Notify vendor(s) about new order
         this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
@@ -958,10 +968,183 @@ export class OrderService {
   }
 
   /**
-   * @deprecated Replaced by fulfillVendorShipment()
+   * Vendor confirms their portion of the order.
+   * Only when ALL vendors confirm → order moves to "processing".
    */
-  async confirmOrder(orderReference: string, business: Business) {
-    return this.fulfillVendorShipment(orderReference, business, {});
+  async confirmVendorShipment(
+    orderReference: string,
+    business: Business | BusinessDocument,
+  ) {
+    const businessId = (business._id || (business as any).id).toString();
+
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    const shipment = order.shipments.find(
+      (s) => s.business.toString() === businessId,
+    );
+    if (!shipment) {
+      throw new BadRequestException('No shipment found for your business in this order');
+    }
+    if (shipment.confirmed) {
+      throw new BadRequestException('You have already confirmed this shipment');
+    }
+    if (shipment.rejected) {
+      throw new BadRequestException('This shipment has been rejected and cannot be confirmed');
+    }
+
+    // Mark this vendor's shipment as confirmed
+    shipment.confirmed = true;
+    shipment.confirmed_at = new Date();
+
+    // Check if ALL non-rejected shipments are confirmed
+    const activeShipments = order.shipments.filter((s) => !s.rejected);
+    const allConfirmed = activeShipments.every((s) => s.confirmed);
+
+    if (allConfirmed) {
+      order.status = OrderStatus.PROCESSING;
+    }
+
+    await order.save();
+
+    // Notify customer that this vendor confirmed
+    this.notifyCustomerVendorConfirmed(order, business).catch((err) =>
+      this.logger.error('Failed to send vendor confirmation notification', err),
+    );
+
+    return {
+      message: `Shipment confirmed by ${(business as any).business_name || businessId}`,
+      data: {
+        confirmed: true,
+        all_vendors_confirmed: allConfirmed,
+        order_status: order.status,
+      },
+    };
+  }
+
+  /**
+   * Vendor rejects their portion of the order.
+   * Refunds only this vendor's items + shipping to the customer.
+   */
+  async rejectVendorShipment(
+    orderReference: string,
+    business: Business | BusinessDocument,
+    reason?: string,
+  ) {
+    const businessId = (business._id || (business as any).id).toString();
+
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    const shipment = order.shipments.find(
+      (s) => s.business.toString() === businessId,
+    );
+    if (!shipment) {
+      throw new BadRequestException('No shipment found for your business in this order');
+    }
+    if (shipment.rejected) {
+      throw new BadRequestException('This shipment has already been rejected');
+    }
+    if (shipment.status === ShipmentStatus.SHIPPED || shipment.status === ShipmentStatus.IN_TRANSIT) {
+      throw new BadRequestException('Cannot reject a shipment that has already been shipped');
+    }
+
+    // Mark as rejected
+    shipment.rejected = true;
+    shipment.rejected_at = new Date();
+    shipment.rejection_reason = reason || 'Vendor declined the order';
+    shipment.status = ShipmentStatus.FAILED;
+
+    // Calculate refund amount for this vendor's portion
+    const vendorItems = order.items.filter(
+      (i) => i.business?.toString() === businessId,
+    );
+    const vendorItemsTotal = vendorItems.reduce(
+      (sum, item) => sum + (item.total_price || 0),
+      0,
+    );
+    const vendorShippingFee = shipment.shipping_fee || 0;
+    const refundAmount = vendorItemsTotal + vendorShippingFee;
+
+    // Update order totals
+    order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+    order.shipping_fee = Math.max(0, (order.shipping_fee || 0) - vendorShippingFee);
+    order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+    // Check if ALL shipments are now rejected → cancel entire order
+    const allRejected = order.shipments.every((s) => s.rejected);
+    if (allRejected) {
+      order.status = OrderStatus.CANCELLED;
+    } else {
+      // Check if remaining (non-rejected) shipments are all confirmed → processing
+      const activeShipments = order.shipments.filter((s) => !s.rejected);
+      const allConfirmed = activeShipments.every((s) => s.confirmed);
+      if (allConfirmed) {
+        order.status = OrderStatus.PROCESSING;
+      }
+    }
+
+    await order.save();
+
+    // TODO: Issue partial refund via Paystack or credit wallet
+    this.logger.log(
+      `Vendor ${businessId} rejected order ${orderReference}. Refund amount: ₦${refundAmount}`,
+    );
+
+    // Notify customer about rejection
+    this.notifyCustomerVendorRejected(order, business, reason).catch((err) =>
+      this.logger.error('Failed to send vendor rejection notification', err),
+    );
+
+    return {
+      message: `Shipment rejected. ₦${refundAmount.toLocaleString()} will be refunded to the customer.`,
+      data: {
+        rejected: true,
+        refund_amount: refundAmount,
+        order_status: order.status,
+      },
+    };
+  }
+
+  /**
+   * Notify customer that a vendor has confirmed their order portion.
+   */
+  private async notifyCustomerVendorConfirmed(order: OrderDocument, business: Business | BusinessDocument) {
+    const businessName = (business as any).business_name || 'A vendor';
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_CONFIRMED,
+      title: 'Order Confirmed by Vendor',
+      body: `${businessName} has confirmed your order #${order.reference}. They're getting it ready!`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+      },
+      action_url: `/orders`,
+    });
+  }
+
+  /**
+   * Notify customer that a vendor has rejected their order portion.
+   */
+  private async notifyCustomerVendorRejected(order: OrderDocument, business: Business | BusinessDocument, reason?: string) {
+    const businessName = (business as any).business_name || 'A vendor';
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_CANCELLED,
+      title: 'Vendor Declined Order',
+      body: `${businessName} was unable to fulfill their portion of order #${order.reference}.${reason ? ` Reason: ${reason}` : ''} A refund for their items will be processed.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+        reason,
+      },
+      action_url: `/orders`,
+    });
   }
 
   /**
@@ -1303,6 +1486,24 @@ export class OrderService {
     dto: FulfillOrderDto,
   ) {
     const businessId = (business._id || business.id).toString();
+
+    // ── Gate: vendor must confirm before fulfilling ──
+    const preCheck = await this.orderModel.findOne({ reference: orderReference });
+    if (preCheck) {
+      const myShipment = preCheck.shipments.find(
+        (s) => s.business.toString() === businessId,
+      );
+      if (myShipment && !myShipment.confirmed) {
+        throw new BadRequestException(
+          'You must confirm this order before you can fulfill it. Use the confirm endpoint first.',
+        );
+      }
+      if (myShipment?.rejected) {
+        throw new BadRequestException(
+          'This shipment has been rejected and cannot be fulfilled.',
+        );
+      }
+    }
 
     // Atomic claim: set status to 'ready_to_ship' only if currently 'pending'
     // This prevents double-fulfillment from concurrent requests

@@ -18,6 +18,7 @@ export enum NotificationCategory {
 export enum NotificationType {
   // Order
   NEW_ORDER = 'new_order',
+  ORDER_CONFIRMED = 'order_confirmed',
   ORDER_CANCELLED = 'order_cancelled',
   ORDER_STATUS_CHANGED = 'order_status_changed',
 

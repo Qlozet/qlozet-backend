@@ -175,6 +175,21 @@ export class VendorShipment {
   @Prop({ type: Number, default: null })
   fabric_yards?: number;
 
+  @Prop({ type: Boolean, default: false })
+  confirmed: boolean;
+
+  @Prop({ type: Date })
+  confirmed_at?: Date;
+
+  @Prop({ type: Boolean, default: false })
+  rejected: boolean;
+
+  @Prop({ type: Date })
+  rejected_at?: Date;
+
+  @Prop({ type: String })
+  rejection_reason?: string;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 
