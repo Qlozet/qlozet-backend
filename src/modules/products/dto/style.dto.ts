@@ -54,7 +54,7 @@ export class CreateStyleDto {
   @ApiProperty({ example: 70, description: 'Base price', minimum: 0 })
   @IsNotEmpty()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   price: number;
 
   @ApiProperty({
@@ -64,7 +64,7 @@ export class CreateStyleDto {
   })
   @IsNotEmpty()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   min_width_cm?: number;
 
   @ApiPropertyOptional({

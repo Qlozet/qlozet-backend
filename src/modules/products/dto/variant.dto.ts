@@ -42,7 +42,7 @@ export class VariantDto {
   })
   @IsOptional()
   @IsNumber()
-  @Min(0.1)
+  @Min(0)
   yard_per_order: number;
 
   @ApiPropertyOptional({
