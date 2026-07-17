@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import {
   AccessorySelectionDto,
+  AddonSelectionDto,
   FabricSelectionDto,
   StyleSelectionDto,
   VariantSelectionDto,
@@ -36,6 +37,7 @@ export interface NormalizedSelections {
   style_selection?: StyleSelectionDto[];
   fabric_selection?: FabricSelectionDto[];
   accessory_selection?: AccessorySelectionDto[];
+  addon_selection?: AddonSelectionDto[];
 }
 export interface AccessorySelection {
   accessory_id: Types.ObjectId;
@@ -69,5 +71,7 @@ export interface ProcessedOrderItem {
     style_selection?: StyleSelectionDto[];
     fabric_selection?: FabricSelectionDto[];
     accessory_selection?: AccessorySelectionDto[];
+    addon_selection?: AddonSelectionDto[];
   };
 }
+

@@ -27,6 +27,7 @@ import {
 import {
   FabricSelectionDto,
   AccessorySelectionDto,
+  AddonSelectionDto,
   VariantSelectionDto,
   StyleSelectionDto,
 } from './dto/selection.dto';
@@ -152,6 +153,7 @@ export class PriceCalculationService {
         style_selection: [],
         fabric_selection: [],
         accessory_selection: [],
+        addon_selection: [],
       };
     }
 
@@ -166,6 +168,8 @@ export class PriceCalculationService {
         selections.fabric_selection ?? selections.fabric_selection ?? [],
       accessory_selection:
         selections.accessory_selection ?? selections.accessory_selection ?? [],
+      addon_selection:
+        selections.addon_selection ?? [],
     };
   }
   private applyDiscount(product: ProductDocument, discount: any): number {
@@ -285,6 +289,11 @@ export class PriceCalculationService {
     if (selections.style_selection)
       total += await this.calculateStyleCost(
         selections.style_selection,
+        product,
+      );
+    if (selections.addon_selection)
+      total += this.calculateAddonCost(
+        selections.addon_selection,
         product,
       );
     return this.round(total);
@@ -518,6 +527,43 @@ export class PriceCalculationService {
 
         total += (v.price ?? 0) * (s.quantity ?? 1);
       }
+    }
+
+    return this.round(total);
+  }
+
+  // ========== ADDONS ==========
+
+  private calculateAddonCost(
+    selections: AddonSelectionDto[],
+    product: ProductDocument,
+  ): number {
+    let total = 0;
+
+    if (!product.clothing?.addons?.length) return 0;
+
+    for (const sel of selections) {
+      const addon = product.clothing.addons.find(
+        (a: any) => String(a._id) === String(sel.addon_id),
+      );
+
+      if (!addon) {
+        throw new BadRequestException(
+          `Selected addon not found on product: ${sel.addon_id}`,
+        );
+      }
+
+      const variant = addon.variants?.find(
+        (v: any) => String(v._id) === String(sel.variant_id),
+      );
+
+      if (!variant) {
+        throw new BadRequestException(
+          `Selected addon variant not found for addon "${addon.name}": ${sel.variant_id}`,
+        );
+      }
+
+      total += (variant.price ?? 0) * (sel.quantity ?? 1);
     }
 
     return this.round(total);

@@ -90,6 +90,24 @@ class AccessorySelection {
   total_amount: number;
 }
 
+@Schema({ _id: false })
+class AddonSelection {
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  addon_id: Types.ObjectId;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  variant_id: Types.ObjectId;
+
+  @Prop({ type: Number, min: 1 })
+  quantity: number;
+
+  @Prop({ type: Number, min: 0 })
+  price: number;
+
+  @Prop({ type: Number, min: 0 })
+  total_amount: number;
+}
+
 /** ------------------ Sub-schema for each item ------------------ */
 @Schema({ _id: false })
 export class OrderItem {
@@ -110,6 +128,9 @@ export class OrderItem {
   @Prop({ type: [AccessorySelection], default: [] })
   accessory_selections?: AccessorySelection[];
 
+  @Prop({ type: [AddonSelection], default: [] })
+  addon_selections?: AddonSelection[];
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   applied_fabric?: Types.ObjectId;
 
@@ -122,6 +143,7 @@ export class OrderItem {
   @Prop({ type: Number, default: 0 })
   total_price?: number;
 }
+
 
 /** ------------------ Vendor Shipment Sub-Schema ------------------ */
 @Schema({ _id: true })
