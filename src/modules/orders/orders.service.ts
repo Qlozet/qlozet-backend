@@ -1638,7 +1638,9 @@ export class OrderService {
       vendorGroups.get(bizId)!.items.push({
         product_id: String(product._id),
         product_name: name,
-        amount: product.base_price || 0,
+        amount: (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+          ? product.discounted_price
+          : (product.base_price || 0),
         weight: 1, // default weight in kg
       });
     }

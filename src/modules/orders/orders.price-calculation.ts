@@ -78,19 +78,6 @@ export class PriceCalculationService {
       throw new NotFoundException(`Product not found: ${item.product_id}`);
     }
 
-    let discountValue = 0;
-
-    // --- Fetch discount if product has applied_discount ---
-    if (product.applied_discount) {
-      const discount = await this.discountModel
-        .findById(product.applied_discount)
-        .lean();
-
-      if (discount) {
-        discountValue = this.applyDiscount(product, discount);
-      }
-    }
-
     // --- Normalize Selections ---
     const normalizedSelections = this.normalizeSelections(item.selections);
     let total = 0;
@@ -123,22 +110,10 @@ export class PriceCalculationService {
         total = 0;
     }
 
-    const totalAmount = Number(total) || 0;
-    const discountAmount = Number(discountValue) || 0;
+    const finalTotal = Number(total) || 0;
 
-    const finalTotal =
-      discountAmount >= totalAmount
-        ? totalAmount
-        : totalAmount - discountAmount;
-    if (discountAmount >= totalAmount) {
-      this.logger?.warn(
-        `Discount ignored: ${discountAmount} >= ${totalAmount}`,
-      );
-    }
-
-    console.log(finalTotal, 'PPPP');
     this.logger.debug(
-      `🧾 Product ${product._id} (${product.kind}) => Base total: ${total}, Discount: ${discountValue}, Final total: ${finalTotal}`,
+      `🧾 Product ${product._id} (${product.kind}) => Final total: ${finalTotal}`,
     );
 
     return finalTotal;
@@ -252,6 +227,10 @@ export class PriceCalculationService {
 
     // Add base price for customized clothing (multiplied by the max quantity of any selection)
     const qty = item.quantity ?? 1;
+    const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+      ? product.discounted_price
+      : (product.base_price || 0);
+
     if (product.clothing?.type === 'customize') {
       let baseQty = qty;
       const allSelections = [
@@ -263,11 +242,11 @@ export class PriceCalculationService {
       if (allSelections.length > 0) {
         baseQty = Math.max(...allSelections.map((s: any) => s.quantity || 1));
       }
-      total += (product.base_price || 0) * baseQty;
+      total += effectivePrice * baseQty;
     } else {
       // Ready-to-wear: if no color variants are selected, add base price
       if (!selections.color_variant_selection || selections.color_variant_selection.length === 0) {
-        total += (product.base_price || 0) * qty;
+        total += effectivePrice * qty;
       }
     }
 
@@ -306,11 +285,15 @@ export class PriceCalculationService {
     product: ProductDocument,
   ): Promise<number> {
     const qty = item.quantity ?? 1;
+    const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+      ? product.discounted_price
+      : (product.base_price || 0);
+
     const selections = item.selections?.fabric_selection;
     if (selections && selections.length > 0) {
       return this.round(await this.calculateFabricCost(selections, product));
     }
-    return this.round((product.base_price || 0) * qty);
+    return this.round(effectivePrice * qty);
   }
 
   async calculateFabricCost(
@@ -418,10 +401,13 @@ export class PriceCalculationService {
   ): Promise<number> {
     let total = 0;
     const qty = item?.quantity ?? 1;
+    const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+      ? product.discounted_price
+      : (product.base_price || 0);
 
     if (product.kind === ProductKind.ACCESSORY) {
       if (!selections || selections.length === 0) {
-        return this.round((product.base_price || 0) * qty);
+        return this.round(effectivePrice * qty);
       }
     }
 
