@@ -76,6 +76,22 @@ export class AccessorySelectionDto {
   total_amount: number;
 }
 
+/** -------------------- ADDON SELECTION -------------------- */
+export class AddonSelectionDto {
+  @IsMongoId()
+  addon_id: Types.ObjectId; // AddOn._id from product.clothing.addons[]
+
+  @IsMongoId()
+  variant_id: Types.ObjectId; // AddOnVariant._id from addon.variants[]
+
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  quantity: number;
+  price: number;
+  total_amount: number;
+}
+
 /** -------------------- ORDER ITEM SELECTIONS -------------------- */
 export class OrderItemSelectionsDto {
   @IsArray()
@@ -101,4 +117,10 @@ export class OrderItemSelectionsDto {
   @Type(() => AccessorySelectionDto)
   @IsOptional()
   accessory_selections?: AccessorySelectionDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddonSelectionDto)
+  @IsOptional()
+  addon_selections?: AddonSelectionDto[];
 }

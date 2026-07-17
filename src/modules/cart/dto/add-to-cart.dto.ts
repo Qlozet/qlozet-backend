@@ -6,8 +6,11 @@ import {
   Min,
   IsNumber,
   IsMongoId,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { OrderItemSelectionsDto } from '../../orders/dto/selection.dto';
 
 export class AddToCartDto {
   @ApiProperty({
@@ -53,4 +56,15 @@ export class AddToCartDto {
   @IsOptional()
   @IsString({ message: 'note must be a string' })
   note?: string;
+
+  @ApiPropertyOptional({
+    type: OrderItemSelectionsDto,
+    description:
+      'Product selections (color variants, fabrics, styles, accessories, addons). ' +
+      'These are persisted and forwarded to POST /orders when placing an order.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OrderItemSelectionsDto)
+  selections?: OrderItemSelectionsDto;
 }

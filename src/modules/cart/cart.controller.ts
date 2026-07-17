@@ -36,6 +36,8 @@ export class CartController {
       dto.quantity,
       dto.appliedFabricId,
       dto.appliedFabricYards,
+      dto.note,
+      dto.selections,
     );
   }
 

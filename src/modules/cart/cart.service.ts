@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { Cart, CartDocument } from './schema/cart.schema';
 import { Product, ProductDocument } from '../products/schemas';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import { OrderItemSelectionsDto } from '../orders/dto/selection.dto';
 
 @Injectable()
 export class CartService {
@@ -31,6 +32,8 @@ export class CartService {
     quantity = 1,
     appliedFabricId?: string,
     appliedFabricYards?: number,
+    note?: string,
+    selections?: OrderItemSelectionsDto,
   ): Promise<CartDocument> {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -95,14 +98,23 @@ export class CartService {
       existingItem.quantity += quantity;
       existingItem.total_price =
         existingItem.quantity * existingItem.unit_price;
+      // Replace selections when re-adding (customer re-configured)
+      if (selections) {
+        existingItem.selections = selections as any;
+      }
+      if (note !== undefined) {
+        existingItem.note = note;
+      }
     } else {
       cart.items.push({
         product_id: new Types.ObjectId(productId),
         applied_fabric_id: fabricObjectId || undefined,
         applied_fabric_yards: appliedFabricYards || undefined,
+        selections: selections as any,
         quantity,
         unit_price: unitPrice,
         total_price: totalPrice,
+        note,
       });
     }
 

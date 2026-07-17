@@ -12,18 +12,42 @@ export class Cart {
     type: [
       {
         product_id: { type: Types.ObjectId, ref: 'Product', required: true },
-        selected_items: {
+        selections: {
           type: {
-            color_variant_id: {
-              type: Types.ObjectId,
-              ref: 'Variant',
-            },
-            fabric_variant_id: {
-              type: Types.ObjectId,
-              ref: 'Fabric',
-            },
-            style_id: { type: Types.ObjectId, ref: 'Style' },
-            accessory_id: { type: Types.ObjectId, ref: 'Accessory' },
+            color_variant_selections: [
+              {
+                color_variant_id: { type: Types.ObjectId },
+                size: String,
+                quantity: { type: Number, min: 1 },
+              },
+            ],
+            fabric_selections: [
+              {
+                fabric_id: { type: Types.ObjectId },
+                yardage: Number,
+                size: String,
+                quantity: { type: Number, min: 1 },
+              },
+            ],
+            style_selections: [
+              {
+                style_id: { type: Types.ObjectId },
+              },
+            ],
+            accessory_selections: [
+              {
+                accessory_id: { type: Types.ObjectId },
+                variant_id: { type: Types.ObjectId },
+                quantity: { type: Number, min: 1 },
+              },
+            ],
+            addon_selections: [
+              {
+                addon_id: { type: Types.ObjectId },
+                variant_id: { type: Types.ObjectId },
+                quantity: { type: Number, min: 1 },
+              },
+            ],
           },
           default: {},
         },
@@ -43,11 +67,31 @@ export class Cart {
   })
   items: Array<{
     product_id: Types.ObjectId;
-    selected_items?: {
-      color_variant_ids?: Types.ObjectId[];
-      fabric_variant_ids?: Types.ObjectId[];
-      style_ids?: Types.ObjectId[];
-      accessory_ids?: Types.ObjectId[];
+    selections?: {
+      color_variant_selections?: {
+        color_variant_id: Types.ObjectId;
+        size?: string;
+        quantity?: number;
+      }[];
+      fabric_selections?: {
+        fabric_id: Types.ObjectId;
+        yardage?: number;
+        size?: string;
+        quantity?: number;
+      }[];
+      style_selections?: {
+        style_id: Types.ObjectId;
+      }[];
+      accessory_selections?: {
+        accessory_id: Types.ObjectId;
+        variant_id: Types.ObjectId;
+        quantity?: number;
+      }[];
+      addon_selections?: {
+        addon_id: Types.ObjectId;
+        variant_id: Types.ObjectId;
+        quantity?: number;
+      }[];
     };
     applied_fabric_id?: Types.ObjectId;
     applied_fabric_yards?: number;
