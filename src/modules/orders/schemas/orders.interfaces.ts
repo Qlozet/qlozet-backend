@@ -52,6 +52,7 @@ export interface ProcessedOrderItem {
   product_kind?: ProductKind;
   clothing_type?: ClothingType; // Only for clothing products
   note?: string;
+  quantity?: number;
   total_price: number;
 
   // Product snapshots at time of order
