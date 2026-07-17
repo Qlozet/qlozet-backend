@@ -38,7 +38,9 @@ export class CartService {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
-    let unitPrice = product.base_price;
+    let unitPrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+      ? product.discounted_price
+      : product.base_price;
 
     // If an external fabric is applied, validate and add its cost
     let fabricObjectId: Types.ObjectId | undefined;
