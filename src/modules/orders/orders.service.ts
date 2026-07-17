@@ -524,6 +524,7 @@ export class OrderService {
           product_kind: product.kind as ProductKind,
           clothing_type: product.clothing?.type as ClothingType,
           note: item.note,
+          quantity: item.quantity,
           selections: finalSelections,
           total_price: totalPrice,
           product_snapshot: this.sanitizeProductSnapshot(product),

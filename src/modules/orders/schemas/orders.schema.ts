@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
 export enum OrderStatus {
@@ -32,7 +32,7 @@ export type OrderDocument = Order & Document;
 /** ------------------ Sub-schemas for selections ------------------ */
 @Schema({ _id: false })
 class VariantSelection {
-  @Prop({ type: Types.ObjectId, ref: 'Variant', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Variant', required: true })
   variant_id: Types.ObjectId;
 
   @Prop({ type: String })
@@ -47,7 +47,7 @@ class VariantSelection {
 
 @Schema({ _id: false })
 class FabricSelection {
-  @Prop({ type: Types.ObjectId, ref: 'Fabric', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Fabric', required: true })
   fabric_id: Types.ObjectId;
 
   @Prop({ type: Number, min: 0.1 })
@@ -65,7 +65,7 @@ class FabricSelection {
 
 @Schema()
 class StyleSelection {
-  @Prop({ type: Types.ObjectId, ref: 'Style', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Style', required: true })
   style_id: Types.ObjectId;
   @Prop({ type: Number, min: 1 })
   price: number;
@@ -77,10 +77,10 @@ class StyleSelection {
 
 @Schema({ _id: false })
 class AccessorySelection {
-  @Prop({ type: Types.ObjectId, ref: 'Accessory', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Accessory', required: true })
   accessory_id: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Variant', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Variant', required: true })
   variant_id: Types.ObjectId;
   @Prop({ type: Number, min: 1 })
   price: number;
@@ -93,9 +93,9 @@ class AccessorySelection {
 /** ------------------ Sub-schema for each item ------------------ */
 @Schema({ _id: false })
 export class OrderItem {
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
   product: Types.ObjectId;
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
   business: Types.ObjectId;
 
   @Prop({ type: [VariantSelection], default: [] })
@@ -104,13 +104,13 @@ export class OrderItem {
   @Prop({ type: [FabricSelection], default: [] })
   fabric_selections?: FabricSelection[];
 
-  @Prop({ type: [Types.ObjectId], default: [] })
+  @Prop({ type: [MongooseSchema.Types.ObjectId], default: [] })
   style_selections?: StyleSelection[];
 
   @Prop({ type: [AccessorySelection], default: [] })
   accessory_selections?: AccessorySelection[];
 
-  @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   applied_fabric?: Types.ObjectId;
 
   @Prop({ type: Number, default: null })
@@ -123,7 +123,7 @@ export class OrderItem {
 /** ------------------ Vendor Shipment Sub-Schema ------------------ */
 @Schema({ _id: true })
 export class VendorShipment {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 
   // Rate quote data (saved from checkout-preview)
@@ -166,10 +166,10 @@ export class VendorShipment {
   })
   shipment_type: ShipmentType;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
   destination_business?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   fabric_product?: Types.ObjectId;
 
   @Prop({ type: Number, default: null })
@@ -193,7 +193,7 @@ export class Order {
   @Prop()
   reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
   @Prop({ type: [OrderItem], required: true })
@@ -221,10 +221,10 @@ export class Order {
   @Prop({ type: String, enum: ['standard', 'bespoke'], default: 'standard' })
   type?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'BespokeDesign', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', default: null })
   bespoke_design?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'BespokeQuote', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeQuote', default: null })
   bespoke_quote?: Types.ObjectId;
 
   /** @deprecated Use shipments[].tracking_number instead */

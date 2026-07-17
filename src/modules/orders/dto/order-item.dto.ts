@@ -23,6 +23,12 @@ export class ProcessedOrderItemDto {
   @IsOptional()
   note?: string;
 
+  @ApiPropertyOptional({ description: 'Quantity of the item (if no variant is selected)' })
+  @IsNumber()
+  @Min(1)
+  @IsOptional()
+  quantity?: number;
+
   @ApiProperty({
     type: OrderItemSelectionsDto,
     description: 'Selections for the product',

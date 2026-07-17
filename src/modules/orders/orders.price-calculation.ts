@@ -117,6 +117,7 @@ export class PriceCalculationService {
         total = await this.calculateAccessoryTotal(
           normalizedSelections.accessory_selection as AccessorySelectionDto[],
           product as ProductDocument,
+          item,
         );
         break;
 
@@ -249,8 +250,9 @@ export class PriceCalculationService {
     let total = 0;
 
     // Add base price for customized clothing (multiplied by the max quantity of any selection)
+    const qty = item.quantity ?? 1;
     if (product.clothing?.type === 'customize') {
-      let baseQty = 1;
+      let baseQty = qty;
       const allSelections = [
         ...(selections.style_selection || []),
         ...(selections.color_variant_selection || []),
@@ -261,6 +263,11 @@ export class PriceCalculationService {
         baseQty = Math.max(...allSelections.map((s: any) => s.quantity || 1));
       }
       total += (product.base_price || 0) * baseQty;
+    } else {
+      // Ready-to-wear: if no color variants are selected, add base price
+      if (!selections.color_variant_selection || selections.color_variant_selection.length === 0) {
+        total += (product.base_price || 0) * qty;
+      }
     }
 
     if (selections.fabric_selection)
@@ -292,10 +299,12 @@ export class PriceCalculationService {
     item: ProcessedOrderItem,
     product: ProductDocument,
   ): Promise<number> {
+    const qty = item.quantity ?? 1;
     const selections = item.selections?.fabric_selection;
-    if (selections)
+    if (selections && selections.length > 0) {
       return this.round(await this.calculateFabricCost(selections, product));
-    return 0;
+    }
+    return this.round((product.base_price || 0) * qty);
   }
 
   async calculateFabricCost(
@@ -399,8 +408,16 @@ export class PriceCalculationService {
   async calculateAccessoryTotal(
     selections: AccessorySelectionDto[],
     product: ProductDocument,
+    item?: ProcessedOrderItem,
   ): Promise<number> {
     let total = 0;
+    const qty = item?.quantity ?? 1;
+
+    if (product.kind === ProductKind.ACCESSORY) {
+      if (!selections || selections.length === 0) {
+        return this.round((product.base_price || 0) * qty);
+      }
+    }
 
     for (const s of selections) {
       let accessory: Accessory | undefined;
