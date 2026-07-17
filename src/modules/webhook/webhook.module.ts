@@ -11,6 +11,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { BusinessModule } from '../business/business.module';
 import { ProductModule } from '../products/products.module';
 import { OrdersModule } from '../orders/orders.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OrdersModule } from '../orders/orders.module';
     BusinessModule,      // provides BusinessService
     ProductModule,       // provides ProductService
     OrdersModule,        // provides Order model (MongooseModule)
+    NotificationsModule, // provides NotificationsService
   ],
   controllers: [WebhookController],
   providers: [

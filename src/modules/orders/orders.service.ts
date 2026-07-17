@@ -40,7 +40,7 @@ import {
 } from '../products/schemas';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
-import { TransactionType } from '../transactions/schema/transaction.schema';
+import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { AddressDocument } from '../ums/schemas/address.schema';
 import {
@@ -54,6 +54,8 @@ import { TransactionService } from '../transactions/transactions.service';
 import { User } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
+import { BusinessService } from '../business/business.service';
+import { ProductService } from '../products/products.service';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 import {
@@ -74,6 +76,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class OrderService {
@@ -102,6 +105,8 @@ export class OrderService {
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
+    private readonly businessService: BusinessService,
+    private readonly productService: ProductService,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -317,9 +322,15 @@ export class OrderService {
         transaction.status = 'success' as any;
         await transaction.save();
 
-        // Mark order as processing (payment is complete)
-        savedOrder.status = OrderStatus.PROCESSING;
+        // Mark order as in_review (awaiting vendor confirmation)
+        savedOrder.status = OrderStatus.IN_REVIEW;
         await savedOrder.save();
+
+        // Record earnings and update inventory (was missing for wallet payments)
+        await Promise.all([
+          this.businessService.recordBusinessEarnings(savedOrder._id as Types.ObjectId),
+          this.productService.updateInventory(savedOrder._id as Types.ObjectId),
+        ]);
 
         // Notify vendor(s) about new order
         this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
@@ -958,10 +969,592 @@ export class OrderService {
   }
 
   /**
-   * @deprecated Replaced by fulfillVendorShipment()
+   * Vendor confirms their portion of the order.
+   * Only when ALL vendors confirm → order moves to "processing".
    */
-  async confirmOrder(orderReference: string, business: Business) {
-    return this.fulfillVendorShipment(orderReference, business, {});
+  async confirmVendorShipment(
+    orderReference: string,
+    business: Business | BusinessDocument,
+  ) {
+    const businessId = (business._id || (business as any).id).toString();
+
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    const shipment = order.shipments.find(
+      (s) => s.business.toString() === businessId,
+    );
+    if (!shipment) {
+      throw new BadRequestException('No shipment found for your business in this order');
+    }
+    if (shipment.confirmed) {
+      throw new BadRequestException('You have already confirmed this shipment');
+    }
+    if (shipment.rejected) {
+      throw new BadRequestException('This shipment has been rejected and cannot be confirmed');
+    }
+
+    // Mark this vendor's shipment as confirmed
+    shipment.confirmed = true;
+    shipment.confirmed_at = new Date();
+
+    // Calculate fulfillment deadline based on product turnaround_days
+    const DEFAULT_TURNAROUND_DAYS = 3; // For fabrics/accessories
+    const vendorItems = order.items.filter(
+      (i) => i.business?.toString() === businessId,
+    );
+    const productIds = vendorItems.map((i) => i.product);
+    const products = await this.productModel.find({ _id: { $in: productIds } }).lean();
+
+    let maxTurnaroundDays = DEFAULT_TURNAROUND_DAYS;
+    for (const product of products) {
+      const turnaround = (product as any).clothing?.turnaround_days ?? DEFAULT_TURNAROUND_DAYS;
+      if (turnaround > maxTurnaroundDays) {
+        maxTurnaroundDays = turnaround;
+      }
+    }
+
+    const deadline = new Date(shipment.confirmed_at);
+    deadline.setDate(deadline.getDate() + maxTurnaroundDays);
+    shipment.fulfillment_deadline = deadline;
+
+    this.logger.log(
+      `[Confirm] Fulfillment deadline set to ${deadline.toISOString()} (${maxTurnaroundDays} days) for vendor ${businessId} on order ${orderReference}`,
+    );
+
+    // Check if ALL non-rejected shipments are confirmed
+    const activeShipments = order.shipments.filter((s) => !s.rejected);
+    const allConfirmed = activeShipments.every((s) => s.confirmed);
+
+    if (allConfirmed) {
+      order.status = OrderStatus.PROCESSING;
+    }
+
+    await order.save();
+
+    // Notify customer that this vendor confirmed
+    this.notifyCustomerVendorConfirmed(order, business).catch((err) =>
+      this.logger.error('Failed to send vendor confirmation notification', err),
+    );
+
+    return {
+      message: `Shipment confirmed by ${(business as any).business_name || businessId}`,
+      data: {
+        confirmed: true,
+        all_vendors_confirmed: allConfirmed,
+        order_status: order.status,
+      },
+    };
+  }
+
+  /**
+   * Vendor rejects their portion of the order.
+   * Refunds only this vendor's items + shipping to the customer.
+   */
+  async rejectVendorShipment(
+    orderReference: string,
+    business: Business | BusinessDocument,
+    reason?: string,
+  ) {
+    const businessId = (business._id || (business as any).id).toString();
+
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    const shipment = order.shipments.find(
+      (s) => s.business.toString() === businessId,
+    );
+    if (!shipment) {
+      throw new BadRequestException('No shipment found for your business in this order');
+    }
+    if (shipment.rejected) {
+      throw new BadRequestException('This shipment has already been rejected');
+    }
+    if (shipment.status === ShipmentStatus.SHIPPED || shipment.status === ShipmentStatus.IN_TRANSIT) {
+      throw new BadRequestException('Cannot reject a shipment that has already been shipped');
+    }
+
+    // Mark as rejected
+    shipment.rejected = true;
+    shipment.rejected_at = new Date();
+    shipment.rejection_reason = reason || 'Vendor declined the order';
+    shipment.status = ShipmentStatus.FAILED;
+
+    // Calculate refund amount for this vendor's portion
+    const vendorItems = order.items.filter(
+      (i) => i.business?.toString() === businessId,
+    );
+    const vendorItemsTotal = vendorItems.reduce(
+      (sum, item) => sum + (item.total_price || 0),
+      0,
+    );
+    const vendorShippingFee = shipment.shipping_fee || 0;
+    const refundAmount = vendorItemsTotal + vendorShippingFee;
+
+    // Update order totals
+    order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+    order.shipping_fee = Math.max(0, (order.shipping_fee || 0) - vendorShippingFee);
+    order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+    // Check if ALL shipments are now rejected → cancel entire order
+    const allRejected = order.shipments.every((s) => s.rejected);
+    if (allRejected) {
+      order.status = OrderStatus.CANCELLED;
+    } else {
+      // Check if remaining (non-rejected) shipments are all confirmed → processing
+      const activeShipments = order.shipments.filter((s) => !s.rejected);
+      const allConfirmed = activeShipments.every((s) => s.confirmed);
+      if (allConfirmed) {
+        order.status = OrderStatus.PROCESSING;
+      }
+    }
+
+    await order.save();
+
+    // Issue partial refund
+    this.processPartialRefund(order, refundAmount, `Vendor ${businessId} rejected`).catch((err) =>
+      this.logger.error(`Failed to process partial refund for order ${orderReference}: ${err.message}`),
+    );
+
+    // Notify customer about rejection
+    this.notifyCustomerVendorRejected(order, business, reason).catch((err) =>
+      this.logger.error('Failed to send vendor rejection notification', err),
+    );
+
+    return {
+      message: `Shipment rejected. ₦${refundAmount.toLocaleString()} will be refunded to the customer.`,
+      data: {
+        rejected: true,
+        refund_amount: refundAmount,
+        order_status: order.status,
+      },
+    };
+  }
+
+  /**
+   * Notify customer that a vendor has confirmed their order portion.
+   */
+  private async notifyCustomerVendorConfirmed(order: OrderDocument, business: Business | BusinessDocument) {
+    const businessName = (business as any).business_name || 'A vendor';
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_CONFIRMED,
+      title: 'Order Confirmed by Vendor',
+      body: `${businessName} has confirmed your order #${order.reference}. They're getting it ready!`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+      },
+      action_url: `/orders`,
+    });
+  }
+
+  /**
+   * Notify customer that a vendor has rejected their order portion.
+   */
+  private async notifyCustomerVendorRejected(order: OrderDocument, business: Business | BusinessDocument, reason?: string) {
+    const businessName = (business as any).business_name || 'A vendor';
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_CANCELLED,
+      title: 'Vendor Declined Order',
+      body: `${businessName} was unable to fulfill their portion of order #${order.reference}.${reason ? ` Reason: ${reason}` : ''} A refund for their items will be processed.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+        reason,
+      },
+      action_url: `/orders`,
+    });
+  }
+
+  // ==================== PARTIAL REFUND ====================
+
+  /**
+   * Process a partial refund for a rejected vendor shipment.
+   * Detects whether the original payment was Paystack or wallet, and routes accordingly.
+   */
+  private async processPartialRefund(
+    order: OrderDocument,
+    refundAmount: number,
+    reason: string,
+  ) {
+    if (refundAmount <= 0) return;
+
+    const orderId = order._id.toString();
+    const customerId = order.customer?.toString();
+
+    this.logger.log(
+      `[Refund] Processing ₦${refundAmount} refund for order ${order.reference}. Reason: ${reason}`,
+    );
+
+    // Find the original payment transaction for this order
+    const originalTransaction = await this.transactionService.findByOrderId(orderId);
+
+    if (!originalTransaction) {
+      this.logger.error(
+        `[Refund] No original transaction found for order ${order.reference}. Manual refund required.`,
+      );
+      return;
+    }
+
+    const paymentChannel = originalTransaction.channel;
+
+    // Route based on payment method
+    if (paymentChannel === 'wallet_checkout') {
+      // Wallet payment → credit the customer's wallet back
+      try {
+        const customerUser = await this.userModel.findById(customerId).lean();
+        const walletId = originalTransaction.wallet?.toString();
+
+        if (!walletId) {
+          this.logger.error(
+            `[Refund] No wallet ID found on transaction for order ${order.reference}`,
+          );
+          return;
+        }
+
+        await this.walletsService.creditWallet(walletId, refundAmount);
+
+        // Create refund transaction record
+        await this.transactionService.create({
+          initiator: new Types.ObjectId(customerId),
+          order: order._id as Types.ObjectId,
+          wallet: new Types.ObjectId(walletId),
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status: TransactionStatus.SUCCESS,
+          description: `Partial refund for order ${order.reference}: ${reason}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: originalTransaction.reference,
+            reason,
+            refund_type: 'wallet',
+          },
+        });
+
+        this.logger.log(
+          `[Refund] ₦${refundAmount} credited back to wallet ${walletId} for order ${order.reference}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[Refund] Failed to credit wallet for order ${order.reference}: ${error.message}`,
+          error.stack,
+        );
+      }
+    } else if (paymentChannel === 'checkout') {
+      // Paystack payment → partial refund via Paystack API
+      const result = await this.transactionService.partialRefundPaystack(
+        orderId,
+        refundAmount,
+        reason,
+      );
+
+      if (result.success) {
+        // Create refund transaction record
+        await this.transactionService.create({
+          initiator: new Types.ObjectId(customerId),
+          order: order._id as Types.ObjectId,
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status: TransactionStatus.SUCCESS,
+          description: `Partial Paystack refund for order ${order.reference}: ${reason}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: originalTransaction.reference,
+            reason,
+            refund_type: 'paystack',
+            paystack_refund: result.refundData,
+          },
+        });
+
+        this.logger.log(
+          `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,
+        );
+      } else {
+        this.logger.error(
+          `[Refund] Paystack partial refund failed for order ${order.reference}: ${result.error}`,
+        );
+      }
+    } else {
+      this.logger.warn(
+        `[Refund] Unknown payment channel "${paymentChannel}" for order ${order.reference}. Manual refund required.`,
+      );
+    }
+  }
+
+  // ==================== CRON: 24h Auto-Reject ====================
+
+  /**
+   * Runs every hour. Finds orders in 'in_review' with unconfirmed shipments
+   * older than 24 hours, and auto-rejects those vendor shipments.
+   */
+  @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
+  async autoRejectStaleShipments() {
+    const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+
+    try {
+      // Find orders that are in_review and were created more than 24h ago
+      const staleOrders = await this.orderModel.find({
+        status: OrderStatus.IN_REVIEW,
+        createdAt: { $lte: cutoff },
+      });
+
+      if (staleOrders.length === 0) return;
+
+      this.logger.log(
+        `[AutoReject] Found ${staleOrders.length} order(s) with stale shipments`,
+      );
+
+      for (const order of staleOrders) {
+        let orderChanged = false;
+
+        for (const shipment of order.shipments) {
+          // Skip already confirmed or rejected shipments
+          if (shipment.confirmed || shipment.rejected) continue;
+
+          // Auto-reject this vendor's unconfirmed shipment
+          shipment.rejected = true;
+          shipment.rejected_at = new Date();
+          shipment.rejection_reason = 'Auto-rejected: vendor did not confirm within 24 hours';
+          shipment.status = ShipmentStatus.FAILED;
+          orderChanged = true;
+
+          // Calculate refund for this vendor's portion
+          const vendorItems = order.items.filter(
+            (i) => i.business?.toString() === shipment.business.toString(),
+          );
+          const vendorItemsTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).total_price || 0),
+            0,
+          );
+          const vendorShippingFee = shipment.shipping_fee || 0;
+          const refundAmount = vendorItemsTotal + vendorShippingFee;
+
+          // Update order totals
+          order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+          order.shipping_fee = Math.max(0, (order.shipping_fee || 0) - vendorShippingFee);
+          order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+          // Look up vendor name for notification
+          const business = await this.businessModel.findById(shipment.business);
+          const businessName = business?.business_name || 'A vendor';
+
+          this.logger.log(
+            `[AutoReject] Auto-rejected shipment for ${businessName} on order ${order.reference}. Refund: ₦${refundAmount}`,
+          );
+
+          // Process partial refund
+          this.processPartialRefund(
+            order as OrderDocument,
+            refundAmount,
+            `Auto-rejected: ${businessName} did not confirm within 24h`,
+          ).catch((err) =>
+            this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
+          );
+
+          // Notify customer
+          this.notificationsService.create({
+            recipient: order.customer.toString(),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.ORDER_CANCELLED,
+            title: 'Vendor Did Not Respond',
+            body: `${businessName} did not confirm your order #${order.reference} within 24 hours. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              business_name: businessName,
+              refund_amount: refundAmount,
+              reason: 'auto_reject_24h',
+            },
+            action_url: `/orders`,
+          }).catch((err) =>
+            this.logger.error(`[AutoReject] Failed to notify customer: ${err.message}`),
+          );
+        }
+
+        if (orderChanged) {
+          // Check if ALL shipments are now rejected → cancel entire order
+          const allRejected = order.shipments.every((s) => s.rejected);
+          if (allRejected) {
+            order.status = OrderStatus.CANCELLED;
+          } else {
+            // Check if remaining are all confirmed → processing
+            const activeShipments = order.shipments.filter((s) => !s.rejected);
+            const allConfirmed = activeShipments.every((s) => s.confirmed);
+            if (allConfirmed) {
+              order.status = OrderStatus.PROCESSING;
+            }
+          }
+
+          await order.save();
+        }
+      }
+
+      this.logger.log(`[AutoReject] Finished processing ${staleOrders.length} stale order(s)`);
+    } catch (error) {
+      this.logger.error(`[AutoReject] Cron failed: ${error.message}`, error.stack);
+    }
+  }
+
+  // ==================== CRON: Late Fulfillment Penalty ====================
+
+  /**
+   * Runs every hour. Finds confirmed-but-unfulfilled vendor shipments
+   * that have passed their fulfillment_deadline, and applies a progressive
+   * penalty: 5% of vendor items total per day late, capped at 25%.
+   * The penalty is deducted from vendor earnings and refunded to the customer.
+   */
+  @Cron('30 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour at :30
+  async checkLateFulfillments() {
+    const PENALTY_PERCENT_PER_DAY = 5;
+    const MAX_PENALTY_PERCENT = 25;
+
+    try {
+      // Find orders with confirmed shipments that have a deadline in the past
+      const orders = await this.orderModel.find({
+        status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+        'shipments.confirmed': true,
+        'shipments.fulfillment_deadline': { $lte: new Date() },
+      });
+
+      if (orders.length === 0) return;
+
+      this.logger.log(
+        `[LatePenalty] Checking ${orders.length} order(s) for overdue shipments`,
+      );
+
+      for (const order of orders) {
+        for (const shipment of order.shipments) {
+          // Skip shipments that aren't overdue or are already shipped/rejected
+          if (!shipment.confirmed || shipment.rejected) continue;
+          if (!shipment.fulfillment_deadline) continue;
+          if (
+            shipment.status === ShipmentStatus.SHIPPED ||
+            shipment.status === ShipmentStatus.IN_TRANSIT ||
+            shipment.status === ShipmentStatus.DELIVERED
+          ) continue;
+
+          const now = new Date();
+          if (now <= shipment.fulfillment_deadline) continue;
+
+          // Calculate days late
+          const msLate = now.getTime() - shipment.fulfillment_deadline.getTime();
+          const daysLate = Math.ceil(msLate / (24 * 60 * 60 * 1000));
+
+          // Skip if we've already penalized for this many (or more) days
+          if (daysLate <= (shipment.late_penalty_days || 0)) continue;
+
+          const businessId = shipment.business.toString();
+
+          // Calculate vendor items total
+          const vendorItems = order.items.filter(
+            (i) => i.business?.toString() === businessId,
+          );
+          const vendorItemsTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).total_price || 0),
+            0,
+          );
+
+          if (vendorItemsTotal <= 0) continue;
+
+          // Calculate total penalty (cumulative)
+          const penaltyPercent = Math.min(daysLate * PENALTY_PERCENT_PER_DAY, MAX_PENALTY_PERCENT);
+          const totalPenaltyAmount = Math.round(vendorItemsTotal * (penaltyPercent / 100));
+
+          // Calculate incremental penalty (what hasn't been applied yet)
+          const previouslyApplied = shipment.late_penalty_amount || 0;
+          const incrementalPenalty = totalPenaltyAmount - previouslyApplied;
+
+          if (incrementalPenalty <= 0) continue;
+
+          // Look up vendor name
+          const business = await this.businessModel.findById(businessId);
+          const businessName = business?.business_name || 'A vendor';
+
+          this.logger.log(
+            `[LatePenalty] Vendor "${businessName}" is ${daysLate} day(s) late on order ${order.reference}. ` +
+            `Applying incremental penalty of ₦${incrementalPenalty} (total: ₦${totalPenaltyAmount}, ${penaltyPercent}%)`,
+          );
+
+          // Update shipment penalty tracking
+          shipment.late_penalty_applied = true;
+          shipment.late_penalty_amount = totalPenaltyAmount;
+          shipment.late_penalty_days = daysLate;
+
+          // Deduct from vendor earnings on the order
+          order.vendor_earnings = Math.max(0, (order.vendor_earnings || 0) - incrementalPenalty);
+
+          await order.save();
+
+          // Refund the incremental amount to the customer
+          this.processPartialRefund(
+            order as OrderDocument,
+            incrementalPenalty,
+            `Late fulfillment penalty: ${businessName} is ${daysLate} day(s) past deadline`,
+          ).catch((err) =>
+            this.logger.error(
+              `[LatePenalty] Refund failed for order ${order.reference}: ${err.message}`,
+            ),
+          );
+
+          // Notify customer
+          this.notificationsService.create({
+            recipient: order.customer.toString(),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.LATE_FULFILLMENT_PENALTY,
+            title: 'Late Fulfillment Compensation',
+            body: `${businessName} is ${daysLate} day(s) late fulfilling order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} compensation has been credited to you.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              business_name: businessName,
+              penalty_amount: incrementalPenalty,
+              total_penalty: totalPenaltyAmount,
+              days_late: daysLate,
+              reason: 'late_fulfillment_penalty',
+            },
+            action_url: `/orders`,
+          }).catch((err) =>
+            this.logger.error(`[LatePenalty] Failed to notify customer: ${err.message}`),
+          );
+
+          // Notify vendor
+          if (business?.created_by?.id) {
+            this.notificationsService.create({
+              recipient: business.created_by.id.toString(),
+              category: NotificationCategory.ORDER,
+              type: NotificationType.LATE_FULFILLMENT_PENALTY,
+              title: 'Late Fulfillment Penalty',
+              body: `You are ${daysLate} day(s) past the fulfillment deadline for order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} penalty has been applied. Please fulfill this order immediately.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                penalty_amount: incrementalPenalty,
+                total_penalty: totalPenaltyAmount,
+                days_late: daysLate,
+                max_penalty_percent: MAX_PENALTY_PERCENT,
+                reason: 'late_fulfillment_penalty',
+              },
+              action_url: `/orders`,
+            }).catch((err) =>
+              this.logger.error(`[LatePenalty] Failed to notify vendor: ${err.message}`),
+            );
+          }
+        }
+      }
+
+      this.logger.log(`[LatePenalty] Finished checking late fulfillments`);
+    } catch (error) {
+      this.logger.error(`[LatePenalty] Cron failed: ${error.message}`, error.stack);
+    }
   }
 
   /**
@@ -1303,6 +1896,24 @@ export class OrderService {
     dto: FulfillOrderDto,
   ) {
     const businessId = (business._id || business.id).toString();
+
+    // ── Gate: vendor must confirm before fulfilling ──
+    const preCheck = await this.orderModel.findOne({ reference: orderReference });
+    if (preCheck) {
+      const myShipment = preCheck.shipments.find(
+        (s) => s.business.toString() === businessId,
+      );
+      if (myShipment && !myShipment.confirmed) {
+        throw new BadRequestException(
+          'You must confirm this order before you can fulfill it. Use the confirm endpoint first.',
+        );
+      }
+      if (myShipment?.rejected) {
+        throw new BadRequestException(
+          'This shipment has been rejected and cannot be fulfilled.',
+        );
+      }
+    }
 
     // Atomic claim: set status to 'ready_to_ship' only if currently 'pending'
     // This prevents double-fulfillment from concurrent requests

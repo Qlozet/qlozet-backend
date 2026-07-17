@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types, Schema as MongooseSchema } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
 export enum OrderStatus {
@@ -27,7 +27,7 @@ export enum ShipmentType {
   FABRIC_TRANSFER = 'fabric_transfer',
 }
 
-export type OrderDocument = Order & Document;
+export type OrderDocument = HydratedDocument<Order>;
 
 /** ------------------ Sub-schemas for selections ------------------ */
 @Schema({ _id: false })
@@ -118,6 +118,9 @@ export class OrderItem {
 
   @Prop({ type: String })
   note?: string;
+
+  @Prop({ type: Number, default: 0 })
+  total_price?: number;
 }
 
 /** ------------------ Vendor Shipment Sub-Schema ------------------ */
@@ -175,6 +178,21 @@ export class VendorShipment {
   @Prop({ type: Number, default: null })
   fabric_yards?: number;
 
+  @Prop({ type: Boolean, default: false })
+  confirmed: boolean;
+
+  @Prop({ type: Date })
+  confirmed_at?: Date;
+
+  @Prop({ type: Boolean, default: false })
+  rejected: boolean;
+
+  @Prop({ type: Date })
+  rejected_at?: Date;
+
+  @Prop({ type: String })
+  rejection_reason?: string;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 
@@ -183,6 +201,19 @@ export class VendorShipment {
 
   @Prop({ type: Date })
   delivered_at?: Date;
+
+  // Late fulfillment penalty tracking
+  @Prop({ type: Date, default: null })
+  fulfillment_deadline?: Date;
+
+  @Prop({ type: Boolean, default: false })
+  late_penalty_applied: boolean;
+
+  @Prop({ type: Number, default: 0 })
+  late_penalty_amount: number;
+
+  @Prop({ type: Number, default: 0 })
+  late_penalty_days: number;
 }
 
 export const VendorShipmentSchema = SchemaFactory.createForClass(VendorShipment);
