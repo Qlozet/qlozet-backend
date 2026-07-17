@@ -255,6 +255,19 @@ export class TransactionService {
     if (!tx) throw new NotFoundException('Transaction not found');
     return tx;
   }
+
+  /**
+   * Find the original payment transaction for an order.
+   * Searches for successful checkout or wallet_checkout transactions.
+   */
+  async findByOrderId(orderId: string): Promise<TransactionDocument | null> {
+    return this.transactionModel.findOne({
+      order: new Types.ObjectId(orderId),
+      status: TransactionStatus.SUCCESS,
+      channel: { $in: ['checkout', 'wallet_checkout'] },
+    });
+  }
+
   async refundPaystackPayment(reference: string) {
     const transaction = await this.transactionModel.findOne({ reference });
     if (!transaction) throw new NotFoundException('Transaction not found');
@@ -301,5 +314,88 @@ export class TransactionService {
     await transaction.save();
 
     return transaction?.metadata?.order_reference;
+  }
+
+  /**
+   * Partial refund via Paystack.
+   * Finds the original checkout transaction for the order, and refunds a specific amount.
+   * Paystack supports partial refunds natively via the `amount` field (in kobo).
+   */
+  async partialRefundPaystack(
+    orderId: string,
+    refundAmount: number,
+    reason?: string,
+  ): Promise<{ success: boolean; refundData?: any; error?: string }> {
+    // Find the original checkout transaction for this order
+    const transaction = await this.transactionModel.findOne({
+      order: new Types.ObjectId(orderId),
+      status: TransactionStatus.SUCCESS,
+      channel: { $in: ['checkout'] },
+    });
+
+    if (!transaction) {
+      return { success: false, error: 'Original checkout transaction not found' };
+    }
+
+    // Guard: can't refund more than the original transaction
+    const alreadyRefunded = transaction.metadata?.total_refunded || 0;
+    const maxRefundable = transaction.amount - alreadyRefunded;
+
+    if (refundAmount > maxRefundable) {
+      return {
+        success: false,
+        error: `Refund amount ₦${refundAmount} exceeds remaining refundable ₦${maxRefundable}`,
+      };
+    }
+
+    const PAYSTACK_SECRET = this.configService.get<string>(
+      'PAYSTACK_SECRET_KEY',
+    );
+
+    try {
+      const payload: any = {
+        transaction: transaction.reference,
+        amount: Math.round(refundAmount * 100), // convert to kobo
+      };
+
+      const response: any = await firstValueFrom(
+        this.httpService.post('https://api.paystack.co/refund', payload, {
+          headers: {
+            Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          },
+        }),
+      );
+
+      const refundData = response.data.data;
+
+      // Track cumulative partial refunds in metadata
+      const partialRefunds = transaction.metadata?.partial_refunds || [];
+      partialRefunds.push({
+        amount: refundAmount,
+        reason: reason || 'vendor_rejection',
+        refunded_at: new Date().toISOString(),
+        paystack_response: refundData,
+      });
+
+      transaction.metadata = {
+        ...transaction.metadata,
+        partial_refunds: partialRefunds,
+        total_refunded: alreadyRefunded + refundAmount,
+      };
+
+      // If fully refunded, mark as reversed
+      if (alreadyRefunded + refundAmount >= transaction.amount) {
+        transaction.status = TransactionStatus.REVERSED;
+      }
+
+      await transaction.save();
+
+      return { success: true, refundData };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+      };
+    }
   }
 }

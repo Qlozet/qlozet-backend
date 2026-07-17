@@ -40,7 +40,7 @@ import {
 } from '../products/schemas';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
-import { TransactionType } from '../transactions/schema/transaction.schema';
+import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { AddressDocument } from '../ums/schemas/address.schema';
 import {
@@ -1087,9 +1087,9 @@ export class OrderService {
 
     await order.save();
 
-    // TODO: Issue partial refund via Paystack or credit wallet
-    this.logger.log(
-      `Vendor ${businessId} rejected order ${orderReference}. Refund amount: ₦${refundAmount}`,
+    // Issue partial refund
+    this.processPartialRefund(order, refundAmount, `Vendor ${businessId} rejected`).catch((err) =>
+      this.logger.error(`Failed to process partial refund for order ${orderReference}: ${err.message}`),
     );
 
     // Notify customer about rejection
@@ -1146,6 +1146,123 @@ export class OrderService {
       },
       action_url: `/orders`,
     });
+  }
+
+  // ==================== PARTIAL REFUND ====================
+
+  /**
+   * Process a partial refund for a rejected vendor shipment.
+   * Detects whether the original payment was Paystack or wallet, and routes accordingly.
+   */
+  private async processPartialRefund(
+    order: OrderDocument,
+    refundAmount: number,
+    reason: string,
+  ) {
+    if (refundAmount <= 0) return;
+
+    const orderId = order._id.toString();
+    const customerId = order.customer?.toString();
+
+    this.logger.log(
+      `[Refund] Processing ₦${refundAmount} refund for order ${order.reference}. Reason: ${reason}`,
+    );
+
+    // Find the original payment transaction for this order
+    const originalTransaction = await this.transactionService.findByOrderId(orderId);
+
+    if (!originalTransaction) {
+      this.logger.error(
+        `[Refund] No original transaction found for order ${order.reference}. Manual refund required.`,
+      );
+      return;
+    }
+
+    const paymentChannel = originalTransaction.channel;
+
+    // Route based on payment method
+    if (paymentChannel === 'wallet_checkout') {
+      // Wallet payment → credit the customer's wallet back
+      try {
+        const customerUser = await this.userModel.findById(customerId).lean();
+        const walletId = originalTransaction.wallet?.toString();
+
+        if (!walletId) {
+          this.logger.error(
+            `[Refund] No wallet ID found on transaction for order ${order.reference}`,
+          );
+          return;
+        }
+
+        await this.walletsService.creditWallet(walletId, refundAmount);
+
+        // Create refund transaction record
+        await this.transactionService.create({
+          initiator: new Types.ObjectId(customerId),
+          order: order._id as Types.ObjectId,
+          wallet: new Types.ObjectId(walletId),
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status: TransactionStatus.SUCCESS,
+          description: `Partial refund for order ${order.reference}: ${reason}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: originalTransaction.reference,
+            reason,
+            refund_type: 'wallet',
+          },
+        });
+
+        this.logger.log(
+          `[Refund] ₦${refundAmount} credited back to wallet ${walletId} for order ${order.reference}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[Refund] Failed to credit wallet for order ${order.reference}: ${error.message}`,
+          error.stack,
+        );
+      }
+    } else if (paymentChannel === 'checkout') {
+      // Paystack payment → partial refund via Paystack API
+      const result = await this.transactionService.partialRefundPaystack(
+        orderId,
+        refundAmount,
+        reason,
+      );
+
+      if (result.success) {
+        // Create refund transaction record
+        await this.transactionService.create({
+          initiator: new Types.ObjectId(customerId),
+          order: order._id as Types.ObjectId,
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status: TransactionStatus.SUCCESS,
+          description: `Partial Paystack refund for order ${order.reference}: ${reason}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: originalTransaction.reference,
+            reason,
+            refund_type: 'paystack',
+            paystack_refund: result.refundData,
+          },
+        });
+
+        this.logger.log(
+          `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,
+        );
+      } else {
+        this.logger.error(
+          `[Refund] Paystack partial refund failed for order ${order.reference}: ${result.error}`,
+        );
+      }
+    } else {
+      this.logger.warn(
+        `[Refund] Unknown payment channel "${paymentChannel}" for order ${order.reference}. Manual refund required.`,
+      );
+    }
   }
 
   // ==================== CRON: 24h Auto-Reject ====================
@@ -1208,6 +1325,15 @@ export class OrderService {
 
           this.logger.log(
             `[AutoReject] Auto-rejected shipment for ${businessName} on order ${order.reference}. Refund: ₦${refundAmount}`,
+          );
+
+          // Process partial refund
+          this.processPartialRefund(
+            order as OrderDocument,
+            refundAmount,
+            `Auto-rejected: ${businessName} did not confirm within 24h`,
+          ).catch((err) =>
+            this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
           );
 
           // Notify customer
