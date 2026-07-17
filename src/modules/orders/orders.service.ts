@@ -327,8 +327,8 @@ export class OrderService {
 
         // Record earnings and update inventory (was missing for wallet payments)
         await Promise.all([
-          this.businessService.recordBusinessEarnings(savedOrder._id),
-          this.productService.updateInventory(savedOrder._id),
+          this.businessService.recordBusinessEarnings(savedOrder._id as Types.ObjectId),
+          this.productService.updateInventory(savedOrder._id as Types.ObjectId),
         ]);
 
         // Notify vendor(s) about new order

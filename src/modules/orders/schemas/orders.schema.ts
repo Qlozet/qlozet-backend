@@ -118,6 +118,9 @@ export class OrderItem {
 
   @Prop({ type: String })
   note?: string;
+
+  @Prop({ type: Number, default: 0 })
+  total_price?: number;
 }
 
 /** ------------------ Vendor Shipment Sub-Schema ------------------ */
