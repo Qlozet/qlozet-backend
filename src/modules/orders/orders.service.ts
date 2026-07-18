@@ -802,7 +802,7 @@ export class OrderService {
       const [orders, total] = await Promise.all([
         this.orderModel
           .find(filter)
-          .populate('customer', 'email firstName lastName')
+          .populate('customer', 'email username firstName lastName')
           .populate('items.product', 'name base_price kind clothing.name clothing.images clothing.type clothing.description fabric.name fabric.images accessory.name accessory.images')
           .populate('shipments.business', 'business_name business_logo_url')
           .populate('shipments.destination_business', 'business_name business_logo_url')
