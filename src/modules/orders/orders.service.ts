@@ -2018,7 +2018,7 @@ export class OrderService {
 
     // Verify payment
     const transaction =
-      await this.transactionService.findByReference(orderReference);
+      await this.transactionService.findByOrderId(order.id);
     if (!transaction || transaction.status !== 'success') {
       throw new BadRequestException(
         'Cannot fulfill order: payment not completed',
