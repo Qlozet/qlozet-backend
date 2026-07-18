@@ -1187,29 +1187,40 @@ export class BusinessService implements OnModuleInit {
       platformSettings?.platform_commission_percent ?? 10;
     this.logger.log(`Using platform commission: ${commissionPercent}%`);
 
+    let totalOrderNet = 0;
+    let totalOrderCommission = 0;
+
     for (const item of order.items) {
       const businessId = item.business;
       this.logger.log(`Processing item for business: ${businessId}`);
 
       const colorVariantsTotal = (item.color_variant_selections || []).reduce(
-        (sum, cv) => sum + cv.price * cv.quantity,
+        (sum, cv) => sum + (cv.total_amount || cv.price * cv.quantity || 0),
         0,
       );
       const stylesTotal = (item.style_selections || []).reduce(
-        (sum, s) => sum + s.price * s.quantity,
+        (sum, s) => sum + (s.total_amount || s.price * s.quantity || 0),
         0,
       );
       const fabricsTotal = (item.fabric_selections || []).reduce(
-        (sum, f) => sum + f.price * f.quantity,
+        (sum, f) => sum + (f.total_amount || f.price * f.quantity || 0),
         0,
       );
       const accessoriesTotal = (item.accessory_selections || []).reduce(
-        (sum, a) => sum + a.price * a.quantity,
+        (sum, a) => sum + (a.total_amount || a.price * a.quantity || 0),
+        0,
+      );
+      const addonsTotal = (item.addon_selections || []).reduce(
+        (sum, a) => sum + (a.total_amount || a.price * a.quantity || 0),
         0,
       );
 
-      const gross =
-        colorVariantsTotal + stylesTotal + fabricsTotal + accessoriesTotal;
+      const selectionsTotal =
+        colorVariantsTotal + stylesTotal + fabricsTotal + accessoriesTotal + addonsTotal;
+
+      // Use the selections total if available, otherwise fall back to the
+      // pre-computed item total_price (covers products with no sub-selections).
+      const gross = selectionsTotal > 0 ? selectionsTotal : (item.total_price || 0);
       const commission = gross * (commissionPercent / 100);
       const net = gross - commission;
 
@@ -1228,7 +1239,21 @@ export class BusinessService implements OnModuleInit {
       });
 
       this.logger.log(`Business earnings recorded for business ${businessId}`);
+
+      totalOrderNet += net;
+      totalOrderCommission += commission;
     }
+
+    // Write the totals back to the order so the vendor can see per-order earnings
+    await this.orderModel.updateOne(
+      { _id: order._id },
+      {
+        $set: {
+          vendor_earnings: totalOrderNet,
+          platform_commission: totalOrderCommission,
+        },
+      },
+    );
 
     this.logger.log(`Finished recording earnings for order: ${orderId}`);
   }
@@ -1379,12 +1404,13 @@ export class BusinessService implements OnModuleInit {
       {
         $match: {
           business: new Types.ObjectId(businessId),
-          released: true, // only consider released earnings
+          // Show all earnings (released + pending) so the chart isn't empty
+          // during the 7-day release window.
         },
       },
       {
         $project: {
-          dayOfWeek: { $dayOfWeek: '$release_date' }, // 1=Sun, 2=Mon, ... 7=Sat
+          dayOfWeek: { $dayOfWeek: '$createdAt' }, // 1=Sun, 2=Mon, ... 7=Sat
           net_amount: 1,
         },
       },
@@ -1471,6 +1497,8 @@ export class BusinessService implements OnModuleInit {
           _id: 1,
           username: '$customer_info.username',
           full_name: '$customer_info.full_name',
+          email: '$customer_info.email',
+          phone_number: '$customer_info.phone_number',
           profile_picture: '$customer_info.profile_picture',
           status: '$customer_info.status',
           total_orders: 1,
