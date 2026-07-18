@@ -1194,33 +1194,10 @@ export class BusinessService implements OnModuleInit {
       const businessId = item.business;
       this.logger.log(`Processing item for business: ${businessId}`);
 
-      const colorVariantsTotal = (item.color_variant_selections || []).reduce(
-        (sum, cv) => sum + (cv.total_amount || cv.price * cv.quantity || 0),
-        0,
-      );
-      const stylesTotal = (item.style_selections || []).reduce(
-        (sum, s) => sum + (s.total_amount || s.price * s.quantity || 0),
-        0,
-      );
-      const fabricsTotal = (item.fabric_selections || []).reduce(
-        (sum, f) => sum + (f.total_amount || f.price * f.quantity || 0),
-        0,
-      );
-      const accessoriesTotal = (item.accessory_selections || []).reduce(
-        (sum, a) => sum + (a.total_amount || a.price * a.quantity || 0),
-        0,
-      );
-      const addonsTotal = (item.addon_selections || []).reduce(
-        (sum, a) => sum + (a.total_amount || a.price * a.quantity || 0),
-        0,
-      );
-
-      const selectionsTotal =
-        colorVariantsTotal + stylesTotal + fabricsTotal + accessoriesTotal + addonsTotal;
-
-      // Use the selections total if available, otherwise fall back to the
-      // pre-computed item total_price (covers products with no sub-selections).
-      const gross = selectionsTotal > 0 ? selectionsTotal : (item.total_price || 0);
+      // item.total_price is pre-computed by calculateItemTotal() during checkout
+      // and already includes: base_price + color variants + styles + fabrics
+      //                      + accessories + addons (the full item cost).
+      const gross = item.total_price || 0;
       const commission = gross * (commissionPercent / 100);
       const net = gross - commission;
 
