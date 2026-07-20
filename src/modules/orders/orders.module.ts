@@ -11,6 +11,7 @@ import {
 } from './schemas/checkout-rate-cache.schema';
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
+import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 import { JwtService } from '@nestjs/jwt';
 
 // Import modules instead of directly listing their services
@@ -31,6 +32,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: CheckoutRateCache.name, schema: CheckoutRateCacheSchema },
       { name: Address.name, schema: AddressSchema },
       { name: User.name, schema: UserSchema },
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
     TransactionsModule,  // provides TransactionService + Transaction model
     BusinessModule,      // provides BusinessService, LogisticsService + Business, BusinessEarning models

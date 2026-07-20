@@ -26,7 +26,7 @@ export class BusinessEarningsCron {
 
     const pending = await this.businessEarningsModel.find({
       released: false,
-      release_date: { $lte: now },
+      release_date: { $ne: null, $lte: now },  // Must have a release_date set (set on delivery)
     });
 
     if (!pending.length) {

@@ -817,6 +817,175 @@ export class ProductService {
     }
   }
 
+  /**
+   * Restores inventory that was deducted when an order was placed.
+   * Called on order cancellation, full refund, or vendor rejection.
+   * Mirrors updateInventory() but adds stock back instead of deducting.
+   */
+  async restoreInventory(orderId: Types.ObjectId) {
+    const session = await this.connection.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        const order = await this.orderModel.findById(orderId).session(session);
+
+        if (!order?.items || order.items.length === 0) return;
+
+        for (const item of order.items) {
+          // Restore fabric yardage
+          const fabricSelections = item.fabric_selections || [];
+          for (const selection of fabricSelections) {
+            const totalYards =
+              (selection.yardage ?? 0) * (selection.quantity ?? 1);
+
+            if (totalYards <= 0) continue;
+
+            // Try standalone fabric first
+            const standaloneFabric = await this.fabricModel
+              .findById(selection.fabric_id)
+              .session(session);
+
+            if (standaloneFabric) {
+              standaloneFabric.yard_length =
+                (standaloneFabric.yard_length ?? 0) + totalYards;
+              await standaloneFabric.save({ session });
+              this.logger.log(
+                `[RestoreInventory] Fabric ${selection.fabric_id} restored +${totalYards} yards`,
+              );
+            } else {
+              // Try embedded fabric in clothing
+              await this.productModel.updateOne(
+                {
+                  _id: item.product,
+                  'clothing.fabrics._id': selection.fabric_id,
+                },
+                {
+                  $inc: { 'clothing.fabrics.$.yard_length': totalYards },
+                },
+                { session },
+              );
+              this.logger.log(
+                `[RestoreInventory] Embedded fabric ${selection.fabric_id} restored +${totalYards} yards`,
+              );
+            }
+          }
+
+          // Restore accessory variant stock
+          const accessorySelections = item.accessory_selections || [];
+          for (const selection of accessorySelections) {
+            const totalQty = selection.quantity ?? 1;
+
+            // Try standalone accessory
+            const standalone = this.accessoryModel
+              ? await this.accessoryModel
+                  .findOne({
+                    _id: selection.accessory_id,
+                    'variants._id': selection.variant_id,
+                  })
+                  .session(session)
+              : null;
+
+            if (standalone) {
+              await this.accessoryModel.updateOne(
+                {
+                  _id: selection.accessory_id,
+                  'variants._id': selection.variant_id,
+                },
+                { $inc: { 'variants.$.stock': totalQty } },
+                { session },
+              );
+              this.logger.log(
+                `[RestoreInventory] Accessory variant ${selection.variant_id} stock +${totalQty}`,
+              );
+            } else {
+              // Try embedded accessory
+              await this.productModel.updateOne(
+                {
+                  _id: item.product,
+                  'clothing.accessories._id': selection.accessory_id,
+                  'clothing.accessories.variants._id': selection.variant_id,
+                },
+                {
+                  $inc: {
+                    'clothing.accessories.$[acc].variants.$[v].stock': totalQty,
+                  },
+                },
+                {
+                  arrayFilters: [
+                    { 'acc._id': selection.accessory_id },
+                    { 'v._id': selection.variant_id },
+                  ],
+                  session,
+                },
+              );
+              this.logger.log(
+                `[RestoreInventory] Embedded accessory variant ${selection.variant_id} stock +${totalQty}`,
+              );
+            }
+          }
+
+          // Restore color variant stock
+          const colorVariantSelections = item.color_variant_selections || [];
+          if (colorVariantSelections.length > 0) {
+            const product = await this.productModel
+              .findById(item.product)
+              .session(session);
+
+            if (product) {
+              const colorVariants =
+                product.clothing?.color_variants || [];
+
+              for (const selection of colorVariantSelections) {
+                const colorVariant = colorVariants.find(
+                  (cv) =>
+                    String(cv._id) === String(selection.variant_id),
+                );
+                if (!colorVariant) continue;
+
+                const variant = colorVariant.variants.find(
+                  (v) =>
+                    String(v._id) === String(selection.variant_id),
+                );
+                if (variant) {
+                  variant.stock =
+                    (variant.stock ?? 0) + (selection.quantity ?? 1);
+                  this.logger.log(
+                    `[RestoreInventory] Color variant ${selection.variant_id} stock +${selection.quantity ?? 1}`,
+                  );
+                }
+              }
+
+              await product.save({ session });
+            }
+          }
+
+          // Restore applied fabric (from "Use Fabric" feature)
+          if (item.applied_fabric && item.applied_fabric_yards) {
+            const fabricProduct = await this.productModel
+              .findById(item.applied_fabric)
+              .session(session);
+            if (fabricProduct?.fabric) {
+              fabricProduct.fabric.yard_length += item.applied_fabric_yards;
+              await fabricProduct.save({ session });
+              this.logger.log(
+                `[RestoreInventory] Applied fabric ${item.applied_fabric} restored +${item.applied_fabric_yards} yards`,
+              );
+            }
+          }
+        }
+      });
+      this.logger.log(`[RestoreInventory] Inventory restored for order ${orderId}`);
+    } catch (err: any) {
+      this.logger.error(
+        `[RestoreInventory] Failed for order ${orderId}: ${err.stack || err.message}`,
+      );
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+
   async updateFabric(item: OrderItem, session, quantityMultiplier = 1) {
     const fabricSelections = item.fabric_selections || [];
 

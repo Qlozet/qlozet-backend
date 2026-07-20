@@ -60,6 +60,10 @@ import { ProductService } from '../products/products.service';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
+import {
   CheckoutPreviewResponse,
   CheckoutPreviewDto,
   VendorShippingRate,
@@ -108,6 +112,8 @@ export class OrderService {
     private readonly notificationsService: NotificationsService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
+    @InjectModel(PlatformSettings.name)
+    private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -974,27 +980,148 @@ export class OrderService {
   }
 
   async cancelOrder(reference: string) {
-    const orderReference =
-      await this.transactionService.refundPaystackPayment(reference);
+    const order = await this.orderModel.findOne({ reference });
+    if (!order) throw new BadRequestException('Order not found');
 
-    const updateResult = await this.orderModel.updateOne(
-      { reference: orderReference },
-      { $set: { status: OrderStatus.CANCELLED } },
+    // Prevent cancelling already cancelled or completed orders
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException('Order is already cancelled');
+    }
+
+    // Find the original payment transaction
+    const transaction = await this.transactionService.findByOrderId(
+      order._id.toString(),
     );
-
-    // Notify vendor(s) about cancellation
-    const order = await this.orderModel.findOne({ reference: orderReference });
-    if (order) {
-      this.notifyVendorsOrderCancelled(order).catch((err) =>
-        this.logger.error('Failed to send cancellation notifications', err),
+    if (!transaction) {
+      throw new BadRequestException(
+        'No payment transaction found for this order. Manual refund required.',
       );
     }
 
+    // Route refund based on payment channel
+    if (transaction.channel === 'wallet_checkout') {
+      // Wallet refund: credit customer wallet back
+      const walletId = transaction.wallet?.toString();
+      if (walletId) {
+        await this.walletsService.creditWallet(walletId, transaction.amount);
+
+        // Create refund transaction record
+        await this.transactionService.create({
+          initiator: order.customer,
+          order: order._id as Types.ObjectId,
+          wallet: transaction.wallet,
+          type: TransactionType.REFUND,
+          amount: transaction.amount,
+          status: TransactionStatus.SUCCESS,
+          description: `Full refund for cancelled order ${order.reference}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: transaction.reference,
+            refund_type: 'wallet',
+            reason: 'order_cancelled',
+          },
+        });
+
+        this.logger.log(
+          `[Cancel] Wallet refund of ₦${transaction.amount} processed for order ${order.reference}`,
+        );
+      }
+    } else if (transaction.channel === 'checkout') {
+      // Paystack refund: use the transaction reference (not order reference)
+      await this.transactionService.refundPaystackPayment(
+        transaction.reference,
+      );
+      this.logger.log(
+        `[Cancel] Paystack refund initiated for order ${order.reference} (txn: ${transaction.reference})`,
+      );
+    } else {
+      this.logger.warn(
+        `[Cancel] Unknown payment channel "${transaction.channel}" for order ${order.reference}. Manual refund required.`,
+      );
+    }
+
+    // Cancel the order
+    order.status = OrderStatus.CANCELLED;
+    await order.save();
+
+    // Reverse business earnings (prevent vendor from getting paid)
+    await this.reverseBusinessEarnings(order);
+
+    // Restore inventory
+    try {
+      await this.productService.restoreInventory(
+        order._id as Types.ObjectId,
+      );
+    } catch (err) {
+      this.logger.error(
+        `[Cancel] Failed to restore inventory for order ${order.reference}: ${err.message}`,
+      );
+    }
+
+    // Notify vendor(s) about cancellation
+    this.notifyVendorsOrderCancelled(order).catch((err) =>
+      this.logger.error('Failed to send cancellation notifications', err),
+    );
+
     return {
       message: 'Order cancelled and refunded successfully',
-      data: updateResult,
+      data: { order_reference: order.reference, status: order.status },
     };
   }
+
+  /**
+   * Reverses BusinessEarning records for a cancelled/refunded order.
+   * If businessId is provided, only reverses earnings for that specific vendor.
+   * Handles both unreleased (delete) and already-released (claw back from wallet) earnings.
+   */
+  private async reverseBusinessEarnings(
+    order: OrderDocument,
+    businessId?: string,
+  ) {
+    const filter: any = { order: order._id };
+    if (businessId) filter.business = new Types.ObjectId(businessId);
+
+    // Handle unreleased earnings — delete them and decrement pending_balance
+    const unreleasedEarnings = await this.businessEarningsModel.find({
+      ...filter,
+      released: false,
+    });
+
+    for (const earning of unreleasedEarnings) {
+      this.logger.log(
+        `[EarningsReversal] Reversing unreleased ₦${earning.net_amount} for business ${earning.business} on order ${order.reference}`,
+      );
+
+      await this.businessEarningsModel.deleteOne({ _id: earning._id });
+    }
+
+    // Handle already-released earnings — claw back from wallet
+    const releasedEarnings = await this.businessEarningsModel.find({
+      ...filter,
+      released: true,
+    });
+
+    for (const earning of releasedEarnings) {
+      this.logger.warn(
+        `[EarningsReversal] Clawing back already-released ₦${earning.net_amount} from business ${earning.business} on order ${order.reference}`,
+      );
+
+      // Mark the earning as reversed (set net_amount to 0)
+      earning.net_amount = 0;
+      earning.released = false;
+      await earning.save();
+    }
+
+    // Reset order-level earnings fields
+    if (!businessId) {
+      await this.orderModel.updateOne(
+        { _id: order._id },
+        { $set: { vendor_earnings: 0, platform_commission: 0 } },
+      );
+    }
+  }
+
 
   /**
    * Vendor confirms their portion of the order.
@@ -1059,6 +1186,23 @@ export class OrderService {
     }
 
     await order.save();
+
+    // Release upfront milestone earnings for this vendor (custom orders only)
+    const upfrontResult = await this.businessEarningsModel.updateMany(
+      {
+        order: order._id,
+        business: businessId,
+        milestone: 'upfront',
+        released: false,
+      },
+      { $set: { release_date: new Date() } },
+    );
+
+    if (upfrontResult.modifiedCount > 0) {
+      this.logger.log(
+        `[Milestone] Released ${upfrontResult.modifiedCount} upfront earning(s) for vendor ${businessId} on order ${orderReference}`,
+      );
+    }
 
     // Notify customer that this vendor confirmed
     this.notifyCustomerVendorConfirmed(order, business).catch((err) =>
@@ -1142,6 +1286,11 @@ export class OrderService {
     // Issue partial refund
     this.processPartialRefund(order, refundAmount, `Vendor ${businessId} rejected`).catch((err) =>
       this.logger.error(`Failed to process partial refund for order ${orderReference}: ${err.message}`),
+    );
+
+    // Reverse business earnings for the rejecting vendor
+    this.reverseBusinessEarnings(order, businessId).catch((err) =>
+      this.logger.error(`Failed to reverse earnings for vendor ${businessId} on order ${orderReference}: ${err.message}`),
     );
 
     // Notify customer about rejection
@@ -1325,10 +1474,12 @@ export class OrderService {
    */
   @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
   async autoRejectStaleShipments() {
-    const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
-    const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
-
     try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const autoRejectHours = (settings as any)?.auto_reject_hours ?? 24;
+      const STALE_THRESHOLD_MS = autoRejectHours * 60 * 60 * 1000;
+      const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+
       // Find orders that are in_review and were created more than 24h ago
       const staleOrders = await this.orderModel.find({
         status: OrderStatus.IN_REVIEW,
@@ -1388,6 +1539,14 @@ export class OrderService {
             this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
           );
 
+          // Reverse business earnings for the auto-rejected vendor
+          this.reverseBusinessEarnings(
+            order as OrderDocument,
+            shipment.business.toString(),
+          ).catch((err) =>
+            this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
+          );
+
           // Notify customer
           this.notificationsService.create({
             recipient: order.customer.toString(),
@@ -1442,10 +1601,11 @@ export class OrderService {
    */
   @Cron('30 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour at :30
   async checkLateFulfillments() {
-    const PENALTY_PERCENT_PER_DAY = 5;
-    const MAX_PENALTY_PERCENT = 25;
-
     try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const PENALTY_PERCENT_PER_DAY = (settings as any)?.late_penalty_percent_per_day ?? 5;
+      const MAX_PENALTY_PERCENT = (settings as any)?.late_penalty_max_percent ?? 25;
+
       // Find orders with confirmed shipments that have a deadline in the past
       const orders = await this.orderModel.find({
         status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
@@ -1521,6 +1681,17 @@ export class OrderService {
           order.vendor_earnings = Math.max(0, (order.vendor_earnings || 0) - incrementalPenalty);
 
           await order.save();
+
+          // Also deduct the penalty from the actual BusinessEarning records
+          // so the cron doesn't release the full un-penalized amount
+          this.businessEarningsModel.updateMany(
+            { order: order._id, business: businessId, released: false },
+            { $inc: { net_amount: -incrementalPenalty } },
+          ).catch((err) =>
+            this.logger.error(
+              `[LatePenalty] Failed to deduct penalty from earnings: ${err.message}`,
+            ),
+          );
 
           // Refund the incremental amount to the customer
           this.processPartialRefund(
@@ -2181,6 +2352,16 @@ export class OrderService {
       },
     ]);
 
+    const capitalize = (s: string) =>
+      s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+
+    const genderColor = (raw: string | null): string => {
+      const g = (raw || '').toLowerCase();
+      if (g === 'male') return '#3d2817';
+      if (g === 'female') return '#d4c5b9';
+      return '#a0a0a0';
+    };
+
     // Transform to chart JSON format
     const chartData = {
       data: {
@@ -2191,9 +2372,9 @@ export class OrderService {
             key: 'gender',
             name: 'Gender Distribution',
             data: data.map((d) => ({
-              label: d._id || 'Unknown',
+              label: d._id ? capitalize(d._id) : 'Not set',
               value: d.count,
-              color: d._id === 'Male' ? '#3d2817' : '#d4c5b9',
+              color: genderColor(d._id),
             })),
           },
         ],
@@ -2515,6 +2696,16 @@ export class OrderService {
       },
     ]);
 
+    const capitalize = (s: string) =>
+      s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+
+    const genderColor = (raw: string | null): string => {
+      const g = (raw || '').toLowerCase();
+      if (g === 'male') return '#3d2817';
+      if (g === 'female') return '#d4c5b9';
+      return '#a0a0a0'; // Unknown / not set
+    };
+
     return {
       data: {
         chartType: 'pie',
@@ -2524,9 +2715,9 @@ export class OrderService {
             key: 'gender',
             name: 'Gender Distribution',
             data: data.map((d) => ({
-              label: d._id || 'Unknown',
+              label: d._id ? capitalize(d._id) : 'Not set',
               value: d.count,
-              color: d._id === 'Male' ? '#3d2817' : '#d4c5b9',
+              color: genderColor(d._id),
             })),
           },
         ],
@@ -2918,7 +3109,74 @@ export class OrderService {
   /**
    * Notify vendors that an order was cancelled.
    */
+  /**
+   * Customer confirms satisfaction with a delivered order.
+   * Sets release_date = now on all unreleased earnings so the next cron
+   * run releases funds to the vendor(s) immediately.
+   */
+  async confirmCustomerSatisfaction(reference: string, customerId: string) {
+    const order = await this.orderModel.findOne({
+      reference,
+      customer: customerId,
+    });
+    if (!order) throw new BadRequestException('Order not found');
+
+    if (order.status !== OrderStatus.COMPLETED) {
+      throw new BadRequestException(
+        'You can only confirm satisfaction for delivered orders',
+      );
+    }
+
+    // Check if already confirmed
+    if ((order as any).customer_satisfied) {
+      return { message: 'You have already confirmed satisfaction for this order' };
+    }
+
+    // Set release_date to now on all unreleased earnings
+    const result = await this.businessEarningsModel.updateMany(
+      { order: order._id, released: false },
+      { $set: { release_date: new Date() } },
+    );
+
+    // Mark on the order
+    (order as any).customer_satisfied = true;
+    (order as any).customer_satisfied_at = new Date();
+    await order.save();
+
+    this.logger.log(
+      `[Satisfaction] Customer ${customerId} confirmed satisfaction for order ${reference}. ${result.modifiedCount} earning(s) set for immediate release.`,
+    );
+
+    // Notify each vendor
+    const vendorBusinessIds = [...new Set(order.items.map(i => i.business?.toString()).filter(Boolean))];
+    for (const businessId of vendorBusinessIds) {
+      const business = await this.businessModel.findById(businessId);
+      if (business?.created_by?.id) {
+        this.notificationsService.create({
+          recipient: business.created_by.id.toString(),
+          category: NotificationCategory.ORDER,
+          type: NotificationType.ORDER_CONFIRMED,
+          title: 'Customer Confirmed Satisfaction! 🎉',
+          body: `The customer has confirmed they're happy with order #${reference}. Your earnings will be released shortly.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: reference,
+          },
+          action_url: `/orders`,
+        }).catch((err) =>
+          this.logger.error(`Failed to notify vendor ${businessId}: ${err.message}`),
+        );
+      }
+    }
+
+    return {
+      message: 'Thank you! Vendor earnings will be released shortly.',
+      data: { earnings_released: result.modifiedCount },
+    };
+  }
+
   private async notifyVendorsOrderCancelled(order: OrderDocument) {
+
     const businessIds = [
       ...new Set(
         order.items

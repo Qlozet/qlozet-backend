@@ -23,11 +23,14 @@ export class BusinessEarning extends Document {
   @Prop({ default: false })
   released: boolean;
 
-  @Prop({ type: Date, required: true })
-  release_date: Date; // after 7 days
+  @Prop({ type: Date, default: null })
+  release_date: Date; // Set on delivery (delivery_date + payout_delay_days)
 
   @Prop({ default: null })
   released_at: Date;
+
+  @Prop({ type: String, enum: ['upfront', 'completion'], default: 'completion' })
+  milestone: string;
 }
 
 export const BusinessEarningSchema =

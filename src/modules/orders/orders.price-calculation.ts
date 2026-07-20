@@ -209,7 +209,7 @@ export class PriceCalculationService {
             `Selected style not found in product: ${s.style_id}`,
           );
         }
-        total += style.price;
+        total += style.price * (s.quantity ?? 1);
       }
     }
 
@@ -225,26 +225,20 @@ export class PriceCalculationService {
     const { selections } = item;
     let total = 0;
 
-    // Add base price for customized clothing (multiplied by the max quantity of any selection)
     const qty = item.quantity ?? 1;
-    const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
-      ? product.discounted_price
-      : (product.base_price || 0);
+    // Always use base_price for calculation; discounts are applied to the FULL total at the end
+    const basePrice = product.base_price || 0;
 
     if (product.clothing?.type === 'customize') {
-      let baseQty = qty;
-      const allSelections = [
-        ...(selections.style_selection || []),
-        ...(selections.color_variant_selection || []),
-        ...(selections.accessory_selection || []),
-        ...(selections.fabric_selection || [])
-      ];
-      if (allSelections.length > 0) {
-        baseQty = Math.max(...allSelections.map((s: any) => s.quantity || 1));
-      }
-      total += effectivePrice * baseQty;
+      // Use item-level quantity for base price (craftsmanship cost).
+      // Component quantities (accessories, fabrics, etc.) only multiply their own prices.
+      total += basePrice * qty;
     } else {
       // Ready-to-wear: if no color variants are selected, add base price
+      // For ready-to-wear, use discounted_price if available (pre-existing behavior)
+      const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
+        ? product.discounted_price
+        : (product.base_price || 0);
       if (!selections.color_variant_selection || selections.color_variant_selection.length === 0) {
         total += effectivePrice * qty;
       }
@@ -275,7 +269,36 @@ export class PriceCalculationService {
         selections.addon_selection,
         product,
       );
+
+    // For customize clothing, apply discount to the FULL total (base + all components)
+    if (product.clothing?.type === 'customize' && product.applied_discount) {
+      const discount = await this.discountModel?.findById(product.applied_discount).lean();
+      if (discount) {
+        const discountAmount = this.applyDiscountToTotal(total, discount);
+        total = Math.max(0, total - discountAmount);
+      }
+    }
+
     return this.round(total);
+  }
+
+  /**
+   * Apply a discount to a total amount based on discount type.
+   */
+  private applyDiscountToTotal(total: number, discount: any): number {
+    if (!discount) return 0;
+
+    switch (discount.type) {
+      case 'percentage':
+      case 'flash_percentage':
+      case 'store_wide':
+        return (total * (discount.value || 0)) / 100;
+      case 'fixed':
+      case 'flash_fixed':
+        return Math.min(discount.value || 0, total);
+      default:
+        return 0;
+    }
   }
 
   // ========== FABRIC ==========
@@ -448,7 +471,7 @@ export class PriceCalculationService {
           total += (accessory.price ?? 0) * (s.quantity ?? 1);
         }
       }
-      console.log(total, '0000000');
+
       if (product.kind === ProductKind.CLOTHING) {
         accessory = product.clothing?.accessories?.find(
           (acc) => String(acc._id) === String(s.accessory_id),
@@ -479,9 +502,10 @@ export class PriceCalculationService {
           }
 
           total += (accessory.price ?? 0) * (s.quantity ?? 1);
+        } else {
+          // No variant specified — just add the base accessory price
+          total += (accessory.price ?? 0) * (s.quantity ?? 1);
         }
-
-        total += (accessory.price ?? 0) * (s.quantity ?? 1);
       }
     }
 
