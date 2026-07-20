@@ -379,7 +379,7 @@ export class BusinessService implements OnModuleInit {
         .select(
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
-          'website social_links average_rating total_ratings total_items_sold ' +
+          'website social_links total_items_sold ' +
           'success_rate is_featured year_founded accepts_external_fabric createdAt'
         )
         .skip(skip)
@@ -425,6 +425,24 @@ export class BusinessService implements OnModuleInit {
         },
       },
 
+      // Product ratings (for the computed vendor rating)
+      {
+        $lookup: {
+          from: 'products',
+          let: { businessId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$business', '$$businessId'] },
+                status: 'active',
+              },
+            },
+            { $project: { ratings: 1, average_rating: 1 } },
+          ],
+          as: 'ratingProducts',
+        },
+      },
+
       // Computed fields
       {
         $addFields: {
@@ -432,6 +450,24 @@ export class BusinessService implements OnModuleInit {
             $ifNull: [{ $arrayElemAt: ['$productCount.count', 0] }, 0],
           },
           followers_count: { $size: { $ifNull: ['$followers', []] } },
+          // Vendor rating aggregated from product ratings (the Business schema
+          // has no own rating field — this is the source of truth).
+          total_number_of_ratings: {
+            $sum: {
+              $map: {
+                input: '$ratingProducts',
+                as: 'p',
+                in: { $size: { $ifNull: ['$$p.ratings', []] } },
+              },
+            },
+          },
+          cumulative_rating: {
+            $cond: [
+              { $gt: [{ $size: '$ratingProducts' }, 0] },
+              { $avg: '$ratingProducts.average_rating' },
+              0,
+            ],
+          },
         },
       },
 
@@ -451,8 +487,8 @@ export class BusinessService implements OnModuleInit {
           country: 1,
           website: 1,
           social_links: 1,
-          average_rating: 1,
-          total_ratings: 1,
+          cumulative_rating: 1,
+          total_number_of_ratings: 1,
           total_products: 1,
           total_items_sold: 1,
           success_rate: 1,
