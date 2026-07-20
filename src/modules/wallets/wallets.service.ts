@@ -128,6 +128,41 @@ export class WalletsService {
     return wallet;
   }
 
+  /**
+   * Adjust a business wallet's ledger buckets by signed deltas.
+   * Used to reverse vendor earnings on cancellations, rejections and returns
+   * so the wallet stays in sync with the BusinessEarning records.
+   * Buckets are clamped at 0 (consistent with earnings/penalty handling elsewhere).
+   */
+  async reconcileBusinessWallet(
+    businessId: string | Types.ObjectId,
+    deltas: { pending?: number; balance?: number },
+  ) {
+    const pendingDelta = deltas.pending ?? 0;
+    const balanceDelta = deltas.balance ?? 0;
+    if (pendingDelta === 0 && balanceDelta === 0) return;
+
+    const wallet = await this.walletModel.findOne({ business: businessId });
+    if (!wallet) {
+      this.logger.warn(
+        `[WalletReconcile] No wallet for business ${businessId}; skipping (pending=${pendingDelta}, balance=${balanceDelta})`,
+      );
+      return;
+    }
+
+    wallet.pending_balance = Math.max(
+      0,
+      (wallet.pending_balance || 0) + pendingDelta,
+    );
+    wallet.balance = Math.max(0, (wallet.balance || 0) + balanceDelta);
+    wallet.last_transaction_at = new Date();
+    await wallet.save();
+
+    this.logger.log(
+      `[WalletReconcile] business=${businessId} pending${pendingDelta >= 0 ? '+' : ''}${pendingDelta} balance${balanceDelta >= 0 ? '+' : ''}${balanceDelta} → pending=${wallet.pending_balance} balance=${wallet.balance}`,
+    );
+  }
+
   // Get wallet balance
   async getWallet(customerId?: string, businessId?: string) {
     const wallet = await this.getOrCreateWallet({ business: businessId, customer: customerId });

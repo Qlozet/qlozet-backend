@@ -142,8 +142,11 @@ export class OrderService {
           style_selections: selections.style_selection || [],
           accessory_selections: selections.accessory_selection || [],
           addon_selections: selections.addon_selection || [],
-          total_price: total ?? 0,
-          subtotal,
+          // Per-item price (computed in processOrderItems). Must NOT be the
+          // whole-order total, otherwise recordBusinessEarnings over-credits
+          // each vendor on multi-item orders.
+          total_price: item.total_price ?? 0,
+          subtotal: item.total_price ?? 0,
         };
       });
 
@@ -1093,6 +1096,12 @@ export class OrderService {
         `[EarningsReversal] Reversing unreleased ₦${earning.net_amount} for business ${earning.business} on order ${order.reference}`,
       );
 
+      // These funds were added to the vendor wallet's pending_balance when the
+      // earning was recorded — remove them so the ledger stays in sync.
+      await this.walletsService.reconcileBusinessWallet(earning.business, {
+        pending: -(earning.net_amount || 0),
+      });
+
       await this.businessEarningsModel.deleteOne({ _id: earning._id });
     }
 
@@ -1107,9 +1116,15 @@ export class OrderService {
         `[EarningsReversal] Clawing back already-released ₦${earning.net_amount} from business ${earning.business} on order ${order.reference}`,
       );
 
-      // Mark the earning as reversed (set net_amount to 0)
+      // The money already moved into the vendor wallet's spendable balance,
+      // so it must be removed from balance (not pending) to actually claw back.
+      await this.walletsService.reconcileBusinessWallet(earning.business, {
+        balance: -(earning.net_amount || 0),
+      });
+
+      // Mark the earning as reversed. Keep released=true so the release cron
+      // does not re-pick it (release_date is already in the past).
       earning.net_amount = 0;
-      earning.released = false;
       await earning.save();
     }
 
@@ -2187,13 +2202,12 @@ export class OrderService {
     );
     const shipment = order.shipments[shipmentIndex];
 
-    // Verify payment (TEMPORARILY BYPASSED FOR TESTING)
+    // Verify payment
     const transaction = await this.transactionService.findByOrderId(order.id);
     if (!transaction || transaction.status !== 'success') {
-      this.logger.warn(`[TEST MODE] Bypassing payment check for order ${order.id}. Transaction status: ${transaction?.status}`);
-      // throw new BadRequestException(
-      //   'Cannot fulfill order: payment not completed',
-      // );
+      throw new BadRequestException(
+        'Cannot fulfill order: payment not completed',
+      );
     }
 
     // Check if rate token is stale (> 25 min)

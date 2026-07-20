@@ -29,7 +29,7 @@ export class PlatformService {
     return {
       payout_cycle: 'weekly',
       minimum_payout: 2000,
-      payout_delay_days: 7,
+      payout_delay_days: 3,
       tailored_order_upfront_percent: 0,
       platform_commission_percent: 10,
       payment_handling_fee_flat: 0,
