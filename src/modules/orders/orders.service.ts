@@ -76,6 +76,7 @@ import {
   CheckoutRateCacheDocument,
 } from './schemas/checkout-rate-cache.schema';
 import { WalletsService } from '../wallets/wallets.service';
+import { estimateProductWeightKg } from '../../common/constants/product-weight.constant';
 import { NotificationsService, CreateNotificationDto } from '../notifications/notifications.service';
 import {
   NotificationCategory,
@@ -1855,7 +1856,7 @@ export class OrderService {
         amount: (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
           ? product.discounted_price
           : (product.base_price || 0),
-        weight: 1, // default weight in kg
+        weight: estimateProductWeightKg(product),
       });
     }
 
@@ -2245,7 +2246,7 @@ export class OrderService {
           return {
             name,
             description: name,
-            unit_weight: 1,
+            unit_weight: estimateProductWeightKg(product),
             unit_amount: shipment.shipping_fee || 1000,
             quantity: 1,
           };
