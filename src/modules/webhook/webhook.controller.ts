@@ -79,9 +79,16 @@ export class WebhookController {
       throw new UnauthorizedException('Webhook verification not configured');
     }
 
+    // Hash the exact raw bytes when available (captured in bootstrap), and
+    // fall back to a re-serialized body only if the raw buffer is missing.
+    const payload: Buffer =
+      req.rawBody instanceof Buffer
+        ? req.rawBody
+        : Buffer.from(JSON.stringify(req.body));
+
     const hash = crypto
       .createHmac('sha512', secret)
-      .update(JSON.stringify(req.body))
+      .update(payload)
       .digest('hex');
 
     const expected = Buffer.from(hash);
