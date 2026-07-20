@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
+import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 import { Warehouse, WarehouseDocument } from './schemas/warehouse.schema';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import {
@@ -49,6 +50,8 @@ export class BusinessService implements OnModuleInit {
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(BusinessEarning.name)
     private businessEarningsModel: Model<BusinessEarningDocument>,
+    @InjectModel(Wallet.name)
+    private walletModel: Model<WalletDocument>,
   ) {}
 
   /**
@@ -1205,17 +1208,62 @@ export class BusinessService implements OnModuleInit {
         `Item totals for business ${businessId}: gross=${gross}, commission=${commission}, net=${net}`,
       );
 
-      await this.businessEarningsModel.create({
-        business: businessId,
-        order: order._id,
-        amount: gross,
-        commission,
-        net_amount: net,
-        released: false,
-        release_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      });
+      // Check if this is a custom clothing item that qualifies for milestone split
+      const isCustom = (item as any).clothing_type === 'customize';
+      const upfrontPercent = (platformSettings as any)?.tailored_order_upfront_percent ?? 0;
 
-      this.logger.log(`Business earnings recorded for business ${businessId}`);
+      if (isCustom && upfrontPercent > 0) {
+        // Split earnings: upfront (released on vendor confirm) + completion (released after delivery)
+        const upfrontNet = net * (upfrontPercent / 100);
+        const completionNet = net - upfrontNet;
+
+        await this.businessEarningsModel.create({
+          business: businessId,
+          order: order._id,
+          amount: gross * (upfrontPercent / 100),
+          commission: commission * (upfrontPercent / 100),
+          net_amount: upfrontNet,
+          released: false,
+          release_date: null,
+          milestone: 'upfront',
+        });
+
+        await this.businessEarningsModel.create({
+          business: businessId,
+          order: order._id,
+          amount: gross * ((100 - upfrontPercent) / 100),
+          commission: commission * ((100 - upfrontPercent) / 100),
+          net_amount: completionNet,
+          released: false,
+          release_date: null,
+          milestone: 'completion',
+        });
+
+        this.logger.log(
+          `Milestone split for custom order: upfront=₦${upfrontNet}, completion=₦${completionNet}`,
+        );
+      } else {
+        // Standard single earning (ready-to-wear, fabric, accessory, or 0% upfront)
+        await this.businessEarningsModel.create({
+          business: businessId,
+          order: order._id,
+          amount: gross,
+          commission,
+          net_amount: net,
+          released: false,
+          release_date: null,
+          milestone: 'completion',
+        });
+      }
+
+      // Increment pending_balance on the vendor's wallet
+      await this.walletModel.findOneAndUpdate(
+        { business: businessId },
+        { $inc: { pending_balance: net } },
+        { upsert: true },
+      );
+
+      this.logger.log(`Business earnings recorded for business ${businessId} (pending_balance +₦${net})`);
 
       totalOrderNet += net;
       totalOrderCommission += commission;

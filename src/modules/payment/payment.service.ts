@@ -281,19 +281,19 @@ export class PaymentService {
         'Vendor does not have a transfer recipient',
       );
     }
-    const { vendorEarnings, commission, tax } =
-      await this.platformService.compute(amount);
+
+    // Amount is already post-commission (net_amount from BusinessEarning).
+    // Do NOT call platformService.compute() here — commission was already
+    // deducted when recording earnings. Transferring the exact amount.
     const transaction = await this.transactionService.create({
-      initiator: businessId as unknown as Types.ObjectId, // vendor as initiator
-      amount: vendorEarnings,
+      initiator: businessId as unknown as Types.ObjectId,
+      amount,
       type: TransactionType.CREDIT,
       description: reason || `Payout for ${business.business_name}`,
       channel: 'payout',
       metadata: {
-        totalAmount: amount,
-        commission,
-        tax,
-        vendorEarnings,
+        payout_amount: amount,
+        business_name: business.business_name,
       },
     });
 
@@ -317,4 +317,5 @@ export class PaymentService {
     }
     return response.data.data.reference;
   }
+
 }

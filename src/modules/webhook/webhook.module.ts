@@ -4,6 +4,8 @@ import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
 import { JobStatusService } from '../measurement/job-status.service';
 import { JobStatus, JobStatusSchema } from '../../common/schemas/job-status.schema';
+import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
+import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 
 // Import modules instead of directly listing their services
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -17,6 +19,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     MongooseModule.forFeature([
       { name: JobStatus.name, schema: JobStatusSchema },
+      { name: BusinessEarning.name, schema: BusinessEarningSchema },
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
     TransactionsModule,  // provides TransactionService
     WalletsModule,       // provides WalletsService, PaymentService, etc.

@@ -286,5 +286,23 @@ export class OrderController {
   async getVendorDashboard(@Req() req: any) {
     return this.orderService.getVendorDashboardMetrics(req.business?.id);
   }
+
+  /**
+   * Customer confirms satisfaction after delivery.
+   * Triggers early release of vendor earnings (skips the hold period).
+   */
+  @Roles(UserType.CUSTOMER)
+  @Post(':reference/confirm-satisfaction')
+  @ApiOperation({ summary: 'Customer confirms satisfaction with delivered order' })
+  @ApiResponse({ status: 200, description: 'Vendor earnings released early' })
+  async confirmSatisfaction(
+    @Param('reference') reference: string,
+    @Req() req: any,
+  ) {
+    return this.orderService.confirmCustomerSatisfaction(
+      reference,
+      req.user?.id || req.user?._id,
+    );
+  }
 }
 

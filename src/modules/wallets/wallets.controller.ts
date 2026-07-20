@@ -9,6 +9,8 @@ import {
   UseGuards,
   Req,
   Query,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -23,9 +25,12 @@ import { WalletsService } from './wallets.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { FundWalletDto } from './wallet.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../ums/schemas';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { TokenService } from './token.service';
 import { PaymentService } from '../payment/payment.service';
+import { WithdrawDto } from './dto/withdraw.dto';
 import {
   FundWalletResponseDto,
   VerifyPaymentResponseDto,
@@ -129,5 +134,24 @@ export class WalletsController {
     @Query('currency') currency: string = 'USD',
   ) {
     return this.tokenService.getTokenPurchasePrice(Number(tokens), currency);
+  }
+
+  /**
+   * Vendor requests withdrawal from their wallet balance.
+   * Validates minimum payout, balance, and bank account.
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Post('withdraw')
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ transform: true }))
+  @ApiOperation({ summary: 'Vendor withdrawal from wallet to bank' })
+  @ApiBody({ type: WithdrawDto })
+  async requestWithdrawal(@Body() dto: WithdrawDto, @Req() req: any) {
+    const businessId = req.business?._id?.toString() || req.business?.id;
+    if (!businessId) {
+      throw new Error('Business context required for withdrawal');
+    }
+    return this.walletsService.requestWithdrawal(businessId, dto.amount);
   }
 }

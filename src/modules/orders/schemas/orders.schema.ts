@@ -323,5 +323,11 @@ export class Order {
     unit: string;
     fit_preferences: string[];
   };
+
+  @Prop({ type: Boolean, default: false })
+  customer_satisfied?: boolean;
+
+  @Prop({ type: Date, default: null })
+  customer_satisfied_at?: Date;
 }
 export const OrderSchema = SchemaFactory.createForClass(Order);

@@ -13,7 +13,7 @@ import {
   OrderStatus,
   ShipmentStatus,
 } from '../orders/schemas/orders.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -21,6 +21,14 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import {
+  BusinessEarning,
+  BusinessEarningDocument,
+} from '../business/schemas/business-earnings.schema';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
 
 @Injectable()
 export class WebhookService {
@@ -34,6 +42,10 @@ export class WebhookService {
     private readonly notificationsService: NotificationsService,
 
     @InjectModel('Order') private orderModel: Model<Order>,
+    @InjectModel(BusinessEarning.name)
+    private businessEarningsModel: Model<BusinessEarningDocument>,
+    @InjectModel(PlatformSettings.name)
+    private platformSettingsModel: Model<PlatformSettingsDocument>,
   ) {}
   async handlePaystackWebhook(payload: any) {
     const { event, data } = payload;
@@ -264,11 +276,25 @@ export class WebhookService {
         `All shipments delivered for order ${order.reference} — marking COMPLETED`,
       );
 
-      // Set payout eligibility for each vendor (after delay period)
-      // This can be enhanced with platform-specific payout_delay_days
-      order.payout_eligible_at = new Date(
-        Date.now() + 7 * 24 * 60 * 60 * 1000,
-      ); // 7 days default
+      // Set delivery-gated payout: release_date = now + payout_delay_days
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+      const releaseDate = new Date(
+        Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
+      );
+
+      // Update all unreleased earnings for this order with the release date
+      const updateResult = await this.businessEarningsModel.updateMany(
+        { order: order._id, released: false, release_date: null },
+        { $set: { release_date: releaseDate } },
+      );
+
+      this.logger.log(
+        `[DeliveryPayout] Set release_date to ${releaseDate.toISOString()} for ${updateResult.modifiedCount} earning(s) on order ${order.reference}`,
+      );
+
+      // Update order-level payout tracking
+      order.payout_eligible_at = releaseDate;
       order.payout_status = 'eligible';
     } else if (
       order.shipments.some(

@@ -13,8 +13,20 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 2000 })
   minimum_payout: number;
 
-  @Prop({ type: Number, default: 7 })
+  @Prop({ type: Number, default: 3 })
   payout_delay_days: number;
+
+  @Prop({ type: Number, default: 5 })
+  late_penalty_percent_per_day: number;
+
+  @Prop({ type: Number, default: 25 })
+  late_penalty_max_percent: number;
+
+  @Prop({ type: Number, default: 24 })
+  auto_reject_hours: number;
+
+  @Prop({ type: Number, default: 7 })
+  return_window_days: number;
 
   @Prop({ type: Number, default: 10 })
   platform_commission_percent: number;
