@@ -111,24 +111,6 @@ export class Business extends Document {
   @Prop({ default: null })
   verification_token_expiration?: Date;
 
-  @Prop({
-    type: [
-      {
-        user: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
-        comment: String,
-        rating: { type: Number, min: 1, max: 5 },
-        created_at: { type: Date, default: Date.now },
-      },
-    ],
-    default: [],
-  })
-  reviews?: Array<{
-    user: Types.ObjectId;
-    comment: string;
-    rating: number;
-    created_at: Date;
-  }>;
-
   @Prop()
   description?: string;
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UnauthorizedException, Logger } from '@nestjs/common';
+import { Controller, Post, Req, UnauthorizedException, Logger } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -22,28 +22,13 @@ export class WebhookController {
   @ApiOperation({ summary: 'Handle Paystack webhook' })
   @ApiResponse({ status: 200, description: 'Webhook received successfully' })
   async handlePaystackWebhook(@Req() req: any) {
-    // Verify Paystack signature
-    const signature = req.headers['x-paystack-signature'];
-    const secret = this.configService.get<string>('PAYSTACK_SECRET_KEY');
-
-    if (secret && signature) {
-      const hash = crypto
-        .createHmac('sha512', secret)
-        .update(JSON.stringify(req.body))
-        .digest('hex');
-
-      if (hash !== signature) {
-        this.logger.warn(
-          '[Webhook] Invalid Paystack signature — possible spoofed request',
-        );
-        throw new UnauthorizedException('Invalid webhook signature');
-      }
-    } else if (!signature) {
-      this.logger.warn(
-        '[Webhook] No X-Paystack-Signature header — rejecting',
-      );
-      throw new UnauthorizedException('Missing webhook signature');
-    }
+    // Paystack signs with HMAC-SHA512 using the account secret key.
+    this.verifyHmacSignature(
+      req,
+      req.headers['x-paystack-signature'],
+      this.configService.get<string>('PAYSTACK_SECRET_KEY'),
+      'Paystack',
+    );
 
     return this.webhookService.handlePaystackWebhook(req.body);
   }
@@ -56,7 +41,69 @@ export class WebhookController {
     description: 'Shipbubble webhook processed successfully',
   })
   async handleShipbubbleWebhook(@Req() req: any) {
+    // Shipbubble signs with HMAC-SHA512 using the account SECRET_KEY.
+    // Prefer a dedicated webhook secret; fall back to the API key.
+    this.verifyHmacSignature(
+      req,
+      req.headers['x-ship-signature'],
+      this.configService.get<string>('SHIPBUBBLE_WEBHOOK_SECRET') ||
+        this.configService.get<string>('SHIPBUBBLE_API_KEY'),
+      'Shipbubble',
+    );
+
     return this.webhookService.handleShipbubbleWebhook(req.body);
+  }
+
+  /**
+   * Verify an incoming webhook's HMAC-SHA512 signature.
+   * Rejects when the signature header is missing, the secret is not
+   * configured, or the computed hash does not match (timing-safe compare).
+   */
+  private verifyHmacSignature(
+    req: any,
+    signature: unknown,
+    secret: string | undefined,
+    provider: string,
+  ) {
+    if (!signature || typeof signature !== 'string') {
+      this.logger.warn(
+        `[Webhook] Missing ${provider} signature header — rejecting`,
+      );
+      throw new UnauthorizedException('Missing webhook signature');
+    }
+
+    if (!secret) {
+      this.logger.error(
+        `[Webhook] ${provider} webhook secret not configured — rejecting`,
+      );
+      throw new UnauthorizedException('Webhook verification not configured');
+    }
+
+    // Hash the exact raw bytes when available (captured in bootstrap), and
+    // fall back to a re-serialized body only if the raw buffer is missing.
+    const payload: Buffer =
+      req.rawBody instanceof Buffer
+        ? req.rawBody
+        : Buffer.from(JSON.stringify(req.body));
+
+    const hash = crypto
+      .createHmac('sha512', secret)
+      .update(payload)
+      .digest('hex');
+
+    const expected = Buffer.from(hash);
+    const received = Buffer.from(signature);
+
+    const valid =
+      expected.length === received.length &&
+      crypto.timingSafeEqual(expected, received);
+
+    if (!valid) {
+      this.logger.warn(
+        `[Webhook] Invalid ${provider} signature — possible spoofed request`,
+      );
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
   }
 }
 

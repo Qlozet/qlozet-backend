@@ -264,12 +264,33 @@ export class ReturnsService {
       }
     }
 
-    // Reverse vendor earnings
-    await this.businessEarningsModel.deleteMany({
+    // Reverse vendor earnings and keep the wallet ledger in sync.
+    // Returns usually happen after delivery, so earnings may already be
+    // released into the vendor's spendable balance — those must be clawed
+    // back from `balance`, while still-pending earnings come out of
+    // `pending_balance` before the record is deleted.
+    const vendorEarnings = await this.businessEarningsModel.find({
       order: returnReq.order,
       business: businessId,
-      released: false,
     });
+
+    for (const earning of vendorEarnings) {
+      const net = earning.net_amount || 0;
+      if (net <= 0) continue;
+
+      if (earning.released) {
+        await this.walletsService.reconcileBusinessWallet(earning.business, {
+          balance: -net,
+        });
+        earning.net_amount = 0;
+        await earning.save();
+      } else {
+        await this.walletsService.reconcileBusinessWallet(earning.business, {
+          pending: -net,
+        });
+        await this.businessEarningsModel.deleteOne({ _id: earning._id });
+      }
+    }
 
     // Restore inventory
     await this.productService.restoreInventory((returnReq.order as any).toString());

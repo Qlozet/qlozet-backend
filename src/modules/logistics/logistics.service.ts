@@ -19,7 +19,7 @@ export class LogisticsService {
 
   constructor(private readonly httpService: HttpService) {
     if (!this.baseUrl) throw new Error('SHIPBUBBLE_BASE_URL is required');
-    if (!this.token) throw new Error('SHIPBUBBLE_TOKEN is required');
+    if (!this.token) throw new Error('SHIPBUBBLE_API_KEY is required');
   }
 
   private get headers() {
