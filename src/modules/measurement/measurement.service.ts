@@ -316,15 +316,11 @@ export class MeasurementService {
       if (!base_image_url) {
         throw new BadRequestException('base_image_url is required');
       }
-      const [settings, tokenBalance] = await Promise.all([
-        this.platformService.getSettings(),
-        this.tokenService.balance(business, customer),
-      ]);
-      if (tokenBalance < settings.edit_garment_token_price) {
-        throw new BadRequestException(
-          'Insufficient tokens, please fund your wallet',
-        );
-      }
+      // NOTE: token gating + deduction is owned by the controller
+      // (edit-garment-image checks balance and pre-deducts before queuing).
+      // This method must NOT re-check or re-spend, otherwise the job is
+      // double-charged, and a customer who paid their exact balance would
+      // fail the redundant check here.
       const client = await this.gradio.getClient(this.ie);
 
       // Call the editor endpoint
@@ -360,7 +356,8 @@ export class MeasurementService {
         'outfits',
       );
 
-      await this.tokenService.spend('edit', business, customer);
+      // Tokens were already deducted by the controller before queuing — do not
+      // spend again here (would double-charge).
       this.logger.log('Edit garment completed successfully');
       return uploadedImage;
     } catch (error) {
