@@ -46,6 +46,16 @@ export class Clothing {
   @Prop({ type: [FabricSchema], default: [] })
   fabrics?: Fabric[];
 
+  // Garment-level fabric requirement (bill of materials): how many yards this
+  // garment consumes per size. Fabric-agnostic, so it drives pricing for both
+  // embedded and external (cross-vendor) fabric, plus inventory depletion and
+  // reservation claims.
+  @Prop({
+    type: [{ size: { type: String }, yards: { type: Number, min: 0 } }],
+    default: [],
+  })
+  yardage_per_size?: { size: string; yards: number }[];
+
   @Prop({ type: Boolean, default: null })
   accepts_external_fabric?: boolean | null; // null = inherit from vendor, true/false = override
 
