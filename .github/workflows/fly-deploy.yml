@@ -16,11 +16,3 @@ jobs:
       - run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      # Post-deploy: backfill PlatformSettings.payout_delay_days to the current
-      # default. Idempotent (no-ops once values match), so it's safe to run on
-      # every deploy. Once it has run successfully in prod this step can be
-      # removed — it's a one-time backfill.
-      - name: Run post-deploy migrations
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl ssh console -a qlozet-backend -C "sh -lc 'cd /app && npm run migrate:payout-delay'"
