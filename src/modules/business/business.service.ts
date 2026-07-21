@@ -1454,11 +1454,18 @@ export class BusinessService implements OnModuleInit {
       this.businessEarningsModel.countDocuments(filter),
     ]);
 
-    return Utils.getPagingData(
-      { count: totalCount, rows: earnings },
-      page,
-      size,
-    );
+    // Expose frontend-friendly aliases (amount/date/label) alongside the raw
+    // fields so the vendor app can render upcoming earnings without a mapping.
+    const rows = earnings.map((e) => ({
+      ...e,
+      amount: e.net_amount,
+      date: e.release_date,
+      label: e.release_date
+        ? new Date(e.release_date).toISOString().slice(0, 10)
+        : null,
+    }));
+
+    return Utils.getPagingData({ count: totalCount, rows }, page, size);
   }
   async getEarningsChart(businessId: string): Promise<any> {
     const data = await this.businessEarningsModel.aggregate([
