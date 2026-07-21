@@ -1,0 +1,50 @@
+# Manually run a one-off maintenance script on the running Fly machine.
+# Actions tab → "Run maintenance script" → Run workflow → pick a script.
+#
+# Runs the script *inside* the Fly machine via `flyctl ssh console`, so it uses
+# the machine's own MONGO_URI secret — no local tooling or DB IP allowlisting
+# needed. The script must already be deployed (i.e. merged to main), since Fly
+# only deploys on push to main.
+#
+# NOTE: workflow_dispatch only shows the "Run workflow" button once this file is
+# on the default branch (main).
+name: Run maintenance script
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: Which maintenance script to run
+        required: true
+        type: choice
+        options:
+          - "migrate:payout-delay"
+          - "reset:stuck-shipments (dry-run)"
+          - "reset:stuck-shipments (apply)"
+
+concurrency: run-script-group
+
+jobs:
+  run:
+    name: Run ${{ inputs.script }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Execute on Fly machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          SCRIPT_CHOICE: ${{ inputs.script }}
+        run: |
+          set -euo pipefail
+          case "$SCRIPT_CHOICE" in
+            "migrate:payout-delay")
+              CMD="npm run migrate:payout-delay" ;;
+            "reset:stuck-shipments (dry-run)")
+              CMD="npm run reset:stuck-shipments -- --dry-run" ;;
+            "reset:stuck-shipments (apply)")
+              CMD="npm run reset:stuck-shipments" ;;
+            *)
+              echo "Unknown script: $SCRIPT_CHOICE"; exit 1 ;;
+          esac
+          echo "▶ Running on qlozet-backend: $CMD"
+          flyctl ssh console -a qlozet-backend -C "sh -lc 'cd /app && $CMD'"

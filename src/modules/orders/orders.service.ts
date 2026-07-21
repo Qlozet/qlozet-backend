@@ -2306,13 +2306,38 @@ export class OrderService {
       );
     }
 
-    // Create shipment label
-    const shipmentResult =
-      await this.logisticService.createShipmentFromToken({
+    // Create shipment label.
+    // If Shipbubble fails (e.g. insufficient account balance, invalid address
+    // code), release the atomic claim so the shipment doesn't get stuck in
+    // 'ready_to_ship'. Reverting to 'pending' lets the vendor retry once the
+    // underlying issue is fixed. The original error is re-thrown so the vendor
+    // still sees the real Shipbubble message.
+    let shipmentResult;
+    try {
+      shipmentResult = await this.logisticService.createShipmentFromToken({
         request_token: requestToken,
         courier_id: courierId,
         service_code: serviceCode,
       });
+    } catch (err: any) {
+      await this.orderModel.updateOne(
+        {
+          reference: orderReference,
+          shipments: {
+            $elemMatch: {
+              business: businessId,
+              status: ShipmentStatus.READY_TO_SHIP,
+            },
+          },
+        },
+        { $set: { 'shipments.$.status': ShipmentStatus.PENDING } },
+      );
+      this.logger.error(
+        `[Fulfill] Label creation failed for order ${orderReference} (business ${businessId}); ` +
+        `reverted shipment ready_to_ship → pending. Reason: ${err?.response?.data?.message || err?.message}`,
+      );
+      throw err;
+    }
 
     // Update shipment data
     order.shipments[shipmentIndex].shipment_id = shipmentResult.shipment_id;
