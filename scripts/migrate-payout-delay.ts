@@ -5,20 +5,19 @@
 // documents, so any existing document created with the old value of 7 must be
 // updated here.
 //
-// Usage:
-//   npx ts-node scripts/migrate-payout-delay.ts          # sets payout_delay_days = 3
-//   npx ts-node scripts/migrate-payout-delay.ts 5        # sets a custom value
+// Runs as a standalone Mongoose script (no Nest bootstrap) so it only needs a
+// Mongo connection — nothing else in the app has to start.
 //
-import { NestFactory } from '@nestjs/core';
-import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { AppModule } from '../src/app.module';
-import {
-  PlatformSettings,
-  PlatformSettingsDocument,
-} from '../src/modules/platform/schema/platformSettings.schema';
+// Usage:
+//   npm run migrate:payout-delay          # sets payout_delay_days = 3
+//   npm run migrate:payout-delay 5        # sets a custom value
+//
+import * as dotenv from 'dotenv';
+import * as mongoose from 'mongoose';
 
-async function bootstrap() {
+dotenv.config();
+
+async function run() {
   const target = Number(process.argv[2] ?? 3);
 
   if (!Number.isFinite(target) || target < 0) {
@@ -26,14 +25,23 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  const app = await NestFactory.createApplicationContext(AppModule);
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  if (!uri) {
+    console.error('❌ MONGO_URI is not set in the environment (.env).');
+    process.exit(1);
+  }
+
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 30000 });
+  console.log('🔌 Connected to MongoDB.');
 
   try {
-    const model = app.get<Model<PlatformSettingsDocument>>(
-      getModelToken(PlatformSettings.name),
-    );
+    // PlatformSettings has no custom collection name, so Mongoose pluralises
+    // the model name → "platformsettings".
+    const collection = mongoose.connection.collection('platformsettings');
 
-    const existing = await model.find({}, 'payout_delay_days').lean();
+    const existing = await collection
+      .find({}, { projection: { payout_delay_days: 1 } })
+      .toArray();
 
     if (existing.length === 0) {
       console.log(
@@ -48,7 +56,7 @@ async function bootstrap() {
         existing.map((d) => d.payout_delay_days).join(', '),
     );
 
-    const result = await model.updateMany(
+    const result = await collection.updateMany(
       { payout_delay_days: { $ne: target } },
       { $set: { payout_delay_days: target } },
     );
@@ -56,12 +64,13 @@ async function bootstrap() {
     console.log(
       `✅ Updated ${result.modifiedCount} document(s) → payout_delay_days = ${target}.`,
     );
-  } catch (err) {
-    console.error('❌ Migration failed:', err);
-    process.exitCode = 1;
   } finally {
-    await app.close();
+    await mongoose.disconnect();
+    console.log('🔌 Disconnected.');
   }
 }
 
-bootstrap();
+run().catch((err) => {
+  console.error('❌ Migration failed:', err);
+  process.exit(1);
+});

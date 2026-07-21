@@ -133,7 +133,10 @@ export class OrderController {
             reference: 'ORD-123456',
             customer: {
               _id: '60d5ecb8b392...',
-              email: 'customer@example.com'
+              email: 'customer@example.com',
+              username: 'kemi_a',
+              firstName: 'Kemi',
+              lastName: 'Ayomi'
             },
             status: 'pending',
             total: 15000,
@@ -141,18 +144,38 @@ export class OrderController {
             shipping_fee: 2000,
             items: [
               {
-                product_id: '60d5ecb8b392...',
-                product_name: 'Ankara Dress',
-                business: '60d5ecb8b392...',
-                selections: {
-                  color_variant_selection: [],
-                  style_selection: [],
-                  fabric_selection: [],
-                  accessory_selection: []
+                // `product` is populated (name, base_price, kind + kind sub-doc)
+                product: {
+                  _id: '60d5ecb8b392...',
+                  name: 'Ankara Dress',
+                  base_price: 13000,
+                  kind: 'clothing',
                 },
+                business: '60d5ecb8b392...',
+                // selection arrays are PLURAL and top-level (not nested under `selections`)
+                color_variant_selections: [],
+                fabric_selections: [],
+                style_selections: [],
+                accessory_selections: [],
+                addon_selections: [],
                 total_price: 13000
               }
             ],
+            // one shipment per vendor (VendorShipment)
+            shipments: [
+              {
+                business: { _id: '60d5ecb8b392...', business_name: 'Ankara Co' },
+                shipment_type: 'vendor_to_customer',
+                status: 'pending',
+                shipping_fee: 2000,
+                courier_id: '123',
+                courier_name: 'GIG Logistics',
+                confirmed: false,
+                rejected: false
+              }
+            ],
+            vendor_earnings: 11700,
+            payout_status: 'pending',
             createdAt: '2026-01-01T10:00:00.000Z',
             updatedAt: '2026-01-01T10:00:00.000Z'
           }

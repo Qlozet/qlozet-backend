@@ -256,6 +256,16 @@ export class OrderService {
 
       const finalTotal = total + totalShippingFee;
 
+      // Every standard order must carry at least one shipment so the vendor can
+      // fulfill it (fulfillment needs the shipment's cached rate token, which
+      // only checkout can mint). Bespoke orders are created via a separate path
+      // and are exempt from this check.
+      if (normalizedItems.length > 0 && shipments.length === 0) {
+        throw new BadRequestException(
+          'Please select a shipping option for each vendor before placing your order.',
+        );
+      }
+
       // Check if any item is bespoke/customize to attach body profile
       const isBespoke = processedItems.some(
         (item) => item.clothing_type === ClothingType.CUSTOMIZE,
@@ -2201,6 +2211,13 @@ export class OrderService {
     const shipmentIndex = order.shipments.findIndex(
       (s) => s.business.toString() === businessId,
     );
+    if (shipmentIndex === -1) {
+      throw new BadRequestException(
+        'No shipment found for your business on this order. ' +
+        'This usually means a shipping option was not selected at checkout, ' +
+        'so there is no rate to create a label from.',
+      );
+    }
     const shipment = order.shipments[shipmentIndex];
 
     // Verify payment
