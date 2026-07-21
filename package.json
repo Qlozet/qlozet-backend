@@ -12,6 +12,7 @@
     "seed:roles": "ts-node scripts/seed.ts roles",
     "seed:users": "ts-node scripts/seed.ts users",
     "migrate:payout-delay": "ts-node scripts/migrate-payout-delay.ts",
+    "reset:stuck-shipments": "ts-node scripts/reset-stuck-shipments.ts",
     "build": "nest build && copyfiles src/modules/notifications/mail/templates/**/* dist/src/modules/notifications/mail/templates",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
