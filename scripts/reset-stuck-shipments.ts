@@ -18,7 +18,7 @@
 //   npm run reset:stuck-shipments                # apply the reset
 //
 import * as dotenv from 'dotenv';
-import * as mongoose from 'mongoose';
+import mongoose from 'mongoose';
 
 dotenv.config();
 

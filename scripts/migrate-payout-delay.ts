@@ -13,7 +13,7 @@
 //   npm run migrate:payout-delay 5        # sets a custom value
 //
 import * as dotenv from 'dotenv';
-import * as mongoose from 'mongoose';
+import mongoose from 'mongoose';
 
 dotenv.config();
 
