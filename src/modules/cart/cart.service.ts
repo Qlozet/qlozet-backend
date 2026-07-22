@@ -5,6 +5,7 @@ import { Cart, CartDocument } from './schema/cart.schema';
 import { Product, ProductDocument } from '../products/schemas';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { OrderItemSelectionsDto } from '../orders/dto/selection.dto';
+import { PriceCalculationService } from '../orders/orders.price-calculation';
 
 @Injectable()
 export class CartService {
@@ -14,6 +15,7 @@ export class CartService {
     private readonly productModel: Model<ProductDocument>,
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
+    private readonly priceCalculationService: PriceCalculationService,
   ) {}
 
   async getCart(userId: string): Promise<CartDocument> {
@@ -38,9 +40,34 @@ export class CartService {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
 
-    let unitPrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
-      ? product.discounted_price
-      : product.base_price;
+    // Component-inclusive per-unit price (base + selected styles/fabric/
+    // accessories/addons/variants, with discount) so the cart subtotal matches
+    // what the order will actually charge. Falls back to base/discounted price
+    // if re-pricing fails (e.g. a stale selection), so add-to-cart never breaks.
+    let unitPrice: number;
+    const fallbackUnitPrice =
+      product.discounted_price != null &&
+      product.discounted_price > 0 &&
+      product.discounted_price < product.base_price
+        ? product.discounted_price
+        : product.base_price;
+    try {
+      const s = selections as any;
+      unitPrice = await this.priceCalculationService.calculateItemTotal({
+        product_id: productId,
+        quantity: 1,
+        selections: {
+          color_variant_selection: s?.color_variant_selections ?? [],
+          style_selection: s?.style_selections ?? [],
+          fabric_selection: s?.fabric_selections ?? [],
+          accessory_selection: s?.accessory_selections ?? [],
+          addon_selection: s?.addon_selections ?? [],
+        },
+      } as any);
+      if (!unitPrice || unitPrice <= 0) unitPrice = fallbackUnitPrice;
+    } catch {
+      unitPrice = fallbackUnitPrice;
+    }
 
     // If an external fabric is applied, validate and add its cost
     let fabricObjectId: Types.ObjectId | undefined;

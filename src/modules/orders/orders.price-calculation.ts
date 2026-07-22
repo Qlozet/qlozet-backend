@@ -381,8 +381,17 @@ export class PriceCalculationService {
           );
         }
 
-        // Auto-resolve yardage from yard_per_order if not provided
+        // Resolve how many yards this garment needs:
+        //  1) explicit yardage on the request,
+        //  2) garment-level yardage_per_size (bill of materials, fabric-agnostic),
+        //  3) legacy per-fabric variant yard_per_order.
         let resolvedYardage = s.yardage;
+        if (!resolvedYardage && s.size) {
+          const gy = product.clothing?.yardage_per_size?.find(
+            (y) => y.size?.toLowerCase() === s.size!.toLowerCase(),
+          );
+          if (gy?.yards) resolvedYardage = gy.yards;
+        }
         if (!resolvedYardage && s.size && fabric.variants?.length) {
           const matchingVariant = fabric.variants.find(
             (v) => v.size?.toLowerCase() === s.size!.toLowerCase(),
@@ -393,12 +402,12 @@ export class PriceCalculationService {
         }
         if (!resolvedYardage) resolvedYardage = 0;
 
-        if (fabric.min_cut < resolvedYardage) {
-          throw new BadRequestException(
-            `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${resolvedYardage} yards.`,
-          );
+        // Fabric is cut in minimums — order at least min_cut. (The previous
+        // check errored on legitimate above-minimum requests; it was inverted.)
+        if (fabric.min_cut && resolvedYardage > 0 && resolvedYardage < fabric.min_cut) {
+          resolvedYardage = fabric.min_cut;
         }
-        // Check remaining yardage
+        // Check remaining stock
         if ((fabric.yard_length ?? 0) < resolvedYardage) {
           throw new BadRequestException(
             `Not enough yardage for fabric "${fabric.name}" in clothing. Remaining: ${fabric.yard_length}`,

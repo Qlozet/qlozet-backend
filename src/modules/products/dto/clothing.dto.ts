@@ -206,6 +206,20 @@ export class ClothingDto {
   @Type(() => FabricDto)
   fabrics?: FabricDto[];
 
+  // ✅ Garment fabric requirement per size (bill of materials).
+  @ApiPropertyOptional({
+    description:
+      'How many yards of fabric this garment uses per size. Drives fabric ' +
+      'pricing (embedded + external/cross-vendor), inventory depletion and reservations.',
+    example: [
+      { size: 'M', yards: 4 },
+      { size: 'L', yards: 4.5 },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  yardage_per_size?: { size: string; yards: number }[];
+
   // ✅ Add-ons (only allowed for CUSTOMIZE)
   @ValidateIf((o) => o.type === ClothingType.CUSTOMIZE)
   @ApiPropertyOptional({
