@@ -39,6 +39,7 @@ import {
   StyleDocument,
 } from '../products/schemas';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
+import { PriceItemDto } from './dto/price-item.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
@@ -460,6 +461,52 @@ export class OrderService {
       default:
         return { name: 'Unknown Product', description: undefined };
     }
+  }
+
+  /**
+   * Authoritatively price a single configured item — the SAME math the cart and
+   * order use (calculateItemTotal) — so the product page can display the real
+   * price instead of a client-side estimate. Returns the per-unit price.
+   */
+  async priceItem(dto: PriceItemDto): Promise<{ data: { price: number } }> {
+    const s = dto.selections as any;
+    const normalized = {
+      color_variant_selection: s?.color_variant_selections ?? [],
+      style_selection: s?.style_selections ?? [],
+      fabric_selection: s?.fabric_selections ?? [],
+      accessory_selection: s?.accessory_selections ?? [],
+      addon_selection: s?.addon_selections ?? [],
+    };
+
+    let price = 0;
+    try {
+      price = await this.priceCalculationService.calculateItemTotal({
+        product_id: dto.product_id,
+        quantity: 1,
+        selections: normalized,
+      } as any);
+    } catch {
+      const product: any = await this.productModel
+        .findById(dto.product_id)
+        .lean();
+      price =
+        product?.discounted_price != null &&
+        product.discounted_price > 0 &&
+        product.discounted_price < product.base_price
+          ? product.discounted_price
+          : product?.base_price ?? 0;
+    }
+
+    // External applied fabric (cross-vendor), per unit.
+    if (dto.applied_fabric_id && dto.applied_fabric_yards) {
+      const fab: any = await this.productModel
+        .findById(dto.applied_fabric_id)
+        .lean();
+      const ppy = fab?.fabric?.price_per_yard;
+      if (ppy) price += ppy * dto.applied_fabric_yards;
+    }
+
+    return { data: { price: Math.round(price * 100) / 100 } };
   }
 
   private async processOrderItems(

@@ -31,6 +31,7 @@ import {
   CheckoutPreviewResponseDto,
 } from './dto/checkout-preview.dto';
 import { FulfillOrderDto } from './dto/fulfill-order.dto';
+import { PriceItemDto } from './dto/price-item.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../ums/schemas';
@@ -83,6 +84,18 @@ export class OrderController {
   @ApiResponse({ status: 400, description: 'No validated address or empty cart' })
   async checkoutPreview(@Req() req, @Body() dto: CheckoutPreviewDto) {
     return this.orderService.checkoutPreview(req.user, dto);
+  }
+
+  @Post('price-item')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Authoritatively price a single configured item',
+    description:
+      'Returns the per-unit price for a product + selections using the same ' +
+      'math as the cart and order, so the product page shows the real price.',
+  })
+  async priceItem(@Body() dto: PriceItemDto) {
+    return this.orderService.priceItem(dto);
   }
 
   // In your controller

@@ -536,16 +536,23 @@ export class PriceCalculationService {
         throw new BadRequestException('Selected variant not found in clothing');
       }
 
-      // Optional: check stock
-      for (const v of color.variants) {
-        if ((v.stock ?? 0) < (s.quantity ?? 0)) {
-          throw new BadRequestException(
-            `Not enough stock for variant "${v._id}" in clothing. Remaining: ${v.stock}`,
-          );
-        }
+      // Price ONLY the selected size's variant — not every size of the colour.
+      // (The previous loop summed all sizes, multiplying the price by the number
+      // of sizes the colour has.)
+      const variant = s.size
+        ? color.variants.find(
+            (v) => v.size?.toLowerCase() === String(s.size).toLowerCase(),
+          )
+        : color.variants[0];
+      if (!variant) continue;
 
-        total += (v.price ?? 0) * (s.quantity ?? 1);
+      if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
+        throw new BadRequestException(
+          `Not enough stock for variant "${variant._id}" in clothing. Remaining: ${variant.stock}`,
+        );
       }
+
+      total += (variant.price ?? 0) * (s.quantity ?? 1);
     }
 
     return this.round(total);
