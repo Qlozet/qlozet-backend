@@ -34,6 +34,8 @@ export class PlatformService {
       // on delivery + payout_delay_days. (§16 milestone payout.)
       tailored_order_upfront_percent: 65,
       platform_commission_percent: 10,
+      platform_commission_type: 'percent',
+      platform_commission_flat: 0,
       payment_handling_fee_flat: 0,
       payment_handling_fee_percent: 0,
       tax_percent: 0.75,

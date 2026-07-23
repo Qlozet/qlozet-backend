@@ -149,6 +149,7 @@ export class OrderService {
           // each vendor on multi-item orders.
           total_price: item.total_price ?? 0,
           subtotal: item.total_price ?? 0,
+          pricing: (item as any).pricing,
         };
       });
 
@@ -593,8 +594,10 @@ export class OrderService {
             : undefined,
         };
 
-        const totalPrice =
-          await this.priceCalculationService.calculateItemTotal(itemForPricing);
+        // One call yields both the itemized breakdown and the final total.
+        const pricing =
+          await this.priceCalculationService.calculateItemBreakdown(itemForPricing);
+        const totalPrice = pricing.final;
 
         // Build the final selections shape that matches ProcessedOrderItem interface:
         const finalSelections = {
@@ -615,6 +618,7 @@ export class OrderService {
           quantity: item.quantity,
           selections: finalSelections,
           total_price: totalPrice,
+          pricing,
           product_snapshot: this.sanitizeProductSnapshot(product),
           style_snapshot:
             styleSnapshots && styleSnapshots.length

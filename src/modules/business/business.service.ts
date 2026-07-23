@@ -1222,9 +1222,15 @@ export class BusinessService implements OnModuleInit {
     }
 
     const platformSettings = await this.platformSettingsModel.findOne().lean();
+    const commissionType =
+      (platformSettings as any)?.platform_commission_type ?? 'percent';
     const commissionPercent =
       platformSettings?.platform_commission_percent ?? 10;
-    this.logger.log(`Using platform commission: ${commissionPercent}%`);
+    const commissionFlat =
+      (platformSettings as any)?.platform_commission_flat ?? 0;
+    this.logger.log(
+      `Using platform commission: ${commissionType === 'fixed' ? `₦${commissionFlat} flat` : `${commissionPercent}%`}`,
+    );
 
     let totalOrderNet = 0;
     let totalOrderCommission = 0;
@@ -1237,7 +1243,12 @@ export class BusinessService implements OnModuleInit {
       // and already includes: base_price + color variants + styles + fabrics
       //                      + accessories + addons (the full item cost).
       const gross = item.total_price || 0;
-      const commission = gross * (commissionPercent / 100);
+      // Commission: a flat ₦ amount or a percentage of the item price
+      // (never more than the item itself).
+      const commission =
+        commissionType === 'fixed'
+          ? Math.min(commissionFlat, gross)
+          : gross * (commissionPercent / 100);
       const net = gross - commission;
 
       this.logger.log(

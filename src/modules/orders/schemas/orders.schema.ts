@@ -142,6 +142,20 @@ export class OrderItem {
 
   @Prop({ type: Number, default: 0 })
   total_price?: number;
+
+  // Frozen itemized pricing snapshot at order time (§27). `final` == total_price.
+  @Prop({ type: Object })
+  pricing?: {
+    base: number;
+    styles_total: number;
+    fabric_total: number;
+    variant_total: number;
+    accessories_total: number;
+    addons_total: number;
+    before_discount: number;
+    discount: number;
+    final: number;
+  };
 }
 
 

@@ -283,6 +283,95 @@ export class PriceCalculationService {
   }
 
   /**
+   * Itemized pricing breakdown (base, styles, fabric, variant, accessories,
+   * add-ons, before-discount, discount, final). `final` always equals
+   * calculateItemTotal — this mirrors the same logic — so it is safe to store
+   * as a per-item pricing snapshot and display without re-computing.
+   */
+  async calculateItemBreakdown(item: ProcessedOrderItem): Promise<{
+    base: number;
+    styles_total: number;
+    fabric_total: number;
+    variant_total: number;
+    accessories_total: number;
+    addons_total: number;
+    before_discount: number;
+    discount: number;
+    final: number;
+  }> {
+    const product = await this.productModel.findById(item.product_id);
+    if (!product) {
+      throw new NotFoundException(`Product not found: ${item.product_id}`);
+    }
+    const sel = this.normalizeSelections(item.selections);
+    const qty = item.quantity ?? 1;
+
+    const empty = {
+      base: 0, styles_total: 0, fabric_total: 0, variant_total: 0,
+      accessories_total: 0, addons_total: 0,
+    };
+
+    if (product.kind === ProductKind.CLOTHING) {
+      const isCustomize = product.clothing?.type === 'customize';
+      const effectivePrice =
+        product.discounted_price != null &&
+        product.discounted_price > 0 &&
+        product.discounted_price < product.base_price
+          ? product.discounted_price
+          : product.base_price || 0;
+
+      let base = 0;
+      if (isCustomize) base = (product.base_price || 0) * qty;
+      else if (!sel.color_variant_selection?.length) base = effectivePrice * qty;
+
+      const styles = sel.style_selection?.length
+        ? await this.calculateStyleCost(sel.style_selection, product)
+        : 0;
+      const fabric = sel.fabric_selection?.length
+        ? await this.calculateFabricCost(sel.fabric_selection, product)
+        : 0;
+      const accessories = sel.accessory_selection?.length
+        ? await this.calculateAccessoryTotal(sel.accessory_selection, product)
+        : 0;
+      const variant = sel.color_variant_selection?.length
+        ? await this.calculateColorVariantCost(sel.color_variant_selection, product)
+        : 0;
+      const addons = sel.addon_selection?.length
+        ? this.calculateAddonCost(sel.addon_selection, product)
+        : 0;
+
+      const before = base + styles + fabric + accessories + variant + addons;
+      let discount = 0;
+      if (isCustomize && product.applied_discount) {
+        const d = await this.discountModel?.findById(product.applied_discount).lean();
+        if (d) discount = Math.min(this.applyDiscountToTotal(before, d), before);
+      }
+      const final = Math.max(0, before - discount);
+      return {
+        base: this.round(base),
+        styles_total: this.round(styles),
+        fabric_total: this.round(fabric),
+        variant_total: this.round(variant),
+        accessories_total: this.round(accessories),
+        addons_total: this.round(addons),
+        before_discount: this.round(before),
+        discount: this.round(discount),
+        final: this.round(final),
+      };
+    }
+
+    // Fabric / accessory products — flat price.
+    const final = await this.calculateItemTotal(item);
+    return {
+      ...empty,
+      base: final,
+      before_discount: final,
+      discount: 0,
+      final,
+    };
+  }
+
+  /**
    * Apply a discount to a total amount based on discount type.
    */
   private applyDiscountToTotal(total: number, discount: any): number {
