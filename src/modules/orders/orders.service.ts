@@ -469,7 +469,7 @@ export class OrderService {
    * order use (calculateItemTotal) — so the product page can display the real
    * price instead of a client-side estimate. Returns the per-unit price.
    */
-  async priceItem(dto: PriceItemDto): Promise<{ data: { price: number } }> {
+  async priceItem(dto: PriceItemDto): Promise<{ data: { price: number; breakdown: any } }> {
     const s = dto.selections as any;
     const normalized = {
       color_variant_selection: s?.color_variant_selections ?? [],
@@ -479,9 +479,9 @@ export class OrderService {
       addon_selection: s?.addon_selections ?? [],
     };
 
-    let price = 0;
+    let breakdown: any;
     try {
-      price = await this.priceCalculationService.calculateItemTotal({
+      breakdown = await this.priceCalculationService.calculateItemBreakdown({
         product_id: dto.product_id,
         quantity: 1,
         selections: normalized,
@@ -490,24 +490,35 @@ export class OrderService {
       const product: any = await this.productModel
         .findById(dto.product_id)
         .lean();
-      price =
+      const base =
         product?.discounted_price != null &&
         product.discounted_price > 0 &&
         product.discounted_price < product.base_price
           ? product.discounted_price
           : product?.base_price ?? 0;
+      breakdown = {
+        base, styles_total: 0, fabric_total: 0, variant_total: 0,
+        accessories_total: 0, addons_total: 0,
+        before_discount: base, discount: 0, final: base,
+      };
     }
 
-    // External applied fabric (cross-vendor), per unit.
+    // External applied fabric (cross-vendor) — a separate line, not discounted.
+    let externalFabric = 0;
     if (dto.applied_fabric_id && dto.applied_fabric_yards) {
       const fab: any = await this.productModel
         .findById(dto.applied_fabric_id)
         .lean();
       const ppy = fab?.fabric?.price_per_yard;
-      if (ppy) price += ppy * dto.applied_fabric_yards;
+      if (ppy) externalFabric = ppy * dto.applied_fabric_yards;
     }
 
-    return { data: { price: Math.round(price * 100) / 100 } };
+    const round = (n: number) => Math.round(n * 100) / 100;
+    breakdown.external_fabric = round(externalFabric);
+    breakdown.before_discount = round(breakdown.before_discount + externalFabric);
+    breakdown.final = round(breakdown.final + externalFabric);
+
+    return { data: { price: breakdown.final, breakdown } };
   }
 
   private async processOrderItems(
