@@ -578,12 +578,15 @@ export class OrderService {
             : null,
         ]);
         const { name } = await this.getProductDetails(product);
-        const selections = await this.normalizeSelections(item.selections);
+        // Price the item on the RESOLVED selections (with the product), not a
+        // re-normalize without the product — that returned empty selections, so
+        // item.total_price was base-only (missing all components), diverging
+        // from the order total and under-crediting vendor earnings.
         const itemForPricing: ProcessedOrderItem = {
           ...item,
           product_name: name,
           business: product?.business,
-          selections,
+          selections: rawSelections,
           total_price: 0,
           discount_snapshot: discountSnapshot
             ? this.sanitizeDiscountSnapshot(discountSnapshot)
