@@ -323,38 +323,73 @@ export class OrderService {
           );
         }
 
+        // Deduct inventory BEFORE moving money. If stock is short (e.g. not
+        // enough fabric yardage) this throws here — before any debit — so the
+        // wallet is never charged for an order that cannot be fulfilled.
+        try {
+          await this.productService.updateInventory(
+            savedOrder._id as Types.ObjectId,
+          );
+        } catch (invErr) {
+          await this.orderModel.deleteOne({ _id: savedOrder._id });
+          throw invErr;
+        }
+
         // Debit wallet
         await this.walletsService.debitWallet(wallet._id.toString(), savedOrder.total);
 
-        // Create transaction record
-        const transaction = await this.transactionService.create({
-          initiator: new Types.ObjectId(customer.id),
-          order: savedOrder.id,
-          wallet: wallet._id,
-          type: TransactionType.DEBIT,
-          amount: savedOrder.total,
-          description: `Wallet payment for order ${savedOrder.reference}`,
-          channel: 'wallet_checkout',
-          metadata: {
-            order_reference: savedOrder.reference,
-            items_count: savedOrder.items.length,
-            payment_method: 'wallet',
-          },
-        });
+        // Everything past the debit is compensated on failure: refund the
+        // wallet, restore inventory and delete the order so the customer is
+        // never left out of pocket for an order that did not complete.
+        let transaction: any;
+        try {
+          // Create transaction record
+          transaction = await this.transactionService.create({
+            initiator: new Types.ObjectId(customer.id),
+            order: savedOrder.id,
+            wallet: wallet._id,
+            type: TransactionType.DEBIT,
+            amount: savedOrder.total,
+            description: `Wallet payment for order ${savedOrder.reference}`,
+            channel: 'wallet_checkout',
+            metadata: {
+              order_reference: savedOrder.reference,
+              items_count: savedOrder.items.length,
+              payment_method: 'wallet',
+            },
+          });
 
-        // Mark transaction as success immediately (wallet already debited)
-        transaction.status = 'success' as any;
-        await transaction.save();
+          // Mark transaction as success immediately (wallet already debited)
+          transaction.status = 'success' as any;
+          await transaction.save();
 
-        // Mark order as in_review (awaiting vendor confirmation)
-        savedOrder.status = OrderStatus.IN_REVIEW;
-        await savedOrder.save();
+          // Mark order as in_review (awaiting vendor confirmation)
+          savedOrder.status = OrderStatus.IN_REVIEW;
+          await savedOrder.save();
 
-        // Record earnings and update inventory (was missing for wallet payments)
-        await Promise.all([
-          this.businessService.recordBusinessEarnings(savedOrder._id as Types.ObjectId),
-          this.productService.updateInventory(savedOrder._id as Types.ObjectId),
-        ]);
+          // Record vendor earnings (inventory already deducted above)
+          await this.businessService.recordBusinessEarnings(
+            savedOrder._id as Types.ObjectId,
+          );
+        } catch (postErr) {
+          await this.walletsService
+            .creditWallet(wallet._id.toString(), savedOrder.total)
+            .catch((e) =>
+              this.logger.error('Wallet refund after failed order failed', e),
+            );
+          await this.productService
+            .restoreInventory(savedOrder._id as Types.ObjectId)
+            .catch((e) =>
+              this.logger.error(
+                'Inventory restore after failed order failed',
+                e,
+              ),
+            );
+          await this.orderModel
+            .deleteOne({ _id: savedOrder._id })
+            .catch(() => undefined);
+          throw postErr;
+        }
 
         // Notify vendor(s) about new order
         this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
@@ -730,13 +765,18 @@ export class OrderService {
       }
       if (!yardage) yardage = 1; // fallback
 
-      const quantity = (fs.quantity ?? 1) * yardage;
+      // Keep `quantity` as the number of garments/cuts — do NOT fold yardage in.
+      // Downstream, both the price calc (calculateFabricCost) and the stock
+      // deduction (updateFabric) multiply yardage × quantity. Folding yardage in
+      // here double-counted it (yardage²), which inflated the order total vs the
+      // PDP/cart price AND raised false "not enough fabric" errors at checkout.
+      const quantity = fs.quantity ?? 1;
       normalizedFabrics.push({
         fabric_id: new Types.ObjectId(isFabricExist._id),
         price: isFabricExist.price_per_yard,
         quantity,
         yardage,
-        total_amount: isFabricExist.price_per_yard * quantity,
+        total_amount: isFabricExist.price_per_yard * yardage * quantity,
       });
     }
 
