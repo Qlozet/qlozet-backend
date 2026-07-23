@@ -31,6 +31,13 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 10 })
   platform_commission_percent: number;
 
+  // Commission can be a percentage of the item price, or a flat ₦ amount.
+  @Prop({ type: String, enum: ['percent', 'fixed'], default: 'percent' })
+  platform_commission_type: 'percent' | 'fixed';
+
+  @Prop({ type: Number, default: 0 })
+  platform_commission_flat: number;
+
   @Prop({ type: Number, default: 0 })
   payment_handling_fee_percent: number;
 
