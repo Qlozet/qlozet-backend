@@ -1096,13 +1096,18 @@ export class ProductService {
     const accessorySelections = item.accessory_selections || [];
 
     for (const selection of accessorySelections) {
+      // Accessories chosen without a specific variant have no per-variant stock
+      // to track (they are priced at their base price), so there is nothing to
+      // decrement — skip them instead of crashing on a missing variant/array.
+      if (!selection.variant_id) continue;
+
       let accessoryVariant: any;
       if (this.accessoryModel) {
         const accessory = await this.accessoryModel
           .findById(selection.accessory_id)
           .session(session);
         if (accessory) {
-          accessoryVariant = accessory.variants.find(
+          accessoryVariant = accessory.variants?.find(
             (v: any) => String(v._id) === String(selection.variant_id),
           );
         }
@@ -1117,7 +1122,7 @@ export class ProductService {
           (a) => String(a._id) === String(selection.accessory_id),
         );
         if (embeddedAccessory) {
-          accessoryVariant = embeddedAccessory.variants.find(
+          accessoryVariant = embeddedAccessory.variants?.find(
             (v) => String(v._id) === String(selection.variant_id),
           );
         }
