@@ -65,8 +65,12 @@ export class AccessorySelectionDto {
   @IsMongoId()
   accessory_id: Types.ObjectId;
 
+  // Optional: the variant only pins stock. Accessories are priced at their base
+  // price, so an accessory with no variant is still a valid selection and must
+  // not be rejected (that silently dropped accessories the PDP had priced).
   @IsMongoId()
-  variant_id: Types.ObjectId;
+  @IsOptional()
+  variant_id?: Types.ObjectId;
 
   @IsNumber()
   @IsPositive()

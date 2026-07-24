@@ -33,6 +33,7 @@ import {
 import { FulfillOrderDto } from './dto/fulfill-order.dto';
 import { PriceItemDto } from './dto/price-item.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../ums/schemas';
 import { VendorRole } from '../ums/schemas/role.schema';
@@ -86,6 +87,10 @@ export class OrderController {
     return this.orderService.checkoutPreview(req.user, dto);
   }
 
+  // Public: the product page (viewable by guests / before the token attaches)
+  // must be able to fetch the authoritative discounted price. Pricing a public
+  // product exposes nothing sensitive.
+  @Public()
   @Post('price-item')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

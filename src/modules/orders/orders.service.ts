@@ -783,26 +783,25 @@ export class OrderService {
     // --- Accessories ---
     const normalizedAccessories: AccessorySelectionDto[] = [];
     for (const as of selections.accessory_selections || []) {
-      console.log('Accessory selection accessory_id:', accessory?._id);
-      console.log(
-        'Clothing accessory IDs:',
-        clothing?.accessories?.map((a) => a._id?.toString()),
-      );
       const isAccessoryExist =
         clothing?.accessories?.find((a) => a._id?.equals(as.accessory_id)) ??
         accessory;
 
       if (!isAccessoryExist) continue;
 
-      const accessoryVariant = isAccessoryExist.variants.find((av) =>
-        av._id?.equals(as.variant_id),
-      );
-      if (!accessoryVariant) continue;
+      // Variant is optional — it only pins stock. Accessories are priced at
+      // their base price, so keep the accessory even when it has no (matching)
+      // variant, instead of silently dropping a selection the PDP had priced.
+      const accessoryVariant = as.variant_id
+        ? isAccessoryExist.variants?.find((av) => av._id?.equals(as.variant_id))
+        : undefined;
 
       const quantity = as.quantity ?? 1;
       normalizedAccessories.push({
         accessory_id: new Types.ObjectId(isAccessoryExist._id),
-        variant_id: new Types.ObjectId(accessoryVariant._id),
+        variant_id: accessoryVariant?._id
+          ? new Types.ObjectId(accessoryVariant._id)
+          : undefined,
         price: isAccessoryExist.price,
         quantity,
         total_amount: isAccessoryExist.price * quantity,
