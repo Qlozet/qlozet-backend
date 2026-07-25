@@ -19,10 +19,11 @@ export class BusinessEarningsCron {
 
   // Fallback window: if the delivery webhook never fires, completion earnings
   // would otherwise sit unreleasable forever. Auto-release them this many days
-  // after they were recorded, provided the vendor has clearly done their part
-  // (order confirmed + at least one shipment dispatched) and the order is not
-  // cancelled/returned. Overridable via PlatformSettings.auto_release_days.
-  private readonly DEFAULT_AUTO_RELEASE_DAYS = 21;
+  // after the vendor DISPATCHED the order (shipped_at), not after payment — so
+  // production time isn't baked in and the window can be short. Only fires when
+  // the order is in flight and not cancelled/returned. Overridable via
+  // PlatformSettings.auto_release_days.
+  private readonly DEFAULT_AUTO_RELEASE_DAYS = 10;
 
   constructor(
     @InjectModel(BusinessEarning.name)
@@ -96,31 +97,28 @@ export class BusinessEarningsCron {
   /**
    * Safety net: completion earnings only get a release_date from the delivery
    * webhook. If that webhook never fires (dropped event, test courier), the
-   * money would be stuck forever. Once enough time has passed AND the order
-   * shows the vendor did their part (confirmed + dispatched) and is not
-   * cancelled/returned, schedule the earning so releaseFunds() can pay it out.
+   * money would be stuck forever. Once the order was DISPATCHED long enough ago
+   * (shipped_at + auto_release_days) — by which point it has almost certainly
+   * been delivered — and the order is not cancelled/returned, schedule the
+   * earning so releaseFunds() can pay it out.
    */
   @Cron(CronExpression.EVERY_6_HOURS)
   async autoReleaseStuckEarnings() {
     const settings = await this.platformSettingsModel.findOne().lean();
     const autoReleaseDays =
       (settings as any)?.auto_release_days ?? this.DEFAULT_AUTO_RELEASE_DAYS;
-    const cutoff = new Date(Date.now() - autoReleaseDays * 24 * 60 * 60 * 1000);
+    const windowMs = autoReleaseDays * 24 * 60 * 60 * 1000;
+    const now = Date.now();
 
     const stuck = await this.businessEarningsModel.find({
       released: false,
       release_date: null,
-      createdAt: { $lte: cutoff },
     });
 
     if (!stuck.length) {
-      this.logger.log('[AutoRelease] No stuck earnings to check.');
+      this.logger.log('[AutoRelease] No unscheduled earnings to check.');
       return;
     }
-
-    this.logger.log(
-      `[AutoRelease] Checking ${stuck.length} earning(s) older than ${autoReleaseDays} days.`,
-    );
 
     // Statuses in which auto-release is safe (vendor confirmed; order in flight
     // or already completed). Explicitly excludes pending/in_review (vendor never
@@ -132,26 +130,33 @@ export class BusinessEarningsCron {
       try {
         const order = await this.orderModel.findById(earning.order).lean();
         if (!order) continue;
+        if (!eligibleStatuses.has((order as any).status)) continue;
 
-        if (!eligibleStatuses.has((order as any).status)) {
-          continue;
-        }
-
-        // Require evidence the vendor dispatched at least one shipment.
+        // Anchor on the most recent DISPATCH among this order's shipments.
+        // Prefer shipped_at; fall back to confirmed_at for older data. If the
+        // order was never dispatched, don't auto-release.
         const shipments = (order as any).shipments || [];
-        const dispatched = shipments.some((s: any) =>
-          dispatchedStatuses.has(s.status),
-        );
-        if (!dispatched) continue;
+        const dispatchAnchors = shipments
+          .filter((s: any) => dispatchedStatuses.has(s.status))
+          .map((s: any) => s.shipped_at ?? s.confirmed_at)
+          .filter(Boolean)
+          .map((d: any) => new Date(d).getTime());
+
+        if (!dispatchAnchors.length) continue;
+
+        const latestDispatch = Math.max(...dispatchAnchors);
+        if (latestDispatch + windowMs > now) continue; // not old enough yet
 
         await this.businessEarningsModel.updateOne(
           { _id: earning._id, released: false, release_date: null },
           { $set: { release_date: new Date() } },
         );
 
+        const daysSince = Math.round((now - latestDispatch) / 86400000);
         this.logger.warn(
           `[AutoRelease] Scheduled stuck ${earning.milestone} earning ${earning._id} ` +
-            `(order ${earning.order}, ₦${earning.net_amount}) — delivery webhook likely missed.`,
+            `(order ${earning.order}, ₦${earning.net_amount}) — dispatched ${daysSince}d ago, ` +
+            `delivery webhook likely missed.`,
         );
       } catch (error) {
         this.logger.error(

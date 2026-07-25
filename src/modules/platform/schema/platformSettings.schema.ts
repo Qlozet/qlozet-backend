@@ -16,9 +16,9 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 3 })
   payout_delay_days: number;
 
-  // Safety net: auto-release completion earnings this many days after they are
-  // recorded if the delivery webhook never fires (see BusinessEarningsCron).
-  @Prop({ type: Number, default: 21 })
+  // Safety net: auto-release completion earnings this many days after DISPATCH
+  // (shipped_at) if the delivery webhook never fires (see BusinessEarningsCron).
+  @Prop({ type: Number, default: 10 })
   auto_release_days: number;
 
   @Prop({ type: Number, default: 5 })
