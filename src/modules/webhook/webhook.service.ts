@@ -110,7 +110,9 @@ export class WebhookService {
       `handleChargeSuccess: type=${transaction.type}, wallet=${transaction.wallet}, isWalletFunding=${isWalletFunding}`,
     );
 
-    if (isWalletFunding) {
+    // Idempotency: Paystack retries webhooks. Credit a funded wallet only once.
+    const alreadyCredited = (transaction.metadata as any)?.funding_credited === true;
+    if (isWalletFunding && !alreadyCredited) {
       try {
         this.logger.log(
           `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
@@ -119,10 +121,19 @@ export class WebhookService {
           transaction.wallet!.toString(),
           transaction.amount,
         );
+        // Flag persists via the metadata spread + save() in the caller.
+        transaction.metadata = {
+          ...(transaction.metadata as any),
+          funding_credited: true,
+        };
         this.logger.log(`Wallet ${transaction.wallet} credited successfully`);
       } catch (error) {
         this.logger.error(`Failed to credit wallet: ${error.message}`, error.stack);
       }
+    } else if (isWalletFunding && alreadyCredited) {
+      this.logger.warn(
+        `Wallet funding ${transaction.reference} already credited — skipping.`,
+      );
     }
 
     const isCheckoutOrder =

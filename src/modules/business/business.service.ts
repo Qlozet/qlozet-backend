@@ -1215,6 +1215,19 @@ export class BusinessService implements OnModuleInit {
   async recordBusinessEarnings(orderId: Types.ObjectId) {
     this.logger.log(`Recording business earnings for order: ${orderId}`);
 
+    // Idempotency: never record earnings twice for the same order. A retried
+    // Paystack webhook (or any accidental double-call) would otherwise create
+    // duplicate BusinessEarning docs and double the vendor's pending_balance.
+    const alreadyRecorded = await this.businessEarningsModel.exists({
+      order: orderId,
+    });
+    if (alreadyRecorded) {
+      this.logger.warn(
+        `Earnings already recorded for order ${orderId} — skipping to avoid double credit.`,
+      );
+      return;
+    }
+
     const order = await this.orderModel.findById(orderId);
     if (!order?.items || order.items.length === 0) {
       this.logger.warn(`Order ${orderId} has no items. Skipping earnings.`);
