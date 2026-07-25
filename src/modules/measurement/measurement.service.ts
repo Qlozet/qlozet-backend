@@ -296,6 +296,52 @@ export class MeasurementService {
       );
     }
   }
+  // The image-editor's garment_type is a Gradio Dropdown with a fixed choice
+  // list — any other value hard-errors. Map an arbitrary product name to the
+  // closest allowed choice; the specific name is still passed via style_notes.
+  private static readonly ALLOWED_GARMENT_TYPES = [
+    "women's dress",
+    "women's flare mini dress",
+    "men's tailored shirt",
+    'kaftan',
+    '2-piece suit',
+    't-shirt',
+    'trousers',
+    'skirt',
+    'jumpsuit',
+    'hoodie',
+    'generic clothing item',
+  ];
+
+  private normalizeGarmentType(raw?: string): string {
+    // Use both: map the free-form name to the closest allowed dropdown choice
+    // (so the editor gets a sensible category), while metadata_json + style_notes
+    // still carry the full garment detail that drives the generation.
+    const s = (raw || '').toLowerCase().trim();
+    if (!s) return 'generic clothing item';
+
+    const exact = MeasurementService.ALLOWED_GARMENT_TYPES.find(
+      (c) => c.toLowerCase() === s,
+    );
+    if (exact) return exact;
+
+    // Keyword mapping, most-specific first.
+    if (/t-?shirt|\btee\b/.test(s)) return 't-shirt';
+    if (/hoodie|sweatshirt/.test(s)) return 'hoodie';
+    if (/jumpsuit|romper|playsuit|onesie/.test(s)) return 'jumpsuit';
+    if (/kaftan|caftan|agbada|boubou|dashiki/.test(s)) return 'kaftan';
+    if (/\bsuit\b|blazer|tuxedo|(2|two)[- ]?piece\s+suit/.test(s))
+      return '2-piece suit';
+    if (/skirt/.test(s)) return 'skirt';
+    if (/trouser|pants|slacks|chinos|jeans|shorts/.test(s)) return 'trousers';
+    if (/shirt|blouse/.test(s)) return "men's tailored shirt";
+    if (/(flare|mini)[\w\s]*dress|dress[\w\s]*(flare|mini)/.test(s))
+      return "women's flare mini dress";
+    if (/dress|gown|frock/.test(s)) return "women's dress";
+
+    return 'generic clothing item';
+  }
+
   async editGarmentWithImageEditor(payload: EditGarmentDto) {
     try {
       const {
@@ -323,17 +369,30 @@ export class MeasurementService {
       // fail the redundant check here.
       const client = await this.gradio.getClient(this.ie);
 
+      // Map the (free-form) garment name to the editor's fixed dropdown choice,
+      // and keep the original name in the notes so the model still sees it.
+      const normalizedGarmentType = this.normalizeGarmentType(garment_type);
+      const enrichedNotes = [
+        garment_type &&
+        garment_type.toLowerCase() !== normalizedGarmentType.toLowerCase()
+          ? `Garment: ${garment_type}`
+          : '',
+        style_notes,
+      ]
+        .filter(Boolean)
+        .join(' | ');
+
       // Call the editor endpoint
       const result = await client.predict('/edit_product_image_from_urls', {
         base_url: base_image_url,
         fabric_url: fabric_image_url || '',
         accessory_url: accessory_image_url || '',
         addon_url: addon_image_url || '',
-        garment_type,
+        garment_type: normalizedGarmentType,
         base_color,
         pattern,
         fit,
-        style_notes,
+        style_notes: enrichedNotes,
         metadata_json: metadata_json ? JSON.stringify(metadata_json) : '',
         model_name: 'gemini-2.5-flash-image',
         aspect_ratio: '1:1',
