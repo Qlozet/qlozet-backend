@@ -80,8 +80,11 @@ class AccessorySelection {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Accessory', required: true })
   accessory_id: Types.ObjectId;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Variant', required: true })
-  variant_id: Types.ObjectId;
+  // Optional: the variant only pins stock. Accessories chosen without one are
+  // priced at their base price; requiring it here threw a Mongoose
+  // ValidationError (surfaced as a 500) when saving such an order.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Variant', required: false })
+  variant_id?: Types.ObjectId;
   @Prop({ type: Number, min: 1 })
   price: number;
   @Prop({ type: Number, min: 1 })
