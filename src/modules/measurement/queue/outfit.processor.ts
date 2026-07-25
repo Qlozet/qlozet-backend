@@ -7,18 +7,14 @@ import { JobState } from 'src/common/schemas/job-status.schema';
 import { Logger } from '@nestjs/common';
 import { TokenService } from '../../wallets/token.service';
 
-// Tokens are charged up-front (before the job is queued). If the job fails we
-// credit them back. Maps the queue job type → the spend/refund price key.
-const REFUND_KEY_BY_TYPE: Record<
-  string,
-  'video' | 'image' | 'edit' | 'prediction' | 'outfit' | 'analyze'
-> = {
+// Only these job types pre-charge tokens in the controller (spend() before
+// queuing), so only these are refunded on failure. auto-mask / video-pipeline /
+// run-prediction only balance-CHECK (no pre-deduction), so refunding them would
+// credit tokens that were never charged.
+const REFUND_KEY_BY_TYPE: Record<string, 'edit' | 'outfit' | 'analyze'> = {
   editGarment: 'edit',
   generateOutfit: 'outfit',
   analyzeReference: 'analyze',
-  runPrediction: 'prediction',
-  autoMask: 'image',
-  videoPipeline: 'video',
 };
 
 @Processor('outfit-generation')

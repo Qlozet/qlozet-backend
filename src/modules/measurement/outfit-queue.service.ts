@@ -64,7 +64,9 @@ export class OutfitQueueService {
       message: 'Prediction started. Use the jobId to check the status.',
     };
   }
-  async queueOutfitGeneration(payload: GenerateOutfitRequestDto) {
+  async queueOutfitGeneration(
+    payload: GenerateOutfitRequestDto & { business?: string; customer?: string },
+  ) {
     const jobId = randomUUID();
     await this.queue.add(
       'generateOutfit',
@@ -93,6 +95,8 @@ export class OutfitQueueService {
     imageUrl?: string;
     provider?: string;
     model?: string;
+    business?: string;
+    customer?: string;
   }) {
     const jobId = randomUUID();
     await this.queue.add(
