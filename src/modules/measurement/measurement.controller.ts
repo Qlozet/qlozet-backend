@@ -261,7 +261,12 @@ export class MeasurementController {
       reference_image_urls,
     };
 
-    return this.outfitService.queueOutfitGeneration(payload);
+    // Carry business/customer so a failed job can refund the pre-charged tokens.
+    return this.outfitService.queueOutfitGeneration({
+      ...payload,
+      business,
+      customer,
+    });
   }
 
   @Roles(UserType.CUSTOMER)
@@ -345,6 +350,8 @@ export class MeasurementController {
       imageUrl: finalImageUrl,
       provider,
       model,
+      business,
+      customer,
     });
   }
 
