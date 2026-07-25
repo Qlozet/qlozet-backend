@@ -342,6 +342,32 @@ export class MeasurementService {
     return 'generic clothing item';
   }
 
+  // `fit` is also a fixed Gradio dropdown: ['', 'tailored', 'slim fit',
+  // 'relaxed', 'oversized', 'regular']. Map any incoming label to a valid value.
+  private static readonly ALLOWED_FITS = [
+    'tailored',
+    'slim fit',
+    'relaxed',
+    'oversized',
+    'regular',
+  ];
+
+  private normalizeFit(raw?: string): string {
+    const s = (raw || '').toLowerCase().trim();
+    if (!s) return 'tailored';
+
+    const exact = MeasurementService.ALLOWED_FITS.find((f) => f === s);
+    if (exact) return exact;
+
+    if (/slim|fitted/.test(s)) return 'slim fit';
+    if (/relax|loose|comfort/.test(s)) return 'relaxed';
+    if (/over|baggy|boxy/.test(s)) return 'oversized';
+    if (/tailor|bespoke|custom/.test(s)) return 'tailored';
+    if (/regular|standard|normal|classic/.test(s)) return 'regular';
+
+    return 'tailored';
+  }
+
   async editGarmentWithImageEditor(payload: EditGarmentDto) {
     try {
       const {
@@ -369,13 +395,17 @@ export class MeasurementService {
       // fail the redundant check here.
       const client = await this.gradio.getClient(this.ie);
 
-      // Map the (free-form) garment name to the editor's fixed dropdown choice,
-      // and keep the original name in the notes so the model still sees it.
+      // Map the (free-form) garment name and fit to the editor's fixed dropdown
+      // choices, and keep the originals in the notes so the model still sees them.
       const normalizedGarmentType = this.normalizeGarmentType(garment_type);
+      const normalizedFit = this.normalizeFit(fit);
       const enrichedNotes = [
         garment_type &&
         garment_type.toLowerCase() !== normalizedGarmentType.toLowerCase()
           ? `Garment: ${garment_type}`
+          : '',
+        fit && fit.toLowerCase() !== normalizedFit.toLowerCase()
+          ? `Fit: ${fit}`
           : '',
         style_notes,
       ]
