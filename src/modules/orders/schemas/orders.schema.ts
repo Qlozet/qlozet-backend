@@ -313,6 +313,9 @@ export class Order {
   @Prop({ type: Number, default: 0 })
   platform_commission?: number;
 
+  @Prop({ type: Boolean, default: false })
+  inventory_deducted?: boolean; // idempotency: guards double stock deduction on webhook retries
+
   @Prop({ type: Date, default: null })
   payout_eligible_at?: Date; // completedAt + payout_delay_days
 

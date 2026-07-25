@@ -30,6 +30,7 @@ export class PlatformService {
       payout_cycle: 'weekly',
       minimum_payout: 2000,
       payout_delay_days: 3,
+      auto_release_days: 10,
       // Custom/tailored orders release 65% up front (on vendor confirm) and 35%
       // on delivery + payout_delay_days. (§16 milestone payout.)
       tailored_order_upfront_percent: 65,

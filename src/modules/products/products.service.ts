@@ -781,6 +781,15 @@ export class ProductService {
 
         if (!order?.items || order.items.length === 0) return;
 
+        // Idempotency: a retried Paystack webhook can call this twice. Deduct
+        // stock only once per order.
+        if ((order as any).inventory_deducted) {
+          this.logger.warn(
+            `Inventory already deducted for order ${orderId} — skipping.`,
+          );
+          return;
+        }
+
         for (const item of order.items) {
           await this.updateFabric(item, session);
           await this.updateAccessory(item, session);
@@ -807,6 +816,10 @@ export class ProductService {
             }
           }
         }
+
+        // Mark deducted so a duplicate webhook can't deduct again.
+        (order as any).inventory_deducted = true;
+        await order.save({ session });
       });
       this.logger.log('INVENTORY UPDATED');
     } catch (err: any) {
@@ -830,6 +843,14 @@ export class ProductService {
         const order = await this.orderModel.findById(orderId).session(session);
 
         if (!order?.items || order.items.length === 0) return;
+
+        // Only restore what was actually deducted — and never restore twice.
+        if (!(order as any).inventory_deducted) {
+          this.logger.warn(
+            `Inventory was not deducted for order ${orderId} — nothing to restore.`,
+          );
+          return;
+        }
 
         for (const item of order.items) {
           // Restore fabric yardage
@@ -973,6 +994,11 @@ export class ProductService {
             }
           }
         }
+
+        // Clear the flag so the order's inventory can be deducted again if it is
+        // ever re-processed, and so a second restore is a no-op.
+        (order as any).inventory_deducted = false;
+        await order.save({ session });
       });
       this.logger.log(`[RestoreInventory] Inventory restored for order ${orderId}`);
     } catch (err: any) {

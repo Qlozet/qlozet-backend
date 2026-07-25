@@ -1317,20 +1317,31 @@ export class OrderService {
 
     await order.save();
 
-    // Release upfront milestone earnings for this vendor (custom orders only)
+    // Schedule the upfront milestone for this vendor (custom orders only).
+    // Apply the same payout delay as completion rather than releasing the
+    // instant the vendor clicks confirm — this keeps the money in
+    // pending_balance during a claw-back window, so a confirm-then-cancel can
+    // be reversed cleanly before the vendor can withdraw it. The upfront still
+    // lands well before delivery (funding materials), just not instantly.
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+    const upfrontReleaseDate = new Date(
+      Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
+    );
     const upfrontResult = await this.businessEarningsModel.updateMany(
       {
         order: order._id,
         business: businessId,
         milestone: 'upfront',
         released: false,
+        release_date: null,
       },
-      { $set: { release_date: new Date() } },
+      { $set: { release_date: upfrontReleaseDate } },
     );
 
     if (upfrontResult.modifiedCount > 0) {
       this.logger.log(
-        `[Milestone] Released ${upfrontResult.modifiedCount} upfront earning(s) for vendor ${businessId} on order ${orderReference}`,
+        `[Milestone] Scheduled ${upfrontResult.modifiedCount} upfront earning(s) for vendor ${businessId} on order ${orderReference} — releasing ${upfrontReleaseDate.toISOString()}`,
       );
     }
 
