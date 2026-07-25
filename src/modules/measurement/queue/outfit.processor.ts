@@ -5,6 +5,21 @@ import { JobStatusService } from '../job-status.service';
 import { OutfitJobData } from './outfit-job.interface';
 import { JobState } from 'src/common/schemas/job-status.schema';
 import { Logger } from '@nestjs/common';
+import { TokenService } from '../../wallets/token.service';
+
+// Tokens are charged up-front (before the job is queued). If the job fails we
+// credit them back. Maps the queue job type → the spend/refund price key.
+const REFUND_KEY_BY_TYPE: Record<
+  string,
+  'video' | 'image' | 'edit' | 'prediction' | 'outfit' | 'analyze'
+> = {
+  editGarment: 'edit',
+  generateOutfit: 'outfit',
+  analyzeReference: 'analyze',
+  runPrediction: 'prediction',
+  autoMask: 'image',
+  videoPipeline: 'video',
+};
 
 @Processor('outfit-generation')
 export class OutfitProcessor extends WorkerHost {
@@ -13,6 +28,7 @@ export class OutfitProcessor extends WorkerHost {
   constructor(
     private measurement: MeasurementService,
     private jobStatusService: JobStatusService,
+    private tokenService: TokenService,
   ) {
     super();
   }
@@ -118,6 +134,28 @@ export class OutfitProcessor extends WorkerHost {
         `Job ${jobId} failed: ${error?.message || error}`,
         error?.stack,
       );
+
+      // Refund the tokens that were charged up-front for this generation, so a
+      // failed job never costs the customer.
+      const refundKey = REFUND_KEY_BY_TYPE[job.data.type];
+      if (refundKey) {
+        const business = (job.data as any).business;
+        const customer = (job.data as any).customer;
+        await this.tokenService
+          .refund(refundKey, business, customer)
+          .then((w) =>
+            w
+              ? this.logger.log(
+                  `Refunded ${refundKey} tokens for failed job ${jobId} → balance=${w.tokens}`,
+                )
+              : undefined,
+          )
+          .catch((e) =>
+            this.logger.error(
+              `Token refund failed for job ${jobId}: ${e.message}`,
+            ),
+          );
+      }
 
       await this.retryMongo(() =>
         this.jobStatusService.updateStatus(

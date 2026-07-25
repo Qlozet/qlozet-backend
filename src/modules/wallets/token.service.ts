@@ -139,6 +139,60 @@ export class TokenService {
     return tokenWallet;
   }
 
+  /**
+   * Credit tokens back after a pre-charged operation fails (tokens are spent
+   * before the async generation job runs, so a failed job would otherwise lose
+   * the customer's tokens). Mirrors spend()'s price map and wallet resolution.
+   */
+  async refund(
+    type: 'video' | 'image' | 'edit' | 'prediction' | 'ai_ask' | 'outfit' | 'analyze' | 'generate_style',
+    business?: string,
+    customer?: string,
+    amountOverride?: number,
+  ) {
+    const settings = await this.platformService.getSettings();
+
+    const priceMap = {
+      image: settings.image_measurement_token_price,
+      video: settings.video_measurement_token_price,
+      prediction: settings.run_prediction_token_price,
+      edit: settings.edit_garment_token_price,
+      ai_ask: settings.ai_ask_token_price,
+      outfit: settings.outfit_generation_token_price,
+      analyze: (settings as any).analyze_reference_token_price ?? 10,
+      generate_style: 10,
+    };
+
+    const amount = amountOverride ?? priceMap[type] ?? settings.edit_garment_token_price;
+    if (!amount || amount <= 0) return null;
+
+    const tokenWalletFilter: any = {};
+    if (customer) {
+      tokenWalletFilter.customer = new Types.ObjectId(customer);
+    } else if (business) {
+      tokenWalletFilter.business = new Types.ObjectId(business);
+    } else {
+      return null;
+    }
+
+    const tokenWallet = await this.tokenModel.findOneAndUpdate(
+      tokenWalletFilter,
+      { $inc: { tokens: amount, lifetimeSpent: -amount } },
+      { new: true },
+    );
+
+    if (tokenWallet) {
+      await this.tokenTransactionModel.create({
+        token: tokenWallet._id,
+        type: TokenTransactionType.EARN,
+        amount,
+        feature: `refund:${type}`,
+      });
+    }
+
+    return tokenWallet;
+  }
+
   async purchase(tokenAmount: number, business?: string, customer?: string) {
     if (tokenAmount <= 0) throw new BadRequestException('Invalid token amount');
 
