@@ -51,6 +51,33 @@ export class ProductService {
   ) {}
 
   /**
+   * Distinct business IDs that have at least one ACTIVE product matching the
+   * given search term (name / category / attributes). Mirrors the product
+   * search used by findAll, so the vendor search on the shop returns the same
+   * vendors whose items show up in the results.
+   */
+  async findBusinessIdsBySearch(search: string): Promise<Types.ObjectId[]> {
+    const term = search?.trim();
+    if (!term) return [];
+    const rx = { $regex: term, $options: 'i' };
+    const ids = await this.productModel.distinct('business', {
+      status: ProductStatus.ACTIVE,
+      $or: [
+        { 'clothing.name': rx },
+        { 'accessory.name': rx },
+        { 'fabric.name': rx },
+        { 'clothing.taxonomy.categories': rx },
+        { 'accessory.taxonomy.categories': rx },
+        { 'fabric.taxonomy.categories': rx },
+        { 'clothing.taxonomy.attributes': rx },
+        { 'accessory.taxonomy.attributes': rx },
+        { 'fabric.taxonomy.attributes': rx },
+      ],
+    });
+    return ids as Types.ObjectId[];
+  }
+
+  /**
    * Create a product and compute its price dynamically based on type
    */
   async upsert(

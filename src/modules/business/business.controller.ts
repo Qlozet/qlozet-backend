@@ -58,10 +58,12 @@ export class BusinessController {
   async getPublicVendors(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     return this.businessService.getPublicVendors(
       Number(page) || 1,
       Number(limit) || 20,
+      search,
     );
   }
 
