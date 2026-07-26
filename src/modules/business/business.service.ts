@@ -371,11 +371,33 @@ export class BusinessService implements OnModuleInit {
    * Public storefront: list active vendors with basic profile info.
    * Used by the customer shop for vendor carousels and listing pages.
    */
-  async getPublicVendors(page = 1, limit = 20) {
+  async getPublicVendors(page = 1, limit = 20, search?: string) {
     const skip = (page - 1) * limit;
+    const filter: any = {
+      status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+    };
+
+    // When a search term is provided, return vendors that either match by their
+    // own fields (name / description / category) OR that sell products matching
+    // the term — so the Vendors Results reflect the same search as the items.
+    const term = search?.trim();
+    if (term) {
+      const rx = { $regex: term, $options: 'i' };
+      const productBusinessIds =
+        await this.productService.findBusinessIdsBySearch(term);
+      filter.$or = [
+        { business_name: rx },
+        { description: rx },
+        { business_category: rx },
+        ...(productBusinessIds.length
+          ? [{ _id: { $in: productBusinessIds } }]
+          : []),
+      ];
+    }
+
     const [vendors, total] = await Promise.all([
       this.businessModel
-        .find({ status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] } })
+        .find(filter)
         .select(
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
@@ -385,7 +407,7 @@ export class BusinessService implements OnModuleInit {
         .skip(skip)
         .limit(limit)
         .lean(),
-      this.businessModel.countDocuments({ status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] } }),
+      this.businessModel.countDocuments(filter),
     ]);
     return { data: vendors, total, page, pages: Math.ceil(total / limit) };
   }
