@@ -978,7 +978,15 @@ export class OrderService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(take)
-        .populate('items.product', 'name images base_price')
+        // Enough of the product to render the customer's order list/detail:
+        // kind + type drive the item's product-type badge, and the kind-specific
+        // name/images give the title and thumbnail.
+        .populate(
+          'items.product',
+          'kind base_price clothing.name clothing.type clothing.images ' +
+            'accessory.name accessory.images fabric.name fabric.images',
+        )
+        .populate('items.business', 'business_name business_logo_url')
         .populate('customer', 'firstName lastName email')
         .exec(),
 
