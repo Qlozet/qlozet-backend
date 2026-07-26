@@ -229,17 +229,32 @@ export class PriceCalculationService {
     // Always use base_price for calculation; discounts are applied to the FULL total at the end
     const basePrice = product.base_price || 0;
 
+    // Colour-variant cost is needed up front so ready-to-wear can fall back to
+    // the product price when the selected variant carries no explicit price.
+    const variantTotal = selections.color_variant_selection?.length
+      ? await this.calculateColorVariantCost(
+          selections.color_variant_selection,
+          product,
+        )
+      : 0;
+
     if (product.clothing?.type === 'customize') {
       // Use item-level quantity for base price (craftsmanship cost).
       // Component quantities (accessories, fabrics, etc.) only multiply their own prices.
       total += basePrice * qty;
     } else {
-      // Ready-to-wear: if no color variants are selected, add base price
-      // For ready-to-wear, use discounted_price if available (pre-existing behavior)
+      // Ready-to-wear: the price comes from the selected colour variant. When no
+      // variant is selected — or the variant rows carry no explicit price (the
+      // price lives on the product's base_price) — fall back to the product's
+      // effective price, otherwise the item would be charged at ₦0.
       const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
         ? product.discounted_price
         : (product.base_price || 0);
-      if (!selections.color_variant_selection || selections.color_variant_selection.length === 0) {
+      if (
+        !selections.color_variant_selection ||
+        selections.color_variant_selection.length === 0 ||
+        variantTotal === 0
+      ) {
         total += effectivePrice * qty;
       }
     }
@@ -254,11 +269,7 @@ export class PriceCalculationService {
         selections.accessory_selection,
         product,
       );
-    if (selections.color_variant_selection)
-      total += await this.calculateColorVariantCost(
-        selections.color_variant_selection,
-        product,
-      );
+    total += variantTotal;
     if (selections.style_selection)
       total += await this.calculateStyleCost(
         selections.style_selection,
@@ -320,10 +331,6 @@ export class PriceCalculationService {
           ? product.discounted_price
           : product.base_price || 0;
 
-      let base = 0;
-      if (isCustomize) base = (product.base_price || 0) * qty;
-      else if (!sel.color_variant_selection?.length) base = effectivePrice * qty;
-
       const styles = sel.style_selection?.length
         ? await this.calculateStyleCost(sel.style_selection, product)
         : 0;
@@ -339,6 +346,19 @@ export class PriceCalculationService {
       const addons = sel.addon_selection?.length
         ? this.calculateAddonCost(sel.addon_selection, product)
         : 0;
+
+      let base = 0;
+      if (isCustomize) {
+        base = (product.base_price || 0) * qty;
+      } else if (!sel.color_variant_selection?.length || variant === 0) {
+        // Ready-to-wear: the price normally comes from the selected colour
+        // variant. But when the variant rows carry no explicit price (the price
+        // lives on the product's base_price), pricing it purely by the variant
+        // would return ₦0 — which is why the PDP showed ₦0 while the grid (which
+        // reads base_price directly) showed the real price. Fall back to the
+        // product's effective (possibly discounted) price in that case.
+        base = effectivePrice * qty;
+      }
 
       const before = base + styles + fabric + accessories + variant + addons;
       let discount = 0;
