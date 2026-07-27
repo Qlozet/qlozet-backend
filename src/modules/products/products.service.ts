@@ -901,8 +901,8 @@ export class ProductService {
                 `[RestoreInventory] Fabric ${selection.fabric_id} restored +${totalYards} yards`,
               );
             } else {
-              // Try embedded fabric in clothing
-              await this.productModel.updateOne(
+              // Try embedded fabric in clothing…
+              const embeddedRes = await this.productModel.updateOne(
                 {
                   _id: item.product,
                   'clothing.fabrics._id': selection.fabric_id,
@@ -912,6 +912,15 @@ export class ProductService {
                 },
                 { session },
               );
+
+              // …or the fabric-KIND product's own fabric (product.fabric).
+              if (embeddedRes.matchedCount === 0) {
+                await this.productModel.updateOne(
+                  { _id: item.product, 'fabric._id': selection.fabric_id },
+                  { $inc: { 'fabric.yard_length': totalYards } },
+                  { session },
+                );
+              }
               this.logger.log(
                 `[RestoreInventory] Embedded fabric ${selection.fabric_id} restored +${totalYards} yards`,
               );
@@ -1061,9 +1070,22 @@ export class ProductService {
           .session(session);
         if (!product) throw new BadRequestException('Product not found');
 
+        // Clothing-embedded fabric…
         fabric = product.clothing?.fabrics?.find(
           (f) => String(f._id) === String(selection.fabric_id),
         ) as FabricDocument | undefined;
+
+        // …or a standalone fabric-KIND product, whose fabric lives on
+        // product.fabric (normalizeSelections stores product.fabric._id as the
+        // fabric_id). Without this branch, buying a fabric product threw
+        // "Fabric … not found in product or standalone" at inventory time.
+        if (
+          !fabric &&
+          product.fabric &&
+          String((product.fabric as any)._id) === String(selection.fabric_id)
+        ) {
+          fabric = product.fabric as any;
+        }
 
         if (!fabric) {
           throw new BadRequestException(
@@ -1097,48 +1119,52 @@ export class ProductService {
     newYardLength: number,
     session?: any,
   ) {
-    let fabric;
-    let isEmbedded = false;
-
-    // Try to find the standalone fabric
-    fabric = await this.fabricModel.findById(fabricId).session(session);
-
-    // If not standalone, check embedded in product
-    if (!fabric) {
-      const product = await this.productModel
-        .findById(productId)
-        .session(session);
-      if (!product) throw new BadRequestException('Product not found');
-
-      fabric = product.clothing?.fabrics?.find(
-        (f) => String(f._id) === String(fabricId),
-      ) as FabricDocument | undefined;
-
-      if (!fabric) {
-        throw new BadRequestException(
-          `Fabric ${fabricId} not found in product or standalone`,
-        );
-      }
-      isEmbedded = true;
+    // 1) Standalone fabric document.
+    const standalone = await this.fabricModel
+      .findById(fabricId)
+      .session(session);
+    if (standalone) {
+      standalone.yard_length = newYardLength;
+      await standalone.save({ session });
+      this.logger.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
+      return { fabricId, newYardLength };
     }
 
-    // Update yard length
-    fabric.yard_length = newYardLength;
+    const product = await this.productModel
+      .findById(productId)
+      .session(session);
+    if (!product) throw new BadRequestException('Product not found');
 
-    // Save changes
-    if (isEmbedded) {
+    // 2) Clothing-embedded fabric (clothing.fabrics[]).
+    const embedded = product.clothing?.fabrics?.find(
+      (f) => String(f._id) === String(fabricId),
+    );
+    if (embedded) {
       await this.productModel
         .updateOne(
-          { _id: productId, 'clothing.fabrics._id': fabric._id },
-          { $set: { 'clothing.fabrics.$.yard_length': fabric.yard_length } },
+          { _id: productId, 'clothing.fabrics._id': fabricId },
+          { $set: { 'clothing.fabrics.$.yard_length': newYardLength } },
         )
         .session(session);
-    } else {
-      await fabric.save({ session });
+      this.logger.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
+      return { fabricId, newYardLength };
     }
 
-    this.logger.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
-    return { fabricId, newYardLength };
+    // 3) Standalone fabric-KIND product: stock lives on product.fabric.
+    if (product.fabric && String((product.fabric as any)._id) === String(fabricId)) {
+      await this.productModel
+        .updateOne(
+          { _id: productId },
+          { $set: { 'fabric.yard_length': newYardLength } },
+        )
+        .session(session);
+      this.logger.log(`Fabric ${fabricId} updated to ${newYardLength} yards`);
+      return { fabricId, newYardLength };
+    }
+
+    throw new BadRequestException(
+      `Fabric ${fabricId} not found in product or standalone`,
+    );
   }
 
   async updateAccessory(
