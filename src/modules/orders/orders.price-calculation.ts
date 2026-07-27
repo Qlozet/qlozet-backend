@@ -347,7 +347,11 @@ export class PriceCalculationService {
         ? this.calculateAddonCost(sel.addon_selection, product)
         : 0;
 
-      let base = 0;
+      // `base` is reported at the UNDISCOUNTED price so `before_discount`
+      // reflects the pre-discount total; the product-level markdown is surfaced
+      // separately as `discount` so the PDP can render a struck-through price.
+      let base = 0; // undiscounted base
+      let baseDiscount = 0; // product-level markdown folded into the base
       if (isCustomize) {
         base = (product.base_price || 0) * qty;
       } else if (!sel.color_variant_selection?.length || variant === 0) {
@@ -356,12 +360,14 @@ export class PriceCalculationService {
         // lives on the product's base_price), pricing it purely by the variant
         // would return ₦0 — which is why the PDP showed ₦0 while the grid (which
         // reads base_price directly) showed the real price. Fall back to the
-        // product's effective (possibly discounted) price in that case.
-        base = effectivePrice * qty;
+        // product's base price, and expose the discount so the pre-discount
+        // price is still shown.
+        base = (product.base_price || 0) * qty;
+        baseDiscount = Math.max(0, base - effectivePrice * qty);
       }
 
       const before = base + styles + fabric + accessories + variant + addons;
-      let discount = 0;
+      let discount = baseDiscount;
       if (isCustomize && product.applied_discount) {
         const d = await this.discountModel?.findById(product.applied_discount).lean();
         if (d) discount = Math.min(this.applyDiscountToTotal(before, d), before);
@@ -382,6 +388,29 @@ export class PriceCalculationService {
 
     // Fabric / accessory products — flat price.
     const final = await this.calculateItemTotal(item);
+
+    // Accessories: surface any product-level discount so the PDP can show the
+    // pre-discount price. (Fabric is priced by yardage, which doesn't map cleanly
+    // onto base_price, so it stays a flat line with no computed discount.)
+    if (product.kind === ProductKind.ACCESSORY) {
+      const qtyF = item.quantity ?? 1;
+      const hasDisc =
+        product.discounted_price != null &&
+        product.discounted_price > 0 &&
+        product.discounted_price < product.base_price;
+      const before = hasDisc
+        ? this.round((product.base_price || 0) * qtyF)
+        : final;
+      const discount = Math.max(0, this.round(before - final));
+      return {
+        ...empty,
+        base: before,
+        before_discount: before,
+        discount,
+        final,
+      };
+    }
+
     return {
       ...empty,
       base: final,
@@ -566,28 +595,29 @@ export class PriceCalculationService {
           );
         }
 
-        // Handle single variant if specified
+        // Stock-check the chosen variant when one genuinely exists. The variant
+        // only pins stock/size; it does not carry its own price.
         const variants = accessory.variants || [];
-
         if (s.variant_id && variants.length > 0) {
           const variant = variants.find(
             (v) => String(v._id) === String(s.variant_id),
           );
-
-          if (!variant) {
-            throw new BadRequestException(
-              `Selected variant not found for accessory "${accessory.name}"`,
-            );
-          }
-
-          if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
+          if (variant && (variant.stock ?? 0) < (s.quantity ?? 0)) {
             throw new BadRequestException(
               `Not enough stock for variant "${variant._id}" of accessory "${accessory.name}". Remaining: ${variant.stock}`,
             );
           }
-
-          total += (accessory.price ?? 0) * (s.quantity ?? 1);
         }
+
+        // Price the accessory. Prefer the product's effective (discounted) price
+        // — which already folds in base_price and any markdown — falling back to
+        // the accessory's own price. Previously the price was only added inside
+        // the "variant specified" branch (and used accessory.price, often 0), so
+        // accessories without variants — or with an unpriced accessory record —
+        // priced at ₦0 both on the PDP and, worse, at charge time.
+        const unit =
+          effectivePrice > 0 ? effectivePrice : (accessory.price ?? 0);
+        total += unit * (s.quantity ?? 1);
       }
 
       if (product.kind === ProductKind.CLOTHING) {
