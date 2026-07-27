@@ -470,7 +470,12 @@ export class PriceCalculationService {
         fabric = product.fabric;
         if (!fabric) continue;
 
-        if (String(s.fabric_id) !== String(fabric._id)) {
+        // Accept either the fabric sub-document id OR the product id — the shop
+        // sends the product id for a standalone fabric. Rejecting product._id
+        // made calculateFabricCost throw, priceItem then fell back to a flat
+        // base_price, and the price stopped tracking the chosen yardage.
+        const fid = String(s.fabric_id);
+        if (fid !== String(fabric._id) && fid !== String(product._id)) {
           throw new BadRequestException(
             'Selected fabric does not exist on product',
           );
