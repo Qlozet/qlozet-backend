@@ -488,7 +488,9 @@ export class PriceCalculationService {
         }
         if (!resolvedYardage) resolvedYardage = 0;
 
-        if (fabric.min_cut < resolvedYardage) {
+        // min_cut is the MINIMUM order — reject requests below it, not above.
+        // (The check was inverted, so any above-minimum order errored out.)
+        if (fabric.min_cut && resolvedYardage < fabric.min_cut) {
           throw new BadRequestException(
             `Minimum cut for fabric "${fabric.name}" is ${fabric.min_cut} yards. You requested ${resolvedYardage} yards.`,
           );
