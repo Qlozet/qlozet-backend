@@ -994,8 +994,29 @@ export class OrderService {
       const [orders, total] = await Promise.all([
         this.orderModel
           .find(filter)
+          // Include the clothing sub-arrays (styles / fabrics / accessories /
+          // addons / color_variants) so the vendor UI can resolve each
+          // selection's NAME + IMAGE + price by its id — otherwise the item
+          // detail can only show generic "Style / Fabric / Accessory" labels.
+          .populate(
+            'items.product',
+            'name base_price kind ' +
+              'clothing.name clothing.images clothing.type clothing.description ' +
+              'clothing.styles clothing.fabrics clothing.accessories clothing.addons clothing.color_variants ' +
+              'fabric.name fabric.images accessory.name accessory.images',
+          )
+          // Cross-vendor fabric applied to a custom outfit — populate the fabric
+          // product (name + images) AND its owning vendor, so the tailor sees
+          // what external fabric is coming and from whom.
+          .populate({
+            path: 'items.applied_fabric',
+            select: 'fabric.name fabric.images base_price business',
+            populate: {
+              path: 'business',
+              select: 'business_name business_logo_url',
+            },
+          })
           .populate('customer', 'email username firstName lastName')
-          .populate('items.product', 'name base_price kind clothing.name clothing.images clothing.type clothing.description fabric.name fabric.images accessory.name accessory.images')
           .populate('shipments.business', 'business_name business_logo_url')
           .populate('shipments.destination_business', 'business_name business_logo_url')
           .populate('shipments.fabric_product', 'fabric.name base_price')
