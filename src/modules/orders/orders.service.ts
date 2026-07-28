@@ -556,6 +556,74 @@ export class OrderService {
     return { data: { price: breakdown.final, breakdown } };
   }
 
+  /**
+   * Per-unit price (yardage/customization aware) for a product + selections,
+   * using the same pricing brain as the cart/order. Falls back to the flat
+   * (discounted) price if the breakdown can't be computed. Selections use the
+   * cart's plural keys and are mapped to the calculator's singular keys.
+   */
+  private async resolvePerUnitAmount(
+    product: any,
+    selections: any,
+  ): Promise<number> {
+    const flat =
+      product?.discounted_price != null &&
+      product.discounted_price > 0 &&
+      product.discounted_price < product.base_price
+        ? product.discounted_price
+        : product?.base_price || 0;
+    try {
+      const s = selections || {};
+      const breakdown =
+        await this.priceCalculationService.calculateItemBreakdown({
+          product_id: String(product._id),
+          quantity: 1,
+          selections: {
+            color_variant_selection: s.color_variant_selections ?? [],
+            style_selection: s.style_selections ?? [],
+            fabric_selection: s.fabric_selections ?? [],
+            accessory_selection: s.accessory_selections ?? [],
+            addon_selection: s.addon_selections ?? [],
+          },
+        } as any);
+      const final = Number(breakdown?.final);
+      return final > 0 ? final : flat;
+    } catch {
+      return flat;
+    }
+  }
+
+  /**
+   * Build a Shipbubble package_item (courier manifest line) with an accurate
+   * declared value and, for fabric, the yardage baked into the name plus a
+   * yard-scaled weight — so the vendor's shipment email shows how many yards to
+   * cut and the real order value (instead of a flat base price and QTY 1).
+   */
+  private buildManifestItem(opts: {
+    name: string;
+    kind?: string | null;
+    unitAmount: number;
+    quantity: number;
+    fabricYards?: number | null;
+    baseWeightKg?: number;
+  }) {
+    const isFabric = opts.kind === 'fabric';
+    const yards =
+      opts.fabricYards && opts.fabricYards > 0 ? opts.fabricYards : null;
+    const name = isFabric && yards ? `${opts.name} — ${yards} yd` : opts.name;
+    const unit_weight =
+      isFabric && yards
+        ? Math.max(0.1, Math.round(yards * 0.3 * 100) / 100)
+        : Math.max(0.1, opts.baseWeightKg || 0.5);
+    return {
+      name,
+      description: name,
+      unit_weight,
+      unit_amount: Math.max(0, Math.round((opts.unitAmount || 0) * 100) / 100),
+      quantity: Math.max(1, Math.round(opts.quantity || 1)),
+    };
+  }
+
   private async processOrderItems(
     items: ProcessedOrderItemDto[],
   ): Promise<ProcessedOrderItem[]> {
@@ -1966,15 +2034,26 @@ export class OrderService {
       businesses.map((b) => [String(b._id), b]),
     );
 
+    const productMap = new Map(products.map((p) => [String(p._id), p]));
+
     const vendorGroups = new Map<
       string,
       {
         business: BusinessDocument;
-        items: Array<{ product_id: string; product_name: string; amount: number; weight: number }>;
+        items: Array<{ product_id: string; product_name: string; pkg: any }>;
       }
     >();
 
-    for (const product of products) {
+    // Iterate the CART items (not the deduped product list) so each line's
+    // selections, quantity and — for fabric — chosen yardage flow into the
+    // courier manifest / vendor email.
+    for (const cartItem of cart.items) {
+      const productId =
+        (cartItem.product_id as any)?._id?.toString() ??
+        String(cartItem.product_id);
+      const product = productMap.get(productId);
+      if (!product) continue;
+
       const bizId = product.business?.toString();
       if (!bizId || !bizMap.has(bizId)) continue;
 
@@ -1983,13 +2062,26 @@ export class OrderService {
       }
 
       const { name } = await this.getProductDetails(product);
+      const selections: any = cartItem.selections || {};
+      const perUnit = await this.resolvePerUnitAmount(product, selections);
+      const isFabric = product.kind === 'fabric';
+      const fabricYards = selections?.fabric_selections?.[0]?.yardage;
+
+      const pkg = this.buildManifestItem({
+        name,
+        kind: product.kind,
+        // Fabric ships as a single cut priced at its full (yardage) value; other
+        // kinds keep the real unit count with a per-unit price.
+        unitAmount: perUnit,
+        quantity: isFabric ? 1 : cartItem.quantity ?? 1,
+        fabricYards,
+        baseWeightKg: estimateProductWeightKg(product),
+      });
+
       vendorGroups.get(bizId)!.items.push({
         product_id: String(product._id),
         product_name: name,
-        amount: (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
-          ? product.discounted_price
-          : (product.base_price || 0),
-        weight: estimateProductWeightKg(product),
+        pkg,
       });
     }
 
@@ -2015,13 +2107,7 @@ export class OrderService {
             sender_address_code: biz.address_code!,
             reciever_address_code: customerAddress.address_code!,
             pickup_date: pickupDate,
-            package_items: group.items.map((item) => ({
-              name: item.product_name,
-              description: item.product_name,
-              unit_weight: item.weight,
-              unit_amount: item.amount,
-              quantity: 1,
-            })),
+            package_items: group.items.map((item) => item.pkg),
             service_type: dto.service_type || 'pickup',
             category_id: 74794423, // "Fashion wears"
             package_dimension: { length: 12, width: 10, height: 10 },
@@ -2125,10 +2211,14 @@ export class OrderService {
           reciever_address_code: tailorBiz.address_code,
           pickup_date: pickupDate,
           package_items: [{
-            name: fabricName,
+            name: `${fabricName} — ${fabricYards} yd`,
             description: `${fabricYards} yards of ${fabricName}`,
-            unit_weight: Math.ceil(fabricYards * 0.3), // ~0.3kg per yard
-            unit_amount: fabricProduct.base_price || 0,
+            unit_weight: Math.max(0.1, Math.ceil(fabricYards * 0.3)), // ~0.3kg per yard
+            // Declared value = yards × price_per_yard (fall back to base price).
+            unit_amount:
+              (fabricProduct.fabric?.price_per_yard ?? 0) * fabricYards ||
+              fabricProduct.base_price ||
+              0,
             quantity: 1,
           }],
           service_type: dto.service_type || 'pickup',
@@ -2383,13 +2473,18 @@ export class OrderService {
           const { name } = product
             ? await this.getProductDetails(product)
             : { name: 'Unknown' };
-          return {
+          // Declared value = the line's real charged price (frozen at order
+          // time); fabric yardage comes from the stored selection.
+          const lineAmount = item.total_price ?? item.pricing?.final ?? 0;
+          const fabricYards = (item.fabric_selections?.[0] as any)?.yardage;
+          return this.buildManifestItem({
             name,
-            description: name,
-            unit_weight: estimateProductWeightKg(product),
-            unit_amount: shipment.shipping_fee || 1000,
+            kind: product?.kind,
+            unitAmount: lineAmount,
             quantity: 1,
-          };
+            fabricYards,
+            baseWeightKg: product ? estimateProductWeightKg(product) : 0.5,
+          });
         }),
       );
 
