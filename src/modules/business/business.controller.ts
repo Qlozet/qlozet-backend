@@ -213,6 +213,17 @@ export class BusinessController {
     return this.businessService.getEarningsChart(req.business?.id);
   }
 
+  // Admin-only one-time repair: record earnings for paid orders that are
+  // missing them (e.g. missed Paystack webhooks). Idempotent — safe to re-run.
+  @Roles(UserType.ADMIN)
+  @Post('earnings/backfill')
+  @ApiOperation({
+    summary: 'Backfill vendor earnings for paid orders missing them (admin)',
+  })
+  async backfillEarnings() {
+    return this.businessService.backfillBusinessEarnings();
+  }
+
   @Roles(UserType.VENDOR)
   @Get('customers')
   @ApiOperation({ summary: 'Get paginated list of vendor customers' })

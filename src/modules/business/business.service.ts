@@ -1365,6 +1365,69 @@ export class BusinessService implements OnModuleInit {
     this.logger.log(`Finished recording earnings for order: ${orderId}`);
   }
 
+  /**
+   * One-time repair: record BusinessEarning rows for every PAID order that is
+   * missing them (e.g. orders whose Paystack success webhook never reached this
+   * environment, or orders created before earnings recording existed). Safe to
+   * run repeatedly — recordBusinessEarnings is idempotent (it skips any order
+   * that already has earnings), so this never double-credits.
+   */
+  async backfillBusinessEarnings(): Promise<{
+    scanned: number;
+    recorded: number;
+    skipped: number;
+    failed: number;
+  }> {
+    // Paid = payment completed. `in_review` is the first post-payment status;
+    // exclude pending (unpaid) and cancelled/returned (refunded).
+    const PAID_STATUSES = [
+      'in_review',
+      'processing',
+      'in_transit',
+      'completed',
+    ];
+
+    const orders = await this.orderModel
+      .find({ status: { $in: PAID_STATUSES } })
+      .select('_id')
+      .lean();
+
+    let recorded = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const o of orders) {
+      const orderId = o._id as Types.ObjectId;
+      try {
+        const already = await this.businessEarningsModel.exists({
+          order: orderId,
+        });
+        if (already) {
+          skipped++;
+          continue;
+        }
+        await this.recordBusinessEarnings(orderId);
+        // recordBusinessEarnings itself skips orders with no items, so confirm
+        // rows were actually written before counting it as recorded.
+        const nowExists = await this.businessEarningsModel.exists({
+          order: orderId,
+        });
+        if (nowExists) recorded++;
+        else skipped++;
+      } catch (e: any) {
+        failed++;
+        this.logger.error(
+          `[EarningsBackfill] Order ${orderId} failed: ${e?.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[EarningsBackfill] scanned=${orders.length} recorded=${recorded} skipped=${skipped} failed=${failed}`,
+    );
+    return { scanned: orders.length, recorded, skipped, failed };
+  }
+
   async getFeed(
     user: string,
     page: number = 1,
