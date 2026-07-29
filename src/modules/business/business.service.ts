@@ -409,7 +409,20 @@ export class BusinessService implements OnModuleInit {
         .lean(),
       this.businessModel.countDocuments(filter),
     ]);
-    return { data: vendors, total, page, pages: Math.ceil(total / limit) };
+
+    // Flag vendors that currently have live deals, so storefront/vendor cards
+    // can show a discount indicator.
+    const discountedIds = new Set(
+      await this.productService.findBusinessIdsWithActiveDiscounts(
+        vendors.map((v: any) => v._id),
+      ),
+    );
+    const data = vendors.map((v: any) => ({
+      ...v,
+      has_active_discount: discountedIds.has(String(v._id)),
+    }));
+
+    return { data, total, page, pages: Math.ceil(total / limit) };
   }
 
   /**
