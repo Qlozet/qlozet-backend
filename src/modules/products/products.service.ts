@@ -78,6 +78,24 @@ export class ProductService {
   }
 
   /**
+   * Of the given business IDs, the distinct ones that currently have at least
+   * one ACTIVE product with a discount applied — used to flag vendors that have
+   * live deals on storefront/vendor cards.
+   */
+  async findBusinessIdsWithActiveDiscounts(
+    businessIds: (Types.ObjectId | string)[],
+  ): Promise<string[]> {
+    if (!businessIds?.length) return [];
+    const ids = businessIds.map((b) => new Types.ObjectId(String(b)));
+    const result = await this.productModel.distinct('business', {
+      business: { $in: ids },
+      status: ProductStatus.ACTIVE,
+      applied_discount: { $ne: null },
+    });
+    return result.map((r) => String(r));
+  }
+
+  /**
    * Create a product and compute its price dynamically based on type
    */
   async upsert(
