@@ -49,18 +49,28 @@ export class MeasurementService {
       const view = config.view ?? 'front';
       const client = await this.gradio.getClient(this.ig);
 
-      // Download reference images and convert to blob for Gradio
+      // The generator only "sees" images passed via image_inputs/image_uploads.
+      // The chosen fabric (plus inspiration/silhouette) lives in
+      // metadata.references, so it was being IGNORED — the model only used the
+      // customer's reference images. Feed those references in as real image
+      // inputs too (deduped), so the picked fabric actually influences the render.
+      const metadataRefs: string[] = Array.isArray(metadataObj.references)
+        ? metadataObj.references
+        : [];
+      const allReferenceUrls = Array.from(
+        new Set([...reference_image_urls, ...metadataRefs]),
+      );
+
+      // Download all reference images and convert to blob for Gradio
       let imageUploads: any[] = [];
-      if (reference_image_urls.length > 0) {
-        for (const url of reference_image_urls) {
-          try {
-            // Use handle_file for proper Gradio file handling
-            const fileRef = await handle_file(url);
-            imageUploads.push(fileRef);
-            this.logger.log(`Added reference image via handle_file: ${url}`);
-          } catch (err) {
-            this.logger.warn(`Failed to handle reference image: ${url} — ${err?.message}`);
-          }
+      for (const url of allReferenceUrls) {
+        try {
+          // Use handle_file for proper Gradio file handling
+          const fileRef = await handle_file(url);
+          imageUploads.push(fileRef);
+          this.logger.log(`Added reference image via handle_file: ${url}`);
+        } catch (err) {
+          this.logger.warn(`Failed to handle reference image: ${url} — ${err?.message}`);
         }
       }
 
@@ -68,7 +78,7 @@ export class MeasurementService {
       this.logger.log(`Gradio /generate_handler call:`);
       this.logger.log(`  prompt: ${prompt.slice(0, 100)}...`);
       this.logger.log(`  view: ${view}`);
-      this.logger.log(`  image_inputs: ${reference_image_urls.join(',') || '(empty)'}`);
+      this.logger.log(`  image_inputs: ${allReferenceUrls.join(',') || '(empty)'}`);
       this.logger.log(`  image_uploads: ${imageUploads.length} file(s)`);
       this.logger.log(`  metadata_json_str: ${metadataJson.slice(0, 200)}...`);
       this.logger.log(`  provider: openai, model: gpt-image-1`);
@@ -76,7 +86,7 @@ export class MeasurementService {
       const result = await client.predict('/generate_handler', {
         prompt,
         view,
-        image_inputs: reference_image_urls.join(',') || '',
+        image_inputs: allReferenceUrls.join(',') || '',
         image_uploads: imageUploads,
         metadata_json_str: metadataJson,
         provider: 'openai',
