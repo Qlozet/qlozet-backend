@@ -2971,50 +2971,84 @@ export class OrderService {
     };
   }
 
+  // "Sales by audience": which gender segment the vendor's SOLD items target,
+  // taken from each product's taxonomy.audience (men/women/unisex). This is
+  // reliably populated and meaningful — unlike the customer's profile gender,
+  // which is almost always unset and doesn't say who the garment is for.
   async getBusinessOrdersByGenderChart(businessId: string): Promise<any> {
     const data = await this.orderModel.aggregate([
-      { $unwind: '$items' }, // Unwind items to check business
-      { $match: { 'items.business': new Types.ObjectId(businessId) } }, // filter by business
+      { $unwind: '$items' },
+      { $match: { 'items.business': new Types.ObjectId(businessId) } },
       {
         $lookup: {
-          from: 'users',
-          localField: 'customer',
+          from: 'products',
+          localField: 'items.product',
           foreignField: '_id',
-          as: 'customer_info',
+          as: 'product_info',
         },
       },
-      { $unwind: '$customer_info' },
+      { $unwind: { path: '$product_info', preserveNullAndEmptyArrays: true } },
       {
         $group: {
-          _id: '$customer_info.gender',
+          // Coalesce audience across the kind-specific taxonomies.
+          _id: {
+            $toLower: {
+              $trim: {
+                input: {
+                  $ifNull: [
+                    '$product_info.clothing.taxonomy.audience',
+                    {
+                      $ifNull: [
+                        '$product_info.accessory.taxonomy.audience',
+                        {
+                          $ifNull: [
+                            '$product_info.fabric.taxonomy.audience',
+                            '',
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
           count: { $sum: 1 },
         },
       },
     ]);
 
-    const capitalize = (s: string) =>
-      s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
-
-    const genderColor = (raw: string | null): string => {
+    // Normalise every audience value to Men / Women / Unisex.
+    const bucketFor = (raw: string): 'Men' | 'Women' | 'Unisex' => {
       const g = (raw || '').toLowerCase();
-      if (g === 'male') return '#3d2817';
-      if (g === 'female') return '#d4c5b9';
-      return '#a0a0a0'; // Unknown / not set
+      if (['men', 'male', 'man', 'boys'].includes(g)) return 'Men';
+      if (['women', 'female', 'woman', 'girls'].includes(g)) return 'Women';
+      return 'Unisex'; // unisex, blank, or anything unrecognised
     };
+    const buckets = new Map<string, number>();
+    for (const d of data) {
+      const b = bucketFor(d._id as string);
+      buckets.set(b, (buckets.get(b) ?? 0) + d.count);
+    }
+
+    const COLORS: Record<string, string> = {
+      Men: '#3d2817',
+      Women: '#d4c5b9',
+      Unisex: '#9C8578',
+    };
+    const seriesData = ['Men', 'Women', 'Unisex']
+      .filter((b) => (buckets.get(b) ?? 0) > 0)
+      .map((b) => ({ label: b, value: buckets.get(b)!, color: COLORS[b] }));
 
     return {
       data: {
         chartType: 'pie',
-        title: 'Orders by Gender',
+        title: 'Sales by Audience',
         series: [
           {
-            key: 'gender',
-            name: 'Gender Distribution',
-            data: data.map((d) => ({
-              label: d._id ? capitalize(d._id) : 'Not set',
-              value: d.count,
-              color: genderColor(d._id),
-            })),
+            key: 'audience',
+            name: 'Audience',
+            data: seriesData,
           },
         ],
       },
