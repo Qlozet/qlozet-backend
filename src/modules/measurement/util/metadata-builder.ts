@@ -113,20 +113,27 @@ export function buildMetadataFromConfig(config: GarmentConfigDto): any {
     fit_notes: config.fitNotes,
     measurement_profile: config.measurementProfile ?? {},
     construction,
-    fabric: {},
-    colors: {},
+    // fabric / colors are added ONLY when a real fabric reference is provided —
+    // shipping empty `fabric: {}`/`colors: {}` (or a non-fetchable local path)
+    // made the generator apply a fabric even when the customer chose none.
     // Use frontend overrides if provided, otherwise use defaults
     brand_profile: (config as any).brand_profile ?? BRAND_PROFILE,
     render_prefs: (config as any).render_prefs ?? RENDER_PREFS,
     references: [] as string[],
   };
-  if (config.fabricRefId) {
+  // A usable reference must be a real fetchable URL — the studio's placeholder
+  // fabric swatches are local /image/* paths the Space can't load, which is
+  // exactly what produced a phantom/hallucinated fabric.
+  const isFetchable = (u?: string) =>
+    !!u && (/^https?:\/\//i.test(u) || u.startsWith('data:'));
+
+  if (config.fabricRefId && isFetchable(config.fabricRefId)) {
     const fabricUrl = resolveAssetUrl(config.fabricRefId);
-    metadata.fabric.use_reference_image = true;
-    metadata.colors.use_reference_image = true;
+    metadata.fabric = { use_reference_image: true };
+    metadata.colors = { use_reference_image: true };
     metadata.references.push(fabricUrl);
   }
-  if (config.embroideryRefId) {
+  if (config.embroideryRefId && isFetchable(config.embroideryRefId)) {
     const embroideryUrl = resolveAssetUrl(config.embroideryRefId);
     metadata.embroidery_reference = {
       use_reference_image: true,
@@ -150,6 +157,9 @@ export function buildMetadataFromConfig(config: GarmentConfigDto): any {
   if (config.silhouetteImageUrl) {
     metadata.references.push(config.silhouetteImageUrl);
   }
+  // Final safety net: only keep fetchable references so a stray local/dummy
+  // path can never reach the generator.
+  metadata.references = metadata.references.filter(isFetchable);
   return metadata;
 }
 
