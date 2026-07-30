@@ -3026,72 +3026,46 @@ export class OrderService {
       { $unwind: '$items' },
       { $match: { 'items.business': new Types.ObjectId(businessId) } },
       // Collapse an order's multiple vendor items back to one row so we count
-      // ORDERS, not line items. Location comes from the ORDER's shipping address
-      // (reliable), not the customer's profile address (usually unset).
+      // ORDERS, not line items. Location = the ORDER's shipping state (reliable),
+      // not the customer's profile address (usually unset).
       {
         $group: {
           _id: '$_id',
           state: { $first: '$address.state' },
-          customer: { $first: '$customer' },
         },
       },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'customer',
-          foreignField: '_id',
-          as: 'customer_info',
-        },
-      },
-      { $unwind: { path: '$customer_info', preserveNullAndEmptyArrays: true } },
       {
         $group: {
+          // Normalise: trim, and treat null/missing/blank state as 'Unknown'
+          // (so a blank state doesn't render as an empty, unlabelled bar).
           _id: {
-            location: { $ifNull: ['$state', 'Unknown'] },
-            gender: '$customer_info.gender',
+            $let: {
+              vars: { s: { $trim: { input: { $ifNull: ['$state', ''] } } } },
+              in: { $cond: [{ $eq: ['$$s', ''] }, 'Unknown', '$$s'] },
+            },
           },
           count: { $sum: 1 },
         },
       },
+      // Top states by order count for a clean chart.
+      { $sort: { count: -1 } },
+      { $limit: 6 },
     ]);
-
-    // Rank states by total orders and keep the top 6 for a clean chart.
-    const totals = new Map<string, number>();
-    for (const d of data) {
-      const loc = (d._id.location as string) || 'Unknown';
-      totals.set(loc, (totals.get(loc) || 0) + d.count);
-    }
-    const topLocations = Array.from(totals.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([loc]) => loc);
-
-    const genderCount = (loc: string, gender: string) => {
-      const rec = data.find(
-        (d) =>
-          ((d._id.location as string) || 'Unknown') === loc &&
-          String(d._id.gender ?? '').toLowerCase() === gender.toLowerCase(),
-      );
-      return rec ? rec.count : 0;
-    };
-
-    const generateSeries = (gender: string, color: string) => ({
-      key: gender.toLowerCase(),
-      name: gender,
-      color,
-      data: topLocations.map((loc) => ({
-        label: loc,
-        value: genderCount(loc, gender),
-      })),
-    });
 
     return {
       data: {
-        chartType: 'stacked_bar',
+        chartType: 'bar',
         title: 'Orders by Location',
         series: [
-          generateSeries('Male', '#3d2817'),
-          generateSeries('Female', '#9C8578'),
+          {
+            key: 'orders',
+            name: 'Orders',
+            color: '#3d2817',
+            data: data.map((d) => ({
+              label: (d._id as string) || 'Unknown',
+              value: d.count,
+            })),
+          },
         ],
       },
     };
