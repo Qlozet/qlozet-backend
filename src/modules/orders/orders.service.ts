@@ -3036,7 +3036,14 @@ export class OrderService {
       },
       {
         $group: {
-          _id: { $ifNull: ['$state', 'Unknown'] },
+          // Normalise: trim, and treat null/missing/blank state as 'Unknown'
+          // (so a blank state doesn't render as an empty, unlabelled bar).
+          _id: {
+            $let: {
+              vars: { s: { $trim: { input: { $ifNull: ['$state', ''] } } } },
+              in: { $cond: [{ $eq: ['$$s', ''] }, 'Unknown', '$$s'] },
+            },
+          },
           count: { $sum: 1 },
         },
       },
