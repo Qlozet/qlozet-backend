@@ -3025,6 +3025,16 @@ export class OrderService {
     const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
       { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      // Collapse an order's multiple vendor items back to one row so we count
+      // ORDERS, not line items. Location comes from the ORDER's shipping address
+      // (reliable), not the customer's profile address (usually unset).
+      {
+        $group: {
+          _id: '$_id',
+          state: { $first: '$address.state' },
+          customer: { $first: '$customer' },
+        },
+      },
       {
         $lookup: {
           from: 'users',
@@ -3033,11 +3043,11 @@ export class OrderService {
           as: 'customer_info',
         },
       },
-      { $unwind: '$customer_info' },
+      { $unwind: { path: '$customer_info', preserveNullAndEmptyArrays: true } },
       {
         $group: {
           _id: {
-            location: '$customer_info.address.city',
+            location: { $ifNull: ['$state', 'Unknown'] },
             gender: '$customer_info.gender',
           },
           count: { $sum: 1 },
@@ -3045,20 +3055,34 @@ export class OrderService {
       },
     ]);
 
-    const locations = Array.from(
-      new Set(data.map((d) => d._id.location || d._id.gender || 'Unknown')),
-    );
+    // Rank states by total orders and keep the top 6 for a clean chart.
+    const totals = new Map<string, number>();
+    for (const d of data) {
+      const loc = (d._id.location as string) || 'Unknown';
+      totals.set(loc, (totals.get(loc) || 0) + d.count);
+    }
+    const topLocations = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([loc]) => loc);
+
+    const genderCount = (loc: string, gender: string) => {
+      const rec = data.find(
+        (d) =>
+          ((d._id.location as string) || 'Unknown') === loc &&
+          String(d._id.gender ?? '').toLowerCase() === gender.toLowerCase(),
+      );
+      return rec ? rec.count : 0;
+    };
 
     const generateSeries = (gender: string, color: string) => ({
       key: gender.toLowerCase(),
       name: gender,
       color,
-      data: locations.map((loc) => {
-        const record = data.find(
-          (d) => d._id.location === loc && d._id.gender === gender,
-        );
-        return { label: loc, value: record ? record.count : 0 };
-      }),
+      data: topLocations.map((loc) => ({
+        label: loc,
+        value: genderCount(loc, gender),
+      })),
     });
 
     return {
