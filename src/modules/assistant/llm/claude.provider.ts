@@ -7,6 +7,7 @@ import {
   LlmProvider,
   RunToolLoopInput,
   RunToolLoopResult,
+  RunToolLoopStreamInput,
 } from './llm-provider.interface';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -125,6 +126,192 @@ export class ClaudeProvider implements LlmProvider {
     this.logger.warn(`Tool loop hit maxTurns (${maxTurns}) without finishing.`);
     return {
       text: "I couldn't finish analysing that in time. Try narrowing the question.",
+      toolsUsed,
+      usage: lastUsage,
+    };
+  }
+
+  // ── Streaming ──────────────────────────────────────────────────────────────
+
+  private async postStream(body: Record<string, any>): Promise<any> {
+    const resp = await firstValueFrom(
+      this.httpService.post(
+        ANTHROPIC_URL,
+        { ...body, stream: true },
+        {
+          headers: {
+            'x-api-key': this.apiKey,
+            'anthropic-version': ANTHROPIC_VERSION,
+            'content-type': 'application/json',
+          },
+          responseType: 'stream',
+          timeout: 120_000,
+        },
+      ),
+    );
+    return resp.data; // Node Readable of SSE bytes
+  }
+
+  /**
+   * Stream a single assistant turn, emitting text tokens via onDelta. Rebuilds
+   * the turn's content blocks (text + tool_use) so the caller can feed tool
+   * results back and continue the loop.
+   */
+  private async streamOneTurn(
+    body: Record<string, any>,
+    onDelta: (t: string) => void,
+  ): Promise<{
+    content: any[];
+    stopReason: string | null;
+    usage: any;
+    turnText: string;
+  }> {
+    let stream: any;
+    try {
+      stream = await this.postStream(body);
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
+      this.logger.error(`Anthropic stream request failed: ${detail}`);
+      throw new ServiceUnavailableException(
+        'The assistant is temporarily unavailable. Please try again.',
+      );
+    }
+
+    const blocks: Record<number, any> = {};
+    let stopReason: string | null = null;
+    let usage: any = null;
+    let turnText = '';
+    let buffer = '';
+
+    const handleEvent = (evt: any) => {
+      switch (evt?.type) {
+        case 'content_block_start':
+          blocks[evt.index] = {
+            ...evt.content_block,
+            _json: '',
+          };
+          break;
+        case 'content_block_delta': {
+          const b = blocks[evt.index];
+          if (!b) break;
+          if (evt.delta?.type === 'text_delta') {
+            b.text = (b.text ?? '') + evt.delta.text;
+            turnText += evt.delta.text;
+            onDelta(evt.delta.text);
+          } else if (evt.delta?.type === 'input_json_delta') {
+            b._json += evt.delta.partial_json ?? '';
+          }
+          break;
+        }
+        case 'message_delta':
+          if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+          if (evt.usage) usage = { ...(usage ?? {}), ...evt.usage };
+          break;
+        case 'message_start':
+          if (evt.message?.usage) usage = evt.message.usage;
+          break;
+        default:
+          break;
+      }
+    };
+
+    for await (const chunk of stream) {
+      buffer += chunk.toString('utf8');
+      let nl: number;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const json = line.slice(5).trim();
+        if (!json || json === '[DONE]') continue;
+        try {
+          handleEvent(JSON.parse(json));
+        } catch {
+          /* ignore malformed SSE fragment */
+        }
+      }
+    }
+
+    // Assemble the API-shaped content array for the next request.
+    const content = Object.keys(blocks)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => {
+        const b = blocks[Number(k)];
+        if (b.type === 'tool_use') {
+          let input = {};
+          try {
+            input = b._json ? JSON.parse(b._json) : {};
+          } catch {
+            input = {};
+          }
+          return { type: 'tool_use', id: b.id, name: b.name, input };
+        }
+        return { type: 'text', text: b.text ?? '' };
+      });
+
+    return { content, stopReason, usage, turnText };
+  }
+
+  async runToolLoopStream(
+    input: RunToolLoopStreamInput,
+  ): Promise<RunToolLoopResult> {
+    const maxTurns = input.maxTurns ?? 6;
+    const maxTokens = input.maxTokens ?? 1024;
+
+    const conversation: any[] = input.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const toolsUsed: string[] = [];
+    let lastUsage: any = null;
+    let finalText = '';
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+      const { content, stopReason, usage, turnText } = await this.streamOneTurn(
+        {
+          model: input.model,
+          max_tokens: maxTokens,
+          system: this.systemBlocks(input.system),
+          tools: input.tools,
+          messages: conversation,
+        },
+        input.onDelta,
+      );
+
+      lastUsage = usage ?? lastUsage;
+      conversation.push({ role: 'assistant', content });
+
+      const toolUses = content.filter((b) => b?.type === 'tool_use');
+      if (stopReason !== 'tool_use' || toolUses.length === 0) {
+        finalText = turnText.trim() || finalText;
+        return { text: finalText, toolsUsed, usage: lastUsage };
+      }
+
+      const results: any[] = [];
+      for (const tu of toolUses) {
+        toolsUsed.push(tu.name);
+        let result: any;
+        try {
+          result = await input.onToolCall(tu.name, tu.input ?? {});
+        } catch (e: any) {
+          result = { error: e?.message ?? 'tool failed' };
+        }
+        results.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify(result),
+        });
+      }
+      conversation.push({ role: 'user', content: results });
+    }
+
+    this.logger.warn(`Stream loop hit maxTurns (${maxTurns}) without finishing.`);
+    return {
+      text:
+        finalText ||
+        "I couldn't finish analysing that in time. Try narrowing the question.",
       toolsUsed,
       usage: lastUsage,
     };
