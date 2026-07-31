@@ -258,7 +258,11 @@ export class ClaudeProvider implements LlmProvider {
       }
     }
 
-    // Assemble the API-shaped content array for the next request.
+    // Assemble the API-shaped content array for the next request. Drop EMPTY
+    // text blocks: on a tool-use turn the model often emits an empty/whitespace
+    // text block alongside the tool_use, and feeding an empty text block back
+    // makes Anthropic reject the next request ("text content blocks must be
+    // non-empty"). tool_use blocks are always kept.
     const content = Object.keys(blocks)
       .sort((a, b) => Number(a) - Number(b))
       .map((k) => {
@@ -273,7 +277,10 @@ export class ClaudeProvider implements LlmProvider {
           return { type: 'tool_use', id: b.id, name: b.name, input };
         }
         return { type: 'text', text: b.text ?? '' };
-      });
+      })
+      .filter(
+        (b: any) => b.type !== 'text' || (b.text && b.text.trim().length > 0),
+      );
 
     return { content, stopReason, usage, turnText };
   }

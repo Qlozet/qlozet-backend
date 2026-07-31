@@ -16,6 +16,7 @@ import {
   LLM_PROVIDER,
   LlmMessage,
   LlmProvider,
+  RunToolLoopResult,
 } from './llm/llm-provider.interface';
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
 import { buildSystemPrompt } from './assistant.prompt';
@@ -110,6 +111,7 @@ export class AssistantService {
       // Build history (plain text) + the new question.
       const history: LlmMessage[] = conversation.messages
         .slice(-HISTORY_TURNS)
+        .filter((m) => m.content && m.content.trim().length > 0)
         .map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: 'user', content: text });
 
@@ -257,41 +259,62 @@ export class AssistantService {
       );
       const history: LlmMessage[] = conversation.messages
         .slice(-HISTORY_TURNS)
+        .filter((m) => m.content && m.content.trim().length > 0)
         .map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: 'user', content: text });
 
-      const result = await this.llm.runToolLoopStream({
+      // Shared tool handler for both streaming and the non-streaming fallback.
+      // render_chart is a UI directive — captured + emitted, never sent to a DB.
+      const onToolCall = (name: string, input: any) => {
+        if (name === 'render_chart') {
+          const spec = {
+            type: ['bar', 'line', 'pie'].includes(input?.type)
+              ? input.type
+              : 'bar',
+            title: String(input?.title ?? '').slice(0, 120),
+            data: Array.isArray(input?.data)
+              ? input.data
+                  .filter((d: any) => d && typeof d.value === 'number')
+                  .slice(0, 12)
+                  .map((d: any) => ({
+                    label: String(d.label ?? ''),
+                    value: d.value,
+                  }))
+              : [],
+          };
+          charts.push(spec);
+          send({ type: 'chart', chart: spec });
+          return Promise.resolve({ ok: true, note: 'Chart shown.' });
+        }
+        return this.tools.execute(name, businessId, input);
+      };
+
+      const common = {
         system: buildSystemPrompt(businessName),
         messages: history,
         tools: this.tools.getToolDefs(),
-        onDelta: (delta) => send({ type: 'delta', text: delta }),
-        onToolCall: (name, input) => {
-          if (name === 'render_chart') {
-            const spec = {
-              type: ['bar', 'line', 'pie'].includes(input?.type)
-                ? input.type
-                : 'bar',
-              title: String(input?.title ?? '').slice(0, 120),
-              data: Array.isArray(input?.data)
-                ? input.data
-                    .filter((d: any) => d && typeof d.value === 'number')
-                    .slice(0, 12)
-                    .map((d: any) => ({
-                      label: String(d.label ?? ''),
-                      value: d.value,
-                    }))
-                : [],
-            };
-            charts.push(spec);
-            send({ type: 'chart', chart: spec });
-            return Promise.resolve({ ok: true, note: 'Chart shown.' });
-          }
-          return this.tools.execute(name, businessId, input);
-        },
+        onToolCall,
         model: this.smartModel,
         maxTokens: 1024,
         maxTurns: 6,
-      });
+      };
+
+      let result: RunToolLoopResult;
+      try {
+        result = await this.llm.runToolLoopStream({
+          ...common,
+          onDelta: (delta) => send({ type: 'delta', text: delta }),
+        });
+      } catch (streamErr: any) {
+        // The streaming request was rejected (provider/model quirk). Fall back
+        // to the non-streaming path — proven to work — so the vendor still gets
+        // an answer. The real cause is already logged by the provider.
+        this.logger.warn(
+          `Stream failed; falling back to non-streaming: ${streamErr?.message}`,
+        );
+        result = await this.llm.runToolLoop(common);
+        if (result.text) send({ type: 'delta', text: result.text });
+      }
 
       const answer =
         result.text ||
