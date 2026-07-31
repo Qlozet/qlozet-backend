@@ -15,6 +15,7 @@ import { ProductModule } from './modules/products/products.module';
 import { UmsModule } from './modules/ums/ums.module';
 import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { BusinessModule } from './modules/business/business.module';
+import { AssistantModule } from './modules/assistant/assistant.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { CartModule } from './modules/cart/cart.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -118,6 +119,7 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
     SizeGuideModule,
     DisputesModule,
     ReturnsModule,
+    AssistantModule,
   ],
   controllers: [AppController],
   providers: [
