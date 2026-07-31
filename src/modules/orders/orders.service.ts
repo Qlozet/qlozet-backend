@@ -1330,9 +1330,32 @@ export class OrderService {
 
       // The money already moved into the vendor wallet's spendable balance,
       // so it must be removed from balance (not pending) to actually claw back.
-      await this.walletsService.reconcileBusinessWallet(earning.business, {
-        balance: -(earning.net_amount || 0),
-      });
+      const clawedAmount = earning.net_amount || 0;
+      const vendorWallet = await this.walletsService.reconcileBusinessWallet(
+        earning.business,
+        { balance: -clawedAmount },
+      );
+
+      // Mirror the claw-back in the vendor ledger as a REFUND debit so their
+      // transaction history stays consistent with their wallet balance (the
+      // release earlier wrote a matching CREDIT).
+      if (vendorWallet && clawedAmount > 0) {
+        await this.transactionService.create({
+          wallet: vendorWallet._id as any,
+          order: order._id as any,
+          type: TransactionType.REFUND,
+          amount: clawedAmount,
+          status: TransactionStatus.SUCCESS,
+          channel: 'refund',
+          payment_method: 'wallet',
+          description: `Earnings reversed for order ${order.reference}`,
+          metadata: {
+            earning_id: (earning._id as any).toString(),
+            business_id: (earning.business as any)?.toString?.() ?? earning.business,
+            clawback: true,
+          },
+        });
+      }
 
       // Mark the earning as reversed. Keep released=true so the release cron
       // does not re-pick it (release_date is already in the past).

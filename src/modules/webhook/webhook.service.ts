@@ -69,8 +69,12 @@ export class WebhookService {
         transaction.status = TransactionStatus.SUCCESS;
         break;
 
-      case 'charge.failed':
       case 'transfer.failed':
+        await this.handleTransferFailed(transaction);
+        transaction.status = TransactionStatus.FAILED;
+        break;
+
+      case 'charge.failed':
         transaction.status = TransactionStatus.FAILED;
         break;
 
@@ -165,32 +169,69 @@ export class WebhookService {
     transaction: TransactionDocument,
   ): Promise<boolean> {
     transaction.status = TransactionStatus.SUCCESS;
-    let walletUpdated = false;
 
-    // Vendor payout
-    if (
-      transaction.type === TransactionType.CREDIT &&
-      transaction.channel === 'payout'
-    ) {
+    // Vendor payout. The wallet was ALREADY debited when the withdrawal was
+    // requested (see WalletsService.requestWithdrawal, which debits up-front to
+    // prevent double-withdrawal), so here we only finalize the payout
+    // bookkeeping — we must NOT debit the wallet again. Match on channel, since
+    // a payout is a DEBIT (money leaving the vendor's wallet).
+    if (transaction.channel === 'payout') {
       await this.processVendorPayout(transaction);
+      return true;
     }
 
-    // Wallet debit if applicable
-    if (transaction.wallet && transaction.type === TransactionType.DEBIT) {
-      await this.walletsService.debitWallet(
-        transaction.wallet.toString(),
-        transaction.amount,
-      );
-      walletUpdated = true;
-    }
+    return false;
+  }
 
-    return walletUpdated;
+  private async handleTransferFailed(
+    transaction: TransactionDocument,
+  ): Promise<void> {
+    // A payout debits the wallet up-front at request time. If the transfer then
+    // fails asynchronously, the funds must be returned to the vendor — exactly
+    // once (Paystack retries webhooks), guarded by a metadata flag.
+    const alreadyReversed =
+      (transaction.metadata as any)?.payout_reversed === true;
+
+    if (
+      transaction.channel === 'payout' &&
+      transaction.wallet &&
+      !alreadyReversed
+    ) {
+      try {
+        await this.walletsService.creditWallet(
+          transaction.wallet.toString(),
+          transaction.amount,
+        );
+        transaction.metadata = {
+          ...(transaction.metadata as any),
+          payout_reversed: true,
+        };
+        this.logger.log(
+          `[Payout] transfer.failed — restored ₦${transaction.amount} to wallet ${transaction.wallet}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[Payout] Failed to restore wallet on transfer.failed: ${error.message}`,
+        );
+      }
+    }
   }
 
   private async processVendorPayout(transaction: TransactionDocument) {
-    const businessId = transaction.initiator as unknown as string;
+    // The payout transaction stores the business id in metadata; `initiator` is
+    // the owner's USER id (created_by.id), which is NOT a business id — resolving
+    // by it returns null and silently skips all payout bookkeeping. Prefer
+    // metadata.business_id, fall back to initiator for older records.
+    const businessId =
+      ((transaction.metadata as any)?.business_id as string) ??
+      (transaction.initiator as unknown as string);
     const business = await this.businessService.findBusinessById(businessId);
-    if (!business) return;
+    if (!business) {
+      this.logger.warn(
+        `[Payout] Could not resolve business for transaction ${transaction.reference}; skipping payout bookkeeping.`,
+      );
+      return;
+    }
 
     // Compute vendor earnings
 
