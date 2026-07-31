@@ -36,8 +36,16 @@ export interface RunToolLoopResult {
   usage?: { input_tokens?: number; output_tokens?: number } | null;
 }
 
+export interface RunToolLoopStreamInput extends RunToolLoopInput {
+  // Called with each text token as the final answer streams in.
+  onDelta: (text: string) => void;
+}
+
 export interface LlmProvider {
   runToolLoop(input: RunToolLoopInput): Promise<RunToolLoopResult>;
+  // Streaming variant: same tool loop, but text tokens are pushed via onDelta as
+  // they arrive. Resolves with the full final text once complete.
+  runToolLoopStream(input: RunToolLoopStreamInput): Promise<RunToolLoopResult>;
   // Single-shot completion (no tools) — used by the digest generator.
   complete(input: {
     system: string;

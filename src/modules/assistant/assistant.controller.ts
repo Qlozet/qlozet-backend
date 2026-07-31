@@ -7,10 +7,12 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -41,6 +43,21 @@ export class AssistantController {
       dto.message,
       dto.conversation_id,
       businessName,
+    );
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post('chat/stream')
+  @ApiOperation({
+    summary: 'Ask the assistant with a streamed (SSE) response',
+  })
+  async chatStream(@Req() req: any, @Body() dto: ChatDto, @Res() res: Response) {
+    return this.assistantService.chatStream(
+      res,
+      req.business?.id,
+      dto.message,
+      dto.conversation_id,
+      req.business?.business_name,
     );
   }
 

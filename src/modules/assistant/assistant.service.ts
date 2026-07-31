@@ -20,6 +20,7 @@ import {
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
 import { buildSystemPrompt } from './assistant.prompt';
 import { TokenService } from '../wallets/token.service';
+import type { Response } from 'express';
 
 // How many prior turns to replay as context. Fresh numbers always come from
 // tool re-fetch, so we don't need deep history.
@@ -189,6 +190,156 @@ export class AssistantService {
         }
       }
       throw err;
+    }
+  }
+
+  /**
+   * Streaming variant of chat(): pushes SSE events to the client as tokens
+   * arrive. Fully owns the Express response — sets headers, streams, persists,
+   * and ends it. Uses @Res in the controller so the global response interceptor
+   * doesn't touch the stream.
+   *
+   * SSE event shapes (each a `data:` JSON line):
+   *   { type: 'delta', text }      — a text token
+   *   { type: 'chart', chart }     — an inline chart spec
+   *   { type: 'done', conversation_id, tools_used }
+   *   { type: 'error', message }
+   */
+  async chatStream(
+    res: Response,
+    businessId: string,
+    message: string,
+    conversationId?: string,
+    businessName?: string,
+  ) {
+    const text = (message ?? '').trim();
+    if (!businessId || !text) {
+      res
+        .status(400)
+        .json({ success: false, message: 'Message is required.' });
+      return;
+    }
+    const bid = new Types.ObjectId(businessId);
+
+    // Metering happens BEFORE any SSE headers so we can still return a clean 400.
+    let charged = false;
+    if (this.meteringEnabled()) {
+      const used = await this.usedToday(bid);
+      if (used >= this.freeDailyQueries()) {
+        try {
+          await this.tokenService.spend('ai_ask', businessId);
+          charged = true;
+        } catch (e: any) {
+          res.status(400).json({
+            success: false,
+            message: e?.message?.includes('Insufficient')
+              ? "You've used your free questions for today and are out of tokens. Top up tokens to keep asking."
+              : e?.message ?? 'Unable to start the assistant.',
+          });
+          return;
+        }
+      }
+    }
+
+    // Begin the event stream.
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    (res as any).flushHeaders?.();
+    const send = (obj: any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+    const charts: Record<string, any>[] = [];
+
+    try {
+      const conversation = await this.getOrCreateConversation(
+        bid,
+        conversationId,
+      );
+      const history: LlmMessage[] = conversation.messages
+        .slice(-HISTORY_TURNS)
+        .map((m) => ({ role: m.role, content: m.content }));
+      history.push({ role: 'user', content: text });
+
+      const result = await this.llm.runToolLoopStream({
+        system: buildSystemPrompt(businessName),
+        messages: history,
+        tools: this.tools.getToolDefs(),
+        onDelta: (delta) => send({ type: 'delta', text: delta }),
+        onToolCall: (name, input) => {
+          if (name === 'render_chart') {
+            const spec = {
+              type: ['bar', 'line', 'pie'].includes(input?.type)
+                ? input.type
+                : 'bar',
+              title: String(input?.title ?? '').slice(0, 120),
+              data: Array.isArray(input?.data)
+                ? input.data
+                    .filter((d: any) => d && typeof d.value === 'number')
+                    .slice(0, 12)
+                    .map((d: any) => ({
+                      label: String(d.label ?? ''),
+                      value: d.value,
+                    }))
+                : [],
+            };
+            charts.push(spec);
+            send({ type: 'chart', chart: spec });
+            return Promise.resolve({ ok: true, note: 'Chart shown.' });
+          }
+          return this.tools.execute(name, businessId, input);
+        },
+        model: this.smartModel,
+        maxTokens: 1024,
+        maxTurns: 6,
+      });
+
+      const answer =
+        result.text ||
+        "I couldn't find anything to answer that. Try rephrasing.";
+
+      conversation.messages.push({
+        role: 'user',
+        content: text,
+        tools_used: [],
+        charts: [],
+        createdAt: new Date(),
+      } as AssistantMessage);
+      conversation.messages.push({
+        role: 'assistant',
+        content: answer,
+        tools_used: result.toolsUsed,
+        charts,
+        createdAt: new Date(),
+      } as AssistantMessage);
+      conversation.last_message_at = new Date();
+      if (conversation.title === 'New conversation') {
+        conversation.title = text.slice(0, 60);
+      }
+      await conversation.save();
+
+      send({
+        type: 'done',
+        conversation_id: (conversation._id as any).toString(),
+        tools_used: result.toolsUsed,
+      });
+      res.end();
+    } catch (err: any) {
+      if (charged) {
+        try {
+          await this.tokenService.refund('ai_ask', businessId);
+        } catch (e: any) {
+          this.logger.error(`ai_ask refund failed: ${e?.message}`);
+        }
+      }
+      try {
+        send({
+          type: 'error',
+          message: err?.message ?? 'Something went wrong.',
+        });
+      } catch {
+        /* stream may already be closed */
+      }
+      res.end();
     }
   }
 
