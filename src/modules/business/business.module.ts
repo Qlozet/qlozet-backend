@@ -9,6 +9,10 @@ import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/pla
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
+import {
+  Transaction,
+  TransactionSchema,
+} from '../transactions/schema/transaction.schema';
 import { JwtService } from '@nestjs/jwt';
 import { BusinessEarningsCron } from './business-earning-cron';
 
@@ -26,6 +30,7 @@ import { ProductModule } from '../products/products.module';
       { name: User.name, schema: UserSchema },
       { name: Order.name, schema: OrderSchema },
       { name: Wallet.name, schema: WalletSchema },
+      { name: Transaction.name, schema: TransactionSchema },
     ]),
     LogisticsModule,   // provides LogisticsService
     ProductModule,     // provides ProductService

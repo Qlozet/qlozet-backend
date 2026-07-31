@@ -140,14 +140,14 @@ export class WalletsService {
   ) {
     const pendingDelta = deltas.pending ?? 0;
     const balanceDelta = deltas.balance ?? 0;
-    if (pendingDelta === 0 && balanceDelta === 0) return;
+    if (pendingDelta === 0 && balanceDelta === 0) return null;
 
     const wallet = await this.walletModel.findOne({ business: businessId });
     if (!wallet) {
       this.logger.warn(
         `[WalletReconcile] No wallet for business ${businessId}; skipping (pending=${pendingDelta}, balance=${balanceDelta})`,
       );
-      return;
+      return null;
     }
 
     wallet.pending_balance = Math.max(
@@ -161,6 +161,8 @@ export class WalletsService {
     this.logger.log(
       `[WalletReconcile] business=${businessId} pending${pendingDelta >= 0 ? '+' : ''}${pendingDelta} balance${balanceDelta >= 0 ? '+' : ''}${balanceDelta} → pending=${wallet.pending_balance} balance=${wallet.balance}`,
     );
+
+    return wallet;
   }
 
   // Get wallet balance
@@ -207,10 +209,13 @@ export class WalletsService {
     // Debit wallet immediately (prevents double-withdrawal)
     await this.debitWallet((wallet._id as any).toString(), amount);
 
-    // Create a pending payout transaction
+    // Create a pending payout transaction. A withdrawal is money LEAVING the
+    // vendor's wallet, so it must be a DEBIT (it was previously mistyped as
+    // CREDIT). Link it to the wallet so it surfaces in the vendor's ledger.
     const transaction = await this.transactionService.create({
       initiator: business.created_by?.id,
-      type: TransactionType.CREDIT,
+      wallet: wallet._id as any,
+      type: TransactionType.DEBIT,
       amount,
       status: TransactionStatus.PENDING,
       description: `Withdrawal request for ${business.business_name}`,
@@ -234,11 +239,23 @@ export class WalletsService {
         `[Withdrawal] ₦${amount.toLocaleString()} payout initiated for ${business.business_name} (ref: ${payoutReference})`,
       );
     } catch (err) {
-      // If payout fails, reverse the wallet debit
+      // If payout fails to even initiate, reverse the up-front wallet debit and
+      // mark the pending payout transaction FAILED so it doesn't linger in the
+      // vendor's ledger as a perpetually-pending debit.
       this.logger.error(
         `[Withdrawal] Payout failed for ${business.business_name}: ${err.message}. Reversing wallet debit.`,
       );
       await this.creditWallet((wallet._id as any).toString(), amount);
+      try {
+        await this.transactionService.updateStatus(
+          transaction.reference,
+          TransactionStatus.FAILED,
+        );
+      } catch (statusErr: any) {
+        this.logger.error(
+          `[Withdrawal] Could not mark transaction ${transaction.reference} FAILED: ${statusErr.message}`,
+        );
+      }
       throw new BadRequestException(
         'Withdrawal failed. Your wallet has been restored. Please try again later.',
       );

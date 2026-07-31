@@ -128,32 +128,26 @@ export class TransactionService {
       },
       { $unwind: { path: '$walletDoc', preserveNullAndEmptyArrays: true } },
 
+      // Show the vendor's OWN wallet ledger: credits for released earnings,
+      // debits for payouts/claw-backs. These transactions are already written
+      // from the vendor's perspective (correct type + exact net amount linked to
+      // their wallet), so we no longer surface the customer's order-payment rows
+      // — those carried the customer's direction and the full order amount.
       {
         $addFields: {
-          orderItemsForBusiness: {
-            $filter: {
-              input: { $ifNull: ['$order.items', []] },
-              as: 'item',
-              cond: { $eq: ['$$item.business', businessId] },
-            },
-          },
           isWalletRelated: {
-            $eq: ['$walletDoc.business', businessId]
+            $eq: ['$walletDoc.business', businessId],
           },
           isInitiatorRelated: {
-            $eq: ['$initiator', businessId]
-          }
+            $eq: ['$initiator', businessId],
+          },
         },
       },
-      
+
       {
         $match: {
-          $or: [
-            { 'orderItemsForBusiness.0': { $exists: true } },
-            { isWalletRelated: true },
-            { isInitiatorRelated: true }
-          ]
-        }
+          $or: [{ isWalletRelated: true }, { isInitiatorRelated: true }],
+        },
       },
 
       // project only minimal order object
@@ -172,10 +166,9 @@ export class TransactionService {
           'order.payout_status': 0,
           'order.createdAt': 0,
           'order.updatedAt': 0,
-          orderItemsForBusiness: 0, // remove helper field
           walletDoc: 0,
           isWalletRelated: 0,
-          isInitiatorRelated: 0
+          isInitiatorRelated: 0,
         },
       },
     ];

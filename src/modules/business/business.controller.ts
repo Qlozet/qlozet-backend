@@ -224,6 +224,17 @@ export class BusinessController {
     return this.businessService.backfillBusinessEarnings();
   }
 
+  // Admin-only one-time repair: write the CREDIT ledger transaction for every
+  // already-released earning that predates the vendor ledger. Idempotent.
+  @Roles(UserType.ADMIN)
+  @Post('earnings/backfill-transactions')
+  @ApiOperation({
+    summary: 'Backfill vendor ledger credits for released earnings (admin)',
+  })
+  async backfillEarningTransactions() {
+    return this.businessService.backfillEarningTransactions();
+  }
+
   @Roles(UserType.VENDOR)
   @Get('customers')
   @ApiOperation({ summary: 'Get paginated list of vendor customers' })

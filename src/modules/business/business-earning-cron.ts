@@ -12,6 +12,13 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
+import {
+  Transaction,
+  TransactionDocument,
+  TransactionType,
+  TransactionStatus,
+} from '../transactions/schema/transaction.schema';
+import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 
 @Injectable()
 export class BusinessEarningsCron {
@@ -34,7 +41,51 @@ export class BusinessEarningsCron {
     private readonly orderModel: Model<OrderDocument>,
     @InjectModel(PlatformSettings.name)
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+    @InjectModel(Transaction.name)
+    private readonly transactionModel: Model<TransactionDocument>,
   ) {}
+
+  /**
+   * Write a CREDIT transaction to the vendor's wallet ledger when an earning is
+   * released into their spendable balance. This is what makes vendor income show
+   * up as a *credit* in their transaction history (previously only the
+   * customer's order-payment debit was surfaced). Idempotent: keyed on the
+   * earning id so a re-run of the release path never double-writes.
+   */
+  private async recordEarningCredit(
+    earning: BusinessEarningDocument,
+    walletId: any,
+  ) {
+    const earningId = (earning._id as any).toString();
+
+    const already = await this.transactionModel.exists({
+      'metadata.earning_id': earningId,
+      type: TransactionType.CREDIT,
+    });
+    if (already) return;
+
+    const reference = await generateUniqueQlozetReference(
+      this.transactionModel,
+      'TRX',
+    );
+
+    await this.transactionModel.create({
+      wallet: walletId,
+      order: earning.order,
+      type: TransactionType.CREDIT,
+      amount: earning.net_amount,
+      reference,
+      status: TransactionStatus.SUCCESS,
+      channel: 'earning',
+      payment_method: 'wallet',
+      description: `Earnings released for order`,
+      metadata: {
+        earning_id: earningId,
+        business_id: (earning.business as any)?.toString?.() ?? earning.business,
+        milestone: earning.milestone,
+      },
+    });
+  }
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async releaseFunds() {
@@ -82,6 +133,9 @@ export class BusinessEarningsCron {
         earning.released = true;
         earning.released_at = new Date();
         await earning.save();
+
+        // Record the vendor-facing CREDIT so this income shows in their ledger.
+        await this.recordEarningCredit(earning, updatedWallet._id);
 
         this.logger.log(
           `Released ₦${earning.net_amount} to business ${earning.business} → wallet=${updatedWallet.balance}`,

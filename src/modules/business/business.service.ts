@@ -9,6 +9,13 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
+import {
+  Transaction,
+  TransactionDocument,
+  TransactionType,
+  TransactionStatus,
+} from '../transactions/schema/transaction.schema';
+import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { Warehouse, WarehouseDocument } from './schemas/warehouse.schema';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import {
@@ -52,6 +59,8 @@ export class BusinessService implements OnModuleInit {
     private businessEarningsModel: Model<BusinessEarningDocument>,
     @InjectModel(Wallet.name)
     private walletModel: Model<WalletDocument>,
+    @InjectModel(Transaction.name)
+    private transactionModel: Model<TransactionDocument>,
   ) {}
 
   /**
@@ -1439,6 +1448,92 @@ export class BusinessService implements OnModuleInit {
       `[EarningsBackfill] scanned=${orders.length} recorded=${recorded} skipped=${skipped} failed=${failed}`,
     );
     return { scanned: orders.length, recorded, skipped, failed };
+  }
+
+  /**
+   * One-time repair: for every ALREADY-RELEASED earning that predates the vendor
+   * ledger, write the matching CREDIT transaction so the vendor's transaction
+   * history reflects their income (before this, only the customer's order-payment
+   * debit was surfaced). Idempotent — keyed on the earning id, so re-runs never
+   * double-credit. Clawed-back earnings (net_amount = 0) are skipped.
+   */
+  async backfillEarningTransactions(): Promise<{
+    scanned: number;
+    created: number;
+    skipped: number;
+    failed: number;
+  }> {
+    const released = await this.businessEarningsModel
+      .find({ released: true, net_amount: { $gt: 0 } })
+      .lean();
+
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    // Cache one wallet lookup per business across the run.
+    const walletByBusiness = new Map<string, any>();
+
+    for (const earning of released) {
+      const earningId = (earning._id as any).toString();
+      try {
+        const exists = await this.transactionModel.exists({
+          'metadata.earning_id': earningId,
+          type: TransactionType.CREDIT,
+        });
+        if (exists) {
+          skipped++;
+          continue;
+        }
+
+        const businessKey = (earning.business as any)?.toString();
+        let wallet = walletByBusiness.get(businessKey);
+        if (wallet === undefined) {
+          wallet = await this.walletModel.findOne({
+            business: earning.business,
+          });
+          walletByBusiness.set(businessKey, wallet ?? null);
+        }
+        if (!wallet) {
+          skipped++;
+          continue;
+        }
+
+        const reference = await generateUniqueQlozetReference(
+          this.transactionModel,
+          'TRX',
+        );
+
+        await this.transactionModel.create({
+          wallet: wallet._id,
+          order: earning.order,
+          type: TransactionType.CREDIT,
+          amount: earning.net_amount,
+          reference,
+          status: TransactionStatus.SUCCESS,
+          channel: 'earning',
+          payment_method: 'wallet',
+          description: `Earnings released for order`,
+          metadata: {
+            earning_id: earningId,
+            business_id: businessKey,
+            milestone: earning.milestone,
+            backfilled: true,
+          },
+        });
+        created++;
+      } catch (e: any) {
+        failed++;
+        this.logger.error(
+          `[EarningTxBackfill] earning ${earningId} failed: ${e?.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[EarningTxBackfill] scanned=${released.length} created=${created} skipped=${skipped} failed=${failed}`,
+    );
+    return { scanned: released.length, created, skipped, failed };
   }
 
   async getFeed(
