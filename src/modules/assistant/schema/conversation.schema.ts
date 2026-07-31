@@ -19,6 +19,11 @@ export class AssistantMessage {
   @Prop({ type: [String], default: [] })
   tools_used: string[];
 
+  // Optional chart specs the assistant chose to render inline with this answer.
+  // Shape: { type: 'bar'|'line'|'pie', title, data: [{label, value}] }.
+  @Prop({ type: [Object], default: [] })
+  charts: Record<string, any>[];
+
   @Prop({ type: Date, default: () => new Date() })
   createdAt: Date;
 }

@@ -13,6 +13,7 @@ import {
   Transaction,
   TransactionSchema,
 } from '../transactions/schema/transaction.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
 import {
   AssistantConversation,
   AssistantConversationSchema,
@@ -37,6 +38,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: BusinessEarning.name, schema: BusinessEarningSchema },
       { name: Wallet.name, schema: WalletSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: Product.name, schema: ProductSchema },
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
     ]),

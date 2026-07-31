@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { LlmToolDef } from '../llm/llm-provider.interface';
@@ -38,8 +38,6 @@ const RANGE_PROPS = {
  */
 @Injectable()
 export class AnalyticsToolsService {
-  private readonly logger = new Logger(AnalyticsToolsService.name);
-
   constructor(
     @InjectModel('Order') private readonly orderModel: Model<any>,
     @InjectModel('BusinessEarning')
@@ -47,6 +45,7 @@ export class AnalyticsToolsService {
     @InjectModel('Wallet') private readonly walletModel: Model<any>,
     @InjectModel('Transaction')
     private readonly transactionModel: Model<any>,
+    @InjectModel('Product') private readonly productModel: Model<any>,
   ) {}
 
   /** Tool definitions advertised to the model. */
@@ -111,6 +110,47 @@ export class AnalyticsToolsService {
           'Available balance now, total pending earnings, and the next scheduled release date and amount. Forward-looking; ignores period.',
         input_schema: { type: 'object', properties: {} },
       },
+      {
+        name: 'get_inventory_status',
+        description:
+          'Active products that are out of stock or at/below a low-stock threshold (unit stock for clothing & accessories). Fabric is yardage-managed and reported separately.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            threshold: {
+              type: 'number',
+              description: 'Low-stock unit threshold (default 5).',
+            },
+          },
+        },
+      },
+      {
+        // UI directive (not a data query): renders a chart in the chat. The
+        // assistant service intercepts this and never hits the DB.
+        name: 'render_chart',
+        description:
+          'Display a chart to the vendor IN ADDITION to your text answer, when a visual makes the point clearer (trends, comparisons, breakdowns). Use numbers you already got from the data tools — do not invent points.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['bar', 'line', 'pie'] },
+            title: { type: 'string' },
+            data: {
+              type: 'array',
+              description: 'Points as {label, value}. Keep to <= 12 points.',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  value: { type: 'number' },
+                },
+                required: ['label', 'value'],
+              },
+            },
+          },
+          required: ['type', 'title', 'data'],
+        },
+      },
     ];
   }
 
@@ -134,6 +174,8 @@ export class AnalyticsToolsService {
         return this.walletLedger(bid, args);
       case 'get_payout_forecast':
         return this.payoutForecast(bid);
+      case 'get_inventory_status':
+        return this.inventoryStatus(bid, args);
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -528,6 +570,83 @@ export class AnalyticsToolsService {
           amount: e.net_amount,
           milestone: e.milestone,
         })),
+      },
+    };
+  }
+
+  // Sum nested variant stock in JS — the shape differs per kind, so this is
+  // clearer and safer than a deep aggregation. Returns null for fabric (managed
+  // in yards, not units) so we never report a misleading unit count.
+  private computeUnitStock(p: any): number | null {
+    if (p.kind === 'clothing') {
+      const cvs = p.clothing?.color_variants ?? [];
+      return cvs.reduce(
+        (sum: number, cv: any) =>
+          sum +
+          (cv.variants ?? []).reduce(
+            (s: number, v: any) => s + (v.stock ?? 0),
+            0,
+          ),
+        0,
+      );
+    }
+    if (p.kind === 'accessory') {
+      const vars = p.accessory?.variants ?? [];
+      return vars.reduce((s: number, v: any) => s + (v.stock ?? 0), 0);
+    }
+    return null; // fabric — yardage-managed
+  }
+
+  private async inventoryStatus(bid: Types.ObjectId, args: any) {
+    const threshold = Math.max(Number(args.threshold) || 5, 0);
+    const products = await this.productModel
+      .find({ business: bid, status: 'active' })
+      .select(
+        'kind clothing.name clothing.color_variants accessory.name accessory.variants accessory.in_stock fabric.name fabric.yard_length',
+      )
+      .lean();
+
+    const out: any[] = [];
+    const low: any[] = [];
+    let fabricCount = 0;
+    let healthy = 0;
+
+    for (const p of products as any[]) {
+      const name =
+        p.clothing?.name ??
+        p.accessory?.name ??
+        p.fabric?.name ??
+        'Unnamed product';
+      if (p.kind === 'fabric') {
+        fabricCount++;
+        continue;
+      }
+      const stock = this.computeUnitStock(p);
+      if (stock === null) continue;
+      if (stock <= 0) out.push({ product: name, kind: p.kind, stock });
+      else if (stock <= threshold)
+        low.push({ product: name, kind: p.kind, stock });
+      else healthy++;
+    }
+
+    out.sort((a, b) => a.stock - b.stock);
+    low.sort((a, b) => a.stock - b.stock);
+
+    return {
+      currency: 'NGN',
+      data: {
+        threshold,
+        active_products: products.length,
+        out_of_stock_count: out.length,
+        low_stock_count: low.length,
+        healthy_count: healthy,
+        fabric_products: fabricCount,
+        out_of_stock: out.slice(0, 15),
+        low_stock: low.slice(0, 15),
+        note:
+          fabricCount > 0
+            ? 'Fabric products are managed in yards, not units, and are not included in the unit stock counts above.'
+            : undefined,
       },
     };
   }

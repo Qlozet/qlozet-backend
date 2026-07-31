@@ -112,11 +112,37 @@ export class AssistantService {
         .map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: 'user', content: text });
 
+      // Collect any charts the model asks to render (render_chart is a UI
+      // directive, intercepted here — it never touches the DB).
+      const charts: Record<string, any>[] = [];
+
       const result = await this.llm.runToolLoop({
         system: buildSystemPrompt(businessName),
         messages: history,
         tools: this.tools.getToolDefs(),
-        onToolCall: (name, input) => this.tools.execute(name, businessId, input),
+        onToolCall: (name, input) => {
+          if (name === 'render_chart') {
+            charts.push({
+              type: ['bar', 'line', 'pie'].includes(input?.type)
+                ? input.type
+                : 'bar',
+              title: String(input?.title ?? '').slice(0, 120),
+              data: Array.isArray(input?.data)
+                ? input.data
+                    .filter(
+                      (d: any) => d && typeof d.value === 'number',
+                    )
+                    .slice(0, 12)
+                    .map((d: any) => ({
+                      label: String(d.label ?? ''),
+                      value: d.value,
+                    }))
+                : [],
+            });
+            return Promise.resolve({ ok: true, note: 'Chart shown to the vendor.' });
+          }
+          return this.tools.execute(name, businessId, input);
+        },
         model: this.smartModel,
         maxTokens: 1024,
         maxTurns: 6,
@@ -131,12 +157,14 @@ export class AssistantService {
         role: 'user',
         content: text,
         tools_used: [],
+        charts: [],
         createdAt: new Date(),
       } as AssistantMessage);
       conversation.messages.push({
         role: 'assistant',
         content: answer,
         tools_used: result.toolsUsed,
+        charts,
         createdAt: new Date(),
       } as AssistantMessage);
       conversation.last_message_at = new Date();
@@ -148,6 +176,7 @@ export class AssistantService {
       return {
         conversation_id: (conversation._id as any).toString(),
         answer,
+        charts,
         tools_used: result.toolsUsed,
       };
     } catch (err) {
