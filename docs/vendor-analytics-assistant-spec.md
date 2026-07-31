@@ -93,6 +93,54 @@ Each maps to existing or near-existing backend logic. Signatures show only the
 last_30_days | last_90_days | this_year`. No free-form date parsing in Phase 1
 (keeps aggregation predictable and cacheable).
 
+### 4a. Candidate tools (Phase 1.5+)
+
+The Phase 1 set answers "what sold, where, how much did I earn." These close the
+gaps vendors actually worry about: am I growing, when do I get paid, are
+customers happy, what should I fix. Grouped by data-availability confidence.
+
+**Strong adds — data clearly exists today:**
+
+| Tool | Answers | Backed by |
+|---|---|---|
+| `get_sales_trend(period, granularity)` | "Am I growing?" WoW/MoM growth, seasonality | orders time-series |
+| `get_payout_forecast()` | "When do I get paid, how much?" pending vs available, next release dates/amounts | `BusinessEarning` release_date + milestones |
+| `get_customer_insights(period)` | new vs **repeat** buyers, repeat rate, top customers, AOV | orders + customers |
+| `get_promotion_performance(period)` | "Are my discounts working?" revenue per discount, discounted vs full-price mix | discounts + orders |
+| `get_reviews_summary(period)` | "Are customers happy?" avg rating, trend, recent low ratings + why, `success_rate` | reviews/ratings |
+| `get_fulfilment_health(period)` | shipments by status, avg dispatch/delivery time, late/failed, orders awaiting dispatch | Shipbubble shipments |
+| `get_returns_and_disputes(period)` | return rate, open disputes, top reasons | returns + disputes modules |
+| `get_custom_order_pipeline()` | tailors: bespoke orders in production, by milestone, overdue | `clothing_type: customize` + milestones |
+
+Highest ROI of the group: **`get_payout_forecast`** (cash-flow is the #1 vendor
+anxiety, and the release/milestone data answers it precisely) and
+**`get_customer_insights`** (repeat-rate is the best single health metric).
+
+**Situational adds:**
+
+- `get_catalog_health()` — dead stock (no sales in N days), out-of-stock,
+  listings missing images/description, price outliers. Merchandising nudge.
+- `get_fabric_stock()` — remaining yardage + active reservations, for fabric
+  vendors (fabric-reservation module).
+
+**Data-dependent — verify tracking exists first:**
+
+- `get_traffic_conversion(period)` — views → cart → order funnel. **Only if
+  product views are logged.** If not, this is the tracking most worth adding —
+  "lots of views, few sales" is the most actionable insight there is.
+- `get_search_demand(period)` — what shoppers searched that led to / missed the
+  store. Only if search queries are logged.
+- `get_category_benchmark(period)` — "you vs category median." Powerful, but
+  **cross-tenant aggregate** — needs a strict privacy guard: aggregates only,
+  enforce a minimum cohort size, nothing vendor-identifiable.
+
+**Not new tools — synthesized behaviors:** "restock this" / "promote that"
+recommendations come from combining `get_inventory_status` + `get_sales_trend` +
+`get_promotion_performance` via the system prompt (especially the digest). Don't
+build endpoints for them.
+
+**Deprioritized:** follower/social analytics — low revenue signal in early phases.
+
 **Tool output contract:** every tool returns
 `{ period, generated_at, currency: 'NGN', data }` so the model always knows the
 window and unit it's describing.
