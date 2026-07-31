@@ -67,6 +67,30 @@ export class ClaudeProvider implements LlmProvider {
     ];
   }
 
+  // Pull the real Anthropic error message out of an axios error. On streaming
+  // requests the error body is itself a stream, so a plain `.data.error.message`
+  // read comes back empty — drain the stream to recover the actual reason.
+  private async extractAnthropicError(err: any): Promise<string> {
+    try {
+      const data = err?.response?.data;
+      if (data && typeof data.on === 'function') {
+        const chunks: Buffer[] = [];
+        for await (const c of data) chunks.push(Buffer.from(c));
+        const body = Buffer.concat(chunks).toString('utf8');
+        try {
+          return JSON.parse(body)?.error?.message ?? body;
+        } catch {
+          return body;
+        }
+      }
+      return (
+        data?.error?.message ?? err?.message ?? 'unknown error'
+      );
+    } catch {
+      return err?.message ?? 'unknown error';
+    }
+  }
+
   async runToolLoop(input: RunToolLoopInput): Promise<RunToolLoopResult> {
     const maxTurns = input.maxTurns ?? 6;
     const maxTokens = input.maxTokens ?? 1024;
@@ -170,9 +194,10 @@ export class ClaudeProvider implements LlmProvider {
     try {
       stream = await this.postStream(body);
     } catch (err: any) {
-      const detail =
-        err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
-      this.logger.error(`Anthropic stream request failed: ${detail}`);
+      const detail = await this.extractAnthropicError(err);
+      this.logger.error(
+        `Anthropic stream request failed (model=${body?.model}): ${detail}`,
+      );
       throw new ServiceUnavailableException(
         'The assistant is temporarily unavailable. Please try again.',
       );
