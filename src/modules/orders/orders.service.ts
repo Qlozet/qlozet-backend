@@ -2618,7 +2618,10 @@ export class OrderService {
         s.status === ShipmentStatus.DELIVERED,
     );
     if (allShipped) {
-      order.status = OrderStatus.PROCESSING;
+      // Once every vendor has shipped, the order is on its way — reflect that
+      // to the customer immediately instead of leaving it at "processing" until
+      // the courier's webhook fires (which can be delayed or missed in tests).
+      order.status = OrderStatus.IN_TRANSIT;
     }
 
     await order.save();
