@@ -254,61 +254,85 @@ export class WebhookService {
   async handleShipbubbleWebhook(payload: any) {
     this.logger.log(`Shipbubble webhook received: ${JSON.stringify(payload)}`);
 
-    const trackingNumber =
-      payload?.tracking_number ||
-      payload?.data?.tracking_number ||
-      payload?.shipment?.tracking_number;
+    // Shipbubble identifies a shipment by `order_id` (e.g. "SB-244512FE8276")
+    // and carries the courier tracking code under `courier.tracking_code`.
+    // Collect every identifier the payload might use (across the flat / data /
+    // shipment shapes) so we can match whatever we stored at fulfillment.
+    const candidates = [
+      payload?.order_id,
+      payload?.data?.order_id,
+      payload?.shipment?.order_id,
+      payload?.tracking_number,
+      payload?.data?.tracking_number,
+      payload?.shipment?.tracking_number,
+      payload?.courier?.tracking_code,
+      payload?.data?.courier?.tracking_code,
+      payload?.shipment?.courier?.tracking_code,
+    ]
+      .filter((v) => typeof v === 'string' && v.trim())
+      .map((v) => v.trim());
 
     const newStatus =
       payload?.status ||
+      payload?.status_code ||
       payload?.data?.status ||
       payload?.shipment?.status;
 
-    if (!trackingNumber) {
-      this.logger.warn('Shipbubble webhook: no tracking_number found');
-      return { status: 'ignored', message: 'No tracking number' };
+    if (candidates.length === 0) {
+      this.logger.warn('Shipbubble webhook: no shipment identifier found');
+      return { status: 'ignored', message: 'No shipment identifier' };
     }
 
-    // Find order with matching shipment tracking number
-    const order = await this.orderModel.findOne({
-      'shipments.tracking_number': trackingNumber,
-    }) as OrderDocument;
+    // Match on EITHER the stored Shipbubble order id (shipment_id) or the
+    // tracking number.
+    const order = (await this.orderModel.findOne({
+      $or: [
+        { 'shipments.shipment_id': { $in: candidates } },
+        { 'shipments.tracking_number': { $in: candidates } },
+      ],
+    })) as OrderDocument;
 
     if (!order) {
       this.logger.warn(
-        `Shipbubble webhook: no order found for tracking ${trackingNumber}`,
+        `Shipbubble webhook: no order found for ${candidates.join(', ')}`,
       );
       return { status: 'ignored', message: 'Order not found' };
     }
 
-    // Find and update the specific shipment
     const shipmentIndex = order.shipments.findIndex(
-      (s) => s.tracking_number === trackingNumber,
+      (s) =>
+        (s.shipment_id && candidates.includes(s.shipment_id)) ||
+        (s.tracking_number && candidates.includes(s.tracking_number)),
     );
     if (shipmentIndex === -1) {
       return { status: 'ignored', message: 'Shipment not found in order' };
     }
 
-    // Map Shipbubble status to our ShipmentStatus
+    // Map Shipbubble status codes to our ShipmentStatus. Shipbubble uses:
+    // pending | confirmed | picked_up | in_transit | completed | cancelled.
     const statusMap: Record<string, ShipmentStatus> = {
-      in_transit: ShipmentStatus.IN_TRANSIT,
-      delivered: ShipmentStatus.DELIVERED,
-      failed: ShipmentStatus.FAILED,
       picked_up: ShipmentStatus.IN_TRANSIT,
+      in_transit: ShipmentStatus.IN_TRANSIT,
       out_for_delivery: ShipmentStatus.IN_TRANSIT,
+      completed: ShipmentStatus.DELIVERED,
+      delivered: ShipmentStatus.DELIVERED,
+      cancelled: ShipmentStatus.FAILED,
+      failed: ShipmentStatus.FAILED,
+      // 'pending' / 'confirmed' carry no shipment-status change for us.
     };
 
-    const mappedStatus =
-      statusMap[newStatus?.toLowerCase()] || null;
+    const mappedStatus = statusMap[String(newStatus).toLowerCase()] || null;
 
     if (!mappedStatus) {
       this.logger.log(
-        `Shipbubble webhook: unmapped status "${newStatus}" for ${trackingNumber}`,
+        `Shipbubble webhook: no-op status "${newStatus}" for ${candidates[0]}`,
       );
-      return { status: 'ignored', message: `Unknown status: ${newStatus}` };
+      return { status: 'ignored', message: `Unhandled status: ${newStatus}` };
     }
 
     order.shipments[shipmentIndex].status = mappedStatus;
+    const trackingNumber =
+      order.shipments[shipmentIndex].tracking_number || candidates[0];
 
     if (mappedStatus === ShipmentStatus.DELIVERED) {
       order.shipments[shipmentIndex].delivered_at = new Date();
