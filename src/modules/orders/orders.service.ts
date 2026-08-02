@@ -2601,11 +2601,22 @@ export class OrderService {
       throw err;
     }
 
-    // Update shipment data
-    order.shipments[shipmentIndex].shipment_id = shipmentResult.shipment_id;
+    // Update shipment data. Shipbubble's create-label response identifies the
+    // shipment by `order_id` (e.g. "SB-244512FE8276") and carries the courier
+    // tracking code under `courier.tracking_code` — the same identifiers its
+    // tracking webhook sends back. Capture both (with the older field names as
+    // fallbacks) so the webhook can reliably match this shipment later.
+    const sb: any = shipmentResult;
+    order.shipments[shipmentIndex].shipment_id =
+      sb.shipment_id ?? sb.order_id ?? null;
     order.shipments[shipmentIndex].tracking_number =
-      shipmentResult.tracking_number;
-    order.shipments[shipmentIndex].label_url = shipmentResult.label_url;
+      sb.tracking_number ?? sb.courier?.tracking_code ?? sb.tracking_code ?? null;
+    order.shipments[shipmentIndex].label_url =
+      sb.label_url ?? sb.waybill_document ?? null;
+    if (!order.shipments[shipmentIndex].courier_name) {
+      order.shipments[shipmentIndex].courier_name =
+        typeof sb.courier === 'string' ? sb.courier : sb.courier?.name;
+    }
     order.shipments[shipmentIndex].status = ShipmentStatus.SHIPPED;
     order.shipments[shipmentIndex].shipped_at = new Date();
 

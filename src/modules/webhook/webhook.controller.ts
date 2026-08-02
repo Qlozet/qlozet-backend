@@ -1,10 +1,21 @@
-import { Controller, Post, Req, UnauthorizedException, Logger } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+  Logger,
+} from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { WebhookService } from './webhook.service';
 import { Public } from 'src/common/decorators/public.decorator';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { RolesGuard } from 'src/common/guards';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserType } from '../ums/schemas';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Webhooks')
 @SkipThrottle()
@@ -52,6 +63,26 @@ export class WebhookController {
     );
 
     return this.webhookService.handleShipbubbleWebhook(req.body);
+  }
+
+  // Admin-only test simulator: fire the Shipbubble webhook handler directly with
+  // a synthetic payload — no HMAC signature needed. Handy for driving a shipment
+  // through statuses (picked_up/in_transit/completed/cancelled) in sandbox.
+  // Pass the shipment's Shipbubble order_id OR its tracking_number.
+  @Roles(UserType.ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Post('shipbubble/simulate')
+  @ApiOperation({ summary: 'Simulate a Shipbubble tracking webhook (admin)' })
+  async simulateShipbubbleWebhook(
+    @Body()
+    body: { order_id?: string; tracking_number?: string; status: string },
+  ) {
+    return this.webhookService.handleShipbubbleWebhook({
+      order_id: body.order_id,
+      tracking_number: body.tracking_number,
+      status: body.status,
+    });
   }
 
   /**
