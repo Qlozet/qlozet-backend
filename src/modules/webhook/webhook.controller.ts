@@ -15,6 +15,7 @@ import { Public } from 'src/common/decorators/public.decorator';
 import { RolesGuard } from 'src/common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas';
+import { SimulateShipbubbleDto } from './dto/simulate-shipbubble.dto';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Webhooks')
@@ -74,10 +75,7 @@ export class WebhookController {
   @ApiBearerAuth('access-token')
   @Post('shipbubble/simulate')
   @ApiOperation({ summary: 'Simulate a Shipbubble tracking webhook (admin)' })
-  async simulateShipbubbleWebhook(
-    @Body()
-    body: { order_id?: string; tracking_number?: string; status: string },
-  ) {
+  async simulateShipbubbleWebhook(@Body() body: SimulateShipbubbleDto) {
     return this.webhookService.handleShipbubbleWebhook({
       order_id: body.order_id,
       tracking_number: body.tracking_number,
