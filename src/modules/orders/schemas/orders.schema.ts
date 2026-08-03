@@ -114,7 +114,9 @@ class AddonSelection {
 /** ------------------ Sub-schema for each item ------------------ */
 @Schema({ _id: false })
 export class OrderItem {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
+  // Optional: bespoke order items have no catalog product (the design/quote hold
+  // the details). Standard order items always set this.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   product: Types.ObjectId;
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
   business: Types.ObjectId;

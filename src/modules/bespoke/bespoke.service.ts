@@ -31,6 +31,9 @@ import { MailService } from '../notifications/mail/mail.service';
 import {
   Order,
   OrderDocument,
+  OrderStatus,
+  ShipmentStatus,
+  ShipmentType,
 } from '../orders/schemas/orders.schema';
 import {
   TransactionType,
@@ -66,6 +69,8 @@ export class BespokeService {
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel('Product')
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel('Address')
+    private readonly addressModel: Model<any>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
     private readonly mailService: MailService,
@@ -425,10 +430,34 @@ export class BespokeService {
     design.accepted_quote = quote._id as Types.ObjectId;
     await design.save();
 
-    // Create order
+    // Resolve the customer's shipping address (needed so the tailor can fulfil).
+    const address =
+      (await this.addressModel.findOne({
+        customer: new Types.ObjectId(customer.id),
+        is_default: true,
+      })) ||
+      (await this.addressModel.findOne({
+        customer: new Types.ObjectId(customer.id),
+      }));
+    if (!address) {
+      throw new BadRequestException(
+        'Please add a shipping address before accepting a quote.',
+      );
+    }
+
+    // Create the bespoke order. Single vendor = the tailor (their quote total is
+    // the full price; line items itemise fabric/accessories/labour). The tailor
+    // has already committed by quoting, so the shipment is pre-confirmed — no
+    // separate vendor-confirm step. The delivery deadline uses the quote's
+    // estimated completion days.
     const orderReference = await generateUniqueQlozetReference(
       this.orderModel,
       'ORD',
+    );
+
+    const deadline = new Date();
+    deadline.setDate(
+      deadline.getDate() + (quote.estimated_completion_days || 7),
     );
 
     const order = new this.orderModel({
@@ -437,28 +466,34 @@ export class BespokeService {
       type: 'bespoke',
       bespoke_design: design._id,
       bespoke_quote: quote._id,
+      address: (address as any).toObject
+        ? (address as any).toObject()
+        : address,
       items: [
         {
-          product: design.fabric,
+          // Bespoke items have no catalog product; the design/quote hold the
+          // details. total_price drives vendor earnings.
+          product: design.fabric || null,
           business: quote.vendor,
-          fabric_selections: design.fabric
-            ? [
-                {
-                  fabric_id: design.fabric,
-                  yardage: quote.required_fabric_yards || 0,
-                  price: 0, // Will be updated from product
-                  quantity: 1,
-                  total_amount: 0,
-                },
-              ]
-            : [],
+          total_price: quote.total,
           note: quote.vendor_notes,
+        },
+      ],
+      shipments: [
+        {
+          business: quote.vendor,
+          shipment_type: ShipmentType.VENDOR_TO_CUSTOMER,
+          status: ShipmentStatus.PENDING,
+          confirmed: true,
+          confirmed_at: new Date(),
+          fulfillment_deadline: deadline,
+          shipping_fee: 0,
         },
       ],
       subtotal: quote.total,
       shipping_fee: 0,
       total: quote.total,
-      status: 'pending',
+      status: OrderStatus.PENDING,
     });
 
     const savedOrder = await order.save();

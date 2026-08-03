@@ -10,6 +10,7 @@ import {
   BespokeQuote,
   BespokeQuoteSchema,
 } from './schemas/bespoke-quote.schema';
+import { Address, AddressSchema } from '../ums/schemas/address.schema';
 
 // Import modules for dependencies
 import { AuthModule } from '../auth/auth.module';
@@ -25,6 +26,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MongooseModule.forFeature([
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
+      { name: Address.name, schema: AddressSchema },
     ]),
     AuthModule,
     OrdersModule,        // provides Order model
