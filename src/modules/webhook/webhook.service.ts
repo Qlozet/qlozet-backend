@@ -46,6 +46,7 @@ export class WebhookService {
     private businessEarningsModel: Model<BusinessEarningDocument>,
     @InjectModel(PlatformSettings.name)
     private platformSettingsModel: Model<PlatformSettingsDocument>,
+    @InjectModel('BespokeDesign') private bespokeDesignModel: Model<any>,
   ) {}
   async handlePaystackWebhook(payload: any) {
     const { event, data } = payload;
@@ -147,16 +148,35 @@ export class WebhookService {
     if (isCheckoutOrder) {
       try {
         const orderId = transaction.order!._id;
+        const order = await this.orderModel.findById(orderId).lean();
+        const isBespoke = (order as any)?.type === 'bespoke';
 
+        // Bespoke orders are auto-confirmed: the tailor already committed by
+        // quoting, so on payment they go straight to `processing` (no separate
+        // vendor-confirm step) rather than `in_review`.
         await this.orderModel.updateOne(
           { _id: orderId },
-          { status: 'in_review' },
+          { status: isBespoke ? 'processing' : 'in_review' },
         );
 
         await Promise.all([
           this.businessService.recordBusinessEarnings(orderId),
           this.productService.updateInventory(orderId),
         ]);
+
+        // Move the bespoke design into production once paid.
+        if (isBespoke && (order as any)?.bespoke_design) {
+          await this.bespokeDesignModel
+            .updateOne(
+              { _id: (order as any).bespoke_design },
+              { $set: { status: 'in_production' } },
+            )
+            .catch((e: any) =>
+              this.logger.error(
+                `Failed to move bespoke design to in_production: ${e?.message}`,
+              ),
+            );
+        }
       } catch (error) {
         this.logger.error(`Failed to process checkout order: ${error.message}`, error.stack);
       }
