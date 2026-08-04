@@ -1312,8 +1312,12 @@ export class BusinessService implements OnModuleInit {
         `Item totals for business ${businessId}: gross=${gross}, commission=${commission}, net=${net}`,
       );
 
-      // Check if this is a custom clothing item that qualifies for milestone split
-      const isCustom = (item as any).clothing_type === 'customize';
+      // Custom/tailored work qualifies for the upfront + completion milestone
+      // split: custom clothing items, and every bespoke order (the tailor fronts
+      // fabric + labour, so they get part on confirmation, the rest on delivery).
+      const isCustom =
+        (order as any).type === 'bespoke' ||
+        (item as any).clothing_type === 'customize';
       const upfrontPercent = (platformSettings as any)?.tailored_order_upfront_percent ?? 0;
 
       if (isCustom && upfrontPercent > 0) {

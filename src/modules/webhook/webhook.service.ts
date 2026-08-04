@@ -47,6 +47,7 @@ export class WebhookService {
     @InjectModel(PlatformSettings.name)
     private platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectModel('BespokeDesign') private bespokeDesignModel: Model<any>,
+    @InjectModel('BespokeQuote') private bespokeQuoteModel: Model<any>,
   ) {}
   async handlePaystackWebhook(payload: any) {
     const { event, data } = payload;
@@ -151,6 +152,16 @@ export class WebhookService {
         const order = await this.orderModel.findById(orderId).lean();
         const isBespoke = (order as any)?.type === 'bespoke';
 
+        // Bespoke: finalise the quote acceptance now that payment succeeded —
+        // accept the winning quote, decline the alternatives and mark the design
+        // accepted. (We deliberately DON'T do this at accept-time, so an
+        // abandoned payment never leaves the customer stuck.)
+        if (isBespoke && (order as any)?.bespoke_quote) {
+          await this.finalizeBespokeAcceptance(order).catch((e: any) =>
+            this.logger.error(`Failed to finalise bespoke acceptance: ${e?.message}`),
+          );
+        }
+
         // Bespoke orders are auto-confirmed: the tailor already committed by
         // quoting, so on payment they go straight to `processing` (no separate
         // vendor-confirm step) rather than `in_review`.
@@ -164,18 +175,26 @@ export class WebhookService {
           this.productService.updateInventory(orderId),
         ]);
 
-        // Move the bespoke design into production once paid.
-        if (isBespoke && (order as any)?.bespoke_design) {
-          await this.bespokeDesignModel
-            .updateOne(
-              { _id: (order as any).bespoke_design },
-              { $set: { status: 'in_production' } },
-            )
-            .catch((e: any) =>
-              this.logger.error(
-                `Failed to move bespoke design to in_production: ${e?.message}`,
-              ),
-            );
+        if (isBespoke) {
+          // Release the tailor's UPFRONT milestone (funds materials). Earnings
+          // were just recorded above, so schedule their release now — mirrors
+          // what confirmVendorShipment does for custom clothing.
+          await this.scheduleBespokeUpfront(order).catch((e: any) =>
+            this.logger.error(`Failed to schedule bespoke upfront: ${e?.message}`),
+          );
+          // Move the design into production.
+          if ((order as any)?.bespoke_design) {
+            await this.bespokeDesignModel
+              .updateOne(
+                { _id: (order as any).bespoke_design },
+                { $set: { status: 'in_production' } },
+              )
+              .catch((e: any) =>
+                this.logger.error(
+                  `Failed to move bespoke design to in_production: ${e?.message}`,
+                ),
+              );
+          }
         }
       } catch (error) {
         this.logger.error(`Failed to process checkout order: ${error.message}`, error.stack);
@@ -183,6 +202,59 @@ export class WebhookService {
     }
 
     return isWalletFunding;
+  }
+
+  // Finalise a bespoke acceptance once payment has succeeded: accept the paid
+  // quote, decline the sibling quotes on the same design, and point the design
+  // at the accepted quote. Idempotent (safe on webhook retries).
+  private async finalizeBespokeAcceptance(order: any) {
+    const quoteId = order?.bespoke_quote;
+    if (!quoteId) return;
+    const quote = await this.bespokeQuoteModel.findById(quoteId);
+    if (!quote || quote.status === 'accepted') return;
+
+    quote.status = 'accepted';
+    quote.accepted_at = new Date();
+    await quote.save();
+
+    await this.bespokeQuoteModel.updateMany(
+      {
+        design: quote.design,
+        _id: { $ne: quote._id },
+        status: { $in: ['pending', 'draft', 'submitted', 'revision_requested'] },
+      },
+      { $set: { status: 'declined' } },
+    );
+
+    await this.bespokeDesignModel.updateOne(
+      { _id: quote.design },
+      { $set: { accepted_quote: quote._id } },
+    );
+  }
+
+  // Schedule the vendor's UPFRONT milestone earnings for a bespoke order so the
+  // tailor gets funded to start (materials), instead of waiting for delivery.
+  // Same payout-delay window as confirmVendorShipment.
+  private async scheduleBespokeUpfront(order: any) {
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+    const releaseDate = new Date(
+      Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
+    );
+    const res = await this.businessEarningsModel.updateMany(
+      {
+        order: order._id,
+        milestone: 'upfront',
+        released: false,
+        release_date: null,
+      },
+      { $set: { release_date: releaseDate } },
+    );
+    if (res.modifiedCount > 0) {
+      this.logger.log(
+        `[Bespoke] Scheduled ${res.modifiedCount} upfront earning(s) for order ${order.reference} — releasing ${releaseDate.toISOString()}`,
+      );
+    }
   }
 
   private async handleTransferSuccess(

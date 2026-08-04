@@ -404,31 +404,51 @@ export class BespokeService {
     const design = await this.designModel.findById(quote.design);
     if (!design) throw new NotFoundException('Design not found');
 
-    // Accept this quote, decline others
-    quote.status = BespokeQuoteStatus.ACCEPTED;
-    quote.accepted_at = new Date();
-    await quote.save();
+    // IMPORTANT: acceptance is finalised only when payment SUCCEEDS (see the
+    // Paystack webhook), not here. If we declined the other quotes now and the
+    // customer abandoned payment, they'd be stuck — accepted quote unpaid, all
+    // alternatives already declined. So here we only create the order + start
+    // payment; the webhook accepts the quote, declines siblings and marks the
+    // design accepted.
 
-    await this.quoteModel.updateMany(
-      {
-        design: design._id,
-        _id: { $ne: quote._id },
-        status: {
-          $in: [
-            BespokeQuoteStatus.PENDING,
-            BespokeQuoteStatus.DRAFT,
-            BespokeQuoteStatus.SUBMITTED,
-            BespokeQuoteStatus.REVISION_REQUESTED,
-          ],
+    // If the customer taps "accept & pay" again, reuse the existing unpaid order
+    // for this quote rather than piling up duplicate orders — but with a FRESH
+    // transaction reference (Paystack rejects re-using an old one).
+    const existingOrder = await this.orderModel.findOne({
+      bespoke_quote: quote._id,
+      status: OrderStatus.PENDING,
+    });
+    if (existingOrder) {
+      const retryTx = await this.transactionService.create({
+        initiator: new Types.ObjectId(customer.id),
+        order: existingOrder._id as Types.ObjectId,
+        type: TransactionType.DEBIT,
+        amount: existingOrder.total,
+        description: `Bespoke order payment for design ${design.reference}`,
+        channel: 'checkout',
+        metadata: {
+          order_reference: existingOrder.reference,
+          bespoke_quote_reference: quote.reference,
+          retry: true,
         },
-      },
-      { $set: { status: BespokeQuoteStatus.DECLINED } },
-    );
-
-    // Update design
-    design.status = BespokeDesignStatus.ACCEPTED;
-    design.accepted_quote = quote._id as Types.ObjectId;
-    await design.save();
+      });
+      const rePay = await this.paymentService.initializePaystackPayment(
+        retryTx.reference,
+        customer.email,
+      );
+      return {
+        message: 'Redirect to payment.',
+        data: {
+          order: existingOrder,
+          transaction: {
+            reference: retryTx.reference,
+            amount: retryTx.amount,
+            status: retryTx.status,
+          },
+          payment: rePay.data,
+        },
+      };
+    }
 
     // Resolve the customer's shipping address (needed so the tailor can fulfil).
     const address =
