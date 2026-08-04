@@ -27,6 +27,11 @@ import { RevisionRequestDto } from './dto/revision-request.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
+import { WalletsService } from '../wallets/wallets.service';
+import { BusinessService } from '../business/business.service';
+import {
+  TransactionStatus,
+} from '../transactions/schema/transaction.schema';
 import { MailService } from '../notifications/mail/mail.service';
 import {
   Order,
@@ -71,11 +76,77 @@ export class BespokeService {
     private readonly productModel: Model<ProductDocument>,
     @InjectModel('Address')
     private readonly addressModel: Model<any>,
+    @InjectModel('BusinessEarning')
+    private readonly businessEarningsModel: Model<any>,
+    @InjectModel('PlatformSettings')
+    private readonly platformSettingsModel: Model<any>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
+    private readonly walletsService: WalletsService,
+    private readonly businessService: BusinessService,
     private readonly mailService: MailService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  /**
+   * Finalise a paid bespoke order: accept the winning quote, decline the
+   * siblings, mark the design in-production, move the order to `processing`,
+   * record the vendor's (split) earnings and schedule the upfront milestone.
+   * Idempotent. Used by the wallet path (instant) — the Paystack path finalises
+   * from the webhook.
+   */
+  private async finalizeBespokeOrder(
+    order: OrderDocument,
+    quote: BespokeQuoteDocument,
+    design: BespokeDesignDocument,
+  ) {
+    quote.status = BespokeQuoteStatus.ACCEPTED;
+    quote.accepted_at = new Date();
+    await quote.save();
+
+    await this.quoteModel.updateMany(
+      {
+        design: design._id,
+        _id: { $ne: quote._id },
+        status: {
+          $in: [
+            BespokeQuoteStatus.PENDING,
+            BespokeQuoteStatus.DRAFT,
+            BespokeQuoteStatus.SUBMITTED,
+            BespokeQuoteStatus.REVISION_REQUESTED,
+          ],
+        },
+      },
+      { $set: { status: BespokeQuoteStatus.DECLINED } },
+    );
+
+    design.status = BespokeDesignStatus.IN_PRODUCTION;
+    design.accepted_quote = quote._id as Types.ObjectId;
+    await design.save();
+
+    order.status = OrderStatus.PROCESSING;
+    await order.save();
+
+    await this.businessService.recordBusinessEarnings(
+      order._id as Types.ObjectId,
+    );
+
+    // Release the tailor's UPFRONT milestone (funds materials).
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+    const releaseDate = new Date(
+      Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
+    );
+    await this.businessEarningsModel.updateMany(
+      {
+        order: order._id,
+        milestone: 'upfront',
+        released: false,
+        release_date: null,
+      },
+      { $set: { release_date: releaseDate } },
+    );
+  }
 
   // ════════════════════════════════════════════════════════════════
   //  CUSTOMER — Design CRUD
@@ -380,7 +451,11 @@ export class BespokeService {
     };
   }
 
-  async acceptQuote(quoteId: string, customer: any) {
+  async acceptQuote(
+    quoteId: string,
+    customer: any,
+    paymentMethod: 'wallet' | 'paystack' = 'paystack',
+  ) {
     const quote = await this.quoteModel.findOne({
       _id: new Types.ObjectId(quoteId),
       customer: new Types.ObjectId(customer.id),
@@ -404,150 +479,162 @@ export class BespokeService {
     const design = await this.designModel.findById(quote.design);
     if (!design) throw new NotFoundException('Design not found');
 
-    // IMPORTANT: acceptance is finalised only when payment SUCCEEDS (see the
-    // Paystack webhook), not here. If we declined the other quotes now and the
-    // customer abandoned payment, they'd be stuck — accepted quote unpaid, all
-    // alternatives already declined. So here we only create the order + start
-    // payment; the webhook accepts the quote, declines siblings and marks the
-    // design accepted.
-
-    // If the customer taps "accept & pay" again, reuse the existing unpaid order
-    // for this quote rather than piling up duplicate orders — but with a FRESH
-    // transaction reference (Paystack rejects re-using an old one).
-    const existingOrder = await this.orderModel.findOne({
+    // Find an existing unpaid order for this quote (retry) or create a new one.
+    // IMPORTANT: acceptance (accept quote + decline the alternatives) is
+    // finalised only once payment SUCCEEDS — inline for wallet (instant), or via
+    // the Paystack webhook — so an abandoned card payment never leaves the
+    // customer stuck with every other quote already declined.
+    let order = await this.orderModel.findOne({
       bespoke_quote: quote._id,
       status: OrderStatus.PENDING,
     });
-    if (existingOrder) {
-      const retryTx = await this.transactionService.create({
-        initiator: new Types.ObjectId(customer.id),
-        order: existingOrder._id as Types.ObjectId,
-        type: TransactionType.DEBIT,
-        amount: existingOrder.total,
-        description: `Bespoke order payment for design ${design.reference}`,
-        channel: 'checkout',
-        metadata: {
-          order_reference: existingOrder.reference,
-          bespoke_quote_reference: quote.reference,
-          retry: true,
-        },
-      });
-      const rePay = await this.paymentService.initializePaystackPayment(
-        retryTx.reference,
-        customer.email,
+
+    if (!order) {
+      // Resolve the customer's shipping address (so the tailor can fulfil).
+      const address =
+        (await this.addressModel.findOne({
+          customer: new Types.ObjectId(customer.id),
+          is_default: true,
+        })) ||
+        (await this.addressModel.findOne({
+          customer: new Types.ObjectId(customer.id),
+        }));
+      if (!address) {
+        throw new BadRequestException(
+          'Please add a shipping address before accepting a quote.',
+        );
+      }
+
+      // Single vendor = the tailor (their quote total is the full price; line
+      // items itemise fabric/accessories/labour). The tailor already committed
+      // by quoting, so the shipment is pre-confirmed. Deadline = estimated days.
+      const orderReference = await generateUniqueQlozetReference(
+        this.orderModel,
+        'ORD',
       );
-      return {
-        message: 'Redirect to payment.',
-        data: {
-          order: existingOrder,
-          transaction: {
-            reference: retryTx.reference,
-            amount: retryTx.amount,
-            status: retryTx.status,
+      const deadline = new Date();
+      deadline.setDate(
+        deadline.getDate() + (quote.estimated_completion_days || 7),
+      );
+
+      order = await new this.orderModel({
+        reference: orderReference,
+        customer: new Types.ObjectId(customer.id),
+        type: 'bespoke',
+        bespoke_design: design._id,
+        bespoke_quote: quote._id,
+        address: (address as any).toObject
+          ? (address as any).toObject()
+          : address,
+        items: [
+          {
+            product: design.fabric || null,
+            business: quote.vendor,
+            total_price: quote.total,
+            note: quote.vendor_notes,
           },
-          payment: rePay.data,
-        },
-      };
+        ],
+        shipments: [
+          {
+            business: quote.vendor,
+            shipment_type: ShipmentType.VENDOR_TO_CUSTOMER,
+            status: ShipmentStatus.PENDING,
+            confirmed: true,
+            confirmed_at: new Date(),
+            fulfillment_deadline: deadline,
+            shipping_fee: 0,
+          },
+        ],
+        subtotal: quote.total,
+        shipping_fee: 0,
+        total: quote.total,
+        status: OrderStatus.PENDING,
+      }).save();
     }
 
-    // Resolve the customer's shipping address (needed so the tailor can fulfil).
-    const address =
-      (await this.addressModel.findOne({
-        customer: new Types.ObjectId(customer.id),
-        is_default: true,
-      })) ||
-      (await this.addressModel.findOne({
-        customer: new Types.ObjectId(customer.id),
-      }));
-    if (!address) {
-      throw new BadRequestException(
-        'Please add a shipping address before accepting a quote.',
+    // ── WALLET PAYMENT (instant → finalise inline) ──
+    if (paymentMethod === 'wallet') {
+      const wallet = await this.walletsService.getOrCreateWallet({
+        customer: customer.id,
+      });
+      if (wallet.balance < order.total) {
+        throw new BadRequestException(
+          `Insufficient wallet balance. You have ₦${wallet.balance.toLocaleString()} but the order total is ₦${order.total.toLocaleString()}.`,
+        );
+      }
+      await this.walletsService.debitWallet(
+        wallet._id.toString(),
+        order.total,
       );
+      try {
+        const tx = await this.transactionService.create({
+          initiator: new Types.ObjectId(customer.id),
+          order: order._id as Types.ObjectId,
+          wallet: wallet._id,
+          type: TransactionType.DEBIT,
+          amount: order.total,
+          status: TransactionStatus.SUCCESS,
+          description: `Wallet payment for bespoke order ${order.reference}`,
+          channel: 'wallet_checkout',
+          metadata: {
+            order_reference: order.reference,
+            bespoke_quote_reference: quote.reference,
+            payment_method: 'wallet',
+          },
+        });
+        await this.finalizeBespokeOrder(order, quote, design);
+        this.logger.log(
+          `Bespoke order ${order.reference} paid from wallet + confirmed`,
+        );
+        return {
+          message: 'Payment successful. Your bespoke order is confirmed.',
+          data: {
+            order,
+            transaction: {
+              reference: tx.reference,
+              amount: tx.amount,
+              status: tx.status,
+            },
+            payment: null,
+          },
+        };
+      } catch (err: any) {
+        // Refund the wallet if anything after the debit failed.
+        await this.walletsService
+          .creditWallet(wallet._id.toString(), order.total)
+          .catch((e) =>
+            this.logger.error(
+              `Wallet refund after failed bespoke pay: ${e?.message}`,
+            ),
+          );
+        throw err;
+      }
     }
 
-    // Create the bespoke order. Single vendor = the tailor (their quote total is
-    // the full price; line items itemise fabric/accessories/labour). The tailor
-    // has already committed by quoting, so the shipment is pre-confirmed — no
-    // separate vendor-confirm step. The delivery deadline uses the quote's
-    // estimated completion days.
-    const orderReference = await generateUniqueQlozetReference(
-      this.orderModel,
-      'ORD',
-    );
-
-    const deadline = new Date();
-    deadline.setDate(
-      deadline.getDate() + (quote.estimated_completion_days || 7),
-    );
-
-    const order = new this.orderModel({
-      reference: orderReference,
-      customer: new Types.ObjectId(customer.id),
-      type: 'bespoke',
-      bespoke_design: design._id,
-      bespoke_quote: quote._id,
-      address: (address as any).toObject
-        ? (address as any).toObject()
-        : address,
-      items: [
-        {
-          // Bespoke items have no catalog product; the design/quote hold the
-          // details. total_price drives vendor earnings.
-          product: design.fabric || null,
-          business: quote.vendor,
-          total_price: quote.total,
-          note: quote.vendor_notes,
-        },
-      ],
-      shipments: [
-        {
-          business: quote.vendor,
-          shipment_type: ShipmentType.VENDOR_TO_CUSTOMER,
-          status: ShipmentStatus.PENDING,
-          confirmed: true,
-          confirmed_at: new Date(),
-          fulfillment_deadline: deadline,
-          shipping_fee: 0,
-        },
-      ],
-      subtotal: quote.total,
-      shipping_fee: 0,
-      total: quote.total,
-      status: OrderStatus.PENDING,
-    });
-
-    const savedOrder = await order.save();
-
-    // Create transaction
+    // ── PAYSTACK PAYMENT (finalised by the webhook on success) ──
     const transaction = await this.transactionService.create({
       initiator: new Types.ObjectId(customer.id),
-      order: savedOrder._id as Types.ObjectId,
+      order: order._id as Types.ObjectId,
       type: TransactionType.DEBIT,
-      amount: quote.total,
+      amount: order.total,
       description: `Bespoke order payment for design ${design.reference}`,
       channel: 'checkout',
       metadata: {
-        order_reference: savedOrder.reference,
+        order_reference: order.reference,
         bespoke_design_reference: design.reference,
         bespoke_quote_reference: quote.reference,
         items_count: 1,
       },
     });
-
-    // Initialize payment
     const paymentInit = await this.paymentService.initializePaystackPayment(
       transaction.reference,
       customer.email,
     );
 
-    this.logger.log(
-      `Bespoke order ${orderReference} created from quote ${quote.reference}`,
-    );
-
     return {
       message: 'Quote accepted. Redirect to payment.',
       data: {
-        order: savedOrder,
+        order,
         transaction: {
           reference: transaction.reference,
           amount: transaction.amount,

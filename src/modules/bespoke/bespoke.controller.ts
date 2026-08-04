@@ -175,10 +175,21 @@ export class BespokeController {
 
   @Post('quotes/:id/accept')
   @Roles(UserType.CUSTOMER)
-  @ApiOperation({ summary: 'Accept a quote → creates order + payment' })
+  @ApiOperation({
+    summary:
+      'Accept a quote → creates order + payment (wallet is instant, paystack redirects)',
+  })
   @ApiParam({ name: 'id', description: 'Quote ID' })
-  async acceptQuote(@Param('id') id: string, @Req() req: any) {
-    return this.bespokeService.acceptQuote(id, req.user);
+  async acceptQuote(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body: { payment_method?: 'wallet' | 'paystack' },
+  ) {
+    return this.bespokeService.acceptQuote(
+      id,
+      req.user,
+      body?.payment_method === 'wallet' ? 'wallet' : 'paystack',
+    );
   }
 
   @Post('quotes/:id/revision')
