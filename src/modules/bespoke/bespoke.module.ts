@@ -20,6 +20,7 @@ import { PaymentModule } from '../payment/payment.module';
 import { BusinessModule } from '../business/business.module';
 import { ProductModule } from '../products/products.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
@@ -32,9 +33,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
     OrdersModule,        // provides Order model
     TransactionsModule,  // provides TransactionService
     PaymentModule,       // provides PaymentService
-    BusinessModule,      // provides Business model
+    BusinessModule,      // provides BusinessService + BusinessEarning/PlatformSettings models
     ProductModule,       // provides Product model
     NotificationsModule, // provides MailService
+    WalletsModule,       // provides WalletsService (wallet payment)
   ],
   controllers: [BespokeController],
   providers: [BespokeService],

@@ -7,6 +7,7 @@ import { JobStatus, JobStatusSchema } from '../../common/schemas/job-status.sche
 import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 import { BespokeDesign, BespokeDesignSchema } from '../bespoke/schemas/bespoke-design.schema';
+import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
 
 // Import modules instead of directly listing their services
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -23,6 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: BusinessEarning.name, schema: BusinessEarningSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
+      { name: BespokeQuote.name, schema: BespokeQuoteSchema },
     ]),
     TransactionsModule,  // provides TransactionService
     WalletsModule,       // provides WalletsService, PaymentService, etc.

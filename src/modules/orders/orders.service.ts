@@ -1020,6 +1020,11 @@ export class OrderService {
           .populate('shipments.business', 'business_name business_logo_url')
           .populate('shipments.destination_business', 'business_name business_logo_url')
           .populate('shipments.fabric_product', 'fabric.name base_price')
+          // Bespoke orders: bring the design so the tailor sees what to make.
+          .populate(
+            'bespoke_design',
+            'name category gender design_images reference_images description fabric',
+          )
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(take)
