@@ -492,45 +492,31 @@ export class BespokeService {
 
     if (!order) {
       // Resolve the customer's shipping address (so the tailor can fulfil).
-      // Prefer the address the shop explicitly selected (looked up by _id,
-      // scoped to the customer), then their default, then any saved address.
-      const customerObjectId = new Types.ObjectId(customer.id);
+      // Match the `customer` ref whether it's stored as an ObjectId or a
+      // (legacy) plain string — some address docs have a string-typed customer,
+      // which a `new Types.ObjectId(...)` equality would silently miss. Compare
+      // on the stringified value so both representations match.
+      const customerIdStr = String(customer.id);
+      const customerMatch = {
+        $expr: { $eq: [{ $toString: '$customer' }, customerIdStr] },
+      };
       const address =
         (addressId
           ? await this.addressModel.findOne({
               _id: new Types.ObjectId(addressId),
-              customer: customerObjectId,
+              ...customerMatch,
             })
           : null) ||
         (await this.addressModel.findOne({
-          customer: customerObjectId,
+          ...customerMatch,
           is_default: true,
         })) ||
-        (await this.addressModel.findOne({ customer: customerObjectId }));
+        (await this.addressModel.findOne(customerMatch));
       if (!address) {
-        // Decisive diagnostics: distinguish an account/id mismatch from bespoke
-        // querying the wrong collection/connection.
-        const forCustomer = await this.addressModel.countDocuments({
-          customer: customerObjectId,
-        });
         const inCollection = await this.addressModel.estimatedDocumentCount();
-        let sentAddrOwner = 'n/a';
-        if (addressId) {
-          try {
-            const raw = await this.addressModel
-              .findById(new Types.ObjectId(addressId))
-              .lean();
-            sentAddrOwner = raw
-              ? `owner=${String((raw as any).customer)}`
-              : 'not-found';
-          } catch {
-            sentAddrOwner = 'invalid-id';
-          }
-        }
         this.logger.warn(
           `[acceptQuote] No shipping address for customer ${customer.id} ` +
-            `(addressId=${addressId ?? 'none'}, forCustomer=${forCustomer}, ` +
-            `inCollection=${inCollection}, sentAddr=${sentAddrOwner}).`,
+            `(addressId=${addressId ?? 'none'}, inCollection=${inCollection}).`,
         );
         throw new BadRequestException(
           'Please add a shipping address before accepting a quote.',
