@@ -42,16 +42,19 @@ export class WalletsService {
     let wallet: any | null = null;
 
     if (business) {
-      wallet = await this.walletModel.findOne({
-        business: new Types.ObjectId(business),
-      });
+      // Match whether the wallet's business ref is an ObjectId or a legacy
+      // string — otherwise an existing wallet is missed and a duplicate gets
+      // created below (splitting the vendor's balance across two wallets).
+      wallet = await this.walletModel.findOne(
+        ObjectIdUtils.refMatch('business', business),
+      );
     }
 
     // 2️⃣ If not found and customer is provided, search by customer
     if (!wallet && customer) {
-      wallet = await this.walletModel.findOne({
-        customer: new Types.ObjectId(customer),
-      });
+      wallet = await this.walletModel.findOne(
+        ObjectIdUtils.refMatch('customer', customer),
+      );
     }
 
     // 3️⃣ Return if found
@@ -146,7 +149,9 @@ export class WalletsService {
     const balanceDelta = deltas.balance ?? 0;
     if (pendingDelta === 0 && balanceDelta === 0) return null;
 
-    const wallet = await this.walletModel.findOne({ business: businessId });
+    const wallet = await this.walletModel.findOne(
+      ObjectIdUtils.refMatch('business', businessId),
+    );
     if (!wallet) {
       this.logger.warn(
         `[WalletReconcile] No wallet for business ${businessId}; skipping (pending=${pendingDelta}, balance=${balanceDelta})`,
@@ -191,7 +196,9 @@ export class WalletsService {
     }
 
     // Find vendor wallet
-    const wallet = await this.walletModel.findOne({ business: businessId });
+    const wallet = await this.walletModel.findOne(
+      ObjectIdUtils.refMatch('business', businessId),
+    );
     if (!wallet) {
       throw new NotFoundException('Vendor wallet not found');
     }

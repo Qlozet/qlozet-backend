@@ -61,6 +61,22 @@ export class ObjectIdUtils {
   }
 
   /**
+   * Build a query fragment that matches a ref `field` whether it's stored as an
+   * ObjectId or a legacy string, by comparing on the stringified value. Spread
+   * it into a find/aggregate filter alongside non-ref conditions:
+   *   findOne({ ...ObjectIdUtils.refMatch('business', id), is_default: true })
+   * NOTE: a `$toString` comparison cannot use an index, so prefer this only on
+   * small collections or when the query is already narrowed by an indexed field
+   * (e.g. `_id`). For large collections, normalise the data instead.
+   */
+  static refMatch(
+    field: string,
+    id: string | Types.ObjectId,
+  ): Record<string, any> {
+    return { $expr: { $eq: [{ $toString: `$${field}` }, String(id)] } };
+  }
+
+  /**
    * Create ObjectId from timestamp (replacement for deprecated constructor)
    */
   static createFromTime(timestamp: number): Types.ObjectId {

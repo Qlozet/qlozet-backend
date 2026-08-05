@@ -24,6 +24,7 @@ import {
   BusinessStatus,
 } from './schemas/business.schema';
 import { Utils } from 'src/common/utils/pagination';
+import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { LogisticsService } from '../logistics/logistics.service';
 import { User, UserDocument } from '../ums/schemas';
@@ -1493,9 +1494,9 @@ export class BusinessService implements OnModuleInit {
         const businessKey = (earning.business as any)?.toString();
         let wallet = walletByBusiness.get(businessKey);
         if (wallet === undefined) {
-          wallet = await this.walletModel.findOne({
-            business: earning.business,
-          });
+          wallet = await this.walletModel.findOne(
+            ObjectIdUtils.refMatch('business', earning.business as any),
+          );
           walletByBusiness.set(businessKey, wallet ?? null);
         }
         if (!wallet) {

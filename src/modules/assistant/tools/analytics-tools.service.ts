@@ -9,6 +9,7 @@ import {
   priorRange,
   resolveRange,
 } from './date-range';
+import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 
 // Orders that represent real, paid sales (excludes unpaid/cancelled/returned).
 const REVENUE_STATUSES = ['in_review', 'processing', 'in_transit', 'completed'];
@@ -464,7 +465,7 @@ export class AnalyticsToolsService {
           },
         },
       ]),
-      this.walletModel.findOne({ business: bid }).lean(),
+      this.walletModel.findOne(ObjectIdUtils.refMatch('business', bid)).lean(),
     ]);
     const e = agg[0] ?? {};
     return {
@@ -496,7 +497,7 @@ export class AnalyticsToolsService {
         },
       },
       { $unwind: { path: '$w', preserveNullAndEmptyArrays: true } },
-      { $match: { 'w.business': bid } },
+      { $match: ObjectIdUtils.refMatch('w.business', bid) },
       {
         $group: {
           _id: '$type',
@@ -523,7 +524,7 @@ export class AnalyticsToolsService {
 
   private async payoutForecast(bid: Types.ObjectId) {
     const [wallet, scheduled, unscheduledAgg] = await Promise.all([
-      this.walletModel.findOne({ business: bid }).lean(),
+      this.walletModel.findOne(ObjectIdUtils.refMatch('business', bid)).lean(),
       this.earningModel
         .find({
           business: bid,
