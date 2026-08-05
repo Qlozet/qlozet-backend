@@ -6,6 +6,15 @@
 app = 'qlozet-backend'
 primary_region = 'lhr'
 
+# TEMPORARY: normalise legacy string-typed ObjectId refs once, before the new
+# release goes live (addresses/wallets/transactions/users/teammembers). This is
+# what makes the large-collection reads (transaction history, checkout address)
+# and the wallet upserts resolve with indexed ObjectId matches. Idempotent — safe
+# to leave for a deploy or two; REMOVE this block once `fly logs` shows it ran
+# (look for "🎉 Done — X converted"). A non-zero exit aborts the deploy.
+[deploy]
+  release_command = "npm run migrate:normalize-refs"
+
 [env]
   PORT = "5000"
 

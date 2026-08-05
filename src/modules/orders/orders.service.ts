@@ -43,6 +43,7 @@ import { PriceItemDto } from './dto/price-item.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
+import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 import { AddressDocument } from '../ums/schemas/address.schema';
 import {
   AccessorySelectionDto,
@@ -940,9 +941,11 @@ export class OrderService {
   ): Promise<any> {
     let address;
     if (addressId) {
+      // _id narrows to a single doc (indexed); refMatch tolerates a string- or
+      // ObjectId-typed customer without a full-collection scan.
       address = await this.addressModel.findOne({
         _id: addressId,
-        customer: customerId,
+        ...ObjectIdUtils.refMatch('customer', customerId),
       });
       if (!address) {
         throw new BadRequestException(
@@ -952,11 +955,13 @@ export class OrderService {
     } else {
       // Try default, then fallback to any
       address = await this.addressModel.findOne({
-        customer: customerId,
+        ...ObjectIdUtils.refMatch('customer', customerId),
         is_default: true,
       });
       if (!address) {
-        address = await this.addressModel.findOne({ customer: customerId });
+        address = await this.addressModel.findOne(
+          ObjectIdUtils.refMatch('customer', customerId),
+        );
       }
     }
 
@@ -2036,19 +2041,21 @@ export class OrderService {
     if (dto.address_id) {
       customerAddress = await this.addressModel.findOne({
         _id: dto.address_id,
-        customer: customerId,
+        ...ObjectIdUtils.refMatch('customer', customerId),
       });
       if (!customerAddress) {
         throw new BadRequestException('Specified address not found');
       }
     } else {
       customerAddress = await this.addressModel.findOne({
-        customer: customerId,
+        ...ObjectIdUtils.refMatch('customer', customerId),
         is_default: true,
       });
       if (!customerAddress) {
         // Fallback to any address
-        customerAddress = await this.addressModel.findOne({ customer: customerId });
+        customerAddress = await this.addressModel.findOne(
+          ObjectIdUtils.refMatch('customer', customerId),
+        );
       }
     }
     if (!customerAddress?.address_code) {
