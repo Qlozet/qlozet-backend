@@ -13,6 +13,7 @@ import {
 } from './schema/transaction.schema';
 import { Utils } from '../../common/utils/pagination';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
+import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -50,9 +51,12 @@ export class TransactionService {
       'TRX',
     );
     const transaction = new this.transactionModel({
-      initiator: dto.initiator,
-      wallet: dto.wallet ? dto.wallet : undefined,
-      order: dto.order ? dto.order : undefined,
+      // Coerce ref ids to ObjectIds — callers pass string ids (e.g. `.id` off
+      // saved docs / JWT), which would otherwise persist as BSON strings and be
+      // missed by ObjectId-equality queries and populate().
+      initiator: ObjectIdUtils.toObjectId(dto.initiator as any),
+      wallet: ObjectIdUtils.toObjectId(dto.wallet as any),
+      order: ObjectIdUtils.toObjectId(dto.order as any),
       type: dto.type,
       amount: dto.amount,
       reference,

@@ -15,6 +15,7 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
+import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 
 @Injectable()
 export class WalletsService {
@@ -59,9 +60,12 @@ export class WalletsService {
     }
 
     // 4️⃣ Create wallet
+    // Cast the refs to ObjectIds — the lookups above query with
+    // `new Types.ObjectId(...)`, so persisting the raw string ids here would
+    // make this freshly-created wallet un-findable and spawn duplicates.
     wallet = new this.walletModel({
-      business: business ?? null,
-      customer: customer ?? null,
+      business: ObjectIdUtils.toObjectId(business) ?? null,
+      customer: ObjectIdUtils.toObjectId(customer) ?? null,
       balance: 0,
       pending_balance: 0,
       currency: 'NGN',

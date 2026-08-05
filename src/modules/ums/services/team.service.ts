@@ -18,6 +18,7 @@ import {
   BusinessDocument,
   Business,
 } from '../../business/schemas/business.schema';
+import { ObjectIdUtils } from '../../../common/utils/objectId.utils';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
   NotificationCategory,
@@ -74,7 +75,7 @@ export class TeamService {
           email: dto.email,
           ...(dto.phone_number && { phone_number: dto.phone_number }),
           hashed_password: hashedPassword,
-          business: business.id,
+          business: ObjectIdUtils.toObjectId(business.id),
           role: dto.role,
           type: UserType.VENDOR,
           email_verified: true,
@@ -85,7 +86,7 @@ export class TeamService {
         await user.save({ session });
       } else {
         if (!user.business || user.business.toString() !== business.id) {
-          user.business = business.id;
+          user.business = ObjectIdUtils.toObjectId(business.id) as Types.ObjectId;
           await user.save({ session });
         }
       }
@@ -103,13 +104,13 @@ export class TeamService {
 
       // ✅ Create team member record
       const teamMember = new this.teamMemberModel({
-        business: business.id,
+        business: ObjectIdUtils.toObjectId(business.id),
         role: dto.role,
         user: user._id,
         email: dto.email,
         full_name: dto.full_name,
         ...(dto.phone_number && { phone_number: dto.phone_number }),
-        invited_by: inviter.id,
+        invited_by: ObjectIdUtils.toObjectId(inviter.id),
         invite_token: token,
         invite_expires: expires,
         accepted: true,
