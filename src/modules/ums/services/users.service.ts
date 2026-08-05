@@ -466,11 +466,26 @@ export class UserService {
   }
 
   /**
+   * Filter that matches an address's `customer` ref whether it's stored as an
+   * ObjectId or a legacy string. Some address docs were persisted with a
+   * string-typed customer (JWT ids come through as strings); an ObjectId
+   * equality filter silently misses those, so compare on the stringified value.
+   * Spread this into a query; combine with other fields (e.g. `_id`) as needed.
+   */
+  private customerFilter(
+    userId: string | Types.ObjectId,
+  ): Record<string, any> {
+    return { $expr: { $eq: [{ $toString: '$customer' }, String(userId)] } };
+  }
+
+  /**
    * Add a new address to the customer's address book.
    * First address is auto-set as default. Max 5 per customer.
    */
   async addAddress(user: UserDocument, dto: AddressDto) {
-    const count = await this.addressModel.countDocuments({ customer: user.id });
+    const count = await this.addressModel.countDocuments(
+      this.customerFilter(user.id),
+    );
     if (count >= UserService.MAX_ADDRESSES) {
       throw new BadRequestException(
         `You can save up to ${UserService.MAX_ADDRESSES} addresses. Please delete one first.`,
@@ -493,7 +508,7 @@ export class UserService {
     // If setting as default, unset any existing default
     if (shouldBeDefault) {
       await this.addressModel.updateMany(
-        { customer: user.id, is_default: true },
+        { ...this.customerFilter(user.id), is_default: true },
         { $set: { is_default: false } },
       );
     }
@@ -521,7 +536,7 @@ export class UserService {
    */
   async listAddresses(userId: string | Types.ObjectId) {
     return this.addressModel
-      .find({ customer: userId })
+      .find(this.customerFilter(userId))
       .sort({ is_default: -1, createdAt: -1 })
       .lean();
   }
@@ -531,13 +546,13 @@ export class UserService {
    */
   async getDefaultAddress(userId: string | Types.ObjectId) {
     const address = await this.addressModel.findOne({
-      customer: userId,
+      ...this.customerFilter(userId),
       is_default: true,
     });
     if (!address) {
       // Fallback: get the most recent address
       const fallback = await this.addressModel
-        .findOne({ customer: userId })
+        .findOne(this.customerFilter(userId))
         .sort({ createdAt: -1 });
       if (!fallback) return null;
       // Auto-set it as default
@@ -555,7 +570,7 @@ export class UserService {
     this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
-      customer: userId,
+      ...this.customerFilter(userId),
     });
     if (!address) {
       throw new NotFoundException('Address not found');
@@ -570,7 +585,7 @@ export class UserService {
     this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
-      customer: userId,
+      ...this.customerFilter(userId),
     });
     if (!address) {
       throw new NotFoundException('Address not found');
@@ -623,18 +638,20 @@ export class UserService {
     this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
-      customer: userId,
+      ...this.customerFilter(userId),
     });
     if (!address) {
       throw new NotFoundException('Address not found');
     }
 
-    const totalCount = await this.addressModel.countDocuments({ customer: userId });
+    const totalCount = await this.addressModel.countDocuments(
+      this.customerFilter(userId),
+    );
 
     if (address.is_default && totalCount > 1) {
       // Auto-reassign default to the next most recent address
       const next = await this.addressModel
-        .findOne({ customer: userId, _id: { $ne: addressId } })
+        .findOne({ ...this.customerFilter(userId), _id: { $ne: addressId } })
         .sort({ createdAt: -1 });
       if (next) {
         next.is_default = true;
@@ -653,7 +670,7 @@ export class UserService {
     this.validateObjectId(addressId, 'address ID');
     const address = await this.addressModel.findOne({
       _id: addressId,
-      customer: userId,
+      ...this.customerFilter(userId),
     });
     if (!address) {
       throw new NotFoundException('Address not found');
@@ -661,7 +678,7 @@ export class UserService {
 
     // Unset all defaults for this customer
     await this.addressModel.updateMany(
-      { customer: userId, is_default: true },
+      { ...this.customerFilter(userId), is_default: true },
       { $set: { is_default: false } },
     );
 
@@ -675,7 +692,9 @@ export class UserService {
   /** @deprecated Use addAddress / updateAddress instead */
   async upsertUserAddress(user: UserDocument, dto: AddressDto) {
     try {
-      const existing = await this.addressModel.findOne({ customer: user.id });
+      const existing = await this.addressModel.findOne(
+        this.customerFilter(user.id),
+      );
       if (existing) {
         return this.updateAddress(user.id, (existing._id as Types.ObjectId).toString(), dto);
       }
