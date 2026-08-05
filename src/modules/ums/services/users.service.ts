@@ -499,10 +499,14 @@ export class UserService {
     }
 
     const newAddress = new this.addressModel({
-      customer: user.id,
       full_name: dto.full_name || user.full_name,
       phone_number: dto.phone_number || user.phone_number,
       ...dto,
+      // Store the owner as an ObjectId explicitly. `user.id` comes off the JWT
+      // payload as a string; persisting it raw leaves a string-typed `customer`
+      // that ObjectId-equality queries (e.g. populate, bespoke accept) silently
+      // miss. Casting here keeps every new address consistently ObjectId-typed.
+      customer: new Types.ObjectId(user.id),
       address: validated.formatted_address,
       address_code: validated.address_code,
       is_default: shouldBeDefault,
