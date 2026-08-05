@@ -6,13 +6,6 @@
 app = 'qlozet-backend'
 primary_region = 'lhr'
 
-# TEMPORARY: run the one-off ObjectId-ref normalisation migration once, before
-# the new release goes live. It is idempotent (re-running converts nothing), so
-# it's safe across a couple of deploys — but REMOVE this [deploy] block once it
-# has run successfully. If the migration exits non-zero, Fly aborts the deploy.
-[deploy]
-  release_command = "npm run migrate:normalize-refs"
-
 [env]
   PORT = "5000"
 
