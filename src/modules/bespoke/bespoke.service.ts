@@ -508,12 +508,29 @@ export class BespokeService {
         })) ||
         (await this.addressModel.findOne({ customer: customerObjectId }));
       if (!address) {
-        const total = await this.addressModel.countDocuments({
+        // Decisive diagnostics: distinguish an account/id mismatch from bespoke
+        // querying the wrong collection/connection.
+        const forCustomer = await this.addressModel.countDocuments({
           customer: customerObjectId,
         });
+        const inCollection = await this.addressModel.estimatedDocumentCount();
+        let sentAddrOwner = 'n/a';
+        if (addressId) {
+          try {
+            const raw = await this.addressModel
+              .findById(new Types.ObjectId(addressId))
+              .lean();
+            sentAddrOwner = raw
+              ? `owner=${String((raw as any).customer)}`
+              : 'not-found';
+          } catch {
+            sentAddrOwner = 'invalid-id';
+          }
+        }
         this.logger.warn(
           `[acceptQuote] No shipping address for customer ${customer.id} ` +
-            `(addressId=${addressId ?? 'none'}, total saved for customer=${total}).`,
+            `(addressId=${addressId ?? 'none'}, forCustomer=${forCustomer}, ` +
+            `inCollection=${inCollection}, sentAddr=${sentAddrOwner}).`,
         );
         throw new BadRequestException(
           'Please add a shipping address before accepting a quote.',
