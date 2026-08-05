@@ -45,6 +45,22 @@ export class ObjectIdUtils {
   }
 
   /**
+   * Lenient coercion for persisting ref fields. Accepts an ObjectId, a string
+   * id (e.g. `req.user.id`, which comes off the JWT as a string), or a nullish
+   * value, and returns a real ObjectId (or undefined). Use this when WRITING a
+   * ref field so it is never stored as a BSON string — string-typed refs are
+   * silently missed by ObjectId-equality queries and `populate()`.
+   */
+  static toObjectId(
+    value: string | Types.ObjectId | null | undefined,
+  ): Types.ObjectId | undefined {
+    if (value === null || value === undefined || value === '') return undefined;
+    if (value instanceof Types.ObjectId) return value;
+    const str = String(value);
+    return Types.ObjectId.isValid(str) ? new Types.ObjectId(str) : undefined;
+  }
+
+  /**
    * Create ObjectId from timestamp (replacement for deprecated constructor)
    */
   static createFromTime(timestamp: number): Types.ObjectId {
