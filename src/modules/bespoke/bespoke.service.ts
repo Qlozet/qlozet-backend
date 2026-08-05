@@ -455,6 +455,7 @@ export class BespokeService {
     quoteId: string,
     customer: any,
     paymentMethod: 'wallet' | 'paystack' = 'paystack',
+    addressId?: string,
   ) {
     const quote = await this.quoteModel.findOne({
       _id: new Types.ObjectId(quoteId),
@@ -491,15 +492,29 @@ export class BespokeService {
 
     if (!order) {
       // Resolve the customer's shipping address (so the tailor can fulfil).
+      // Prefer the address the shop explicitly selected (looked up by _id,
+      // scoped to the customer), then their default, then any saved address.
+      const customerObjectId = new Types.ObjectId(customer.id);
       const address =
+        (addressId
+          ? await this.addressModel.findOne({
+              _id: new Types.ObjectId(addressId),
+              customer: customerObjectId,
+            })
+          : null) ||
         (await this.addressModel.findOne({
-          customer: new Types.ObjectId(customer.id),
+          customer: customerObjectId,
           is_default: true,
         })) ||
-        (await this.addressModel.findOne({
-          customer: new Types.ObjectId(customer.id),
-        }));
+        (await this.addressModel.findOne({ customer: customerObjectId }));
       if (!address) {
+        const total = await this.addressModel.countDocuments({
+          customer: customerObjectId,
+        });
+        this.logger.warn(
+          `[acceptQuote] No shipping address for customer ${customer.id} ` +
+            `(addressId=${addressId ?? 'none'}, total saved for customer=${total}).`,
+        );
         throw new BadRequestException(
           'Please add a shipping address before accepting a quote.',
         );
