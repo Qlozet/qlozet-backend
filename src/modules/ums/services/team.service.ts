@@ -173,8 +173,11 @@ export class TeamService {
   }
 
   async listTeamMembers(businessId: string) {
+    // Match `business` whether it's stored as an ObjectId or a legacy string —
+    // team-member docs were created with a string-typed business, which an
+    // ObjectId-equality filter silently misses (empty "users & permissions").
     const members = await this.teamMemberModel
-      .find({ business: businessId })
+      .find({ $expr: { $eq: [{ $toString: '$business' }, String(businessId)] } })
       .populate('user', 'full_name email')
       .populate('role', 'name description');
     return members;
