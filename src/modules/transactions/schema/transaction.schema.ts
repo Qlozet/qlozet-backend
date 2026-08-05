@@ -49,7 +49,21 @@ export class Transaction extends Document {
 
   @Prop({
     type: String,
-    enum: ['checkout', 'wallet_topup', 'refund', 'payout'],
+    // Every channel actually written by the app must be listed here — an
+    // unlisted value fails enum validation and the whole transaction create
+    // throws. 'earning' (released earnings), 'wallet_checkout' (bespoke wallet
+    // payment) and 'reservation' (fabric reservation) were missing, so those
+    // transactions silently never saved (e.g. earnings credits not showing in
+    // the vendor ledger even though the wallet balance rose).
+    enum: [
+      'checkout',
+      'wallet_topup',
+      'wallet_checkout',
+      'refund',
+      'payout',
+      'earning',
+      'reservation',
+    ],
     default: 'checkout',
   })
   channel: string; // Source context
