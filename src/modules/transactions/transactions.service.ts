@@ -103,6 +103,11 @@ export class TransactionService {
 
     const businessId =
       typeof business === 'string' ? new Types.ObjectId(business) : business;
+    // Compare on the stringified id so the ledger still matches wallets /
+    // transactions whose `business` / `initiator` ref was persisted as a
+    // (legacy) string instead of an ObjectId — those would otherwise be
+    // silently filtered out (e.g. released-earnings and payout rows vanishing).
+    const businessIdStr = businessId.toString();
 
     const matchStage: any = {};
     if (status && status !== 'all') {
@@ -140,10 +145,10 @@ export class TransactionService {
       {
         $addFields: {
           isWalletRelated: {
-            $eq: ['$walletDoc.business', businessId],
+            $eq: [{ $toString: '$walletDoc.business' }, businessIdStr],
           },
           isInitiatorRelated: {
-            $eq: ['$initiator', businessId],
+            $eq: [{ $toString: '$initiator' }, businessIdStr],
           },
         },
       },
