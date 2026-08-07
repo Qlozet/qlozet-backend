@@ -262,6 +262,14 @@ export class BusinessController {
   }
 
   @Roles(UserType.VENDOR)
+  @Get('customers/:id/stats')
+  @ApiOperation({ summary: "Get a single customer's order stats with this vendor" })
+  @ApiResponse({ status: 200, description: 'total_orders / total_spent / last_order_at scoped to this vendor' })
+  async getVendorCustomerStats(@Req() req: any, @Param('id') id: string) {
+    return this.businessService.getVendorCustomerStats(req.business?.id, id);
+  }
+
+  @Roles(UserType.VENDOR)
   @Get('customers/:id/wishlist')
   @ApiOperation({ summary: 'Get a specific customer\'s wishlist items that belong to this vendor' })
   @ApiResponse({ status: 200, description: 'List of wishlist products belonging to the vendor' })
