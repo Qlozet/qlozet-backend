@@ -99,6 +99,31 @@ export class Business extends Document {
   @Prop({ type: Boolean, default: true })
   accepts_external_fabric: boolean; // Whether this vendor accepts fabric from other vendors for bespoke orders
 
+  // ─── Vendor order preferences (flat, editable via PATCH /business/profile) ───
+  @Prop({ type: Boolean, default: false })
+  order_confirmation: boolean; // auto-confirm incoming orders
+
+  @Prop({ type: Boolean, default: true })
+  order_notifications: boolean; // notify on order status changes
+
+  @Prop({ type: Boolean, default: true })
+  order_tracking: boolean; // customer-facing order tracking
+
+  @Prop({ type: Number, default: 0 })
+  daily_order_limit: number; // max orders accepted per day (0 = no limit)
+
+  @Prop({ type: Boolean, default: false })
+  automatic_refunds: boolean; // auto-process refunds on returns
+
+  @Prop({ type: Number, default: 0 })
+  return_window_days: number; // 0 | 7 | 14 | 30 | 60
+
+  @Prop({ type: Boolean, default: true })
+  custom_order_options: boolean; // allow add-ons / customisation
+
+  @Prop({ type: String, default: 'NGN' })
+  default_currency: string; // NGN | USD | GBP | EUR
+
   @Prop({ default: false })
   email_verified: boolean;
 

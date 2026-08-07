@@ -1,4 +1,11 @@
-import { IsOptional, IsString, IsArray, IsBoolean } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsIn,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateBusinessProfileDto {
@@ -99,4 +106,47 @@ export class UpdateBusinessProfileDto {
   @IsOptional()
   @IsBoolean()
   accepts_external_fabric?: boolean;
+
+  // ─── Vendor order preferences ───
+  @ApiPropertyOptional({ example: false, description: 'Auto-confirm incoming orders' })
+  @IsOptional()
+  @IsBoolean()
+  order_confirmation?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Notify on order status changes' })
+  @IsOptional()
+  @IsBoolean()
+  order_notifications?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Customer-facing order tracking' })
+  @IsOptional()
+  @IsBoolean()
+  order_tracking?: boolean;
+
+  @ApiPropertyOptional({ example: 0, description: 'Max orders accepted per day (0 = no limit)' })
+  @IsOptional()
+  @IsNumber()
+  daily_order_limit?: number;
+
+  @ApiPropertyOptional({ example: false, description: 'Auto-process refunds on returns' })
+  @IsOptional()
+  @IsBoolean()
+  automatic_refunds?: boolean;
+
+  @ApiPropertyOptional({ example: 14, description: 'Return window in days (0 | 7 | 14 | 30 | 60)' })
+  @IsOptional()
+  @IsNumber()
+  @IsIn([0, 7, 14, 30, 60])
+  return_window_days?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Allow add-ons / customisation on orders' })
+  @IsOptional()
+  @IsBoolean()
+  custom_order_options?: boolean;
+
+  @ApiPropertyOptional({ example: 'NGN', description: 'Default currency (NGN | USD | GBP | EUR)' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['NGN', 'USD', 'GBP', 'EUR'])
+  default_currency?: string;
 }
