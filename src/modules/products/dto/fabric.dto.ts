@@ -45,6 +45,14 @@ export class FabricDto {
   colors?: ColorDto[];
 
   @ApiPropertyOptional({
+    example: 'Cotton',
+    description: 'Material composition (Cotton, Silk, Ankara, etc.)',
+  })
+  @IsOptional()
+  @IsString()
+  material?: string;
+
+  @ApiPropertyOptional({
     example: 'striped',
     description:
       'Pattern or style of the fabric (plain, striped, floral, etc.)',

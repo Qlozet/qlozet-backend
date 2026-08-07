@@ -219,6 +219,14 @@ export class VendorShipment {
   @Prop({ type: Number, default: null })
   fabric_yards?: number;
 
+  // Courier ETA for this shipment (captured from the rate at creation). Used by
+  // the fabric card's ETA + the SLA warning (fabric ETA vs quote completion days).
+  @Prop({ type: Number, default: null })
+  eta_days?: number;
+
+  @Prop({ type: Date, default: null })
+  expected_delivery_at?: Date;
+
   @Prop({ type: Boolean, default: false })
   confirmed: boolean;
 

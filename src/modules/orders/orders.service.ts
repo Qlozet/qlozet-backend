@@ -239,6 +239,16 @@ export class OrderService {
 
           const verifiedTransferFee = matchedRate.rate_amount;
 
+          // Persist the courier ETA so the fabric card + SLA warning have it.
+          const etaRaw = (matchedRate as any).delivery_eta;
+          const etaDays =
+            typeof etaRaw === 'number'
+              ? etaRaw
+              : (String(etaRaw ?? '').match(/\d+/)?.[0]
+                  ? Number(String(etaRaw).match(/\d+/)![0])
+                  : null);
+          const etaTime = (matchedRate as any).delivery_eta_time;
+
           shipments.push({
             business: new Types.ObjectId(transfer.fabric_vendor_id),
             destination_business: new Types.ObjectId(transfer.tailor_vendor_id),
@@ -252,6 +262,8 @@ export class OrderService {
             shipping_fee: verifiedTransferFee,
             status: 'pending',
             rate_fetched_at: cachedEntry.createdAt,
+            eta_days: etaDays,
+            expected_delivery_at: etaTime ? new Date(etaTime) : null,
           });
           totalShippingFee += verifiedTransferFee;
         }

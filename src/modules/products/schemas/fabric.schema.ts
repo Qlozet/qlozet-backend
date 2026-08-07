@@ -19,6 +19,8 @@ export class Fabric {
   description?: string;
   @Prop({ required: true })
   product_type: string;
+  @Prop()
+  material?: string; // e.g. Cotton, Silk, Ankara — shown on the fabric card
   @Prop({ type: [ColorSchema], default: [] })
   colors?: Color[];
   @Prop()
