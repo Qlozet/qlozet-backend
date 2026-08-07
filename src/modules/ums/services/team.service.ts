@@ -183,9 +183,48 @@ export class TeamService {
     return members;
   }
 
-  async removeMember(teamId: string) {
-    const team = await this.teamMemberModel.findById(teamId);
+  async updateMember(
+    teamId: string,
+    businessId: string,
+    dto: {
+      full_name?: string;
+      phone_number?: string;
+      role?: string;
+      is_active?: boolean;
+    },
+  ) {
+    // Scope to the caller's business so a vendor can only edit their own team.
+    const member = await this.teamMemberModel.findOne({
+      _id: new Types.ObjectId(teamId),
+      ...ObjectIdUtils.refMatch('business', businessId),
+    });
+    if (!member) throw new NotFoundException('Team member not found');
+    if (member.is_owner) {
+      throw new BadRequestException('The business owner cannot be edited here.');
+    }
+
+    if (dto.full_name !== undefined) member.full_name = dto.full_name;
+    if (dto.phone_number !== undefined) member.phone_number = dto.phone_number;
+    if (dto.is_active !== undefined) member.is_active = dto.is_active;
+    if (dto.role !== undefined) {
+      member.role = ObjectIdUtils.toObjectId(dto.role) as Types.ObjectId;
+    }
+
+    await member.save();
+    return { message: 'Team member updated successfully', data: member };
+  }
+
+  async removeMember(teamId: string, scopeBusinessId?: string) {
+    const team = scopeBusinessId
+      ? await this.teamMemberModel.findOne({
+          _id: new Types.ObjectId(teamId),
+          ...ObjectIdUtils.refMatch('business', scopeBusinessId),
+        })
+      : await this.teamMemberModel.findById(teamId);
     if (!team) throw new NotFoundException('Team member not found');
+    if (team.is_owner) {
+      throw new BadRequestException('The business owner cannot be removed.');
+    }
 
     const userId = team.user;
     const businessId = team.business;
