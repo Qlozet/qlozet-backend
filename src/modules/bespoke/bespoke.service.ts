@@ -761,6 +761,71 @@ export class BespokeService {
     );
   }
 
+  // ─── Admin (read-only) ──────────────────────────────────────────────
+  // Returns our existing quote/design shape + populated vendor business and
+  // customer. Field names are unchanged (reference_images stays string[],
+  // description not customer_notes) — the frontend maps.
+  async adminListQuotes(opts: {
+    page?: number;
+    size?: number;
+    status?: string;
+    business_id?: string;
+    customer_id?: string;
+  }) {
+    const page = Number(opts.page) || 1;
+    const size = Number(opts.size) || 10;
+    const filter: any = {};
+    if (opts.status) filter.status = opts.status;
+    if (opts.business_id) filter.vendor = new Types.ObjectId(opts.business_id);
+    if (opts.customer_id) filter.customer = new Types.ObjectId(opts.customer_id);
+
+    const [quotes, total] = await Promise.all([
+      this.quoteModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * size)
+        .limit(size)
+        .populate(
+          'design',
+          'name category gender design_images reference_images description fabric',
+        )
+        .populate('vendor', 'business_name business_logo_url business_email')
+        .populate('customer', 'username first_name last_name email')
+        .lean(),
+      this.quoteModel.countDocuments(filter),
+    ]);
+
+    return Utils.getPagingData({ count: total, rows: quotes }, page, size);
+  }
+
+  async adminGetQuote(quoteId: string) {
+    const quote = await this.quoteModel
+      .findById(new Types.ObjectId(quoteId))
+      .populate({ path: 'design', populate: { path: 'fabric' } })
+      .populate('vendor', 'business_name business_logo_url business_email')
+      .populate('customer', 'username first_name last_name email')
+      .lean();
+    if (!quote) throw new NotFoundException('Quote not found');
+
+    // Reverse link: the order carries bespoke_quote, not the other way round.
+    const order = await this.orderModel
+      .findOne({ bespoke_quote: quote._id })
+      .select('_id reference status')
+      .lean();
+
+    return { data: { ...quote, order: order || null } };
+  }
+
+  async adminGetDesign(designId: string) {
+    const design = await this.designModel
+      .findById(new Types.ObjectId(designId))
+      .populate('fabric')
+      .populate('accepted_quote')
+      .lean();
+    if (!design) throw new NotFoundException('Design not found');
+    return { data: design };
+  }
+
   async getQuoteDetail(quoteId: string, businessId: string) {
     const quote = await this.quoteModel
       .findOne({

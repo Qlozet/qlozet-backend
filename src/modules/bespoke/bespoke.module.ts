@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BespokeController } from './bespoke.controller';
+import { AdminBespokeController } from './admin-bespoke.controller';
 import { BespokeService } from './bespoke.service';
 import {
   BespokeDesign,
@@ -38,7 +39,7 @@ import { WalletsModule } from '../wallets/wallets.module';
     NotificationsModule, // provides MailService
     WalletsModule,       // provides WalletsService (wallet payment)
   ],
-  controllers: [BespokeController],
+  controllers: [BespokeController, AdminBespokeController],
   providers: [BespokeService],
   exports: [BespokeService],
 })

@@ -3,6 +3,8 @@ import {
   Injectable,
   BadRequestException,
   InternalServerErrorException,
+  NotFoundException,
+  ForbiddenException,
   Logger,
   HttpException,
   Inject,
@@ -1059,6 +1061,61 @@ export class OrderService {
     } catch (error) {
       throw new InternalServerErrorException();
     }
+  }
+
+  /**
+   * Read the measurement set of the customer on an order. Order-scoped so it's
+   * not a general PII read: the vendor must own a shipment/item on the order
+   * (pass their businessId); admin passes no businessId. Contact PII
+   * (email/phone) is intentionally dropped — only the raw measurements + unit.
+   */
+  async getOrderCustomerMeasurements(
+    reference: string,
+    scopeBusinessId?: string,
+  ) {
+    const order = await this.orderModel
+      .findOne({ reference })
+      .select('customer items shipments')
+      .lean();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (scopeBusinessId) {
+      const bid = String(scopeBusinessId);
+      const owns =
+        ((order as any).shipments || []).some(
+          (s: any) => String(s.business) === bid,
+        ) ||
+        ((order as any).items || []).some(
+          (i: any) => String(i.business) === bid,
+        );
+      if (!owns) {
+        throw new ForbiddenException(
+          'This order does not belong to your business.',
+        );
+      }
+    }
+
+    const user = await this.userModel
+      .findById((order as any).customer)
+      .select('full_name measurementSets')
+      .lean();
+    if (!user) throw new NotFoundException('Customer not found');
+
+    const sets = (user as any).measurementSets || [];
+    const active = sets.find((s: any) => s.active) || sets[0] || null;
+    if (!active) return { data: null };
+
+    return {
+      data: {
+        full_name: (user as any).full_name,
+        name: active.name,
+        unit: active.unit,
+        active: !!active.active,
+        // Embedded sets only carry createdAt; expose it as updatedAt for the UI.
+        updatedAt: active.updatedAt ?? active.createdAt ?? null,
+        measurements: active.measurements || {},
+      },
+    };
   }
 
   async findCustomerOrdersWithFilters(

@@ -328,6 +328,22 @@ export class OrderController {
     return this.orderService.getVendorDashboardMetrics(req.business?.id);
   }
 
+  @Roles(UserType.VENDOR)
+  @Get(':reference/measurements')
+  @ApiOperation({
+    summary: "Read the measurement set of this order's customer (vendor)",
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async getOrderMeasurements(
+    @Param('reference') reference: string,
+    @Req() req: any,
+  ) {
+    return this.orderService.getOrderCustomerMeasurements(
+      reference,
+      req.business?.id,
+    );
+  }
+
   /**
    * Customer confirms satisfaction after delivery.
    * Triggers early release of vendor earnings (skips the hold period).
