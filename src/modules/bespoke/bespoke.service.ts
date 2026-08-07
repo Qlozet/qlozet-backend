@@ -125,6 +125,7 @@ export class BespokeService {
     await design.save();
 
     order.status = OrderStatus.PROCESSING;
+    (order as any).payment_status = 'paid';
     await order.save();
 
     await this.businessService.recordBusinessEarnings(

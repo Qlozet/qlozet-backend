@@ -380,6 +380,7 @@ export class OrderService {
 
           // Mark order as in_review (awaiting vendor confirmation)
           savedOrder.status = OrderStatus.IN_REVIEW;
+          (savedOrder as any).payment_status = 'paid';
           await savedOrder.save();
 
           // Record vendor earnings (inventory already deducted above)
@@ -1337,6 +1338,7 @@ export class OrderService {
 
     // Cancel the order
     order.status = OrderStatus.CANCELLED;
+    (order as any).refund_status = 'refunded';
     await order.save();
 
     // Reverse business earnings (prevent vendor from getting paid)
@@ -1755,6 +1757,11 @@ export class OrderService {
           },
         });
 
+        await this.orderModel.updateOne(
+          { _id: orderId, refund_status: { $ne: 'refunded' } },
+          { refund_status: 'partial' },
+        );
+
         this.logger.log(
           `[Refund] ₦${refundAmount} credited back to wallet ${walletId} for order ${order.reference}`,
         );
@@ -1790,6 +1797,11 @@ export class OrderService {
             paystack_refund: result.refundData,
           },
         });
+
+        await this.orderModel.updateOne(
+          { _id: orderId, refund_status: { $ne: 'refunded' } },
+          { refund_status: 'partial' },
+        );
 
         this.logger.log(
           `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,

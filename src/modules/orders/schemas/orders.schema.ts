@@ -334,7 +334,19 @@ export class Order {
     enum: ['pending', 'eligible', 'paid'],
     default: 'pending',
   })
-  payout_status?: 'pending' | 'eligible' | 'paid';
+  payout_status?: 'pending' | 'eligible' | 'paid'; // vendor PAYOUT (not customer payment)
+
+  // Customer-facing payment/refund state (denormalised from Transactions so the
+  // order list can render Paid/Refunded without joining the transactions coll).
+  @Prop({ type: String, enum: ['unpaid', 'paid'], default: 'unpaid' })
+  payment_status?: 'unpaid' | 'paid';
+
+  @Prop({
+    type: String,
+    enum: ['none', 'partial', 'refunded'],
+    default: 'none',
+  })
+  refund_status?: 'none' | 'partial' | 'refunded';
 
   @Prop({
     type: {
