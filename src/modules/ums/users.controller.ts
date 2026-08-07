@@ -20,12 +20,13 @@ import {
   ApiBody,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { RolesService, UserService } from './services';
-import { InviteTeamMemberDto } from './dto/team.dto';
+import { InviteTeamMemberDto, UpdateTeamMemberDto } from './dto/team.dto';
 import { TeamService } from './services/team.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
@@ -103,6 +104,29 @@ export class UserController {
   @ApiOperation({ summary: 'Get all team members' })
   async getTeamMembers(@Req() req: any): Promise<TeamMember[]> {
     return this.teamService.listTeamMembers(req.business.id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Patch('team/members/:id')
+  @ApiOperation({ summary: 'Update a team member (name, phone, role, active)' })
+  @ApiParam({ name: 'id', description: 'Team member ID' })
+  @ApiBody({ type: UpdateTeamMemberDto })
+  async updateTeamMember(
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamMemberDto,
+    @Req() req: any,
+  ) {
+    return this.teamService.updateMember(id, req.business.id, dto);
+  }
+
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Delete('team/members/:id')
+  @ApiOperation({ summary: 'Remove a team member' })
+  @ApiParam({ name: 'id', description: 'Team member ID' })
+  async removeTeamMember(@Param('id') id: string, @Req() req: any) {
+    return this.teamService.removeMember(id, req.business.id);
   }
 
   // ==============================

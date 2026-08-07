@@ -24,6 +24,15 @@ export class TeamMember {
   @Prop({ default: false })
   accepted: boolean;
 
+  // Previously written by inviteTeamMember but never declared, so Mongoose
+  // silently dropped them. Declared now so is_active (soft-delete) and is_owner
+  // actually persist.
+  @Prop({ type: Boolean, default: true })
+  is_active: boolean;
+
+  @Prop({ type: Boolean, default: false })
+  is_owner: boolean;
+
   @Prop()
   invite_token?: string;
 

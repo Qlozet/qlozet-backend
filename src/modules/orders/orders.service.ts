@@ -3,6 +3,8 @@ import {
   Injectable,
   BadRequestException,
   InternalServerErrorException,
+  NotFoundException,
+  ForbiddenException,
   Logger,
   HttpException,
   Inject,
@@ -110,6 +112,7 @@ export class OrderService {
     @InjectModel(CheckoutRateCache.name)
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
     @InjectModel('User') private userModel: Model<User>,
+    @InjectModel('Dispute') private disputeModel: Model<any>,
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
@@ -239,6 +242,16 @@ export class OrderService {
 
           const verifiedTransferFee = matchedRate.rate_amount;
 
+          // Persist the courier ETA so the fabric card + SLA warning have it.
+          const etaRaw = (matchedRate as any).delivery_eta;
+          const etaDays =
+            typeof etaRaw === 'number'
+              ? etaRaw
+              : (String(etaRaw ?? '').match(/\d+/)?.[0]
+                  ? Number(String(etaRaw).match(/\d+/)![0])
+                  : null);
+          const etaTime = (matchedRate as any).delivery_eta_time;
+
           shipments.push({
             business: new Types.ObjectId(transfer.fabric_vendor_id),
             destination_business: new Types.ObjectId(transfer.tailor_vendor_id),
@@ -252,6 +265,8 @@ export class OrderService {
             shipping_fee: verifiedTransferFee,
             status: 'pending',
             rate_fetched_at: cachedEntry.createdAt,
+            eta_days: etaDays,
+            expected_delivery_at: etaTime ? new Date(etaTime) : null,
           });
           totalShippingFee += verifiedTransferFee;
         }
@@ -366,6 +381,7 @@ export class OrderService {
 
           // Mark order as in_review (awaiting vendor confirmation)
           savedOrder.status = OrderStatus.IN_REVIEW;
+          (savedOrder as any).payment_status = 'paid';
           await savedOrder.save();
 
           // Record vendor earnings (inventory already deducted above)
@@ -1049,6 +1065,231 @@ export class OrderService {
     }
   }
 
+  /**
+   * Read the measurement set of the customer on an order. Order-scoped so it's
+   * not a general PII read: the vendor must own a shipment/item on the order
+   * (pass their businessId); admin passes no businessId. Contact PII
+   * (email/phone) is intentionally dropped — only the raw measurements + unit.
+   */
+  async getOrderCustomerMeasurements(
+    reference: string,
+    scopeBusinessId?: string,
+  ) {
+    const order = await this.orderModel
+      .findOne({ reference })
+      .select('customer items shipments')
+      .lean();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (scopeBusinessId) {
+      const bid = String(scopeBusinessId);
+      const owns =
+        ((order as any).shipments || []).some(
+          (s: any) => String(s.business) === bid,
+        ) ||
+        ((order as any).items || []).some(
+          (i: any) => String(i.business) === bid,
+        );
+      if (!owns) {
+        throw new ForbiddenException(
+          'This order does not belong to your business.',
+        );
+      }
+    }
+
+    const user = await this.userModel
+      .findById((order as any).customer)
+      .select('full_name measurementSets')
+      .lean();
+    if (!user) throw new NotFoundException('Customer not found');
+
+    const sets = (user as any).measurementSets || [];
+    const active = sets.find((s: any) => s.active) || sets[0] || null;
+    if (!active) return { data: null };
+
+    return {
+      data: {
+        full_name: (user as any).full_name,
+        name: active.name,
+        unit: active.unit,
+        active: !!active.active,
+        // Embedded sets only carry createdAt; expose it as updatedAt for the UI.
+        updatedAt: active.updatedAt ?? active.createdAt ?? null,
+        measurements: active.measurements || {},
+      },
+    };
+  }
+
+  // ─── Bespoke production checklist (on the vendor's shipment) ─────────
+  private readonly productionStepDefs = [
+    { key: 'fabric_cut', label: 'Fabric Cut', description: 'Pattern traced and fabric cut to spec' },
+    { key: 'sewing', label: 'Sewing', description: 'Garment assembled from the cut pieces' },
+    { key: 'finishing', label: 'Finishing', description: 'Hems, fastenings and final touches' },
+    { key: 'quality_check', label: 'Quality Check', description: 'Inspected against the measurements and spec' },
+  ];
+
+  private buildProduction(shipment: any) {
+    const saved: any[] = shipment?.production_steps || [];
+    const byKey = new Map(saved.map((s) => [s.key, s]));
+    const steps = this.productionStepDefs.map((def) => {
+      const s: any = byKey.get(def.key);
+      return {
+        key: def.key,
+        label: def.label,
+        description: def.description,
+        completed: !!s?.completed,
+        completed_at: s?.completed_at ?? null,
+      };
+    });
+    const completed_count = steps.filter((s) => s.completed).length;
+    return {
+      steps,
+      completed_count,
+      total_count: steps.length,
+      ready_to_ship: !!shipment?.ready_to_ship_at,
+      ready_to_ship_at: shipment?.ready_to_ship_at ?? null,
+    };
+  }
+
+  // The vendor's own garment shipment (vendor_to_customer). Scoped to the
+  // business for vendor calls; admin gets the garment shipment unscoped.
+  private resolveProductionShipmentIndex(
+    order: any,
+    scopeBusinessId?: string,
+  ): number {
+    const shipments: any[] = order.shipments || [];
+    if (scopeBusinessId) {
+      const bid = String(scopeBusinessId);
+      let idx = shipments.findIndex(
+        (s) =>
+          String(s.business) === bid &&
+          s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
+      );
+      if (idx === -1) idx = shipments.findIndex((s) => String(s.business) === bid);
+      return idx;
+    }
+    let idx = shipments.findIndex(
+      (s) => s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
+    );
+    if (idx === -1 && shipments.length) idx = 0;
+    return idx;
+  }
+
+  async getOrderProduction(reference: string, scopeBusinessId?: string) {
+    const order = await this.orderModel.findOne({ reference });
+    if (!order) throw new NotFoundException('Order not found');
+    const idx = this.resolveProductionShipmentIndex(order, scopeBusinessId);
+    if (idx === -1) {
+      throw scopeBusinessId
+        ? new ForbiddenException('This order does not belong to your business.')
+        : new NotFoundException('No shipment found on this order.');
+    }
+    return { data: this.buildProduction(order.shipments[idx]) };
+  }
+
+  async updateProductionStep(
+    reference: string,
+    businessId: string,
+    step: string,
+    completed: boolean,
+  ) {
+    const validKeys = this.productionStepDefs.map((s) => s.key);
+    if (!validKeys.includes(step)) {
+      throw new BadRequestException(
+        `Invalid step "${step}". Expected one of: ${validKeys.join(', ')}.`,
+      );
+    }
+    const order = await this.orderModel.findOne({ reference });
+    if (!order) throw new NotFoundException('Order not found');
+    const idx = this.resolveProductionShipmentIndex(order, businessId);
+    if (idx === -1) {
+      throw new ForbiddenException('This order does not belong to your business.');
+    }
+    const shipment: any = order.shipments[idx];
+    if (!Array.isArray(shipment.production_steps)) shipment.production_steps = [];
+    let s = shipment.production_steps.find((x: any) => x.key === step);
+    if (!s) {
+      s = { key: step, completed: false, completed_at: null };
+      shipment.production_steps.push(s);
+    }
+    s.completed = !!completed;
+    s.completed_at = completed ? new Date() : null;
+    order.markModified('shipments');
+    await order.save();
+    return { data: this.buildProduction(shipment) };
+  }
+
+  async markProductionReadyToShip(reference: string, businessId: string) {
+    const order = await this.orderModel.findOne({ reference });
+    if (!order) throw new NotFoundException('Order not found');
+    const idx = this.resolveProductionShipmentIndex(order, businessId);
+    if (idx === -1) {
+      throw new ForbiddenException('This order does not belong to your business.');
+    }
+    const shipment: any = order.shipments[idx];
+    const production = this.buildProduction(shipment);
+    if (production.completed_count < production.total_count) {
+      throw new BadRequestException(
+        `Complete all ${production.total_count} production steps before marking ready to ship ` +
+          `(${production.completed_count}/${production.total_count} done).`,
+      );
+    }
+    if (!shipment.ready_to_ship_at) shipment.ready_to_ship_at = new Date();
+    if (shipment.status === ShipmentStatus.PENDING) {
+      shipment.status = ShipmentStatus.READY_TO_SHIP;
+    }
+    order.markModified('shipments');
+    await order.save();
+    return { data: this.buildProduction(shipment) };
+  }
+
+  // Vendor flags a measurement problem on an order → files a dispute
+  // (reason=measurement_issue, initiated_by=vendor) so it lands on /disputes/admin.
+  async flagMeasurement(
+    reference: string,
+    businessId: string,
+    dto: { reason?: string; body_part?: string },
+  ) {
+    const order = await this.orderModel
+      .findOne({ reference })
+      .select('customer items shipments reference')
+      .lean();
+    if (!order) throw new NotFoundException('Order not found');
+
+    const bid = String(businessId);
+    const owns =
+      ((order as any).shipments || []).some(
+        (s: any) => String(s.business) === bid,
+      ) ||
+      ((order as any).items || []).some((i: any) => String(i.business) === bid);
+    if (!owns) {
+      throw new ForbiddenException('This order does not belong to your business.');
+    }
+
+    const reason = (dto.reason || '').trim();
+    const bodyPart = (dto.body_part || '').trim();
+    if (!reason) throw new BadRequestException('A reason is required.');
+
+    const dispute = await this.disputeModel.create({
+      order: (order as any)._id,
+      order_reference: (order as any).reference,
+      customer: (order as any).customer,
+      business: new Types.ObjectId(bid),
+      reason: 'measurement_issue',
+      description: bodyPart
+        ? `Measurement flag — ${bodyPart}: ${reason}`
+        : `Measurement flag: ${reason}`,
+      body_part: bodyPart || null,
+      initiated_by: 'vendor',
+      status: 'open',
+    });
+
+    return {
+      message: 'Measurement issue flagged for admin review.',
+      data: dispute,
+    };
+  }
+
   async findCustomerOrdersWithFilters(
     customerId: Types.ObjectId,
     page: number = 1,
@@ -1268,6 +1509,7 @@ export class OrderService {
 
     // Cancel the order
     order.status = OrderStatus.CANCELLED;
+    (order as any).refund_status = 'refunded';
     await order.save();
 
     // Reverse business earnings (prevent vendor from getting paid)
@@ -1686,6 +1928,11 @@ export class OrderService {
           },
         });
 
+        await this.orderModel.updateOne(
+          { _id: orderId, refund_status: { $ne: 'refunded' } },
+          { refund_status: 'partial' },
+        );
+
         this.logger.log(
           `[Refund] ₦${refundAmount} credited back to wallet ${walletId} for order ${order.reference}`,
         );
@@ -1721,6 +1968,11 @@ export class OrderService {
             paystack_refund: result.refundData,
           },
         });
+
+        await this.orderModel.updateOne(
+          { _id: orderId, refund_status: { $ne: 'refunded' } },
+          { refund_status: 'partial' },
+        );
 
         this.logger.log(
           `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,

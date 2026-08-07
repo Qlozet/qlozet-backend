@@ -167,7 +167,7 @@ export class WebhookService {
         // vendor-confirm step) rather than `in_review`.
         await this.orderModel.updateOne(
           { _id: orderId },
-          { status: isBespoke ? 'processing' : 'in_review' },
+          { status: isBespoke ? 'processing' : 'in_review', payment_status: 'paid' },
         );
 
         await Promise.all([

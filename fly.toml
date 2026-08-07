@@ -6,14 +6,16 @@
 app = 'qlozet-backend'
 primary_region = 'lhr'
 
-# TEMPORARY: normalise legacy string-typed ObjectId refs once, before the new
-# release goes live (addresses/wallets/transactions/users/teammembers). This is
-# what makes the large-collection reads (transaction history, checkout address)
-# and the wallet upserts resolve with indexed ObjectId matches. Idempotent — safe
-# to leave for a deploy or two; REMOVE this block once `fly logs` shows it ran
-# (look for "🎉 Done — X converted"). A non-zero exit aborts the deploy.
+# One-off data migrations, run before each release goes live. Both are
+# idempotent (safe to leave for a deploy or two) — REMOVE this block once
+# `fly logs` shows them done. Order matters: normalise-refs must run first so
+# transactions.order is an ObjectId before the payment backfill reads it. A
+# non-zero exit aborts the deploy.
+#   1. normalize-refs  — string-typed ObjectId refs -> ObjectId
+#      (addresses/wallets/transactions/users/teammembers)
+#   2. order-payment   — derive Order.payment_status / refund_status from txns
 [deploy]
-  release_command = "npm run migrate:normalize-refs"
+  release_command = "npm run migrate:normalize-refs && npm run backfill:order-payment"
 
 [env]
   PORT = "5000"

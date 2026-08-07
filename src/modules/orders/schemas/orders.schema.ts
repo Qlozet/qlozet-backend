@@ -219,6 +219,14 @@ export class VendorShipment {
   @Prop({ type: Number, default: null })
   fabric_yards?: number;
 
+  // Courier ETA for this shipment (captured from the rate at creation). Used by
+  // the fabric card's ETA + the SLA warning (fabric ETA vs quote completion days).
+  @Prop({ type: Number, default: null })
+  eta_days?: number;
+
+  @Prop({ type: Date, default: null })
+  expected_delivery_at?: Date;
+
   @Prop({ type: Boolean, default: false })
   confirmed: boolean;
 
@@ -255,6 +263,29 @@ export class VendorShipment {
 
   @Prop({ type: Number, default: 0 })
   late_penalty_days: number;
+
+  // Bespoke production checklist for this vendor's shipment. Step keys are the
+  // fixed 4 (fabric_cut/sewing/finishing/quality_check); labels/descriptions are
+  // derived in code so we don't persist presentation. `ready_to_ship_at` records
+  // the "mark ready to ship" action (distinct from fulfill, which makes the label).
+  @Prop({
+    type: [
+      {
+        key: { type: String },
+        completed: { type: Boolean, default: false },
+        completed_at: { type: Date, default: null },
+      },
+    ],
+    default: [],
+  })
+  production_steps?: {
+    key: string;
+    completed: boolean;
+    completed_at?: Date;
+  }[];
+
+  @Prop({ type: Date, default: null })
+  ready_to_ship_at?: Date;
 }
 
 export const VendorShipmentSchema = SchemaFactory.createForClass(VendorShipment);
@@ -326,7 +357,19 @@ export class Order {
     enum: ['pending', 'eligible', 'paid'],
     default: 'pending',
   })
-  payout_status?: 'pending' | 'eligible' | 'paid';
+  payout_status?: 'pending' | 'eligible' | 'paid'; // vendor PAYOUT (not customer payment)
+
+  // Customer-facing payment/refund state (denormalised from Transactions so the
+  // order list can render Paid/Refunded without joining the transactions coll).
+  @Prop({ type: String, enum: ['unpaid', 'paid'], default: 'unpaid' })
+  payment_status?: 'unpaid' | 'paid';
+
+  @Prop({
+    type: String,
+    enum: ['none', 'partial', 'refunded'],
+    default: 'none',
+  })
+  refund_status?: 'none' | 'partial' | 'refunded';
 
   @Prop({
     type: {

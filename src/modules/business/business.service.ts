@@ -1843,6 +1843,39 @@ export class BusinessService implements OnModuleInit {
     };
   }
 
+  // Single customer's order stats with THIS vendor — avoids paging the whole
+  // /business/customers list just to show "N orders with you" on an order.
+  async getVendorCustomerStats(businessId: string, customerId: string) {
+    const businessObjectId = new Types.ObjectId(businessId);
+    const customerObjectId = new Types.ObjectId(customerId);
+
+    const [row] = await this.orderModel.aggregate([
+      {
+        $match: {
+          customer: customerObjectId,
+          'items.business': businessObjectId,
+        },
+      },
+      {
+        $group: {
+          _id: '$customer',
+          total_orders: { $sum: 1 },
+          total_spent: { $sum: { $ifNull: ['$total', 0] } },
+          last_order_at: { $max: '$createdAt' },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        customer: customerId,
+        total_orders: row?.total_orders ?? 0,
+        total_spent: row?.total_spent ?? 0,
+        last_order_at: row?.last_order_at ?? null,
+      },
+    };
+  }
+
   async getVendorCustomerWishlist(businessId: string, customerId: string) {
     const customer = await this.userModel.findById(customerId).select('wishlist').populate({
       path: 'wishlist',

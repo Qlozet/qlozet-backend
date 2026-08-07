@@ -193,6 +193,24 @@ export class PlatformController {
   }
 
   @Roles(UserType.PLATFORM)
+  @Get('orders/:reference/measurements')
+  @ApiOperation({
+    summary: "Read an order customer's measurement set (admin, read-only)",
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async getOrderMeasurements(@Param('reference') reference: string) {
+    return this.orderService.getOrderCustomerMeasurements(reference);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('orders/:reference/production')
+  @ApiOperation({ summary: 'Get an order production checklist (admin, read-only)' })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async getOrderProduction(@Param('reference') reference: string) {
+    return this.orderService.getOrderProduction(reference);
+  }
+
+  @Roles(UserType.PLATFORM)
   @Get('tickets')
   @ApiOperation({ summary: 'Get paginated tickets with filters' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
