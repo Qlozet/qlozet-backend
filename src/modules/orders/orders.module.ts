@@ -12,6 +12,7 @@ import {
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
+import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
 import { JwtService } from '@nestjs/jwt';
 
 // Import modules instead of directly listing their services
@@ -33,6 +34,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Address.name, schema: AddressSchema },
       { name: User.name, schema: UserSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      { name: Dispute.name, schema: DisputeSchema },
     ]),
     TransactionsModule,  // provides TransactionService + Transaction model
     BusinessModule,      // provides BusinessService, LogisticsService + Business, BusinessEarning models

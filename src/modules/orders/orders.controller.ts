@@ -344,6 +344,61 @@ export class OrderController {
     );
   }
 
+  // ─── Bespoke production checklist ───────────────────────────────
+  @Roles(UserType.VENDOR)
+  @Get(':reference/production')
+  @ApiOperation({ summary: 'Get the production checklist for this order (vendor)' })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async getProduction(@Param('reference') reference: string, @Req() req: any) {
+    return this.orderService.getOrderProduction(reference, req.business?.id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Patch(':reference/production/:step')
+  @ApiOperation({
+    summary:
+      'Set a production step complete/incomplete (fabric_cut|sewing|finishing|quality_check)',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  @ApiParam({ name: 'step', description: 'Production step key' })
+  async updateProductionStep(
+    @Param('reference') reference: string,
+    @Param('step') step: string,
+    @Body() body: { completed?: boolean },
+    @Req() req: any,
+  ) {
+    return this.orderService.updateProductionStep(
+      reference,
+      req.business?.id,
+      step,
+      body?.completed !== false,
+    );
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post(':reference/measurements/flag')
+  @ApiOperation({
+    summary: "Flag a measurement issue on this order (files a dispute)",
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async flagMeasurement(
+    @Param('reference') reference: string,
+    @Body() body: { reason?: string; body_part?: string },
+    @Req() req: any,
+  ) {
+    return this.orderService.flagMeasurement(reference, req.business?.id, body);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post(':reference/production/ready-to-ship')
+  @ApiOperation({
+    summary: 'Mark the order ready to ship (requires all production steps complete)',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async markReadyToShip(@Param('reference') reference: string, @Req() req: any) {
+    return this.orderService.markProductionReadyToShip(reference, req.business?.id);
+  }
+
   /**
    * Customer confirms satisfaction after delivery.
    * Triggers early release of vendor earnings (skips the hold period).

@@ -263,6 +263,29 @@ export class VendorShipment {
 
   @Prop({ type: Number, default: 0 })
   late_penalty_days: number;
+
+  // Bespoke production checklist for this vendor's shipment. Step keys are the
+  // fixed 4 (fabric_cut/sewing/finishing/quality_check); labels/descriptions are
+  // derived in code so we don't persist presentation. `ready_to_ship_at` records
+  // the "mark ready to ship" action (distinct from fulfill, which makes the label).
+  @Prop({
+    type: [
+      {
+        key: { type: String },
+        completed: { type: Boolean, default: false },
+        completed_at: { type: Date, default: null },
+      },
+    ],
+    default: [],
+  })
+  production_steps?: {
+    key: string;
+    completed: boolean;
+    completed_at?: Date;
+  }[];
+
+  @Prop({ type: Date, default: null })
+  ready_to_ship_at?: Date;
 }
 
 export const VendorShipmentSchema = SchemaFactory.createForClass(VendorShipment);

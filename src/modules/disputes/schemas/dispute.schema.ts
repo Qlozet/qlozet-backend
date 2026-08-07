@@ -18,6 +18,7 @@ export enum DisputeReason {
   NOT_AS_DESCRIBED = 'not_as_described',
   POOR_QUALITY = 'poor_quality',
   MISSING_ITEMS = 'missing_items',
+  MEASUREMENT_ISSUE = 'measurement_issue', // vendor-raised: customer measurements look off
   OTHER = 'other',
 }
 
@@ -43,6 +44,14 @@ export class Dispute extends Document {
 
   @Prop({ type: [String], default: [] })
   evidence_urls: string[];
+
+  // Who raised it — disputes are usually customer-filed; a measurement flag is
+  // vendor-filed. `body_part` is the measurement the vendor flagged (if any).
+  @Prop({ type: String, enum: ['customer', 'vendor'], default: 'customer' })
+  initiated_by?: 'customer' | 'vendor';
+
+  @Prop({ type: String, default: null })
+  body_part?: string;
 
   @Prop({ type: String, enum: Object.values(DisputeStatus), default: DisputeStatus.OPEN })
   status: DisputeStatus;
