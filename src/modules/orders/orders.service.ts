@@ -1328,6 +1328,12 @@ export class OrderService {
         )
         .populate('items.business', 'business_name business_logo_url')
         .populate('customer', 'firstName lastName email')
+        // Bespoke orders have no catalog product — bring the design so the
+        // customer's order shows the outfit name + image.
+        .populate(
+          'bespoke_design',
+          'name category gender design_images reference_images description',
+        )
         .exec(),
 
       this.orderModel.countDocuments(query),
