@@ -1330,9 +1330,12 @@ export class OrderService {
         .populate(
           'items.product',
           'kind base_price clothing.name clothing.type clothing.images ' +
-            'clothing.styles.name clothing.styles.images ' +
-            'clothing.fabrics.name clothing.fabrics.images ' +
-            'clothing.accessories.name clothing.accessories.images ' +
+            // Include the subdoc _id explicitly — dot-notation subfield
+            // projection on an array does NOT auto-include the embedded _id,
+            // and the client matches selection ids against it.
+            'clothing.styles._id clothing.styles.name clothing.styles.images ' +
+            'clothing.fabrics._id clothing.fabrics.name clothing.fabrics.images ' +
+            'clothing.accessories._id clothing.accessories.name clothing.accessories.images ' +
             'accessory.name accessory.images fabric.name fabric.images',
         )
         .populate('items.business', 'business_name business_logo_url')
