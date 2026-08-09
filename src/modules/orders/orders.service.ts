@@ -1886,12 +1886,22 @@ export class OrderService {
    * Process a partial refund for a rejected vendor shipment.
    * Detects whether the original payment was Paystack or wallet, and routes accordingly.
    */
+  /**
+   * Refund `refundAmount` to the customer for a partially-refunded order.
+   *
+   * Always leaves an audit trail: a REFUND transaction is written on every
+   * attempt — `success` when the money actually reached the customer's wallet /
+   * card, `failed` (with a failure reason in metadata) when it didn't — so a
+   * penalty debited from a vendor can never silently vanish with nothing on the
+   * customer side. Returns whether the credit landed so callers can decide
+   * whether to tell the customer they were compensated.
+   */
   private async processPartialRefund(
     order: OrderDocument,
     refundAmount: number,
     reason: string,
-  ) {
-    if (refundAmount <= 0) return;
+  ): Promise<{ success: boolean; reason?: string }> {
+    if (refundAmount <= 0) return { success: false, reason: 'non_positive_amount' };
 
     const orderId = order._id.toString();
     const customerId = order.customer?.toString();
@@ -1900,6 +1910,37 @@ export class OrderService {
       `[Refund] Processing ₦${refundAmount} refund for order ${order.reference}. Reason: ${reason}`,
     );
 
+    // Write a REFUND ledger row for this attempt (never throws).
+    const recordRefund = async (
+      status: TransactionStatus,
+      extra: Record<string, any>,
+      walletId?: string,
+    ) => {
+      try {
+        await this.transactionService.create({
+          initiator: customerId ? new Types.ObjectId(customerId) : undefined,
+          order: order._id as Types.ObjectId,
+          wallet: walletId ? new Types.ObjectId(walletId) : undefined,
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status,
+          description: `Partial refund for order ${order.reference}: ${reason}`,
+          channel: 'refund',
+          metadata: { order_reference: order.reference, reason, ...extra },
+        });
+      } catch (err) {
+        this.logger.error(
+          `[Refund] Failed to write refund transaction for order ${order.reference}: ${err.message}`,
+        );
+      }
+    };
+
+    const markOrderPartiallyRefunded = () =>
+      this.orderModel.updateOne(
+        { _id: orderId, refund_status: { $ne: 'refunded' } },
+        { refund_status: 'partial' },
+      );
+
     // Find the original payment transaction for this order
     const originalTransaction = await this.transactionService.findByOrderId(orderId);
 
@@ -1907,7 +1948,11 @@ export class OrderService {
       this.logger.error(
         `[Refund] No original transaction found for order ${order.reference}. Manual refund required.`,
       );
-      return;
+      await recordRefund(TransactionStatus.FAILED, {
+        refund_type: 'manual',
+        failure: 'original_transaction_not_found',
+      });
+      return { success: false, reason: 'original_transaction_not_found' };
     }
 
     const paymentChannel = originalTransaction.channel;
@@ -1915,50 +1960,50 @@ export class OrderService {
     // Route based on payment method
     if (paymentChannel === 'wallet_checkout') {
       // Wallet payment → credit the customer's wallet back
+      const walletId = originalTransaction.wallet?.toString();
+
+      if (!walletId) {
+        this.logger.error(
+          `[Refund] No wallet ID found on transaction for order ${order.reference}`,
+        );
+        await recordRefund(TransactionStatus.FAILED, {
+          refund_type: 'wallet',
+          original_transaction: originalTransaction.reference,
+          failure: 'wallet_id_missing',
+        });
+        return { success: false, reason: 'wallet_id_missing' };
+      }
+
       try {
-        const customerUser = await this.userModel.findById(customerId).lean();
-        const walletId = originalTransaction.wallet?.toString();
-
-        if (!walletId) {
-          this.logger.error(
-            `[Refund] No wallet ID found on transaction for order ${order.reference}`,
-          );
-          return;
-        }
-
         await this.walletsService.creditWallet(walletId, refundAmount);
-
-        // Create refund transaction record
-        await this.transactionService.create({
-          initiator: new Types.ObjectId(customerId),
-          order: order._id as Types.ObjectId,
-          wallet: new Types.ObjectId(walletId),
-          type: TransactionType.REFUND,
-          amount: refundAmount,
-          status: TransactionStatus.SUCCESS,
-          description: `Partial refund for order ${order.reference}: ${reason}`,
-          channel: 'refund',
-          metadata: {
-            order_reference: order.reference,
+        await recordRefund(
+          TransactionStatus.SUCCESS,
+          {
             original_transaction: originalTransaction.reference,
-            reason,
             refund_type: 'wallet',
           },
-        });
-
-        await this.orderModel.updateOne(
-          { _id: orderId, refund_status: { $ne: 'refunded' } },
-          { refund_status: 'partial' },
+          walletId,
         );
-
+        await markOrderPartiallyRefunded();
         this.logger.log(
           `[Refund] ₦${refundAmount} credited back to wallet ${walletId} for order ${order.reference}`,
         );
+        return { success: true };
       } catch (error) {
         this.logger.error(
           `[Refund] Failed to credit wallet for order ${order.reference}: ${error.message}`,
           error.stack,
         );
+        await recordRefund(
+          TransactionStatus.FAILED,
+          {
+            original_transaction: originalTransaction.reference,
+            refund_type: 'wallet',
+            failure: 'wallet_credit_error',
+          },
+          walletId,
+        );
+        return { success: false, reason: 'wallet_credit_error' };
       }
     } else if (paymentChannel === 'checkout') {
       // Paystack payment → partial refund via Paystack API
@@ -1969,42 +2014,38 @@ export class OrderService {
       );
 
       if (result.success) {
-        // Create refund transaction record
-        await this.transactionService.create({
-          initiator: new Types.ObjectId(customerId),
-          order: order._id as Types.ObjectId,
-          type: TransactionType.REFUND,
-          amount: refundAmount,
-          status: TransactionStatus.SUCCESS,
-          description: `Partial Paystack refund for order ${order.reference}: ${reason}`,
-          channel: 'refund',
-          metadata: {
-            order_reference: order.reference,
-            original_transaction: originalTransaction.reference,
-            reason,
-            refund_type: 'paystack',
-            paystack_refund: result.refundData,
-          },
+        await recordRefund(TransactionStatus.SUCCESS, {
+          original_transaction: originalTransaction.reference,
+          refund_type: 'paystack',
+          paystack_refund: result.refundData,
         });
-
-        await this.orderModel.updateOne(
-          { _id: orderId, refund_status: { $ne: 'refunded' } },
-          { refund_status: 'partial' },
-        );
-
+        await markOrderPartiallyRefunded();
         this.logger.log(
           `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,
         );
-      } else {
-        this.logger.error(
-          `[Refund] Paystack partial refund failed for order ${order.reference}: ${result.error}`,
-        );
+        return { success: true };
       }
-    } else {
-      this.logger.warn(
-        `[Refund] Unknown payment channel "${paymentChannel}" for order ${order.reference}. Manual refund required.`,
+
+      this.logger.error(
+        `[Refund] Paystack partial refund failed for order ${order.reference}: ${result.error}`,
       );
+      await recordRefund(TransactionStatus.FAILED, {
+        original_transaction: originalTransaction.reference,
+        refund_type: 'paystack',
+        failure: 'paystack_refund_failed',
+        error: result.error,
+      });
+      return { success: false, reason: 'paystack_refund_failed' };
     }
+
+    this.logger.warn(
+      `[Refund] Unknown payment channel "${paymentChannel}" for order ${order.reference}. Manual refund required.`,
+    );
+    await recordRefund(TransactionStatus.FAILED, {
+      refund_type: 'manual',
+      failure: `unknown_channel_${paymentChannel}`,
+    });
+    return { success: false, reason: 'unknown_channel' };
   }
 
   // ==================== CRON: 24h Auto-Reject ====================
@@ -2234,37 +2275,51 @@ export class OrderService {
             ),
           );
 
-          // Refund the incremental amount to the customer
-          this.processPartialRefund(
+          // Refund the incremental amount to the customer, then only tell them
+          // they were compensated if the credit actually landed — the vendor
+          // has already been debited above, so a silently-failed refund must
+          // NOT be reported to the customer as money received.
+          const refundResult = await this.processPartialRefund(
             order as OrderDocument,
             incrementalPenalty,
             `Late fulfillment penalty: ${businessName} is ${daysLate} day(s) past deadline`,
-          ).catch((err) =>
+          ).catch((err) => {
             this.logger.error(
               `[LatePenalty] Refund failed for order ${order.reference}: ${err.message}`,
-            ),
-          );
+            );
+            return { success: false, reason: 'exception' as string };
+          });
 
-          // Notify customer
-          this.notificationsService.create({
-            recipient: order.customer.toString(),
-            category: NotificationCategory.ORDER,
-            type: NotificationType.LATE_FULFILLMENT_PENALTY,
-            title: 'Late Fulfillment Compensation',
-            body: `${businessName} is ${daysLate} day(s) late fulfilling order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} compensation has been credited to you.`,
-            metadata: {
-              order_id: order._id,
-              order_reference: order.reference,
-              business_name: businessName,
-              penalty_amount: incrementalPenalty,
-              total_penalty: totalPenaltyAmount,
-              days_late: daysLate,
-              reason: 'late_fulfillment_penalty',
-            },
-            action_url: `/orders`,
-          }).catch((err) =>
-            this.logger.error(`[LatePenalty] Failed to notify customer: ${err.message}`),
-          );
+          if (refundResult?.success) {
+            // Notify customer — only when the compensation truly reached them
+            this.notificationsService.create({
+              recipient: order.customer.toString(),
+              category: NotificationCategory.ORDER,
+              type: NotificationType.LATE_FULFILLMENT_PENALTY,
+              title: 'Late Fulfillment Compensation',
+              body: `${businessName} is ${daysLate} day(s) late fulfilling order #${order.reference}. A ₦${incrementalPenalty.toLocaleString()} compensation has been credited to you.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                business_name: businessName,
+                penalty_amount: incrementalPenalty,
+                total_penalty: totalPenaltyAmount,
+                days_late: daysLate,
+                reason: 'late_fulfillment_penalty',
+              },
+              action_url: `/orders`,
+            }).catch((err) =>
+              this.logger.error(`[LatePenalty] Failed to notify customer: ${err.message}`),
+            );
+          } else {
+            // Vendor was debited but the customer credit did not complete — a
+            // FAILED refund transaction was recorded for reconciliation.
+            this.logger.error(
+              `[LatePenalty] Penalty of ₦${incrementalPenalty} applied to vendor on order ${order.reference}, ` +
+              `but customer refund did NOT complete (${refundResult?.reason}). ` +
+              `A failed refund transaction was recorded for manual reconciliation.`,
+            );
+          }
 
           // Notify vendor
           if (business?.created_by?.id) {
