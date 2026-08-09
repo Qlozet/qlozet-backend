@@ -263,8 +263,12 @@ export class TransactionService {
    * Searches for successful checkout or wallet_checkout transactions.
    */
   async findByOrderId(orderId: string): Promise<TransactionDocument | null> {
+    // Type-agnostic match on `order`: some legacy payment transactions persisted
+    // the ref as a BSON string, which a strict ObjectId equality would miss —
+    // leaving refunds unable to find the original charge. Narrowed by
+    // status + channel so the $toString comparison stays cheap.
     return this.transactionModel.findOne({
-      order: new Types.ObjectId(orderId),
+      ...ObjectIdUtils.refMatch('order', orderId),
       status: TransactionStatus.SUCCESS,
       channel: { $in: ['checkout', 'wallet_checkout'] },
     });
