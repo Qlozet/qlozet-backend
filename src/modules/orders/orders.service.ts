@@ -1321,9 +1321,18 @@ export class OrderService {
         // Enough of the product to render the customer's order list/detail:
         // kind + type drive the item's product-type badge, and the kind-specific
         // name/images give the title and thumbnail.
+        // Enough of the product to render the customer's order list/detail:
+        // kind + type drive the item's product-type badge, the kind-specific
+        // name/images give the title/thumbnail, and — for customize clothing —
+        // the embedded styles/fabrics/accessories let us resolve the item's
+        // design choices to a name + image (the selection ids point into these
+        // embedded arrays, NOT standalone Style/Fabric/Accessory collections).
         .populate(
           'items.product',
           'kind base_price clothing.name clothing.type clothing.images ' +
+            'clothing.styles.name clothing.styles.images ' +
+            'clothing.fabrics.name clothing.fabrics.images ' +
+            'clothing.accessories.name clothing.accessories.images ' +
             'accessory.name accessory.images fabric.name fabric.images',
         )
         .populate('items.business', 'business_name business_logo_url')
@@ -1334,11 +1343,6 @@ export class OrderService {
           'bespoke_design',
           'name category gender design_images reference_images description',
         )
-        // Custom (customize) items: resolve the chosen styles/fabric/accessories
-        // to name + image so the order can show their design choices.
-        .populate('items.style_selections.style_id', 'name images')
-        .populate('items.fabric_selections.fabric_id', 'name images')
-        .populate('items.accessory_selections.accessory_id', 'name images')
         .exec(),
 
       this.orderModel.countDocuments(query),
