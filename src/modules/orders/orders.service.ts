@@ -1334,6 +1334,11 @@ export class OrderService {
           'bespoke_design',
           'name category gender design_images reference_images description',
         )
+        // Custom (customize) items: resolve the chosen styles/fabric/accessories
+        // to name + image so the order can show their design choices.
+        .populate('items.style_selections.style_id', 'name images')
+        .populate('items.fabric_selections.fabric_id', 'name images')
+        .populate('items.accessory_selections.accessory_id', 'name images')
         .exec(),
 
       this.orderModel.countDocuments(query),
