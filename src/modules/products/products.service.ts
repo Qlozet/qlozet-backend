@@ -973,8 +973,8 @@ export class ProductService {
                 `[RestoreInventory] Accessory variant ${selection.variant_id} stock +${totalQty}`,
               );
             } else {
-              // Try embedded accessory
-              await this.productModel.updateOne(
+              // Try embedded accessory (clothing.accessories)
+              const embRes = await this.productModel.updateOne(
                 {
                   _id: item.product,
                   'clothing.accessories._id': selection.accessory_id,
@@ -993,9 +993,29 @@ export class ProductService {
                   session,
                 },
               );
-              this.logger.log(
-                `[RestoreInventory] Embedded accessory variant ${selection.variant_id} stock +${totalQty}`,
-              );
+
+              if (embRes.modifiedCount > 0) {
+                this.logger.log(
+                  `[RestoreInventory] Embedded accessory variant ${selection.variant_id} stock +${totalQty}`,
+                );
+              } else {
+                // Standalone accessory-KIND product: stock on product.accessory.
+                await this.productModel.updateOne(
+                  {
+                    _id: item.product,
+                    'accessory._id': selection.accessory_id,
+                    'accessory.variants._id': selection.variant_id,
+                  },
+                  { $inc: { 'accessory.variants.$[v].stock': totalQty } },
+                  {
+                    arrayFilters: [{ 'v._id': selection.variant_id }],
+                    session,
+                  },
+                );
+                this.logger.log(
+                  `[RestoreInventory] Accessory-kind variant ${selection.variant_id} stock +${totalQty}`,
+                );
+              }
             }
           }
 
@@ -1011,16 +1031,18 @@ export class ProductService {
                 product.clothing?.color_variants || [];
 
               for (const selection of colorVariantSelections) {
-                const colorVariant = colorVariants.find(
-                  (cv) =>
-                    String(cv._id) === String(selection.variant_id),
-                );
-                if (!colorVariant) continue;
-
-                const variant = colorVariant.variants.find(
-                  (v) =>
-                    String(v._id) === String(selection.variant_id),
-                );
+                // `variant_id` is the INNER size-variant _id — find the colour
+                // variant that contains it, then restore that variant's stock.
+                let variant: any;
+                for (const cv of colorVariants) {
+                  const match = cv.variants.find(
+                    (v) => String(v._id) === String(selection.variant_id),
+                  );
+                  if (match) {
+                    variant = match;
+                    break;
+                  }
+                }
                 if (variant) {
                   variant.stock =
                     (variant.stock ?? 0) + (selection.quantity ?? 1);
@@ -1223,6 +1245,20 @@ export class ProductService {
             (v) => String(v._id) === String(selection.variant_id),
           );
         }
+
+        // Standalone accessory-KIND product: the accessory and its variant
+        // stock live on product.accessory — not in a standalone Accessory doc
+        // or clothing.accessories. Without this branch, buying an accessory
+        // product with a variant threw "variant not found" at inventory time.
+        if (
+          !accessoryVariant &&
+          product.accessory &&
+          String((product.accessory as any)._id) === String(selection.accessory_id)
+        ) {
+          accessoryVariant = (product.accessory as any).variants?.find(
+            (v: any) => String(v._id) === String(selection.variant_id),
+          );
+        }
       }
 
       if (!accessoryVariant) {
@@ -1275,30 +1311,33 @@ export class ProductService {
     const colorVariants = product.clothing?.color_variants || [];
 
     for (const selection of selections) {
-      const colorVariant = colorVariants.find(
-        (cv) => String(cv._id) === String(selection.variant_id),
-      );
-
-      if (!colorVariant) {
-        throw new BadRequestException(
-          `Color variant ${selection.variant_id} not found`,
+      // The stored `variant_id` is the INNER size-variant _id. Find the colour
+      // variant that CONTAINS it, then the size variant itself — the two levels
+      // have different ids, so we must not match both with the same id.
+      let variant: any;
+      let colorName = '';
+      for (const cv of colorVariants) {
+        const match = cv.variants.find(
+          (v) => String(v._id) === String(selection.variant_id),
         );
+        if (match) {
+          variant = match;
+          colorName = cv.name;
+          break;
+        }
       }
-
-      const variant = colorVariant.variants.find(
-        (v) => String(v._id) === String(selection.variant_id),
-      );
 
       if (!variant) {
         throw new BadRequestException(
-          `Variant ${selection.variant_id} not found for color ${colorVariant.name}`,
+          `Variant ${selection.variant_id} not found`,
         );
       }
+
       const totalQuantity = (selection.quantity ?? 1) * quantityMultiplier;
 
       if ((variant.stock ?? 0) < totalQuantity) {
         throw new BadRequestException(
-          `Not enough stock for ${colorVariant.name} (${variant.size})`,
+          `Not enough stock for ${colorName} (${variant.size})`,
         );
       }
       variant.stock -= totalQuantity;
@@ -1356,33 +1395,58 @@ export class ProductService {
       { session },
     );
 
-    if (!embeddedAccessory) {
+    if (embeddedAccessory) {
+      this.logger.log(`Embedded accessory found. Updating variant stock...`);
+
+      await this.productModel.updateOne(
+        {
+          _id: product_id,
+          'clothing.accessories._id': accessory_id,
+        },
+        {
+          $set: {
+            'clothing.accessories.$.variants.$[variant].stock': new_stock,
+          },
+        },
+        {
+          session,
+          arrayFilters: [{ 'variant._id': variant_id }],
+        },
+      );
+
+      this.logger.log(`Embedded accessory variant updated successfully`);
+      return { type: 'embedded', new_stock };
+    }
+
+    // 3️⃣ Standalone accessory-KIND product: stock lives on product.accessory.
+    const accessoryKind = await this.productModel.findOne(
+      {
+        _id: product_id,
+        'accessory._id': accessory_id,
+        'accessory.variants._id': variant_id,
+      },
+      null,
+      { session },
+    );
+
+    if (!accessoryKind) {
       throw new BadRequestException(
-        `Accessory variant ${variant_id} not found in both standalone and embedded`,
+        `Accessory variant ${variant_id} not found in standalone, embedded, or accessory product`,
       );
     }
 
-    this.logger.log(`Embedded accessory found. Updating variant stock...`);
+    this.logger.log(`Accessory-kind product found. Updating variant stock...`);
 
-    // Perform the update
     await this.productModel.updateOne(
-      {
-        _id: product_id,
-        'clothing.accessories._id': accessory_id,
-      },
-      {
-        $set: {
-          'clothing.accessories.$.variants.$[variant].stock': new_stock,
-        },
-      },
+      { _id: product_id },
+      { $set: { 'accessory.variants.$[variant].stock': new_stock } },
       {
         session,
         arrayFilters: [{ 'variant._id': variant_id }],
       },
     );
 
-    this.logger.log(`Embedded accessory variant updated successfully`);
-
-    return { type: 'embedded', new_stock };
+    this.logger.log(`Accessory-kind product variant updated successfully`);
+    return { type: 'accessory_kind', new_stock };
   }
 }
