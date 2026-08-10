@@ -143,7 +143,19 @@ export class OrderService {
           note: item.note,
           product_kind: item.product_kind,
           clothing_type: item.clothing_type,
-          color_variant_selections: selections.color_variant_selection || [],
+          // The selection pipeline names the chosen size-variant id
+          // `color_variant_id`, but the persisted OrderItem schema field is
+          // `variant_id` (what inventory deduction reads). Map it here so the
+          // id is actually stored — otherwise stock is never reduced.
+          color_variant_selections: (selections.color_variant_selection || []).map(
+            (cv: any) => ({
+              variant_id: cv.variant_id ?? cv.color_variant_id,
+              size: cv.size,
+              price: cv.price,
+              quantity: cv.quantity,
+              total_amount: cv.total_amount,
+            }),
+          ),
           fabric_selections: selections.fabric_selection || [],
           style_selections: selections.style_selection || [],
           accessory_selections: selections.accessory_selection || [],

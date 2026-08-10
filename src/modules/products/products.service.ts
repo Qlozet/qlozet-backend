@@ -1011,16 +1011,18 @@ export class ProductService {
                 product.clothing?.color_variants || [];
 
               for (const selection of colorVariantSelections) {
-                const colorVariant = colorVariants.find(
-                  (cv) =>
-                    String(cv._id) === String(selection.variant_id),
-                );
-                if (!colorVariant) continue;
-
-                const variant = colorVariant.variants.find(
-                  (v) =>
-                    String(v._id) === String(selection.variant_id),
-                );
+                // `variant_id` is the INNER size-variant _id — find the colour
+                // variant that contains it, then restore that variant's stock.
+                let variant: any;
+                for (const cv of colorVariants) {
+                  const match = cv.variants.find(
+                    (v) => String(v._id) === String(selection.variant_id),
+                  );
+                  if (match) {
+                    variant = match;
+                    break;
+                  }
+                }
                 if (variant) {
                   variant.stock =
                     (variant.stock ?? 0) + (selection.quantity ?? 1);
@@ -1275,30 +1277,33 @@ export class ProductService {
     const colorVariants = product.clothing?.color_variants || [];
 
     for (const selection of selections) {
-      const colorVariant = colorVariants.find(
-        (cv) => String(cv._id) === String(selection.variant_id),
-      );
-
-      if (!colorVariant) {
-        throw new BadRequestException(
-          `Color variant ${selection.variant_id} not found`,
+      // The stored `variant_id` is the INNER size-variant _id. Find the colour
+      // variant that CONTAINS it, then the size variant itself — the two levels
+      // have different ids, so we must not match both with the same id.
+      let variant: any;
+      let colorName = '';
+      for (const cv of colorVariants) {
+        const match = cv.variants.find(
+          (v) => String(v._id) === String(selection.variant_id),
         );
+        if (match) {
+          variant = match;
+          colorName = cv.name;
+          break;
+        }
       }
-
-      const variant = colorVariant.variants.find(
-        (v) => String(v._id) === String(selection.variant_id),
-      );
 
       if (!variant) {
         throw new BadRequestException(
-          `Variant ${selection.variant_id} not found for color ${colorVariant.name}`,
+          `Variant ${selection.variant_id} not found`,
         );
       }
+
       const totalQuantity = (selection.quantity ?? 1) * quantityMultiplier;
 
       if ((variant.stock ?? 0) < totalQuantity) {
         throw new BadRequestException(
-          `Not enough stock for ${colorVariant.name} (${variant.size})`,
+          `Not enough stock for ${colorName} (${variant.size})`,
         );
       }
       variant.stock -= totalQuantity;
