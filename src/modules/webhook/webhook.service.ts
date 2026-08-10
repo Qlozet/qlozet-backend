@@ -16,6 +16,7 @@ import {
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
+import { PaymentService } from '../payment/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   NotificationCategory,
@@ -39,6 +40,7 @@ export class WebhookService {
     private readonly walletsService: WalletsService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
+    private readonly paymentService: PaymentService,
     private readonly notificationsService: NotificationsService,
 
     @InjectModel('Order') private orderModel: Model<Order>,
@@ -147,61 +149,122 @@ export class WebhookService {
       transaction.order != null;
 
     if (isCheckoutOrder) {
-      try {
-        const orderId = transaction.order!._id;
-        const order = await this.orderModel.findById(orderId).lean();
-        const isBespoke = (order as any)?.type === 'bespoke';
-
-        // Bespoke: finalise the quote acceptance now that payment succeeded —
-        // accept the winning quote, decline the alternatives and mark the design
-        // accepted. (We deliberately DON'T do this at accept-time, so an
-        // abandoned payment never leaves the customer stuck.)
-        if (isBespoke && (order as any)?.bespoke_quote) {
-          await this.finalizeBespokeAcceptance(order).catch((e: any) =>
-            this.logger.error(`Failed to finalise bespoke acceptance: ${e?.message}`),
-          );
-        }
-
-        // Bespoke orders are auto-confirmed: the tailor already committed by
-        // quoting, so on payment they go straight to `processing` (no separate
-        // vendor-confirm step) rather than `in_review`.
-        await this.orderModel.updateOne(
-          { _id: orderId },
-          { status: isBespoke ? 'processing' : 'in_review', payment_status: 'paid' },
-        );
-
-        await Promise.all([
-          this.businessService.recordBusinessEarnings(orderId),
-          this.productService.updateInventory(orderId),
-        ]);
-
-        if (isBespoke) {
-          // Release the tailor's UPFRONT milestone (funds materials). Earnings
-          // were just recorded above, so schedule their release now — mirrors
-          // what confirmVendorShipment does for custom clothing.
-          await this.scheduleBespokeUpfront(order).catch((e: any) =>
-            this.logger.error(`Failed to schedule bespoke upfront: ${e?.message}`),
-          );
-          // Move the design into production.
-          if ((order as any)?.bespoke_design) {
-            await this.bespokeDesignModel
-              .updateOne(
-                { _id: (order as any).bespoke_design },
-                { $set: { status: 'in_production' } },
-              )
-              .catch((e: any) =>
-                this.logger.error(
-                  `Failed to move bespoke design to in_production: ${e?.message}`,
-                ),
-              );
-          }
-        }
-      } catch (error) {
-        this.logger.error(`Failed to process checkout order: ${error.message}`, error.stack);
-      }
+      await this.finalizeCheckoutOrder(transaction).catch((error) =>
+        this.logger.error(
+          `Failed to process checkout order: ${error.message}`,
+          error.stack,
+        ),
+      );
     }
 
     return isWalletFunding;
+  }
+
+  /**
+   * Finalise a paid card-checkout order: mark it paid, record vendor earnings,
+   * deduct inventory, and (for bespoke) accept the quote + schedule the upfront
+   * milestone + move the design into production.
+   *
+   * Idempotent — safe to call from BOTH the Paystack webhook AND the
+   * customer-return verify endpoint. recordBusinessEarnings and updateInventory
+   * are each individually idempotent; the bespoke side effects (which are not)
+   * only run on the FIRST finalisation, i.e. when the order wasn't already paid.
+   */
+  async finalizeCheckoutOrder(transaction: TransactionDocument): Promise<void> {
+    if (transaction.channel !== 'checkout' || transaction.order == null) return;
+
+    const orderId = transaction.order._id;
+    const order = await this.orderModel.findById(orderId).lean();
+    if (!order) return;
+
+    const isBespoke = (order as any)?.type === 'bespoke';
+    const alreadyPaid = (order as any)?.payment_status === 'paid';
+
+    // Bespoke: finalise the quote acceptance now that payment succeeded — accept
+    // the winning quote, decline the alternatives and mark the design accepted.
+    // (Done at payment-time, not accept-time, so an abandoned payment never
+    // leaves the customer stuck.) Skip if already finalised.
+    if (!alreadyPaid && isBespoke && (order as any)?.bespoke_quote) {
+      await this.finalizeBespokeAcceptance(order).catch((e: any) =>
+        this.logger.error(`Failed to finalise bespoke acceptance: ${e?.message}`),
+      );
+    }
+
+    // Bespoke orders are auto-confirmed: the tailor already committed by
+    // quoting, so on payment they go straight to `processing` (no separate
+    // vendor-confirm step) rather than `in_review`.
+    await this.orderModel.updateOne(
+      { _id: orderId },
+      { status: isBespoke ? 'processing' : 'in_review', payment_status: 'paid' },
+    );
+
+    await Promise.all([
+      this.businessService.recordBusinessEarnings(orderId),
+      this.productService.updateInventory(orderId),
+    ]);
+
+    if (!alreadyPaid && isBespoke) {
+      // Release the tailor's UPFRONT milestone (funds materials).
+      await this.scheduleBespokeUpfront(order).catch((e: any) =>
+        this.logger.error(`Failed to schedule bespoke upfront: ${e?.message}`),
+      );
+      // Move the design into production.
+      if ((order as any)?.bespoke_design) {
+        await this.bespokeDesignModel
+          .updateOne(
+            { _id: (order as any).bespoke_design },
+            { $set: { status: 'in_production' } },
+          )
+          .catch((e: any) =>
+            this.logger.error(
+              `Failed to move bespoke design to in_production: ${e?.message}`,
+            ),
+          );
+      }
+    }
+  }
+
+  /**
+   * Customer-return verification. The Paystack webhook is the primary way a card
+   * payment is finalised, but it can fail to arrive (misconfigured URL, downtime,
+   * retries exhausted). When the customer lands back on the confirmation page we
+   * actively confirm the charge with Paystack and finalise the order ourselves —
+   * a safety net so earnings/inventory register even without the webhook.
+   * Idempotent; a no-op if the webhook already did the work.
+   */
+  async verifyAndFinalize(
+    reference: string,
+  ): Promise<{ success: boolean; status: string }> {
+    const transaction =
+      await this.transactionService.findByReference(reference);
+
+    // Wallet checkout is settled at creation and never goes through Paystack —
+    // report its stored status without hitting the gateway (verifying a
+    // non-Paystack reference would wrongly mark it failed).
+    if (transaction.channel !== 'checkout') {
+      return {
+        success: transaction.status === TransactionStatus.SUCCESS,
+        status: transaction.status,
+      };
+    }
+
+    // Card checkout: confirm with Paystack if not already settled.
+    if (transaction.status !== TransactionStatus.SUCCESS) {
+      await this.paymentService
+        .verifyPaystackPayment(reference)
+        .catch((e: any) =>
+          this.logger.error(
+            `[VerifyAndFinalize] Paystack verify failed for ${reference}: ${e?.message}`,
+          ),
+        );
+    }
+
+    const fresh = await this.transactionService.findByReference(reference);
+    if (fresh.status === TransactionStatus.SUCCESS) {
+      await this.finalizeCheckoutOrder(fresh);
+      return { success: true, status: 'success' };
+    }
+    return { success: false, status: fresh.status };
   }
 
   // Finalise a bespoke acceptance once payment has succeeded: accept the paid

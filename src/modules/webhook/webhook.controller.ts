@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Param,
   Post,
   Req,
   UnauthorizedException,
@@ -43,6 +44,18 @@ export class WebhookController {
     );
 
     return this.webhookService.handlePaystackWebhook(req.body);
+  }
+
+  // Customer-return verification (authenticated, like /wallets/verify). Actively
+  // confirms a card payment with Paystack and finalises the order — a safety net
+  // for when the Paystack webhook doesn't arrive. Idempotent.
+  @Post('verify/:reference')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify & finalise a card payment by reference' })
+  @ApiResponse({ status: 201, description: 'Verification result' })
+  async verifyPayment(@Param('reference') reference: string) {
+    const result = await this.webhookService.verifyAndFinalize(reference);
+    return { message: 'Payment verification processed', data: result };
   }
 
   @Public()
