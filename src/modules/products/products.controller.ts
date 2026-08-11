@@ -297,7 +297,7 @@ export class ProductsController {
   })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async findById(@Param('id') id: string) {
-    return this.productService.findById(id);
+    return this.productService.findByIdWithAvailability(id);
   }
 
   @Delete(':id')

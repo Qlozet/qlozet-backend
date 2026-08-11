@@ -18,6 +18,10 @@ import {
   Collection, CollectionSchema,
 } from './schemas';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import {
+  PlatformSettings,
+  PlatformSettingsSchema,
+} from '../platform/schema/platformSettings.schema';
 
 @Module({
   imports: [
@@ -31,6 +35,7 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
       { name: Discount.name, schema: DiscountSchema },
       { name: Collection.name, schema: CollectionSchema },
       { name: Order.name, schema: OrderSchema },
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
   ],
   controllers: [ProductsController, DiscountController, CollectionController],
