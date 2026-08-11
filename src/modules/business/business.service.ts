@@ -534,6 +534,10 @@ export class BusinessService implements OnModuleInit {
           social_links: 1,
           cumulative_rating: 1,
           total_number_of_ratings: 1,
+          // Alias under the names the storefront reads, so the vendor rating
+          // score actually renders (the shop uses average_rating/total_ratings).
+          average_rating: '$cumulative_rating',
+          total_ratings: '$total_number_of_ratings',
           total_products: 1,
           total_items_sold: 1,
           success_rate: 1,
@@ -967,6 +971,9 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: 1,
           total_products: 1,
           total_number_of_ratings: 1,
+          // Alias for the storefront (reads average_rating/total_ratings).
+          average_rating: '$cumulative_rating',
+          total_ratings: '$total_number_of_ratings',
 
           following: 1,
           followers_count: 1,
@@ -1129,6 +1136,9 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: 1,
           total_products: 1,
           total_number_of_ratings: 1,
+          // Alias for the storefront (reads average_rating/total_ratings).
+          average_rating: '$cumulative_rating',
+          total_ratings: '$total_number_of_ratings',
 
           following: 1,
           followers_count: 1,
@@ -1246,6 +1256,9 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: 1,
           total_products: 1,
           total_number_of_ratings: 1,
+          // Alias for the storefront (reads average_rating/total_ratings).
+          average_rating: '$cumulative_rating',
+          total_ratings: '$total_number_of_ratings',
 
           following: 1,
           followers_count: 1,
