@@ -513,7 +513,7 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: {
             $let: {
               vars: {
-                _sum: {
+                rsum: {
                   $sum: {
                     $map: {
                       input: '$ratingProducts',
@@ -522,7 +522,7 @@ export class BusinessService implements OnModuleInit {
                     },
                   },
                 },
-                _cnt: {
+                rcnt: {
                   $sum: {
                     $map: {
                       input: '$ratingProducts',
@@ -534,8 +534,8 @@ export class BusinessService implements OnModuleInit {
               },
               in: {
                 $cond: [
-                  { $gt: ['$$_cnt', 0] },
-                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  { $gt: ['$$rcnt', 0] },
+                  { $round: [{ $divide: ['$$rsum', '$$rcnt'] }, 1] },
                   0,
                 ],
               },
@@ -970,7 +970,7 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: {
             $let: {
               vars: {
-                _sum: {
+                rsum: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -979,7 +979,7 @@ export class BusinessService implements OnModuleInit {
                     },
                   },
                 },
-                _cnt: {
+                rcnt: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -991,8 +991,8 @@ export class BusinessService implements OnModuleInit {
               },
               in: {
                 $cond: [
-                  { $gt: ['$$_cnt', 0] },
-                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  { $gt: ['$$rcnt', 0] },
+                  { $round: [{ $divide: ['$$rsum', '$$rcnt'] }, 1] },
                   0,
                 ],
               },
@@ -1161,7 +1161,7 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: {
             $let: {
               vars: {
-                _sum: {
+                rsum: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -1170,7 +1170,7 @@ export class BusinessService implements OnModuleInit {
                     },
                   },
                 },
-                _cnt: {
+                rcnt: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -1182,8 +1182,8 @@ export class BusinessService implements OnModuleInit {
               },
               in: {
                 $cond: [
-                  { $gt: ['$$_cnt', 0] },
-                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  { $gt: ['$$rcnt', 0] },
+                  { $round: [{ $divide: ['$$rsum', '$$rcnt'] }, 1] },
                   0,
                 ],
               },
@@ -1312,7 +1312,7 @@ export class BusinessService implements OnModuleInit {
           cumulative_rating: {
             $let: {
               vars: {
-                _sum: {
+                rsum: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -1321,7 +1321,7 @@ export class BusinessService implements OnModuleInit {
                     },
                   },
                 },
-                _cnt: {
+                rcnt: {
                   $sum: {
                     $map: {
                       input: '$products',
@@ -1333,8 +1333,8 @@ export class BusinessService implements OnModuleInit {
               },
               in: {
                 $cond: [
-                  { $gt: ['$$_cnt', 0] },
-                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  { $gt: ['$$rcnt', 0] },
+                  { $round: [{ $divide: ['$$rsum', '$$rcnt'] }, 1] },
                   0,
                 ],
               },
