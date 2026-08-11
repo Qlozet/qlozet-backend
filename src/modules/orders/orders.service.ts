@@ -61,6 +61,7 @@ import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
 import { BusinessService } from '../business/business.service';
 import { ProductService } from '../products/products.service';
+import { computeAvailability } from '../products/product-availability';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 import {
@@ -2368,6 +2369,90 @@ export class OrderService {
    * Checkout preview: split cart by vendor, fetch rates per vendor.
    * Returns per-vendor courier options for the customer to select.
    */
+  /**
+   * Re-check that every cart line is still purchasable against LIVE stock — a
+   * product/variant can sell out (or a fabric drop below the requested yards)
+   * between adding to cart and checking out. Returns the lines that are no
+   * longer available so the preview can block checkout with a clear message
+   * instead of failing at the deduction step (which, for wallet, rolls the
+   * whole order back). Customize garments are made-to-order and never gated.
+   */
+  private validateCartAvailability(
+    cartItems: any[],
+    productMap: Map<string, any>,
+  ): Array<{ product_id: string; product_name: string; reason: string }> {
+    const issues: Array<{
+      product_id: string;
+      product_name: string;
+      reason: string;
+    }> = [];
+
+    for (const cartItem of cartItems) {
+      const productId =
+        (cartItem.product_id as any)?._id?.toString() ??
+        String(cartItem.product_id);
+      const product = productMap.get(productId);
+      if (!product) continue;
+
+      const name =
+        product.clothing?.name ??
+        product.accessory?.name ??
+        product.fabric?.name ??
+        'Item';
+      const sel: any = cartItem.selections || {};
+      const qty = cartItem.quantity ?? 1;
+      const flag = (reason: string) =>
+        issues.push({ product_id: productId, product_name: name, reason });
+
+      if (product.kind === 'clothing') {
+        if (product.clothing?.type === 'customize') continue; // made to order
+        const cvs = sel.color_variant_selections?.[0];
+        const variantId = cvs?.color_variant_id;
+        const need = cvs?.quantity ?? qty;
+        if (variantId) {
+          let stock: number | undefined;
+          for (const cv of product.clothing?.color_variants || []) {
+            const v = cv.variants?.find(
+              (x: any) => String(x._id) === String(variantId),
+            );
+            if (v) {
+              stock = v.stock ?? 0;
+              break;
+            }
+          }
+          if (stock !== undefined && stock < need) {
+            flag(stock <= 0 ? 'Out of stock' : `Only ${stock} left`);
+          }
+        } else if (!computeAvailability(product).in_stock) {
+          flag('Out of stock');
+        }
+      } else if (product.kind === 'fabric') {
+        const fs = sel.fabric_selections?.[0];
+        const reqYards = (fs?.yardage ?? 0) * (fs?.quantity ?? qty ?? 1);
+        const yardLeft = product.fabric?.yard_length ?? 0;
+        const minCut = product.fabric?.min_cut ?? 0;
+        if (yardLeft <= 0 || yardLeft < minCut) flag('Out of stock');
+        else if (reqYards > yardLeft) flag(`Only ${yardLeft} yd left`);
+      } else if (product.kind === 'accessory') {
+        const asSel = sel.accessory_selections?.[0];
+        const variantId = asSel?.variant_id;
+        const need = asSel?.quantity ?? qty;
+        if (variantId) {
+          const v = (product.accessory?.variants || []).find(
+            (x: any) => String(x._id) === String(variantId),
+          );
+          if (v && (v.stock ?? 0) < need) {
+            flag((v.stock ?? 0) <= 0 ? 'Out of stock' : `Only ${v.stock} left`);
+          }
+        } else if (!computeAvailability(product).in_stock) {
+          flag('Out of stock');
+        }
+      }
+    }
+
+    return issues;
+  }
+
   async checkoutPreview(
     customer: any,
     dto: CheckoutPreviewDto,
@@ -2710,12 +2795,20 @@ export class OrderService {
       });
     }
 
+    // Re-validate stock against LIVE inventory (items can sell out between
+    // add-to-cart and checkout). Non-empty → the shop blocks "Place order".
+    const unavailable_items = this.validateCartAvailability(
+      cart.items,
+      productMap,
+    );
+
     return {
       vendor_shipping: vendorShipping,
       fabric_transfers: fabricTransfers,
       total_shipping_fee: totalShippingFee,
       subtotal,
       total: subtotal + totalShippingFee,
+      unavailable_items,
     };
   }
 
