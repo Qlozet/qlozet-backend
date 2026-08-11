@@ -506,12 +506,40 @@ export class BusinessService implements OnModuleInit {
               },
             },
           },
+          // True vendor rating = mean of ALL individual ratings (sum of rating
+          // values / number of ratings). Averaging product `average_rating`
+          // wrongly counted unrated products (average 0), dragging e.g. a lone
+          // 5.0 among 12 products down to ~0.4.
           cumulative_rating: {
-            $cond: [
-              { $gt: [{ $size: '$ratingProducts' }, 0] },
-              { $avg: '$ratingProducts.average_rating' },
-              0,
-            ],
+            $let: {
+              vars: {
+                _sum: {
+                  $sum: {
+                    $map: {
+                      input: '$ratingProducts',
+                      as: 'p',
+                      in: { $sum: '$$p.ratings.value' },
+                    },
+                  },
+                },
+                _cnt: {
+                  $sum: {
+                    $map: {
+                      input: '$ratingProducts',
+                      as: 'p',
+                      in: { $size: { $ifNull: ['$$p.ratings', []] } },
+                    },
+                  },
+                },
+              },
+              in: {
+                $cond: [
+                  { $gt: ['$$_cnt', 0] },
+                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  0,
+                ],
+              },
+            },
           },
         },
       },
@@ -937,12 +965,38 @@ export class BusinessService implements OnModuleInit {
             },
           },
 
+          // True vendor rating = mean of ALL individual ratings (not an average
+          // of product averages, which counted unrated products as 0).
           cumulative_rating: {
-            $cond: [
-              { $gt: [{ $size: '$products' }, 0] },
-              { $avg: '$products.average_rating' },
-              0,
-            ],
+            $let: {
+              vars: {
+                _sum: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $sum: '$$p.ratings.value' },
+                    },
+                  },
+                },
+                _cnt: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $size: { $ifNull: ['$$p.ratings', []] } },
+                    },
+                  },
+                },
+              },
+              in: {
+                $cond: [
+                  { $gt: ['$$_cnt', 0] },
+                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  0,
+                ],
+              },
+            },
           },
 
           following: {
@@ -1102,12 +1156,38 @@ export class BusinessService implements OnModuleInit {
             },
           },
 
+          // True vendor rating = mean of ALL individual ratings (not an average
+          // of product averages, which counted unrated products as 0).
           cumulative_rating: {
-            $cond: [
-              { $gt: [{ $size: '$products' }, 0] },
-              { $avg: '$products.average_rating' },
-              0,
-            ],
+            $let: {
+              vars: {
+                _sum: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $sum: '$$p.ratings.value' },
+                    },
+                  },
+                },
+                _cnt: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $size: { $ifNull: ['$$p.ratings', []] } },
+                    },
+                  },
+                },
+              },
+              in: {
+                $cond: [
+                  { $gt: ['$$_cnt', 0] },
+                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  0,
+                ],
+              },
+            },
           },
 
           following: {
@@ -1227,12 +1307,38 @@ export class BusinessService implements OnModuleInit {
             },
           },
 
+          // True vendor rating = mean of ALL individual ratings (not an average
+          // of product averages, which counted unrated products as 0).
           cumulative_rating: {
-            $cond: [
-              { $gt: [{ $size: '$products' }, 0] },
-              { $avg: '$products.average_rating' },
-              0,
-            ],
+            $let: {
+              vars: {
+                _sum: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $sum: '$$p.ratings.value' },
+                    },
+                  },
+                },
+                _cnt: {
+                  $sum: {
+                    $map: {
+                      input: '$products',
+                      as: 'p',
+                      in: { $size: { $ifNull: ['$$p.ratings', []] } },
+                    },
+                  },
+                },
+              },
+              in: {
+                $cond: [
+                  { $gt: ['$$_cnt', 0] },
+                  { $round: [{ $divide: ['$$_sum', '$$_cnt'] }, 1] },
+                  0,
+                ],
+              },
+            },
           },
 
           following: {
