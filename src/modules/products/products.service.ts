@@ -31,6 +31,11 @@ import {
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { FindAllProductsDto } from './dto/find-all-products.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
+import { withAvailability, StockThresholds } from './product-availability';
 
 @Injectable()
 export class ProductService {
@@ -46,9 +51,32 @@ export class ProductService {
     private readonly fabricModel: Model<FabricDocument>,
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(PlatformSettings.name)
+    private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  /** Stock thresholds from platform settings (with sane fallbacks). */
+  private async getStockThresholds(): Promise<StockThresholds> {
+    const s = await this.platformSettingsModel
+      .findOne()
+      .lean()
+      .catch(() => null);
+    return {
+      lowStock: (s as any)?.low_stock_threshold ?? 5,
+      lowFabricYards: (s as any)?.low_fabric_yards ?? 0,
+    };
+  }
+
+  /** A product by id with its computed `availability` (for the PDP). */
+  async findByIdWithAvailability(id: string): Promise<any> {
+    const [product, thresholds] = await Promise.all([
+      this.findById(id),
+      this.getStockThresholds(),
+    ]);
+    return withAvailability(product, thresholds);
+  }
 
   /**
    * Distinct business IDs that have at least one ACTIVE product matching the
@@ -362,7 +390,12 @@ export class ProductService {
       this.productModel.countDocuments(filter),
     ]);
 
-    return Utils.getPagingData({ rows, count }, page, size);
+    // Attach per-product availability so listings can badge/demote sold-out
+    // items and the shop can offer an "in stock only" filter.
+    const thresholds = await this.getStockThresholds();
+    const withAvail = rows.map((r) => withAvailability(r, thresholds));
+
+    return Utils.getPagingData({ rows: withAvail, count }, page, size);
   }
 
   // trending this week, top vendors, new vendors

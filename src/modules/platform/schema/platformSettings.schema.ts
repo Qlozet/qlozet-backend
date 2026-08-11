@@ -80,6 +80,15 @@ export class PlatformSettings extends Document {
 
   @Prop({ type: Number, default: 10 })
   reservation_fee_percent: number;
+
+  // Availability thresholds. A variant at/under `low_stock_threshold` units (or a
+  // fabric with fewer than `low_fabric_yards` yards left) is flagged "low stock".
+  @Prop({ type: Number, default: 5 })
+  low_stock_threshold: number;
+
+  @Prop({ type: Number, default: 0 })
+  low_fabric_yards: number; // 0 → fall back to 2× the fabric's min_cut
+
   @Prop({
     type: {
       usd: {
