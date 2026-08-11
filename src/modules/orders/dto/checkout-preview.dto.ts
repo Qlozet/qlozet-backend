@@ -117,6 +117,17 @@ export class FabricTransferRateDto {
   fastest_rate: number;
 }
 
+export class UnavailableItemDto {
+  @ApiProperty({ example: '6a46a78bdf31919585ad7da5' })
+  product_id: string;
+
+  @ApiProperty({ example: 'Butterfly Two-piece Dress' })
+  product_name: string;
+
+  @ApiProperty({ example: 'Only 2 left' })
+  reason: string;
+}
+
 export class CheckoutPreviewResponseDto {
   @ApiProperty({ type: [VendorShippingRateDto], description: 'Shipping rates grouped by vendor (Vendor → Customer)' })
   vendor_shipping: VendorShippingRateDto[];
@@ -132,6 +143,14 @@ export class CheckoutPreviewResponseDto {
 
   @ApiProperty({ example: 29300, description: 'subtotal + total_shipping_fee' })
   total: number;
+
+  @ApiProperty({
+    type: [UnavailableItemDto],
+    default: [],
+    description:
+      'Cart lines that are no longer purchasable (went out of stock / below available yardage since being added). Non-empty → block checkout.',
+  })
+  unavailable_items: UnavailableItemDto[];
 }
 
 // Keep interfaces for internal use
