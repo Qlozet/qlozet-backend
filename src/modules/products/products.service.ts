@@ -553,9 +553,41 @@ export class ProductService {
 
     if (!product) throw new NotFoundException('Product not found');
 
+    // Units delivered = total quantity of this product across delivered/completed
+    // orders (summed over the per-item selection arrays).
+    const soldAgg = await this.orderModel.aggregate([
+      {
+        $match: {
+          status: { $in: ['completed', 'delivered'] },
+          'items.product': new Types.ObjectId(productId),
+        },
+      },
+      { $unwind: '$items' },
+      { $match: { 'items.product': new Types.ObjectId(productId) } },
+      {
+        $group: {
+          _id: null,
+          units: {
+            $sum: {
+              $add: [
+                { $sum: '$items.color_variant_selections.quantity' },
+                { $sum: '$items.fabric_selections.quantity' },
+                { $sum: '$items.accessory_selections.quantity' },
+              ],
+            },
+          },
+          lines: { $sum: 1 },
+        },
+      },
+    ]);
+    const agg = soldAgg[0];
+    // Fall back to the line count if selections carried no quantity.
+    const items_sold = agg ? agg.units || agg.lines || 0 : 0;
+
     return {
       average: product.average_rating,
       total_reviews: product.ratings.length,
+      items_sold,
       ratings: product.ratings,
     };
   }
