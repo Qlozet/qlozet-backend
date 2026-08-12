@@ -35,7 +35,17 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
-import { withAvailability, StockThresholds } from './product-availability';
+import {
+  withAvailability,
+  computeAvailability,
+  StockThresholds,
+} from './product-availability';
+import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class ProductService {
@@ -53,9 +63,63 @@ export class ProductService {
     private readonly orderModel: Model<OrderDocument>,
     @InjectModel(PlatformSettings.name)
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  /**
+   * After an order deducts stock, alert the vendor about any of their products
+   * that are now low or out of stock. De-duped per product (via createUnique) so
+   * a product that stays low doesn't fire on every subsequent sale.
+   */
+  private async notifyLowStock(productIds: string[]): Promise<void> {
+    try {
+      const ids = [...new Set(productIds.filter(Boolean))];
+      if (!ids.length) return;
+      const thresholds = await this.getStockThresholds();
+      const products = await this.productModel
+        .find({ _id: { $in: ids } })
+        .lean();
+
+      for (const p of products) {
+        const avail = computeAvailability(p, thresholds);
+        if (avail.state !== 'low_stock' && avail.state !== 'out_of_stock')
+          continue;
+
+        const business = await this.businessModel
+          .findById((p as any).business)
+          .select('created_by')
+          .lean();
+        const recipient = (business as any)?.created_by?.id?.toString();
+        if (!recipient) continue;
+
+        const name =
+          (p as any).clothing?.name ??
+          (p as any).accessory?.name ??
+          (p as any).fabric?.name ??
+          'A product';
+        const out = avail.state === 'out_of_stock';
+
+        await this.notificationsService.createUnique({
+          recipient,
+          recipient_business: (p as any).business?.toString?.(),
+          category: NotificationCategory.PRODUCT,
+          type: NotificationType.LOW_STOCK,
+          title: out ? 'Out of stock ⚠️' : 'Low stock ⚠️',
+          body: out
+            ? `${name} is now out of stock — restock to keep selling.`
+            : `${name} is running low on stock.`,
+          metadata: { product_id: (p as any)._id, state: avail.state },
+          action_url: '/products',
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Low-stock notification failed: ${err.message}`);
+    }
+  }
 
   /** Stock thresholds from platform settings (with sane fallbacks). */
   private async getStockThresholds(): Promise<StockThresholds> {
@@ -884,6 +948,7 @@ export class ProductService {
 
   async updateInventory(orderId: Types.ObjectId) {
     const session = await this.connection.startSession();
+    const deductedProductIds: string[] = [];
 
     try {
       await session.withTransaction(async () => {
@@ -901,6 +966,9 @@ export class ProductService {
         }
 
         for (const item of order.items) {
+          if ((item as any).product) {
+            deductedProductIds.push(String((item as any).product));
+          }
           await this.updateFabric(item, session);
           await this.updateAccessory(item, session);
           await this.updateColorVariant(item, session);
@@ -932,6 +1000,13 @@ export class ProductService {
         await order.save({ session });
       });
       this.logger.log('INVENTORY UPDATED');
+
+      // Post-commit (best-effort): alert vendors about now-low/out-of-stock
+      // products. Outside the transaction so a notification hiccup can't roll
+      // back the deduction, and only when we actually deducted this run.
+      if (deductedProductIds.length) {
+        await this.notifyLowStock(deductedProductIds);
+      }
     } catch (err: any) {
       this.logger.error('updateInventory failed', err.stack || err.message);
       throw err;

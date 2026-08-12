@@ -138,9 +138,11 @@ export class TeamService {
         tempPassword,
       );
 
-      // In-app notification to business owner
+      // In-app notification to business owner. The recipient MUST be the
+      // vendor's USER id (notifications are queried by recipient=user id) — the
+      // business _id here meant the owner never saw it.
       this.notificationsService.create({
-        recipient: (business as any)._id?.toString(),
+        recipient: (business as any).created_by?.id?.toString(),
         recipient_business: (business as any)._id?.toString(),
         category: NotificationCategory.TEAM,
         type: NotificationType.TEAM_MEMBER_JOINED,

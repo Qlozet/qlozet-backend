@@ -431,7 +431,8 @@ export class BespokeService {
 
       // In-app notification
       this.notificationsService.create({
-        recipient: (business as any)._id?.toString(),
+        // Recipient must be the vendor's USER id (queried by recipient=user id).
+        recipient: (business as any).created_by?.id?.toString(),
         recipient_business: (business as any)._id?.toString(),
         category: NotificationCategory.BESPOKE,
         type: NotificationType.BESPOKE_QUOTE_REQUEST,
@@ -714,7 +715,8 @@ export class BespokeService {
     const vendorBiz = quote.vendor as any;
     const revDesign = quote.design as any;
     this.notificationsService.create({
-      recipient: vendorBiz._id?.toString(),
+      // Vendor's USER id, not the business id.
+      recipient: (vendorBiz as any).created_by?.id?.toString(),
       recipient_business: vendorBiz._id?.toString(),
       category: NotificationCategory.BESPOKE,
       type: NotificationType.BESPOKE_QUOTE_REVISION,

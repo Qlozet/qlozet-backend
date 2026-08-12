@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import {
   Notification,
@@ -26,6 +27,7 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private notificationModel: Model<NotificationDocument>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -50,11 +52,34 @@ export class NotificationsService {
       this.logger.log(
         `Notification created: [${data.type}] for user ${data.recipient}`,
       );
+      // Realtime ping → the gateway pushes it to the recipient's socket room.
+      this.eventEmitter.emit('notification.created', saved);
       return saved;
     } catch (error) {
       this.logger.error('Failed to create notification', error);
       throw error;
     }
+  }
+
+  /**
+   * Create a notification only if the recipient has no UNREAD notification of the
+   * same type for the same product. Prevents spamming e.g. a low-stock alert on
+   * every sale while the product stays low. Returns null when skipped.
+   */
+  async createUnique(
+    data: CreateNotificationDto,
+  ): Promise<NotificationDocument | null> {
+    const productId = data.metadata?.product_id;
+    if (data.recipient && productId) {
+      const exists = await this.notificationModel.exists({
+        recipient: new Types.ObjectId(data.recipient.toString()),
+        type: data.type,
+        'metadata.product_id': productId,
+        is_read: false,
+      });
+      if (exists) return null;
+    }
+    return this.create(data);
   }
 
   /**

@@ -19,6 +19,7 @@ import { BusinessEarningsCron } from './business-earning-cron';
 // Import modules instead of directly listing services
 import { LogisticsModule } from '../logistics/logistics.module';
 import { ProductModule } from '../products/products.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ProductModule } from '../products/products.module';
     ]),
     LogisticsModule,   // provides LogisticsService
     ProductModule,     // provides ProductService
+    NotificationsModule, // provides NotificationsService (payout notifications)
   ],
   controllers: [BusinessController],
   exports: [
