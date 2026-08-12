@@ -50,7 +50,57 @@ export class WebhookService {
     private platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectModel('BespokeDesign') private bespokeDesignModel: Model<any>,
     @InjectModel('BespokeQuote') private bespokeQuoteModel: Model<any>,
+    @InjectModel('Business') private businessModel: Model<any>,
   ) {}
+
+  /**
+   * Notify the vendor whose shipment changed status. The customer already gets
+   * their own update; this is the vendor-facing 'Shipping' notification.
+   */
+  private async notifyVendorShippingUpdate(
+    order: OrderDocument,
+    shipment: any,
+    status: ShipmentStatus,
+    trackingNumber: string,
+  ) {
+    try {
+      if (
+        status !== ShipmentStatus.IN_TRANSIT &&
+        status !== ShipmentStatus.DELIVERED
+      )
+        return;
+
+      const business = await this.businessModel
+        .findById(shipment?.business)
+        .select('created_by')
+        .lean();
+      const recipient = (business as any)?.created_by?.id?.toString();
+      if (!recipient) return;
+
+      const delivered = status === ShipmentStatus.DELIVERED;
+      await this.notificationsService.create({
+        recipient,
+        recipient_business: shipment?.business?.toString?.() ?? shipment?.business,
+        category: NotificationCategory.SHIPPING,
+        type: delivered
+          ? NotificationType.ORDER_DELIVERED
+          : NotificationType.ORDER_SHIPPED,
+        title: delivered ? 'Order delivered ✅' : 'Order in transit 🚚',
+        body: delivered
+          ? `Your shipment for order #${order.reference} was delivered. Payout will be scheduled shortly.`
+          : `Your shipment for order #${order.reference} is on its way. Tracking: ${trackingNumber}`,
+        metadata: {
+          order_id: order._id,
+          order_reference: order.reference,
+          tracking_number: trackingNumber,
+          shipment_status: status,
+        },
+        action_url: '/orders',
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to send vendor shipping notification: ${err.message}`);
+    }
+  }
   async handlePaystackWebhook(payload: any) {
     const { event, data } = payload;
     const transaction = await this.transactionService
@@ -538,6 +588,16 @@ export class WebhookService {
     }
 
     await order.save();
+
+    // ── Notify the vendor whose shipment moved ──
+    this.notifyVendorShippingUpdate(
+      order,
+      order.shipments[shipmentIndex],
+      mappedStatus,
+      trackingNumber,
+    ).catch((err) =>
+      this.logger.error('Failed to send vendor shipping notification', err),
+    );
 
     // ── Notify customer about delivery status ──
     this.notifyCustomerShippingUpdate(order, mappedStatus, trackingNumber).catch((err) =>

@@ -19,6 +19,12 @@ import {
   TransactionStatus,
 } from '../transactions/schema/transaction.schema';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
+import { Business, BusinessDocument } from './schemas/business.schema';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class BusinessEarningsCron {
@@ -43,7 +49,46 @@ export class BusinessEarningsCron {
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  /** Notify the vendor that a payout landed in their wallet. */
+  private async notifyPayout(earning: BusinessEarningDocument) {
+    try {
+      const business = await this.businessModel
+        .findById(earning.business)
+        .select('created_by business_name')
+        .lean();
+      const recipient = (business as any)?.created_by?.id?.toString();
+      if (!recipient) return;
+
+      const order = await this.orderModel
+        .findById(earning.order)
+        .select('reference')
+        .lean();
+
+      await this.notificationsService.create({
+        recipient,
+        recipient_business:
+          (earning.business as any)?.toString?.() ?? earning.business,
+        category: NotificationCategory.PAYMENT,
+        type: NotificationType.PAYOUT_RELEASED,
+        title: 'Payout released 💰',
+        body: `₦${Number(earning.net_amount).toLocaleString()} has been released to your wallet${(order as any)?.reference ? ` for order #${(order as any).reference}` : ''}.`,
+        metadata: {
+          order_id: earning.order,
+          order_reference: (order as any)?.reference,
+          amount: earning.net_amount,
+          milestone: earning.milestone,
+        },
+        action_url: '/wallet',
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to send payout notification: ${err.message}`);
+    }
+  }
 
   /**
    * Write a CREDIT transaction to the vendor's wallet ledger when an earning is
@@ -136,6 +181,9 @@ export class BusinessEarningsCron {
 
         // Record the vendor-facing CREDIT so this income shows in their ledger.
         await this.recordEarningCredit(earning, updatedWallet._id);
+
+        // Notify the vendor that the money is now spendable.
+        await this.notifyPayout(earning);
 
         this.logger.log(
           `Released ₦${earning.net_amount} to business ${earning.business} → wallet=${updatedWallet.balance}`,
