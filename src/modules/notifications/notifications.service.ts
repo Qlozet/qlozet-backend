@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import {
   Notification,
@@ -26,6 +27,7 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private notificationModel: Model<NotificationDocument>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -50,6 +52,8 @@ export class NotificationsService {
       this.logger.log(
         `Notification created: [${data.type}] for user ${data.recipient}`,
       );
+      // Realtime ping → the gateway pushes it to the recipient's socket room.
+      this.eventEmitter.emit('notification.created', saved);
       return saved;
     } catch (error) {
       this.logger.error('Failed to create notification', error);

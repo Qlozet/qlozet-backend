@@ -8,6 +8,7 @@ import {
   NotificationSchema,
 } from './schemas/notification.schema';
 import { JwtService } from '@nestjs/jwt';
+import { NotificationsGateway } from './notifications.gateway';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { JwtService } from '@nestjs/jwt';
     ]),
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, MailService, JwtService],
+  providers: [NotificationsService, MailService, JwtService, NotificationsGateway],
   exports: [NotificationsService, MailService, MongooseModule],
 })
 export class NotificationsModule {}
