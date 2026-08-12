@@ -22,6 +22,8 @@ import {
   PlatformSettings,
   PlatformSettingsSchema,
 } from '../platform/schema/platformSettings.schema';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -36,7 +38,9 @@ import {
       { name: Collection.name, schema: CollectionSchema },
       { name: Order.name, schema: OrderSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      { name: Business.name, schema: BusinessSchema },
     ]),
+    NotificationsModule, // provides NotificationsService (low-stock alerts)
   ],
   controllers: [ProductsController, DiscountController, CollectionController],
   providers: [JwtService, ProductService, DiscountService, CollectionService],

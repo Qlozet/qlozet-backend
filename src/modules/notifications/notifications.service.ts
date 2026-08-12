@@ -58,6 +58,27 @@ export class NotificationsService {
   }
 
   /**
+   * Create a notification only if the recipient has no UNREAD notification of the
+   * same type for the same product. Prevents spamming e.g. a low-stock alert on
+   * every sale while the product stays low. Returns null when skipped.
+   */
+  async createUnique(
+    data: CreateNotificationDto,
+  ): Promise<NotificationDocument | null> {
+    const productId = data.metadata?.product_id;
+    if (data.recipient && productId) {
+      const exists = await this.notificationModel.exists({
+        recipient: new Types.ObjectId(data.recipient.toString()),
+        type: data.type,
+        'metadata.product_id': productId,
+        is_read: false,
+      });
+      if (exists) return null;
+    }
+    return this.create(data);
+  }
+
+  /**
    * Create notifications for multiple recipients at once
    */
   async createMany(
