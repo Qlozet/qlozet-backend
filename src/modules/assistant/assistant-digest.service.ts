@@ -62,18 +62,22 @@ export class AssistantDigestService {
 
   /** Gather the metrics a digest is built from, all scoped to the business. */
   private async gatherMetrics(businessId: string) {
-    const [thisWeek, topProducts, payout] = await Promise.all([
+    // The digest summarises the week that just ended, so it must look BACK a
+    // full 7 days — not `this_week`, which is week-to-date and resolves to an
+    // empty [now, now) window at the Sunday-00:00 cron time, making every
+    // vendor look like they had zero orders (the bug behind "no digest ever").
+    const [lastWeek, topProducts, payout] = await Promise.all([
       this.tools.execute('get_sales_summary', businessId, {
-        period: 'this_week',
+        period: 'last_7_days',
       }),
       this.tools.execute('get_top_products', businessId, {
-        period: 'this_week',
+        period: 'last_7_days',
         limit: 3,
       }),
       this.tools.execute('get_payout_forecast', businessId, {}),
     ]);
     return {
-      sales_this_week: thisWeek?.data,
+      sales_last_7_days: lastWeek?.data,
       top_products: topProducts?.data,
       payout: payout?.data,
     };
@@ -120,7 +124,10 @@ export class AssistantDigestService {
     const metrics = await this.gatherMetrics(businessId);
 
     // Skip vendors with a completely empty week — nothing worth sending.
-    if (!metrics.sales_this_week || metrics.sales_this_week.order_count === 0) {
+    if (
+      !metrics.sales_last_7_days ||
+      metrics.sales_last_7_days.order_count === 0
+    ) {
       return null;
     }
 

@@ -24,7 +24,8 @@ export class AssistantDigestCron {
     return !!this.config.get<string>('ANTHROPIC_API_KEY');
   }
 
-  // Monday 07:00 — start-of-week summary of the week just gone.
+  // Sunday 00:00 (CronExpression.EVERY_WEEK = '0 0 * * 0') — summarises the
+  // last 7 days, i.e. the week that just ended.
   @Cron(CronExpression.EVERY_WEEK)
   async run() {
     if (!this.enabled()) {
