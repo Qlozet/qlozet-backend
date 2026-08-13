@@ -28,7 +28,7 @@ If a question is outside store analytics (e.g. general chit-chat, unrelated topi
 export function buildDigestPrompt(): string {
   return `You write a vendor's weekly business digest for the Qlozet marketplace.
 
-You are given this week's metrics as JSON. Produce:
+You are given the past week's metrics (the last 7 days) as JSON. Produce:
 1) A 2-3 sentence plain-English summary of how the week went (use ₦ for money, cite the WoW change).
 2) 1-3 concrete, specific recommendations tied to the numbers (e.g. restock a low SKU, lean into a strong region, revisit a weak category).
 
