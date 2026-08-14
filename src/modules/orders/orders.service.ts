@@ -2317,12 +2317,43 @@ export class OrderService {
             `Applying incremental penalty of ₦${incrementalPenalty} (total: ₦${totalPenaltyAmount}, ${penaltyPercent}%)`,
           );
 
-          // Update shipment penalty tracking
+          // Atomically CLAIM this penalty tier before applying it. Like the
+          // auto-reject cron, this runs on multiple instances / overlapping runs;
+          // the in-memory `daysLate <= late_penalty_days` guard above is
+          // check-then-act and lets both apply the same tier, double-penalizing
+          // the vendor and double-compensating the customer. Advancing
+          // late_penalty_days from < daysLate to daysLate atomically means only
+          // one instance (modifiedCount === 1) proceeds to deduct + refund.
+          const penaltyClaim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: {
+                  _id: (shipment as any)._id,
+                  late_penalty_days: { $lt: daysLate },
+                },
+              },
+            },
+            {
+              $set: {
+                'shipments.$.late_penalty_applied': true,
+                'shipments.$.late_penalty_amount': totalPenaltyAmount,
+                'shipments.$.late_penalty_days': daysLate,
+              },
+            },
+          );
+          if (penaltyClaim.modifiedCount !== 1) {
+            this.logger.warn(
+              `[LatePenalty] Penalty tier (${daysLate}d) for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
+            );
+            continue;
+          }
+
+          // Keep the in-memory doc in sync, then deduct from the order's recorded
+          // vendor earnings (safe: only the claim winner reaches here).
           shipment.late_penalty_applied = true;
           shipment.late_penalty_amount = totalPenaltyAmount;
           shipment.late_penalty_days = daysLate;
-
-          // Deduct from vendor earnings on the order
           order.vendor_earnings = Math.max(0, (order.vendor_earnings || 0) - incrementalPenalty);
 
           await order.save();
