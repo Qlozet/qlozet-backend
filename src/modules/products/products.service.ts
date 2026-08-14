@@ -139,6 +139,9 @@ export class ProductService {
       this.findById(id),
       this.getStockThresholds(),
     ]);
+    // Customer-facing PDP: a draft/archived product, or one from an unapproved
+    // vendor, must not be viewable — treat it as not found.
+    await this.assertPubliclyVisible(product);
     return withAvailability(product, thresholds);
   }
 
@@ -166,7 +169,47 @@ export class ProductService {
         { 'fabric.taxonomy.attributes': rx },
       ],
     });
-    return ids as Types.ObjectId[];
+    const approved = new Set(
+      (await this.getApprovedBusinessIds()).map((x) => x.toString()),
+    );
+    return (ids as Types.ObjectId[]).filter((id) =>
+      approved.has(id.toString()),
+    );
+  }
+
+  /**
+   * Business ids that are approved to sell — only their products may be shown to
+   * customers. Approved = status ∈ {approved, verified} and not deactivated.
+   * Every public/customer product query gates on this so products from
+   * pending / in-review / rejected / deactivated vendors never surface.
+   */
+  private async getApprovedBusinessIds(): Promise<Types.ObjectId[]> {
+    const ids = await this.businessModel.distinct('_id', {
+      status: { $in: ['approved', 'verified'] },
+      is_active: { $ne: false },
+    });
+    return ids as unknown as Types.ObjectId[];
+  }
+
+  /**
+   * Guard a single product for customer-facing exposure (PDP): it must be ACTIVE
+   * and belong to an approved vendor, otherwise it is treated as not found.
+   * findById itself stays ungated so internal callers can resolve any product.
+   */
+  private async assertPubliclyVisible(product: any): Promise<void> {
+    if (!product || product.status !== ProductStatus.ACTIVE) {
+      throw new NotFoundException('Product not found');
+    }
+    const bizId = (product.business as any)?._id ?? product.business;
+    const biz = await this.businessModel
+      .findById(bizId)
+      .select('status is_active')
+      .lean();
+    const approved =
+      !!biz &&
+      ['approved', 'verified'].includes((biz as any).status) &&
+      (biz as any).is_active !== false;
+    if (!approved) throw new NotFoundException('Product not found');
   }
 
   /**
@@ -278,20 +321,20 @@ export class ProductService {
 
     const filter: any = {};
 
-    // ✅ BUSINESS FILTER (THIS IS THE KEY)
-    // Business filter is now handled below in the andClauses
-    if (!business_id) {
-      // If business_id is NOT passed, it's a public storefront query
-      // Strictly enforce ACTIVE status to prevent leaking drafts/archived items
-      filter.status = ProductStatus.ACTIVE;
-    }
+    // Public/customer catalog. ONLY active products from APPROVED vendors are
+    // ever visible:
+    //  • status is forced to ACTIVE — the incoming `status` param is ignored so
+    //    it can't be abused (?status=draft) to surface unpublished products.
+    //  • the vendor-approval gate hides products from pending / in-review /
+    //    rejected / deactivated vendors, even when a specific business_id is
+    //    requested (an unapproved vendor's storefront then returns nothing).
+    // Vendors view their own drafts via the @Roles(VENDOR) findByVendor path,
+    // which is unaffected by this.
+    filter.status = ProductStatus.ACTIVE;
+    filter.business = { $in: await this.getApprovedBusinessIds() };
 
     if (kind) {
       filter.kind = kind;
-    }
-
-    if (status) {
-      filter.status = status;
     }
 
     // 🏷️ TAXONOMY FILTERS
@@ -803,7 +846,14 @@ export class ProductService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    return user.wishlist || [];
+    // Drop wishlisted items whose vendor is no longer approved.
+    const approved = new Set(
+      (await this.getApprovedBusinessIds()).map((x) => x.toString()),
+    );
+    return ((user.wishlist as any[]) || []).filter((p) => {
+      const bizId = ((p?.business as any)?._id ?? p?.business)?.toString();
+      return bizId && approved.has(bizId);
+    });
   }
 
   async getTrendingProductsThisWeek() {
@@ -850,6 +900,13 @@ export class ProductService {
         },
       },
       { $unwind: { path: '$business', preserveNullAndEmptyArrays: true } },
+      // Only surface products from approved vendors.
+      {
+        $match: {
+          'business.status': { $in: ['approved', 'verified'] },
+          'business.is_active': { $ne: false },
+        },
+      },
       {
         $project: {
           id: '$_id',
