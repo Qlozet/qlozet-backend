@@ -3,7 +3,9 @@ import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export enum BusinessStatus {
   PENDING = 'pending',
-  IN_REVIEW = 'in_review',
+  // Hyphen, to match the persisted values (the `status` @Prop enum below and the
+  // 'in-review' string used by updateBusinessStatus / the platform route).
+  IN_REVIEW = 'in-review',
   APPROVED = 'approved',
   VERIFIED = 'verified',
   REJECTED = 'rejected',
