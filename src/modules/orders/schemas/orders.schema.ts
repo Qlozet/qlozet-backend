@@ -157,6 +157,10 @@ export class OrderItem {
     variant_total: number;
     accessories_total: number;
     addons_total: number;
+    // Customer-supplied external fabric cost (fabric vendor's revenue). Recorded
+    // here for the books and added to the order total, but NOT in `final` /
+    // total_price (which drives the tailor's earnings).
+    external_fabric?: number;
     before_discount: number;
     discount: number;
     final: number;

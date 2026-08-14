@@ -293,7 +293,17 @@ export class OrderService {
         }
       }
 
-      const finalTotal = total + totalShippingFee;
+      // Customer-supplied external fabric ("use my own fabric") is billed at the
+      // order level — added to the goods subtotal (and thus the charged total) so
+      // the customer pays for the fabric, without inflating any item's
+      // total_price (which drives the tailor's earnings; the fabric is the fabric
+      // vendor's revenue, reconciled separately).
+      const totalExternalFabric = processedItems.reduce(
+        (sum, it) => sum + ((it as any).pricing?.external_fabric || 0),
+        0,
+      );
+      const goodsSubtotal = subtotal + totalExternalFabric;
+      const finalTotal = goodsSubtotal + totalShippingFee;
 
       // Every standard order must carry at least one shipment so the vendor can
       // fulfill it (fulfillment needs the shipment's cached rate token, which
@@ -336,7 +346,7 @@ export class OrderService {
         address: shippingAddress,
         items: normalizedItems,
         status: 'pending',
-        subtotal,
+        subtotal: goodsSubtotal,
         shipping_fee: totalShippingFee,
         total: finalTotal,
         shipments,
