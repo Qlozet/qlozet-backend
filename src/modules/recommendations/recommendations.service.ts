@@ -736,7 +736,18 @@ export class RecommendationsService {
         _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) },
         status: 'active',
       })
-      .populate('business', 'business_name business_logo_url accepts_external_fabric')
+      .populate({
+        path: 'business',
+        // Only approved, active vendors. A product whose vendor fails this
+        // populates as business:null and is dropped in the merge below, so no
+        // rec feed surfaces products from pending / in-review / rejected /
+        // deactivated vendors.
+        match: {
+          status: { $in: ['approved', 'verified'] },
+          is_active: { $ne: false },
+        },
+        select: 'business_name business_logo_url accepts_external_fabric',
+      })
       .select(
         'name kind base_price business clothing fabric accessory status ' +
         'average_rating total_ratings slug',
@@ -752,7 +763,9 @@ export class RecommendationsService {
     return items
       .map((item) => {
         const product = productMap.get(item.itemId);
-        if (!product) return null; // Skip: no matching active product
+        // Drop items with no active product, or whose vendor isn't approved
+        // (the populate `match` above left business null).
+        if (!product || !product.business) return null;
 
         return {
           // Recommendation metadata (keep)
