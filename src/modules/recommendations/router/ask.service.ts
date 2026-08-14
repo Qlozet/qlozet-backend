@@ -264,7 +264,16 @@ export class AskService {
         _id: { $in: validIds.map((id) => new Types.ObjectId(id)) },
         status: 'active',
       })
-      .populate('business', 'business_name business_logo_url')
+      .populate({
+        path: 'business',
+        // Only approved, active vendors — unapproved vendors' products populate
+        // business:null and are dropped below.
+        match: {
+          status: { $in: ['approved', 'verified'] },
+          is_active: { $ne: false },
+        },
+        select: 'business_name business_logo_url',
+      })
       .select(
         'name kind base_price business clothing fabric accessory status ' +
         'average_rating total_ratings slug',
@@ -278,7 +287,8 @@ export class AskService {
     return summaries
       .map((summary) => {
         const product = productMap.get(summary.itemId);
-        if (!product) return null; // Skip draft/deleted products
+        // Skip draft/deleted products, or products from unapproved vendors.
+        if (!product || !product.business) return null;
         return {
           ...summary,
           product,

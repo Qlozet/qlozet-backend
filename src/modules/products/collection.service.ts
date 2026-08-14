@@ -4,6 +4,7 @@ import { FilterQuery, Model, Types } from 'mongoose';
 import { Collection, CollectionDocument, CollectionScope } from './schemas/collection.schema';
 import { CreateCollectionDto, CreatePlatformCollectionDto, UpdateCollectionDto } from './dto/collection.dto';
 import { Product, ProductDocument } from './schemas';
+import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { Utils } from '../../common/utils/pagination';
 import { OnEvent } from '@nestjs/event-emitter';
 
@@ -16,7 +17,21 @@ export class CollectionService {
     private readonly collectionModel: Model<CollectionDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
   ) {}
+
+  /**
+   * Business ids approved to sell — only their products are shown to customers.
+   * Collection product pages are public, so they must gate on this too.
+   */
+  private async getApprovedBusinessIds(): Promise<Types.ObjectId[]> {
+    const ids = await this.businessModel.distinct('_id', {
+      status: { $in: ['approved', 'verified'] },
+      is_active: { $ne: false },
+    });
+    return ids as unknown as Types.ObjectId[];
+  }
 
   /**
    * Get all collections
@@ -352,16 +367,20 @@ export class CollectionService {
   }> {
     const { take, skip } = await Utils.getPagination(page, limit);
 
+    // Public page: only active products from approved vendors.
+    const query = {
+      collections: new Types.ObjectId(collectionId),
+      status: 'active',
+      business: { $in: await this.getApprovedBusinessIds() },
+    };
     const [products, totalCount] = await Promise.all([
       this.productModel
-        .find({ collections: new Types.ObjectId(collectionId) })
+        .find(query)
         .skip(skip)
         .limit(take)
         .populate('collections')
         .exec(),
-      this.productModel.countDocuments({
-        collections: new Types.ObjectId(collectionId),
-      }),
+      this.productModel.countDocuments(query),
     ]);
 
     return Utils.getPagingData(
@@ -417,8 +436,20 @@ export class CollectionService {
         .exec(),
       this.collectionModel.countDocuments(collectionFilter),
     ]);
+    // Public vendor storefront: show nothing if the vendor isn't approved, and
+    // only their active products.
+    const approved = new Set(
+      (await this.getApprovedBusinessIds()).map((x) => x.toString()),
+    );
+    if (!approved.has(String(business))) {
+      return Utils.getPagingData({ count: 0, rows: [] }, page, limit);
+    }
     const allProducts = await this.productModel
-      .find({ business, collections: { $in: collections.map((c) => c._id) } })
+      .find({
+        business,
+        collections: { $in: collections.map((c) => c._id) },
+        status: 'active',
+      })
       .populate('collections')
       .exec();
 
@@ -608,13 +639,15 @@ export class CollectionService {
 
     const { take, skip } = await Utils.getPagination(page, limit);
 
+    // Public page: only active products from approved vendors.
+    const pcQuery = {
+      collections: collection._id,
+      status: 'active',
+      business: { $in: await this.getApprovedBusinessIds() },
+    };
     const [products, totalCount] = await Promise.all([
-      this.productModel
-        .find({ collections: collection._id })
-        .skip(skip)
-        .limit(take)
-        .lean(),
-      this.productModel.countDocuments({ collections: collection._id }),
+      this.productModel.find(pcQuery).skip(skip).limit(take).lean(),
+      this.productModel.countDocuments(pcQuery),
     ]);
 
     return {

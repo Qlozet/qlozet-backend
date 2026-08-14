@@ -907,6 +907,7 @@ export class BusinessService implements OnModuleInit {
             {
               $match: {
                 $expr: { $eq: ['$business', '$$businessId'] },
+                status: 'active',
               },
             },
             { $sample: { size: 3 } },
@@ -1080,6 +1081,7 @@ export class BusinessService implements OnModuleInit {
             {
               $match: {
                 $expr: { $eq: ['$business', '$$businessId'] },
+                status: 'active',
               },
             },
 
@@ -1257,6 +1259,8 @@ export class BusinessService implements OnModuleInit {
             {
               $match: {
                 $expr: { $eq: ['$business', '$$businessId'] },
+                // Only active products count toward the vendor's public rating.
+                status: 'active',
               },
             },
             {
