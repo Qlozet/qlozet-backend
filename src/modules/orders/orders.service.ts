@@ -161,6 +161,14 @@ export class OrderService {
           style_selections: selections.style_selection || [],
           accessory_selections: selections.accessory_selection || [],
           addon_selections: selections.addon_selection || [],
+          // Customer-supplied external fabric (schema fields on OrderItem). The
+          // vendor read populates `applied_fabric` → fabric name/image/source,
+          // so the tailor sees which foreign fabric to use. Without this the
+          // populate resolves to null and the fabric card is always empty.
+          applied_fabric: (item as any).applied_fabric_id
+            ? ObjectIdUtils.toObjectId((item as any).applied_fabric_id)
+            : null,
+          applied_fabric_yards: (item as any).applied_fabric_yards ?? null,
           // Per-item price (computed in processOrderItems). Must NOT be the
           // whole-order total, otherwise recordBusinessEarnings over-credits
           // each vendor on multi-item orders.
@@ -285,7 +293,17 @@ export class OrderService {
         }
       }
 
-      const finalTotal = total + totalShippingFee;
+      // Customer-supplied external fabric ("use my own fabric") is billed at the
+      // order level — added to the goods subtotal (and thus the charged total) so
+      // the customer pays for the fabric, without inflating any item's
+      // total_price (which drives the tailor's earnings; the fabric is the fabric
+      // vendor's revenue, reconciled separately).
+      const totalExternalFabric = processedItems.reduce(
+        (sum, it) => sum + ((it as any).pricing?.external_fabric || 0),
+        0,
+      );
+      const goodsSubtotal = subtotal + totalExternalFabric;
+      const finalTotal = goodsSubtotal + totalShippingFee;
 
       // Every standard order must carry at least one shipment so the vendor can
       // fulfill it (fulfillment needs the shipment's cached rate token, which
@@ -328,7 +346,7 @@ export class OrderService {
         address: shippingAddress,
         items: normalizedItems,
         status: 'pending',
-        subtotal,
+        subtotal: goodsSubtotal,
         shipping_fee: totalShippingFee,
         total: finalTotal,
         shipments,
@@ -761,6 +779,10 @@ export class OrderService {
           note: item.note,
           quantity: item.quantity,
           selections: finalSelections,
+          // Carry the customer's applied external fabric through so it lands on
+          // the persisted order item (normalizedItems below reads these).
+          applied_fabric_id: item.applied_fabric_id,
+          applied_fabric_yards: item.applied_fabric_yards,
           total_price: totalPrice,
           pricing,
           product_snapshot: this.sanitizeProductSnapshot(product),

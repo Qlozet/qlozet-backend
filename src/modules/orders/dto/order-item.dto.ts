@@ -36,4 +36,21 @@ export class ProcessedOrderItemDto {
   @ValidateNested()
   @Type(() => OrderItemSelectionsDto)
   selections: OrderItemSelectionsDto;
+
+  @ApiPropertyOptional({
+    description:
+      "Product id of a fabric the customer supplies from another vendor (external/'use my own fabric'). Carried onto the order item so the tailor can see it.",
+    type: String,
+  })
+  @IsMongoId()
+  @IsOptional()
+  applied_fabric_id?: Types.ObjectId;
+
+  @ApiPropertyOptional({
+    description: 'Yards of the applied external fabric.',
+  })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  applied_fabric_yards?: number;
 }

@@ -1495,6 +1495,56 @@ export class BusinessService implements OnModuleInit {
 
       totalOrderNet += net;
       totalOrderCommission += commission;
+
+      // ── Fabric-vendor payout for a customer-supplied external fabric ──
+      // The applied fabric is the FABRIC vendor's product, so its revenue
+      // (recorded on the item as pricing.external_fabric, deliberately kept OUT
+      // of the tailor's total_price above) is a SEPARATE earning credited to the
+      // fabric vendor — released on payment like a normal fabric sale, with the
+      // same platform commission. Runs in the same idempotent pass, so no
+      // double-credit on a retried webhook.
+      const externalFabric = (item as any).pricing?.external_fabric || 0;
+      const appliedFabricId = (item as any).applied_fabric;
+      if (externalFabric > 0 && appliedFabricId) {
+        try {
+          const fabricProduct = await this.productService.findById(
+            String(appliedFabricId),
+          );
+          const fabricVendorId =
+            (fabricProduct?.business as any)?._id ?? fabricProduct?.business;
+          if (fabricVendorId) {
+            const fabricCommission =
+              commissionType === 'fixed'
+                ? Math.min(commissionFlat, externalFabric)
+                : externalFabric * (commissionPercent / 100);
+            const fabricNet = externalFabric - fabricCommission;
+            await this.businessEarningsModel.create({
+              business: fabricVendorId,
+              order: order._id,
+              amount: externalFabric,
+              commission: fabricCommission,
+              net_amount: fabricNet,
+              released: false,
+              release_date: null,
+              milestone: 'completion',
+            });
+            await this.walletModel.findOneAndUpdate(
+              { business: fabricVendorId },
+              { $inc: { pending_balance: fabricNet } },
+              { upsert: true },
+            );
+            totalOrderNet += fabricNet;
+            totalOrderCommission += fabricCommission;
+            this.logger.log(
+              `Fabric-vendor earning: business ${fabricVendorId} +₦${fabricNet} (external fabric) on order ${order._id}`,
+            );
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `Could not record fabric-vendor earning for order ${order._id}: ${e?.message}`,
+          );
+        }
+      }
     }
 
     // Write the totals back to the order so the vendor can see per-order earnings

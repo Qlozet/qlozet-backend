@@ -119,6 +119,24 @@ export class PriceCalculationService {
     return finalTotal;
   }
 
+  /**
+   * Cost of a customer-supplied external ("use my own") fabric applied to a
+   * clothing item: required_yards × price_per_yard of the chosen fabric product.
+   * Returns 0 when the item has no applied fabric. Mirrors the checkout-preview
+   * formula. NOTE: this is the fabric vendor's revenue, not the tailor's, so it
+   * is tracked separately (pricing.external_fabric) and added to the ORDER total
+   * — never folded into the item's total_price (which drives tailor earnings).
+   */
+  async externalFabricCost(item: ProcessedOrderItem): Promise<number> {
+    const fabricId = (item as any).applied_fabric_id;
+    const yards = (item as any).applied_fabric_yards;
+    if (!fabricId || !yards || yards <= 0) return 0;
+    const fab: any = await this.productModel.findById(fabricId).lean();
+    const ppy = fab?.fabric?.price_per_yard;
+    if (!ppy || ppy <= 0) return 0;
+    return this.round(ppy * yards);
+  }
+
   private normalizeSelections(
     selections: NormalizedSelections,
   ): NormalizedSelections {
@@ -306,6 +324,7 @@ export class PriceCalculationService {
     variant_total: number;
     accessories_total: number;
     addons_total: number;
+    external_fabric: number;
     before_discount: number;
     discount: number;
     final: number;
@@ -319,7 +338,7 @@ export class PriceCalculationService {
 
     const empty = {
       base: 0, styles_total: 0, fabric_total: 0, variant_total: 0,
-      accessories_total: 0, addons_total: 0,
+      accessories_total: 0, addons_total: 0, external_fabric: 0,
     };
 
     if (product.kind === ProductKind.CLOTHING) {
@@ -373,6 +392,10 @@ export class PriceCalculationService {
         if (d) discount = Math.min(this.applyDiscountToTotal(before, d), before);
       }
       const final = Math.max(0, before - discount);
+      // External fabric is recorded but NOT added to `final`/total_price — it is
+      // the fabric vendor's revenue and is billed at the order level, so folding
+      // it in here would over-credit the tailor's earnings.
+      const externalFabric = await this.externalFabricCost(item);
       return {
         base: this.round(base),
         styles_total: this.round(styles),
@@ -380,6 +403,7 @@ export class PriceCalculationService {
         variant_total: this.round(variant),
         accessories_total: this.round(accessories),
         addons_total: this.round(addons),
+        external_fabric: this.round(externalFabric),
         before_discount: this.round(before),
         discount: this.round(discount),
         final: this.round(final),

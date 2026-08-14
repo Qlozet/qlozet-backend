@@ -57,6 +57,12 @@ export interface ProcessedOrderItem {
   quantity?: number;
   total_price: number;
 
+  // Customer-supplied external fabric (from another vendor) applied to this
+  // clothing item — carried from the cart/DTO onto the persisted order item so
+  // the tailor can see which foreign fabric to use.
+  applied_fabric_id?: Types.ObjectId;
+  applied_fabric_yards?: number;
+
   // Product snapshots at time of order
   product_snapshot?: any;
   clothing_snapshot?: any;
