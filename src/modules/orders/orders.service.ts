@@ -2147,22 +2147,50 @@ export class OrderService {
             `[AutoReject] Auto-rejected shipment for ${businessName} on order ${order.reference}. Refund: ₦${refundAmount}`,
           );
 
-          // Process partial refund
-          this.processPartialRefund(
-            order as OrderDocument,
-            refundAmount,
-            `Auto-rejected: ${businessName} did not confirm within 24h`,
-          ).catch((err) =>
-            this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
+          // Atomically CLAIM this shipment's refund before issuing it. The cron
+          // is not single-flight (two backend instances, or overlapping runs,
+          // both load the same IN_REVIEW orders), so without this both would
+          // refund the customer and reverse earnings twice. Only the instance
+          // whose $set actually flips `refunded` (modifiedCount === 1) proceeds;
+          // the loser's later order.save() only $sets its own modified paths, so
+          // it won't reset this flag.
+          const refundClaim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: {
+                  _id: (shipment as any)._id,
+                  refunded: { $ne: true },
+                },
+              },
+            },
+            { $set: { 'shipments.$.refunded': true } },
           );
 
-          // Reverse business earnings for the auto-rejected vendor
-          this.reverseBusinessEarnings(
-            order as OrderDocument,
-            shipment.business.toString(),
-          ).catch((err) =>
-            this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
-          );
+          if (refundClaim.modifiedCount === 1) {
+            (shipment as any).refunded = true; // keep the in-memory doc in sync
+
+            // Process partial refund
+            this.processPartialRefund(
+              order as OrderDocument,
+              refundAmount,
+              `Auto-rejected: ${businessName} did not confirm within 24h`,
+            ).catch((err) =>
+              this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
+            );
+
+            // Reverse business earnings for the auto-rejected vendor
+            this.reverseBusinessEarnings(
+              order as OrderDocument,
+              shipment.business.toString(),
+            ).catch((err) =>
+              this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
+            );
+          } else {
+            this.logger.warn(
+              `[AutoReject] Refund for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
+            );
+          }
 
           // Notify customer
           this.notificationsService.create({

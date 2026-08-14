@@ -246,6 +246,12 @@ export class VendorShipment {
   @Prop({ type: String })
   rejection_reason?: string;
 
+  // Set atomically the moment this shipment's auto-reject refund is issued, so a
+  // second concurrent cron instance (or an overlapping run) cannot double-refund
+  // the customer / double-reverse the vendor's earnings.
+  @Prop({ type: Boolean, default: false })
+  refunded: boolean;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 
