@@ -111,27 +111,34 @@ export class WalletsService {
 
   // Credit wallet after successful funding
   async creditWallet(walletId: string, amount: number) {
-    const wallet = await this.walletModel.findById(walletId);
+    // Atomic $inc — NOT read-modify-write. Refunds are frequently issued
+    // concurrently (e.g. the auto-reject cron fires many at once, often for the
+    // same customer), and `balance += amount; save()` loses all but the last
+    // write — so recorded refunds never reach the balance. $inc is race-safe.
+    const wallet = await this.walletModel.findByIdAndUpdate(
+      walletId,
+      { $inc: { balance: amount }, $set: { last_transaction_at: new Date() } },
+      { new: true },
+    );
     if (!wallet) throw new NotFoundException('Wallet not found');
-
-    wallet.balance += amount;
-    wallet.last_transaction_at = new Date();
-    await wallet.save();
-
     return wallet;
   }
 
   // Debit wallet
   async debitWallet(walletId: string, amount: number) {
-    const wallet = await this.walletModel.findById(walletId);
-    if (!wallet) throw new NotFoundException('Wallet not found');
-    if (wallet.balance < amount)
+    // Atomic conditional debit: only applies when the balance actually covers
+    // it, so concurrent debits can neither overdraw nor lose updates.
+    const wallet = await this.walletModel.findOneAndUpdate(
+      { _id: walletId, balance: { $gte: amount } },
+      { $inc: { balance: -amount }, $set: { last_transaction_at: new Date() } },
+      { new: true },
+    );
+    if (!wallet) {
+      // Disambiguate: missing wallet vs insufficient funds.
+      const exists = await this.walletModel.exists({ _id: walletId });
+      if (!exists) throw new NotFoundException('Wallet not found');
       throw new BadRequestException('Insufficient balance');
-
-    wallet.balance -= amount;
-    wallet.last_transaction_at = new Date();
-    await wallet.save();
-
+    }
     return wallet;
   }
 

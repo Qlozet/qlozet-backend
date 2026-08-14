@@ -2147,22 +2147,50 @@ export class OrderService {
             `[AutoReject] Auto-rejected shipment for ${businessName} on order ${order.reference}. Refund: ₦${refundAmount}`,
           );
 
-          // Process partial refund
-          this.processPartialRefund(
-            order as OrderDocument,
-            refundAmount,
-            `Auto-rejected: ${businessName} did not confirm within 24h`,
-          ).catch((err) =>
-            this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
+          // Atomically CLAIM this shipment's refund before issuing it. The cron
+          // is not single-flight (two backend instances, or overlapping runs,
+          // both load the same IN_REVIEW orders), so without this both would
+          // refund the customer and reverse earnings twice. Only the instance
+          // whose $set actually flips `refunded` (modifiedCount === 1) proceeds;
+          // the loser's later order.save() only $sets its own modified paths, so
+          // it won't reset this flag.
+          const refundClaim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: {
+                  _id: (shipment as any)._id,
+                  refunded: { $ne: true },
+                },
+              },
+            },
+            { $set: { 'shipments.$.refunded': true } },
           );
 
-          // Reverse business earnings for the auto-rejected vendor
-          this.reverseBusinessEarnings(
-            order as OrderDocument,
-            shipment.business.toString(),
-          ).catch((err) =>
-            this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
-          );
+          if (refundClaim.modifiedCount === 1) {
+            (shipment as any).refunded = true; // keep the in-memory doc in sync
+
+            // Process partial refund
+            this.processPartialRefund(
+              order as OrderDocument,
+              refundAmount,
+              `Auto-rejected: ${businessName} did not confirm within 24h`,
+            ).catch((err) =>
+              this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
+            );
+
+            // Reverse business earnings for the auto-rejected vendor
+            this.reverseBusinessEarnings(
+              order as OrderDocument,
+              shipment.business.toString(),
+            ).catch((err) =>
+              this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
+            );
+          } else {
+            this.logger.warn(
+              `[AutoReject] Refund for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
+            );
+          }
 
           // Notify customer
           this.notificationsService.create({
@@ -2289,12 +2317,43 @@ export class OrderService {
             `Applying incremental penalty of ₦${incrementalPenalty} (total: ₦${totalPenaltyAmount}, ${penaltyPercent}%)`,
           );
 
-          // Update shipment penalty tracking
+          // Atomically CLAIM this penalty tier before applying it. Like the
+          // auto-reject cron, this runs on multiple instances / overlapping runs;
+          // the in-memory `daysLate <= late_penalty_days` guard above is
+          // check-then-act and lets both apply the same tier, double-penalizing
+          // the vendor and double-compensating the customer. Advancing
+          // late_penalty_days from < daysLate to daysLate atomically means only
+          // one instance (modifiedCount === 1) proceeds to deduct + refund.
+          const penaltyClaim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: {
+                  _id: (shipment as any)._id,
+                  late_penalty_days: { $lt: daysLate },
+                },
+              },
+            },
+            {
+              $set: {
+                'shipments.$.late_penalty_applied': true,
+                'shipments.$.late_penalty_amount': totalPenaltyAmount,
+                'shipments.$.late_penalty_days': daysLate,
+              },
+            },
+          );
+          if (penaltyClaim.modifiedCount !== 1) {
+            this.logger.warn(
+              `[LatePenalty] Penalty tier (${daysLate}d) for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
+            );
+            continue;
+          }
+
+          // Keep the in-memory doc in sync, then deduct from the order's recorded
+          // vendor earnings (safe: only the claim winner reaches here).
           shipment.late_penalty_applied = true;
           shipment.late_penalty_amount = totalPenaltyAmount;
           shipment.late_penalty_days = daysLate;
-
-          // Deduct from vendor earnings on the order
           order.vendor_earnings = Math.max(0, (order.vendor_earnings || 0) - incrementalPenalty);
 
           await order.save();
