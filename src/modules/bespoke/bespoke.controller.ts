@@ -133,7 +133,13 @@ export class BespokeController {
     );
   }
 
+  // Dual customer/vendor route. It MUST declare @Roles so the RolesGuard runs
+  // and populates req.business for vendors — without it the guard short-circuits
+  // (no roles = allow, set nothing), req.business is undefined, and a vendor
+  // request wrongly falls to the customer branch below and 404s on its own
+  // quote. That was the root cause of vendor quotes reading back as empty.
   @Get('quotes/:id')
+  @Roles(UserType.VENDOR, UserType.CUSTOMER)
   @ApiOperation({ summary: 'Get quote detail (customer or vendor)' })
   @ApiParam({ name: 'id', description: 'Quote ID' })
   async getQuoteDetail(@Param('id') id: string, @Req() req: any) {
