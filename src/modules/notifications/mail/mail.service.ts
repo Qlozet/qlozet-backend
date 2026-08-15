@@ -398,6 +398,43 @@ export class MailService {
     }
   }
 
+  // For an EXISTING Qlozet user added to a vendor team: no temporary password —
+  // they sign in with their own credentials. (Sending a temp password here would
+  // be both wrong, since it's never saved, and insecure, since it would reset a
+  // real account's login.)
+  async sendTeamAddedEmail(
+    to: string,
+    name: string,
+    role: string,
+    businessName: string,
+  ) {
+    try {
+      const loginUrl = `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qlozet-vert.vercel.app'}/auth/sign-in`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #2C1810;">
+          <h2 style="color: #2C1810;">You've been added to ${businessName}</h2>
+          <p>Hello <strong>${name}</strong>,</p>
+          <p>You've been added to <strong>${businessName}</strong> on Qlozet as a <strong>${role}</strong>.</p>
+          <p>Because you already have a Qlozet account, just sign in with your <strong>existing email and password</strong> — no new password is needed. After signing in you can switch to ${businessName}.</p>
+          <p style="margin:22px 0;">
+            <a href="${loginUrl}" target="_blank"
+               style="display:inline-block;background:#2C1810;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600;">Sign in</a>
+          </p>
+          <p style="color:#8A7C6E;font-size:13px;">Forgot your password? Use "Forgot password" on the sign-in page.</p>
+        </div>`;
+      await this.mailerService.sendMail({
+        to,
+        subject: `You've been added to ${businessName} on Qlozet`,
+        html,
+      });
+      console.log('✅ Team added email sent successfully to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send team added email:', error);
+      throw error;
+    }
+  }
+
   // ================================================================
   // BESPOKE QUOTE EMAIL METHODS
   // ================================================================
