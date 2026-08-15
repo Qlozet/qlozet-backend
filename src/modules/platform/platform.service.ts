@@ -98,10 +98,17 @@ export class PlatformService {
     const usdPrice = settings.token_price.usd.amount;
 
     // Convert to NGN using your currency service
-    const newNgnPrice = await this.currencyService.convertUsdTo(
+    const rawNgnPrice = await this.currencyService.convertUsdTo(
       usdPrice,
       'NGN',
     );
+
+    // Store to kobo precision (2 dp). The raw FX rate yields many decimals, so
+    // `quantity × price` produces a fractional-kobo total that Paystack rejects
+    // ("amount must be an integer") and that makes the displayed price disagree
+    // with the charged one. Rounding the per-token price to whole kobo keeps
+    // every purchase total a whole number of kobo.
+    const newNgnPrice = Math.round(rawNgnPrice * 100) / 100;
 
     settings.token_price.ngn.amount = newNgnPrice;
     settings.token_price.ngn.last_updated = new Date();
