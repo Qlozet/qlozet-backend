@@ -52,8 +52,9 @@ export class TeamService {
     try {
       const token = randomBytes(24).toString('hex');
       const expires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h
-      const tempPassword = randomBytes(6).toString('hex');
-      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+      // Only a brand-NEW user gets a temporary password; an existing Qlozet user
+      // keeps their own credentials. Generated inside the new-user branch below.
+      let tempPassword: string | null = null;
 
       const role = await this.roleModel.findById(dto.role).session(session);
       if (!role) throw new BadRequestException('Role not found.');
@@ -70,6 +71,8 @@ export class TeamService {
 
       if (!user) {
         isNewUser = true; // 👈 mark as new
+        tempPassword = randomBytes(6).toString('hex');
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
         user = new this.userModel({
           full_name: dto.full_name,
           email: dto.email,
@@ -129,14 +132,35 @@ export class TeamService {
       await session.commitTransaction();
       session.endSession();
 
-      // ✅ Send email after transaction
-      this.mailService.sendTeamInviteEmail(
-        dto.email,
-        dto.full_name,
-        role.name,
-        business.business_name,
-        tempPassword,
-      );
+      // ✅ Send email after transaction. A brand-new user gets a temporary
+      // password to sign in with. An EXISTING Qlozet user was NOT given a new
+      // password (resetting it would break their existing login), so they get a
+      // "use your existing login" email instead — previously the temp password
+      // was emailed to them too but never saved, so it never worked.
+      if (isNewUser && tempPassword) {
+        this.mailService
+          .sendTeamInviteEmail(
+            dto.email,
+            dto.full_name,
+            role.name,
+            business.business_name,
+            tempPassword,
+          )
+          .catch((err) =>
+            this.logger.warn(`Failed to send team invite email: ${err.message}`),
+          );
+      } else {
+        this.mailService
+          .sendTeamAddedEmail(
+            dto.email,
+            dto.full_name,
+            role.name,
+            business.business_name,
+          )
+          .catch((err) =>
+            this.logger.warn(`Failed to send team added email: ${err.message}`),
+          );
+      }
 
       // In-app notification to business owner. The recipient MUST be the
       // vendor's USER id (notifications are queried by recipient=user id) — the
