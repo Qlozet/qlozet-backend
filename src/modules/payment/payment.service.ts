@@ -67,13 +67,25 @@ export class PaymentService {
         );
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         email,
-        amount: transaction.amount * 100, // Paystack uses kobo
+        // Kobo, integer — Math.round guards against float artefacts on
+        // fractional naira amounts (Paystack rejects non-integer amounts).
+        amount: Math.round(transaction.amount * 100),
         reference: transaction.reference,
-        currency: transaction.currency,
-        callback_url: `${FRONTEND_URL}/payment/verify`,
+        currency: transaction.currency || 'NGN',
       };
+      // Only send a callback_url when FRONTEND_URL is configured — otherwise it
+      // becomes "undefined/payment/verify", which Paystack rejects as an invalid
+      // URL (a 400 that surfaced here as a generic 502). With it omitted,
+      // Paystack falls back to the dashboard-configured callback.
+      if (FRONTEND_URL) {
+        payload.callback_url = `${FRONTEND_URL}/payment/verify`;
+      } else {
+        this.logger?.warn(
+          'FRONTEND_URL not set — initializing Paystack without a callback_url',
+        );
+      }
 
       const response: any = await firstValueFrom(
         this.httpService.post(
@@ -122,13 +134,19 @@ export class PaymentService {
       if (error instanceof HttpException) {
         throw error;
       }
+      // Surface Paystack's actual reason instead of a blanket message — an
+      // opaque 502 makes "invalid key" / "invalid callback" impossible to
+      // diagnose from the client. Paystack error bodies are safe to relay.
+      const paystackMessage: string | undefined = error?.response?.data?.message;
       this.logger?.error(
-        'Paystack payment initialization failed',
+        `Paystack payment initialization failed: ${paystackMessage || error?.message}`,
         error?.response?.data || error.stack || error,
       );
 
       throw new BadGatewayException(
-        'Unable to initialize payment at this time. Please try again.',
+        paystackMessage
+          ? `Unable to initialize payment: ${paystackMessage}`
+          : 'Unable to initialize payment at this time. Please try again.',
       );
     }
   }
@@ -299,7 +317,7 @@ export class PaymentService {
 
     const payload = {
       source: 'balance',
-      amount: amount * 100, // Paystack uses kobo
+      amount: Math.round(amount * 100), // Paystack uses kobo (integer)
       recipient: business.transfer_recipient_code,
       reason: reason || `Payout for ${business.business_name}`,
       reference: transaction.reference,
