@@ -1041,7 +1041,16 @@ export class OrderService {
       const { skip, take } = await Utils.getPagination(page, size);
       const filter: any = {};
       if (business) {
-        filter['items.business'] = business;
+        // A vendor's orders include (a) those where they sell an item, AND
+        // (b) those where they are the SOURCE of a shipment — specifically a
+        // fabric vendor shipping their fabric to a tailor for a cross-vendor
+        // "use my own fabric" order. The fabric vendor is only on the
+        // fabric_transfer shipment, never on an order item, so filtering by
+        // items.business alone hid those orders from them entirely.
+        filter['$or'] = [
+          { 'items.business': business },
+          { 'shipments.business': business },
+        ];
       }
       if (status && status !== 'all') {
         filter.status = status;
@@ -3933,26 +3942,22 @@ export class OrderService {
 
       if (!fabricBiz || !tailorBiz) continue;
 
-      // Look up vendor users
-      const [fabricUsers, tailorUsers] = await Promise.all([
-        this.businessModel.db.model('User').find({
-          business: new Types.ObjectId(fabricBizId),
-          type: 'vendor',
-        }).select('_id business').lean(),
-        this.businessModel.db.model('User').find({
-          business: new Types.ObjectId(tailorBizId),
-          type: 'vendor',
-        }).select('_id business').lean(),
-      ]);
-
       const fabricYards = shipment.fabric_yards || 0;
       const fabricName = 'fabric'; // We could look up the product but keeping it simple
 
+      // Route to each business's OWNER (created_by.id), NOT users whose active
+      // User.business happens to equal the id. A multi-business owner viewing a
+      // different business would otherwise never receive their notice (or the
+      // wrong one) — the reported "fabric-transfer notifications on the wrong
+      // vendor" symptom.
+      const fabricOwnerId = (fabricBiz as any).created_by?.id?.toString();
+      const tailorOwnerId = (tailorBiz as any).created_by?.id?.toString();
+
       // Notify fabric vendor: "Ship your fabric to the tailor"
-      for (const user of fabricUsers as any[]) {
+      if (fabricOwnerId) {
         notifications.push({
-          recipient: user._id.toString(),
-          recipient_business: user.business?.toString(),
+          recipient: fabricOwnerId,
+          recipient_business: fabricBizId,
           category: NotificationCategory.ORDER,
           type: NotificationType.NEW_ORDER,
           title: 'Fabric Transfer Required',
@@ -3969,10 +3974,10 @@ export class OrderService {
       }
 
       // Notify tailor vendor: "Fabric is coming to you"
-      for (const user of tailorUsers as any[]) {
+      if (tailorOwnerId) {
         notifications.push({
-          recipient: user._id.toString(),
-          recipient_business: user.business?.toString(),
+          recipient: tailorOwnerId,
+          recipient_business: tailorBizId,
           category: NotificationCategory.ORDER,
           type: NotificationType.NEW_ORDER,
           title: 'External Fabric Incoming',
