@@ -1383,15 +1383,31 @@ export class BusinessService implements OnModuleInit {
   async recordBusinessEarnings(orderId: Types.ObjectId) {
     this.logger.log(`Recording business earnings for order: ${orderId}`);
 
-    // Idempotency: never record earnings twice for the same order. A retried
-    // Paystack webhook (or any accidental double-call) would otherwise create
-    // duplicate BusinessEarning docs and double the vendor's pending_balance.
+    // Idempotency: never record earnings twice for the same order, or a retried
+    // webhook / concurrent call (webhook + order creation + bespoke accept all
+    // fire recordBusinessEarnings) creates duplicate BusinessEarning docs and
+    // duplicate payouts. ATOMICALLY claim the order — the previous exists()
+    // check was check-then-act and lost this race (the reported triple payout).
+    const claim = await this.orderModel.updateOne(
+      { _id: orderId, earnings_recorded: { $ne: true } },
+      { $set: { earnings_recorded: true } },
+    );
+    if (claim.modifiedCount !== 1) {
+      this.logger.warn(
+        `Earnings already recorded/claimed for order ${orderId} — skipping to avoid double credit.`,
+      );
+      return;
+    }
+
+    // Secondary guard for legacy orders that already have earnings but predate
+    // the earnings_recorded flag: the claim above would succeed for them, so
+    // bail if earnings already exist rather than duplicating.
     const alreadyRecorded = await this.businessEarningsModel.exists({
       order: orderId,
     });
     if (alreadyRecorded) {
       this.logger.warn(
-        `Earnings already recorded for order ${orderId} — skipping to avoid double credit.`,
+        `Earnings already exist for order ${orderId} (legacy/unflagged) — skipping.`,
       );
       return;
     }

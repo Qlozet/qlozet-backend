@@ -162,32 +162,59 @@ export class BusinessEarningsCron {
           continue;
         }
 
-        // Update business wallet
-        const updatedWallet = await this.businessWalletModel.findOneAndUpdate(
-          { business: earning.business },
-          {
-            $inc: {
-              balance: earning.net_amount,
-              pending_balance: -earning.net_amount,
+        // Atomically CLAIM this earning's release BEFORE crediting. releaseFunds
+        // runs on every backend instance every 30 min, so two runs both find the
+        // same released:false earning and each credit the wallet — a duplicate
+        // payout (the reported triple credit). Only the run whose update flips
+        // released false -> true proceeds; the others skip.
+        const claim = await this.businessEarningsModel.updateOne(
+          { _id: earning._id, released: false },
+          { $set: { released: true, released_at: new Date() } },
+        );
+        if (claim.modifiedCount !== 1) {
+          this.logger.warn(
+            `Earning ${earning._id} already released by another run — skipping to avoid a duplicate payout.`,
+          );
+          continue;
+        }
+
+        try {
+          // Credit the vendor's spendable balance (atomic $inc).
+          const updatedWallet = await this.businessWalletModel.findOneAndUpdate(
+            { business: earning.business },
+            {
+              $inc: {
+                balance: earning.net_amount,
+                pending_balance: -earning.net_amount,
+              },
             },
-          },
-          { upsert: true, new: true },
-        );
+            { upsert: true, new: true },
+          );
 
-        // Mark earning as released
-        earning.released = true;
-        earning.released_at = new Date();
-        await earning.save();
+          // Ledger credit + notification are best-effort — a failure here must
+          // NOT revert the claim (the money is already credited; a revert would
+          // re-pay it next run). recordEarningCredit is idempotent by earning id.
+          await this.recordEarningCredit(earning, updatedWallet._id).catch((e) =>
+            this.logger.warn(`recordEarningCredit failed: ${e.message}`),
+          );
+          await this.notifyPayout(earning).catch(() => undefined);
 
-        // Record the vendor-facing CREDIT so this income shows in their ledger.
-        await this.recordEarningCredit(earning, updatedWallet._id);
-
-        // Notify the vendor that the money is now spendable.
-        await this.notifyPayout(earning);
-
-        this.logger.log(
-          `Released ₦${earning.net_amount} to business ${earning.business} → wallet=${updatedWallet.balance}`,
-        );
+          this.logger.log(
+            `Released ₦${earning.net_amount} to business ${earning.business} → wallet=${updatedWallet.balance}`,
+          );
+        } catch (creditError: any) {
+          // The credit itself failed → revert the claim so a later run retries
+          // (rather than losing the payout). No money moved, so this is safe.
+          await this.businessEarningsModel
+            .updateOne(
+              { _id: earning._id },
+              { $set: { released: false, released_at: null } },
+            )
+            .catch(() => undefined);
+          this.logger.error(
+            `Release credit failed for earning ${earning._id} (claim reverted): ${creditError.message}`,
+          );
+        }
       } catch (error) {
         this.logger.error(
           `Failed release for business=${earning.business} order=${earning.order}: ${error.message}`,

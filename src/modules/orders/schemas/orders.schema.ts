@@ -356,6 +356,12 @@ export class Order {
   @Prop({ type: Number, default: 0 })
   platform_commission?: number;
 
+  // Atomically-claimed guard so BusinessEarnings are recorded exactly once per
+  // order — recordBusinessEarnings is called from several places (payment
+  // webhook, order creation, bespoke accept, backfill) that can race.
+  @Prop({ type: Boolean, default: false })
+  earnings_recorded?: boolean;
+
   @Prop({ type: Boolean, default: false })
   inventory_deducted?: boolean; // idempotency: guards double stock deduction on webhook retries
 
