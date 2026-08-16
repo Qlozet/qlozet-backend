@@ -1145,9 +1145,12 @@ export class AuthService {
     token: string,
     newPassword: string,
   ): Promise<{ message: string }> {
+    // Field is `password_reset_code` with `expire_at` (see User schema) — the
+    // previous query used `passwordResetCode.expireAt`, which never matched, so
+    // every reset failed with "Invalid or expired reset token".
     const user = await this.userModel.findOne({
-      'passwordResetCode.pin': token,
-      'passwordResetCode.expireAt': { $gt: new Date() },
+      'password_reset_code.pin': token,
+      'password_reset_code.expire_at': { $gt: new Date() },
     });
 
     if (!user) {
