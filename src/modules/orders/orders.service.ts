@@ -3882,32 +3882,32 @@ export class OrderService {
 
     if (businessIds.length === 0) return;
 
-    // Find vendor users who own these businesses
-    const vendorUsers = await this.businessModel.db
-      .model('User')
-      .find({
-        business: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
-        type: 'vendor',
-      })
-      .select('_id business full_name')
+    // Route to each business's OWNER (created_by.id), not users whose active
+    // `business` field equals the id — a multi-business owner viewing a
+    // different business would otherwise miss their new-order notification.
+    const businesses = await this.businessModel
+      .find({ _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) } })
+      .select('_id created_by')
       .lean();
 
-    const notifications: CreateNotificationDto[] = vendorUsers.map((user: any) => ({
-      recipient: user._id.toString(),
-      recipient_business: user.business?.toString(),
-      category: NotificationCategory.ORDER,
-      type: NotificationType.NEW_ORDER,
-      title: 'New Order Received!',
-      body: `Order #${order.reference} has been placed (₦${order.total?.toLocaleString()}). Check your orders to review.`,
-      metadata: {
-        order_id: order._id,
-        order_reference: order.reference,
-        total: order.total,
-        items_count: order.items.length,
-        customer_name: (customer as any).full_name || '',
-      },
-      action_url: `/orders`,
-    }));
+    const notifications: CreateNotificationDto[] = businesses
+      .filter((biz: any) => biz.created_by?.id)
+      .map((biz: any) => ({
+        recipient: biz.created_by.id.toString(),
+        recipient_business: biz._id?.toString(),
+        category: NotificationCategory.ORDER,
+        type: NotificationType.NEW_ORDER,
+        title: 'New Order Received!',
+        body: `Order #${order.reference} has been placed (₦${order.total?.toLocaleString()}). Check your orders to review.`,
+        metadata: {
+          order_id: order._id,
+          order_reference: order.reference,
+          total: order.total,
+          items_count: order.items.length,
+          customer_name: (customer as any).full_name || '',
+        },
+        action_url: `/orders`,
+      }));
 
     if (notifications.length > 0) {
       await this.notificationsService.createMany(notifications);
