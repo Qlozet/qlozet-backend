@@ -10,6 +10,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { Connection, Model, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
+import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 import {
   UserDocument,
   User,
@@ -746,9 +747,18 @@ export class AuthService {
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
-    // Verify user is a team member of the target business
+    // Verify user is a team member of the target business. Match both refs
+    // type-agnostically: some legacy TeamMember records store `user`/`business`
+    // as plain strings, which a strict ObjectId-casting query silently misses —
+    // producing a false "not a member" (401) even for a valid membership the
+    // switch UI just listed.
     const membership = await this.teamMemberModel
-      .findOne({ user: userId, business: businessId })
+      .findOne({
+        $and: [
+          ObjectIdUtils.refMatch('user', userId),
+          ObjectIdUtils.refMatch('business', businessId),
+        ],
+      })
       .populate('business', 'business_name business_logo_url status')
       .populate('role', 'name description')
       .exec();
