@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsString, Length } from 'class-validator';
 
-export class PasswordResetDto {
+export class VerifyResetCodeDto {
   @ApiProperty({
     example: 'user@example.com',
     description: 'Email the reset code was sent to',
@@ -16,12 +16,4 @@ export class PasswordResetDto {
   @IsString()
   @Length(4, 8)
   code: string;
-
-  @ApiProperty({
-    example: 'NewSecurePassword123',
-    description: 'New password for the user account',
-  })
-  @IsString()
-  @Length(8, 64)
-  newPassword: string;
 }

@@ -217,28 +217,28 @@ export class MailService {
     }
   }
 
-  async sendResetEmail(to: string, name: string, resetLink: string) {
+  async sendResetCodeEmail(to: string, name: string, code: string) {
     try {
       if (!this.templates.passwordReset)
         throw new Error('Password reset template not loaded');
 
       const html = this.templates.passwordReset({
         userName: name,
-        resetUrl: resetLink,
-        expiryTime: '1 hour',
-        subject: 'Reset Your Password',
+        resetCode: code,
+        expiryTime: '15 minutes',
+        subject: 'Your Password Reset Code',
       });
 
       await this.mailerService.sendMail({
         to,
-        subject: 'Reset Your Password',
+        subject: 'Your Password Reset Code',
         html,
       });
 
-      console.log('✅ Password reset email sent successfully to:', to);
+      console.log('✅ Password reset code email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password reset email:', error);
+      console.error('❌ Failed to send password reset code email:', error);
       throw error;
     }
   }

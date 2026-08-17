@@ -39,7 +39,6 @@ import { Token, TokenDocument } from '../wallets/schema/token.schema';
 import {
   createHash,
   generateOtp,
-  generateVerificationToken,
 } from 'src/common/utils/generateString';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -1101,68 +1100,139 @@ export class AuthService {
     return { message: 'Password updated successfully' };
   }
 
+  // ─── Password-reset (code) tuning ──────────────────────────────────
+  // A 6-digit code is only ~1M combinations, so these guardrails — short TTL,
+  // hashed-at-rest, an attempt cap, and a resend cooldown — are what make it
+  // safe. See requestPasswordReset / verifyResetCode / resetPassword below.
+  private readonly RESET_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly RESET_MAX_ATTEMPTS = 5; // wrong tries before the code dies
+  private readonly RESET_RESEND_COOLDOWN_MS = 60 * 1000; // 1 min between sends
+  private readonly RESET_GENERIC_MSG =
+    'If an account exists for that email, a reset code has been sent';
+
   /**
-   * Request password reset
+   * Request a password-reset CODE (6-digit OTP) by email. Enumeration-safe:
+   * always returns the same generic message whether or not the account exists,
+   * and even if the email send fails. The code is stored hashed with a short
+   * expiry, a zeroed attempt counter, and a resend-cooldown anchor.
    */
   async requestPasswordReset(email: string): Promise<{ message: string }> {
-    const user = await this.userModel.findOne({ email });
+    const user = await this.userModel
+      .findOne({ email })
+      .select('+password_reset_code');
 
+    // Same response for a missing account — never reveal existence.
     if (!user) {
-      // Don't reveal whether email exists or not for security
-      return { message: 'If the email exists, a reset link has been sent' };
+      return { message: this.RESET_GENERIC_MSG };
     }
 
-    const resetToken = generateVerificationToken();
+    // Resend cooldown: if a code was just issued, don't mint/send another (but
+    // still return the generic message so timing doesn't leak existence).
+    const lastSent = user.password_reset_code?.last_sent_at;
+    if (
+      lastSent &&
+      Date.now() - new Date(lastSent).getTime() < this.RESET_RESEND_COOLDOWN_MS
+    ) {
+      return { message: this.RESET_GENERIC_MSG };
+    }
 
-    // Use passwordResetCode field from schema
+    const code = generateOtp(); // 6-digit
     user.password_reset_code = {
-      pin: resetToken,
-      expire_at: new Date(Date.now() + 1 * 60 * 60 * 1000), // 1 hour
+      pin: createHash(code), // hashed at rest — never store the raw code
+      expire_at: new Date(Date.now() + this.RESET_CODE_TTL_MS),
+      attempts: 0,
+      last_sent_at: new Date(),
     };
-
     await user.save();
 
-    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-
+    // Best-effort send — a mail failure must NOT change the response (else a
+    // 500-vs-200 difference would leak which emails exist).
     try {
-      await this.mailService.sendResetEmail(
-        user.email,
-        user.full_name,
-        resetLink,
-      );
+      await this.mailService.sendResetCodeEmail(user.email, user.full_name, code);
     } catch (error) {
-      this.logger.error('Failed to send reset email:', error);
-      throw new InternalServerErrorException('Failed to send reset email');
+      this.logger.error('Failed to send reset code email:', error);
     }
 
-    return { message: 'If the email exists, a reset link has been sent' };
+    return { message: this.RESET_GENERIC_MSG };
   }
 
   /**
-   * Reset password with token
+   * Shared code check for verify + reset. Validates existence, expiry, the
+   * attempt cap, and the hashed code. On a wrong code it increments the attempt
+   * counter (locking the code once the cap is hit); on success it does nothing
+   * to the counter so a correct verify→reset pair costs zero attempts. Returns
+   * the (validated) user document so the caller can proceed. Throws a single
+   * generic error for every invalid case — no enumeration.
    */
-  async resetPassword(
-    token: string,
-    newPassword: string,
-  ): Promise<{ message: string }> {
-    // Field is `password_reset_code` with `expire_at` (see User schema) — the
-    // previous query used `passwordResetCode.expireAt`, which never matched, so
-    // every reset failed with "Invalid or expired reset token".
-    const user = await this.userModel.findOne({
-      'password_reset_code.pin': token,
-      'password_reset_code.expire_at': { $gt: new Date() },
-    });
+  private async assertResetCode(email: string, code: string) {
+    const invalid = new BadRequestException('Invalid or expired reset code');
 
-    if (!user) {
-      throw new BadRequestException('Invalid or expired reset token');
+    const user = await this.userModel
+      .findOne({ email })
+      .select('+password_reset_code +hashed_password');
+
+    const rc = user?.password_reset_code;
+    if (!user || !rc?.pin || !rc?.expire_at) throw invalid;
+
+    // Expired → clear it and fail.
+    if (new Date(rc.expire_at).getTime() <= Date.now()) {
+      user.password_reset_code = undefined;
+      await user.save();
+      throw invalid;
     }
 
-    user.hashed_password = await bcrypt.hash(newPassword, 10);
-    user.password_reset_code = undefined;
+    // Attempt cap reached → burn the code so it can't be brute-forced further.
+    if ((rc.attempts ?? 0) >= this.RESET_MAX_ATTEMPTS) {
+      user.password_reset_code = undefined;
+      await user.save();
+      throw new BadRequestException(
+        'Too many incorrect attempts. Please request a new reset code.',
+      );
+    }
 
+    // Wrong code → count the attempt and fail.
+    if (createHash(code) !== rc.pin) {
+      user.password_reset_code = {
+        pin: rc.pin,
+        expire_at: rc.expire_at,
+        attempts: (rc.attempts ?? 0) + 1,
+        last_sent_at: rc.last_sent_at,
+      };
+      await user.save();
+      throw invalid;
+    }
+
+    return user;
+  }
+
+  /**
+   * Verify a reset code WITHOUT consuming it — lets the web app gate the
+   * "set new password" screen. A correct code does not spend an attempt.
+   */
+  async verifyResetCode(
+    email: string,
+    code: string,
+  ): Promise<{ valid: boolean; message: string }> {
+    await this.assertResetCode(email, code);
+    return { valid: true, message: 'Code verified' };
+  }
+
+  /**
+   * Reset the password using the emailed code. Re-validates the code (this is
+   * the authoritative single-use consumer), sets the new password, and clears
+   * the code so it can never be reused.
+   */
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const user = await this.assertResetCode(email, code);
+
+    user.hashed_password = await bcrypt.hash(newPassword, 10);
+    user.password_reset_code = undefined; // single-use: consume it
     await user.save();
 
-    // Send password reset success email
     try {
       await this.mailService.sendPasswordResetSuccessEmail(
         user.email,

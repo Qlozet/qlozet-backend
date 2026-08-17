@@ -31,6 +31,7 @@ import { PasswordResetRequestDto } from './dto/password-reset-request.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { PasswordResetDto } from './dto/password-reset.dto';
+import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SwitchBusinessDto } from './dto/switch-business.dto';
 import { ApiResponseWrapper } from 'src/common/decorators/api-response.decorator';
@@ -233,14 +234,15 @@ export class AuthController {
     );
   }
 
-  // ✅ Request Password Reset
+  // ✅ Request Password Reset (emails a 6-digit code)
   @Post('forgot-password')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Request password reset',
     description:
-      'Sends a password reset link to the user email if the account exists.',
+      'Emails a 6-digit reset code to the account if it exists. Always returns the same message (enumeration-safe).',
   })
   @ApiBody({
     type: PasswordResetRequestDto,
@@ -251,21 +253,39 @@ export class AuthController {
     return this.authService.requestPasswordReset(passwordResetRequestDto.email);
   }
 
-  // ✅ Reset Password
-  @Post('reset-password')
+  // ✅ Verify the reset code (gates the "set new password" screen; does not consume it)
+  @Post('verify-reset-code')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Reset password using token',
+    summary: 'Verify a password reset code',
     description:
-      'Reset password after receiving a valid reset token via email.',
+      'Checks the emailed code without consuming it, so the client can reveal the new-password step. Locks after too many wrong attempts.',
+  })
+  @ApiBody({
+    type: VerifyResetCodeDto,
+  })
+  async verifyResetCode(@Body() dto: VerifyResetCodeDto) {
+    return this.authService.verifyResetCode(dto.email, dto.code);
+  }
+
+  // ✅ Reset Password (with the emailed code)
+  @Post('reset-password')
+  @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset password using the emailed code',
+    description:
+      'Sets a new password after the emailed 6-digit code is verified. The code is single-use and cleared on success.',
   })
   @ApiBody({
     type: PasswordResetDto,
   })
   async resetPassword(@Body() passwordResetDto: PasswordResetDto) {
-    const { token, newPassword } = passwordResetDto;
-    return this.authService.resetPassword(token, newPassword);
+    const { email, code, newPassword } = passwordResetDto;
+    return this.authService.resetPassword(email, code, newPassword);
   }
 
   // ✅ Change Password (Authenticated)
