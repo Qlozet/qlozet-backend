@@ -1165,9 +1165,29 @@ export class OrderService {
     // order completing means the tailor delivered to the customer — not this
     // vendor's concern.
     const primary = fabricTransfers[0];
+
+    // The money the fabric vendor actually earns on this order: the customer's
+    // "use my own fabric" charge, which is billed as each garment item's
+    // pricing.external_fabric and is this vendor's fabric revenue. Match the
+    // items whose applied_fabric product belongs to this vendor (same owner as
+    // the transfer's `business`). This is what turns the scoped view from a bare
+    // "transfer" into a real fabric order (vendor → vendor).
+    const fabricValue = items.reduce((sum, it) => {
+      const af = it?.applied_fabric;
+      const afBizId =
+        af && typeof af === 'object'
+          ? String(af.business?._id ?? af.business)
+          : null;
+      return afBizId === bid ? sum + (it?.pricing?.external_fabric || 0) : sum;
+    }, 0);
+
     return {
       _id: order._id,
       reference: order.reference,
+      // The fabric vendor's gross revenue for this order (customer-paid). Their
+      // wallet payout is this minus platform commission, released like a normal
+      // sale once the transfer is delivered.
+      fabric_value: fabricValue,
       // NOTE: `type` (standard/bespoke) is deliberately omitted — a bespoke
       // clothing order would otherwise route the vendor UI into the quote/design
       // drawer, leaking the customer's design + measurements to the fabric vendor.
