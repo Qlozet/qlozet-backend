@@ -1083,7 +1083,15 @@ export class OrderService {
           })
           .populate('customer', 'email username firstName lastName')
           .populate('shipments.business', 'business_name business_logo_url')
-          .populate('shipments.destination_business', 'business_name business_logo_url')
+          // Include the tailor's ship-to address on the destination business —
+          // a fabric-transfer-only vendor needs somewhere to send the fabric,
+          // and the scoped view (below) surfaces this instead of the customer's
+          // delivery address.
+          .populate(
+            'shipments.destination_business',
+            'business_name business_logo_url business_phone_number ' +
+              'business_address validated_address address_line_2 state city',
+          )
           .populate('shipments.fabric_product', 'fabric.name base_price')
           // Bespoke orders: bring the design so the tailor sees what to make.
           .populate(
@@ -1096,10 +1104,20 @@ export class OrderService {
           .lean(),
         this.orderModel.countDocuments(filter),
       ]);
+
+      // Privacy scoping: a fabric vendor only appears on an order as the SOURCE
+      // of a fabric_transfer shipment (never on an item). They must be able to
+      // see that transfer to ship it, but must NOT see the customer, the design,
+      // the other vendor's items, the order totals, or anyone's earnings. Trim
+      // each order down to just their transfer slice when that's their only role.
+      const scopedRows = business
+        ? orders.map((o) => this.scopeOrderForVendor(o, String(business)))
+        : orders;
+
       return Utils.getPagingData(
         {
           count: total,
-          rows: orders,
+          rows: scopedRows,
         },
         page,
         size,
@@ -1107,6 +1125,63 @@ export class OrderService {
     } catch (error) {
       throw new InternalServerErrorException();
     }
+  }
+
+  /**
+   * If `businessId` is on this order ONLY as the source of a fabric_transfer
+   * shipment (i.e. a cross-vendor "use my own fabric" transfer — never on an
+   * order item, and with no vendor_to_customer shipment of their own), return a
+   * trimmed order exposing just that transfer. Everything else about the order
+   * belongs to the customer and the tailor, so it's stripped. Any vendor who
+   * actually sells on the order (has an item or their own garment shipment) gets
+   * the full order unchanged.
+   */
+  private scopeOrderForVendor(order: any, businessId: string) {
+    const bid = String(businessId);
+    const shipments: any[] = order.shipments || [];
+    const items: any[] = order.items || [];
+
+    const shipmentBizId = (s: any) => String(s?.business?._id ?? s?.business);
+
+    const hasItem = items.some((i) => String(i?.business) === bid);
+    const hasOwnGarmentShipment = shipments.some(
+      (s) =>
+        shipmentBizId(s) === bid &&
+        s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
+    );
+    const fabricTransfers = shipments.filter(
+      (s) =>
+        shipmentBizId(s) === bid &&
+        s.shipment_type === ShipmentType.FABRIC_TRANSFER,
+    );
+
+    // A real participant on the order → nothing to hide from them.
+    if (hasItem || hasOwnGarmentShipment || fabricTransfers.length === 0) {
+      return order;
+    }
+
+    // Fabric-transfer-only vendor → expose just their transfer(s). Surface the
+    // transfer's own lifecycle as the status (not the whole order's), since the
+    // order completing means the tailor delivered to the customer — not this
+    // vendor's concern.
+    const primary = fabricTransfers[0];
+    return {
+      _id: order._id,
+      reference: order.reference,
+      // NOTE: `type` (standard/bespoke) is deliberately omitted — a bespoke
+      // clothing order would otherwise route the vendor UI into the quote/design
+      // drawer, leaking the customer's design + measurements to the fabric vendor.
+      // Discriminator the vendor UI branches on to render the transfer card
+      // instead of the full order/customer/design view.
+      vendor_role: 'fabric_transfer',
+      status: primary?.status ?? null,
+      shipments: fabricTransfers,
+      // Empty (not omitted) so any incidental `order.items` access on the client
+      // degrades to "no items" instead of throwing.
+      items: [],
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    };
   }
 
   /**
@@ -1127,12 +1202,18 @@ export class OrderService {
 
     if (scopeBusinessId) {
       const bid = String(scopeBusinessId);
+      // Must be a real seller on the order — an item, or their own
+      // garment (vendor_to_customer) shipment. A fabric_transfer SOURCE does not
+      // qualify: shipping fabric to the tailor doesn't grant access to the
+      // customer's body measurements.
       const owns =
-        ((order as any).shipments || []).some(
-          (s: any) => String(s.business) === bid,
-        ) ||
         ((order as any).items || []).some(
           (i: any) => String(i.business) === bid,
+        ) ||
+        ((order as any).shipments || []).some(
+          (s: any) =>
+            String(s.business) === bid &&
+            s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
         );
       if (!owns) {
         throw new ForbiddenException(
@@ -1209,7 +1290,16 @@ export class OrderService {
           String(s.business) === bid &&
           s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
       );
-      if (idx === -1) idx = shipments.findIndex((s) => String(s.business) === bid);
+      // Fall back to any of the vendor's own shipments — but NEVER a
+      // fabric_transfer. A fabric vendor doesn't run the garment's production, so
+      // resolving into it would (harmlessly) expose/allow writing a checklist
+      // that isn't theirs. Returning -1 makes the caller respond Forbidden.
+      if (idx === -1)
+        idx = shipments.findIndex(
+          (s) =>
+            String(s.business) === bid &&
+            s.shipment_type !== ShipmentType.FABRIC_TRANSFER,
+        );
       return idx;
     }
     let idx = shipments.findIndex(
