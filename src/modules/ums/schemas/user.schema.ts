@@ -52,12 +52,19 @@ export class User extends Document {
 
   @Prop({
     type: {
-      pin: String,
+      pin: String, // sha256 hash of the 6-digit code (never stored in plaintext)
       expire_at: Date,
+      attempts: { type: Number, default: 0 }, // wrong-code tries; lock after a cap
+      last_sent_at: Date, // resend-cooldown anchor
     },
     select: false,
   })
-  password_reset_code?: { pin: string; expire_at: Date };
+  password_reset_code?: {
+    pin: string;
+    expire_at: Date;
+    attempts?: number;
+    last_sent_at?: Date;
+  };
 
   @Prop({
     default:
