@@ -1110,9 +1110,66 @@ export class OrderService {
       // see that transfer to ship it, but must NOT see the customer, the design,
       // the other vendor's items, the order totals, or anyone's earnings. Trim
       // each order down to just their transfer slice when that's their only role.
-      const scopedRows = business
-        ? orders.map((o) => this.scopeOrderForVendor(o, String(business)))
+      // The fabric-vendor breakdown (value − commission = earnings) mirrors the
+      // real earning formula, so load the platform commission settings once.
+      const settings = business
+        ? await this.platformSettingsModel.findOne().lean()
+        : null;
+      const commissionParams = {
+        type: (settings as any)?.platform_commission_type ?? 'percent',
+        percent: (settings as any)?.platform_commission_percent ?? 10,
+        flat: (settings as any)?.platform_commission_flat ?? 0,
+      };
+
+      let scopedRows = business
+        ? orders.map((o) =>
+            this.scopeOrderForVendor(o, String(business), commissionParams),
+          )
         : orders;
+
+      // Attach each fabric transfer's real payout state from the vendor's
+      // BusinessEarning (their own, not the tailor's order.payout_status). One
+      // batched query for the whole page.
+      if (business) {
+        const fabricOrderIds = scopedRows
+          .filter((r: any) => r?.vendor_role === 'fabric_transfer')
+          .map((r: any) => r._id);
+        if (fabricOrderIds.length) {
+          const earnings = await this.businessEarningsModel
+            .find({ business, order: { $in: fabricOrderIds } })
+            .select('order released release_date')
+            .lean();
+          const byOrder = new Map<
+            string,
+            { released: boolean; hasDate: boolean; any: boolean }
+          >();
+          for (const e of earnings as any[]) {
+            const k = String(e.order);
+            const cur = byOrder.get(k) ?? {
+              released: true,
+              hasDate: false,
+              any: false,
+            };
+            cur.released = cur.released && !!e.released;
+            cur.hasDate = cur.hasDate || !!e.release_date;
+            cur.any = true;
+            byOrder.set(k, cur);
+          }
+          scopedRows = scopedRows.map((r: any) => {
+            if (r?.vendor_role !== 'fabric_transfer') return r;
+            const agg = byOrder.get(String(r._id));
+            const payout_status =
+              !agg || !agg.any
+                ? 'pending'
+                : agg.released
+                  ? 'paid'
+                  : agg.hasDate
+                    ? 'eligible'
+                    : 'pending';
+            return { ...r, payout_status };
+          });
+        }
+      }
 
       return Utils.getPagingData(
         {
@@ -1136,7 +1193,11 @@ export class OrderService {
    * actually sells on the order (has an item or their own garment shipment) gets
    * the full order unchanged.
    */
-  private scopeOrderForVendor(order: any, businessId: string) {
+  private scopeOrderForVendor(
+    order: any,
+    businessId: string,
+    commission?: { type: string; percent: number; flat: number },
+  ) {
     const bid = String(businessId);
     const shipments: any[] = order.shipments || [];
     const items: any[] = order.items || [];
@@ -1181,13 +1242,27 @@ export class OrderService {
       return afBizId === bid ? sum + (it?.pricing?.external_fabric || 0) : sum;
     }, 0);
 
+    // Platform commission on the fabric sale — same formula as the real fabric-
+    // vendor earning (business.service recordBusinessEarnings), so the drawer
+    // can show value − commission = earnings like any regular order.
+    const cType = commission?.type ?? 'percent';
+    const cPercent = commission?.percent ?? 10;
+    const cFlat = commission?.flat ?? 0;
+    const fabricCommission =
+      cType === 'fixed'
+        ? Math.min(cFlat, fabricValue)
+        : fabricValue * (cPercent / 100);
+    const fabricNet = fabricValue - fabricCommission;
+
     return {
       _id: order._id,
       reference: order.reference,
-      // The fabric vendor's gross revenue for this order (customer-paid). Their
-      // wallet payout is this minus platform commission, released like a normal
-      // sale once the transfer is delivered.
+      // The fabric vendor's gross revenue for this order (customer-paid), the
+      // platform commission taken from it, and their net earnings — released to
+      // their wallet once the transfer is delivered.
       fabric_value: fabricValue,
+      fabric_commission: fabricCommission,
+      fabric_net: fabricNet,
       // NOTE: `type` (standard/bespoke) is deliberately omitted — a bespoke
       // clothing order would otherwise route the vendor UI into the quote/design
       // drawer, leaking the customer's design + measurements to the fabric vendor.
