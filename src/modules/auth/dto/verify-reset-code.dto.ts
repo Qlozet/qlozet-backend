@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, Length } from 'class-validator';
+import { IsEmail, IsString, Matches } from 'class-validator';
 
 export class VerifyResetCodeDto {
   @ApiProperty({
@@ -14,6 +14,8 @@ export class VerifyResetCodeDto {
     description: '6-digit reset code received via email',
   })
   @IsString()
-  @Length(4, 8)
+  // Exactly 6 digits — a wrong-length entry fails validation without spending
+  // a lockout attempt.
+  @Matches(/^\d{6}$/, { message: 'Code must be 6 digits' })
   code: string;
 }

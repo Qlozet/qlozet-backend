@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, Length } from 'class-validator';
+import { IsEmail, IsString, Length, Matches } from 'class-validator';
 
 export class PasswordResetDto {
   @ApiProperty({
@@ -14,7 +14,9 @@ export class PasswordResetDto {
     description: '6-digit reset code received via email',
   })
   @IsString()
-  @Length(4, 8)
+  // Exactly 6 digits: a wrong-length entry is a validation error, so a typo
+  // never reaches the code check and never spends a lockout attempt.
+  @Matches(/^\d{6}$/, { message: 'Code must be 6 digits' })
   code: string;
 
   @ApiProperty({
