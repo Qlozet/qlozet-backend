@@ -1092,7 +1092,10 @@ export class OrderService {
             'business_name business_logo_url business_phone_number ' +
               'business_address validated_address address_line_2 state city',
           )
-          .populate('shipments.fabric_product', 'fabric.name base_price')
+          .populate(
+            'shipments.fabric_product',
+            'fabric.name fabric.images base_price',
+          )
           // Bespoke orders: bring the design so the tailor sees what to make.
           .populate(
             'bespoke_design',
@@ -1122,9 +1125,29 @@ export class OrderService {
       };
 
       let scopedRows = business
-        ? orders.map((o) =>
-            this.scopeOrderForVendor(o, String(business), commissionParams),
-          )
+        ? orders.map((o) => {
+            const scoped = this.scopeOrderForVendor(
+              o,
+              String(business),
+              commissionParams,
+            );
+            // Fabric-transfer-only orders already carry their own fabric_*
+            // breakdown; real (garment) vendors get a per-vendor breakdown of
+            // THEIR items. order.vendor_earnings is order-wide and — on a
+            // "use my own fabric" order — also includes the fabric vendor's net,
+            // which would otherwise inflate this vendor's earnings and hide the
+            // commission line. Compute it from their items instead.
+            if ((scoped as any)?.vendor_role === 'fabric_transfer')
+              return scoped;
+            return {
+              ...(scoped as any),
+              vendor_breakdown: this.computeVendorBreakdown(
+                scoped,
+                String(business),
+                commissionParams,
+              ),
+            };
+          })
         : orders;
 
       // Attach each fabric transfer's real payout state from the vendor's
@@ -1193,6 +1216,39 @@ export class OrderService {
    * actually sells on the order (has an item or their own garment shipment) gets
    * the full order unchanged.
    */
+  /**
+   * The requesting vendor's own money breakdown for an order: subtotal of THEIR
+   * items, platform commission on it, and their net. Mirrors the per-business
+   * earning formula in recordBusinessEarnings (gross = sum of item finals,
+   * commission = gross × rate). Used instead of order.vendor_earnings, which is
+   * order-wide and — on a "use my own fabric" order — also folds in the fabric
+   * vendor's net, over-stating this vendor's earnings.
+   */
+  private computeVendorBreakdown(
+    order: any,
+    businessId: string,
+    commission?: { type: string; percent: number; flat: number },
+  ) {
+    const bid = String(businessId);
+    const myItems = (order?.items || []).filter(
+      (i: any) => String(i?.business) === bid,
+    );
+    const cType = commission?.type ?? 'percent';
+    const cPercent = commission?.percent ?? 10;
+    const cFlat = commission?.flat ?? 0;
+    // Per-item, matching recordBusinessEarnings (a fixed fee is charged per
+    // item, so summing per-item is not the same as one fee on the subtotal).
+    let subtotal = 0;
+    let commissionAmt = 0;
+    for (const it of myItems) {
+      const gross = it?.total_price ?? it?.pricing?.final ?? 0;
+      subtotal += gross;
+      commissionAmt +=
+        cType === 'fixed' ? Math.min(cFlat, gross) : gross * (cPercent / 100);
+    }
+    return { subtotal, commission: commissionAmt, net: subtotal - commissionAmt };
+  }
+
   private scopeOrderForVendor(
     order: any,
     businessId: string,
