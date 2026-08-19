@@ -1841,12 +1841,31 @@ export class OrderService {
         );
       }
     } else if (transaction.channel === 'checkout') {
-      // Paystack refund: use the transaction reference (not order reference)
-      await this.transactionService.refundPaystackPayment(
-        transaction.reference,
-      );
+      // Paystack payment → refund to the customer's WALLET (instant, in-app and
+      // re-spendable) rather than a card refund via the Paystack /refund API.
+      const wallet = await this.walletsService.getOrCreateWallet({
+        customer: order.customer.toString(),
+      });
+      const walletId = (wallet._id as any).toString();
+      await this.walletsService.creditWallet(walletId, transaction.amount);
+      await this.transactionService.create({
+        initiator: order.customer,
+        order: order._id as Types.ObjectId,
+        wallet: wallet._id as any,
+        type: TransactionType.REFUND,
+        amount: transaction.amount,
+        status: TransactionStatus.SUCCESS,
+        description: `Full refund for cancelled order ${order.reference}`,
+        channel: 'refund',
+        metadata: {
+          order_reference: order.reference,
+          original_transaction: transaction.reference,
+          refund_type: 'wallet_from_paystack',
+          reason: 'order_cancelled',
+        },
+      });
       this.logger.log(
-        `[Cancel] Paystack refund initiated for order ${order.reference} (txn: ${transaction.reference})`,
+        `[Cancel] ₦${transaction.amount} credited to the customer's wallet for paystack order ${order.reference}`,
       );
     } else {
       this.logger.warn(
@@ -2153,6 +2172,16 @@ export class OrderService {
       this.logger.error(`Failed to reverse earnings for vendor ${businessId} on order ${orderReference}: ${err.message}`),
     );
 
+    // Return the rejected vendor's items to stock — they were deducted at
+    // payment. Best-effort so a restock hiccup can't fail the rejection.
+    this.productService
+      .restoreInventory(order._id as Types.ObjectId, businessId)
+      .catch((err) =>
+        this.logger.error(
+          `Failed to restore inventory for rejected vendor ${businessId} on order ${orderReference}: ${err.message}`,
+        ),
+      );
+
     // Notify customer about rejection
     this.notifyCustomerVendorRejected(order, business, reason).catch((err) =>
       this.logger.error('Failed to send vendor rejection notification', err),
@@ -2335,36 +2364,49 @@ export class OrderService {
         return { success: false, reason: 'wallet_credit_error' };
       }
     } else if (paymentChannel === 'checkout') {
-      // Paystack payment → partial refund via Paystack API
-      const result = await this.transactionService.partialRefundPaystack(
-        orderId,
-        refundAmount,
-        reason,
-      );
-
-      if (result.success) {
-        await recordRefund(TransactionStatus.SUCCESS, {
+      // Paystack payment → refund to the customer's WALLET (instant, stays in
+      // the app and is immediately re-spendable) rather than a card refund via
+      // the Paystack /refund API (slow, and silently unavailable in test mode —
+      // which is why these refunds often never appeared to land).
+      if (!customerId) {
+        await recordRefund(TransactionStatus.FAILED, {
           original_transaction: originalTransaction.reference,
-          refund_type: 'paystack',
-          paystack_refund: result.refundData,
+          refund_type: 'wallet_from_paystack',
+          failure: 'customer_missing',
         });
+        return { success: false, reason: 'customer_missing' };
+      }
+      try {
+        const wallet = await this.walletsService.getOrCreateWallet({
+          customer: customerId,
+        });
+        const walletId = (wallet._id as any).toString();
+        await this.walletsService.creditWallet(walletId, refundAmount);
+        await recordRefund(
+          TransactionStatus.SUCCESS,
+          {
+            original_transaction: originalTransaction.reference,
+            refund_type: 'wallet_from_paystack',
+          },
+          walletId,
+        );
         await markOrderPartiallyRefunded();
         this.logger.log(
-          `[Refund] Paystack partial refund of ₦${refundAmount} processed for order ${order.reference}`,
+          `[Refund] ₦${refundAmount} credited to the customer's wallet for paystack order ${order.reference}`,
         );
         return { success: true };
+      } catch (error: any) {
+        this.logger.error(
+          `[Refund] Failed to credit customer wallet for paystack order ${order.reference}: ${error.message}`,
+          error.stack,
+        );
+        await recordRefund(TransactionStatus.FAILED, {
+          original_transaction: originalTransaction.reference,
+          refund_type: 'wallet_from_paystack',
+          failure: 'wallet_credit_error',
+        });
+        return { success: false, reason: 'wallet_credit_error' };
       }
-
-      this.logger.error(
-        `[Refund] Paystack partial refund failed for order ${order.reference}: ${result.error}`,
-      );
-      await recordRefund(TransactionStatus.FAILED, {
-        original_transaction: originalTransaction.reference,
-        refund_type: 'paystack',
-        failure: 'paystack_refund_failed',
-        error: result.error,
-      });
-      return { success: false, reason: 'paystack_refund_failed' };
     }
 
     this.logger.warn(
@@ -2480,6 +2522,18 @@ export class OrderService {
             ).catch((err) =>
               this.logger.error(`[AutoReject] Earnings reversal failed for ${order.reference}: ${err.message}`),
             );
+
+            // Return this vendor's items to stock (deducted at payment).
+            this.productService
+              .restoreInventory(
+                order._id as Types.ObjectId,
+                shipment.business.toString(),
+              )
+              .catch((err) =>
+                this.logger.error(
+                  `[AutoReject] Inventory restore failed for ${order.reference}: ${err.message}`,
+                ),
+              );
           } else {
             this.logger.warn(
               `[AutoReject] Refund for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
@@ -2652,16 +2706,49 @@ export class OrderService {
 
           await order.save();
 
-          // Also deduct the penalty from the actual BusinessEarning records
-          // so the cron doesn't release the full un-penalized amount
-          this.businessEarningsModel.updateMany(
-            { order: order._id, business: businessId, released: false },
-            { $inc: { net_amount: -incrementalPenalty } },
-          ).catch((err) =>
+          // Charge the penalty to the vendor. Take it from their UNRELEASED
+          // earnings first — reduce each earning's net_amount (so the release
+          // cron pays out less) and drop the matching amount from the wallet's
+          // pending balance. If that isn't enough (the earnings were already
+          // released into their spendable balance), claw the remainder back from
+          // that balance — otherwise the vendor keeps their money while the
+          // platform funds the customer's compensation. (A per-earning loop, not
+          // one $inc across all records, so bespoke upfront+completion earnings
+          // aren't each charged the full penalty.)
+          try {
+            let remaining = incrementalPenalty;
+            const unreleased = await this.businessEarningsModel.find({
+              order: order._id,
+              business: businessId,
+              released: false,
+            });
+            for (const earning of unreleased) {
+              if (remaining <= 0) break;
+              const take = Math.min(remaining, earning.net_amount || 0);
+              if (take <= 0) continue;
+              earning.net_amount = (earning.net_amount || 0) - take;
+              await earning.save();
+              await this.walletsService.reconcileBusinessWallet(businessId, {
+                pending: -take,
+              });
+              remaining -= take;
+            }
+            if (remaining > 0) {
+              // Already-released earnings → claw back from spendable balance.
+              // reconcileBusinessWallet floors at 0, so this only recovers what
+              // is still in the wallet (unrecoverable if already withdrawn).
+              await this.walletsService.reconcileBusinessWallet(businessId, {
+                balance: -remaining,
+              });
+              this.logger.warn(
+                `[LatePenalty] Clawed back ₦${remaining} from ${businessName}'s released balance on order ${order.reference} (pending earnings did not cover the penalty).`,
+              );
+            }
+          } catch (err: any) {
             this.logger.error(
-              `[LatePenalty] Failed to deduct penalty from earnings: ${err.message}`,
-            ),
-          );
+              `[LatePenalty] Failed to charge penalty to vendor ${businessId}: ${err.message}`,
+            );
+          }
 
           // Refund the incremental amount to the customer, then only tell them
           // they were compensated if the credit actually landed — the vendor

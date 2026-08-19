@@ -1077,7 +1077,10 @@ export class ProductService {
    * Called on order cancellation, full refund, or vendor rejection.
    * Mirrors updateInventory() but adds stock back instead of deducting.
    */
-  async restoreInventory(orderId: Types.ObjectId) {
+  async restoreInventory(
+    orderId: Types.ObjectId,
+    businessId?: string | Types.ObjectId,
+  ) {
     const session = await this.connection.startSession();
 
     try {
@@ -1094,7 +1097,16 @@ export class ProductService {
           return;
         }
 
-        for (const item of order.items) {
+        // A vendor rejection / auto-reject restores only THAT vendor's items;
+        // the rest of a multi-vendor order stays deducted. A full order
+        // cancel/return passes no businessId and restores everything.
+        const items = businessId
+          ? order.items.filter(
+              (i) => String((i as any).business) === String(businessId),
+            )
+          : order.items;
+
+        for (const item of items) {
           // Restore fabric yardage
           const fabricSelections = item.fabric_selections || [];
           for (const selection of fabricSelections) {
@@ -1231,25 +1243,41 @@ export class ProductService {
                 // `variant_id` is the INNER size-variant _id — find the colour
                 // variant that contains it, then restore that variant's stock.
                 let variant: any;
+                let colorVariant: any;
                 for (const cv of colorVariants) {
                   const match = cv.variants.find(
                     (v) => String(v._id) === String(selection.variant_id),
                   );
                   if (match) {
                     variant = match;
+                    colorVariant = cv;
                     break;
                   }
                 }
                 if (variant) {
-                  variant.stock =
-                    (variant.stock ?? 0) + (selection.quantity ?? 1);
+                  // Atomic add-back — a doubly-nested subdoc mutation + save()
+                  // does not reliably persist (see updateColorVariant).
+                  await this.productModel.updateOne(
+                    { _id: item.product },
+                    {
+                      $inc: {
+                        'clothing.color_variants.$[cv].variants.$[v].stock':
+                          selection.quantity ?? 1,
+                      },
+                    },
+                    {
+                      arrayFilters: [
+                        { 'cv._id': colorVariant._id },
+                        { 'v._id': variant._id },
+                      ],
+                      session,
+                    },
+                  );
                   this.logger.log(
                     `[RestoreInventory] Color variant ${selection.variant_id} stock +${selection.quantity ?? 1}`,
                   );
                 }
               }
-
-              await product.save({ session });
             }
           }
 
@@ -1268,10 +1296,15 @@ export class ProductService {
           }
         }
 
-        // Clear the flag so the order's inventory can be deducted again if it is
-        // ever re-processed, and so a second restore is a no-op.
-        (order as any).inventory_deducted = false;
-        await order.save({ session });
+        // Only a FULL restore clears the order-level flag (so a re-process can
+        // deduct again and a second full restore is a no-op). A per-vendor
+        // restore leaves other vendors' deductions — and the flag — intact; the
+        // reject flow's own guards (shipment.rejected / the atomic refund claim)
+        // stop the same vendor being restored twice.
+        if (!businessId) {
+          (order as any).inventory_deducted = false;
+          await order.save({ session });
+        }
       });
       this.logger.log(`[RestoreInventory] Inventory restored for order ${orderId}`);
     } catch (err: any) {
@@ -1512,6 +1545,7 @@ export class ProductService {
       // variant that CONTAINS it, then the size variant itself — the two levels
       // have different ids, so we must not match both with the same id.
       let variant: any;
+      let colorVariant: any;
       let colorName = '';
       for (const cv of colorVariants) {
         const match = cv.variants.find(
@@ -1519,6 +1553,7 @@ export class ProductService {
         );
         if (match) {
           variant = match;
+          colorVariant = cv;
           colorName = cv.name;
           break;
         }
@@ -1537,9 +1572,31 @@ export class ProductService {
           `Not enough stock for ${colorName} (${variant.size})`,
         );
       }
-      variant.stock -= totalQuantity;
+
+      // Atomic, guaranteed-persisted decrement of the doubly-nested size-variant
+      // stock. Mutating the subdocument in memory + product.save() does NOT
+      // reliably mark a nested-array-within-array path dirty in Mongoose, so the
+      // decrement could silently fail to persist — which is why clothing stock
+      // appeared unchanged after an order. (Matches the atomic pattern
+      // restoreInventory already uses for accessories/fabric.)
+      const res = await this.productModel.updateOne(
+        { _id: item.product },
+        {
+          $inc: {
+            'clothing.color_variants.$[cv].variants.$[v].stock': -totalQuantity,
+          },
+        },
+        {
+          arrayFilters: [{ 'cv._id': colorVariant._id }, { 'v._id': variant._id }],
+          session,
+        },
+      );
+      if (res.modifiedCount === 0) {
+        throw new BadRequestException(
+          `Failed to deduct stock for variant ${selection.variant_id}`,
+        );
+      }
     }
-    await product.save({ session });
   }
 
   async updateAccessoryVariantStock(
