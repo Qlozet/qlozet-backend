@@ -1272,8 +1272,52 @@ export class OrderService {
         s.shipment_type === ShipmentType.FABRIC_TRANSFER,
     );
 
-    // A real participant on the order → nothing to hide from them.
-    if (hasItem || hasOwnGarmentShipment || fabricTransfers.length === 0) {
+    // A real participant (sells an item and/or has their own garment shipment):
+    // return only THEIR slice of the order. A shared multi-vendor basket is one
+    // order in the DB, so without this the API would ship other vendors' items,
+    // prices and shipments to this vendor.
+    if (hasItem || hasOwnGarmentShipment) {
+      const myItems = items.filter((i) => String(i?.business) === bid);
+      const bd = this.computeVendorBreakdown(order, bid, commission);
+      // Keep only the shipments this vendor is involved in: their own
+      // (vendor_to_customer, or an outgoing fabric transfer they send) and any
+      // INCOMING fabric transfer destined for them (the drawer's "wait for
+      // fabric" gate needs it). Other vendors' shipments are stripped.
+      const myShipments = shipments.filter((s) => {
+        const src = shipmentBizId(s);
+        const dst = String(
+          s?.destination_business?._id ?? s?.destination_business,
+        );
+        return (
+          src === bid ||
+          (s.shipment_type === ShipmentType.FABRIC_TRANSFER && dst === bid)
+        );
+      });
+      const myShippingFee =
+        myShipments.find(
+          (s) =>
+            shipmentBizId(s) === bid &&
+            s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
+        )?.shipping_fee ?? 0;
+      return {
+        ...order,
+        items: myItems,
+        shipments: myShipments,
+        subtotal: bd.subtotal,
+        shipping_fee: myShippingFee,
+        // THIS vendor's own total — their goods + their delivery, not the whole
+        // multi-vendor basket. (The customer's external "use my own fabric"
+        // charge is the fabric vendor's revenue and is excluded from item
+        // total_price, so it isn't part of the tailor's total here.)
+        total: bd.subtotal + myShippingFee,
+        vendor_earnings: bd.net,
+        platform_commission: bd.commission,
+      };
+    }
+
+    // On the order via nothing recognisable (shouldn't happen — the query only
+    // returns orders the vendor is on) and not a fabric-transfer source.
+    if (fabricTransfers.length === 0) {
       return order;
     }
 
