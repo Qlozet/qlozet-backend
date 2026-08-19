@@ -1231,25 +1231,41 @@ export class ProductService {
                 // `variant_id` is the INNER size-variant _id — find the colour
                 // variant that contains it, then restore that variant's stock.
                 let variant: any;
+                let colorVariant: any;
                 for (const cv of colorVariants) {
                   const match = cv.variants.find(
                     (v) => String(v._id) === String(selection.variant_id),
                   );
                   if (match) {
                     variant = match;
+                    colorVariant = cv;
                     break;
                   }
                 }
                 if (variant) {
-                  variant.stock =
-                    (variant.stock ?? 0) + (selection.quantity ?? 1);
+                  // Atomic add-back — a doubly-nested subdoc mutation + save()
+                  // does not reliably persist (see updateColorVariant).
+                  await this.productModel.updateOne(
+                    { _id: item.product },
+                    {
+                      $inc: {
+                        'clothing.color_variants.$[cv].variants.$[v].stock':
+                          selection.quantity ?? 1,
+                      },
+                    },
+                    {
+                      arrayFilters: [
+                        { 'cv._id': colorVariant._id },
+                        { 'v._id': variant._id },
+                      ],
+                      session,
+                    },
+                  );
                   this.logger.log(
                     `[RestoreInventory] Color variant ${selection.variant_id} stock +${selection.quantity ?? 1}`,
                   );
                 }
               }
-
-              await product.save({ session });
             }
           }
 
@@ -1512,6 +1528,7 @@ export class ProductService {
       // variant that CONTAINS it, then the size variant itself — the two levels
       // have different ids, so we must not match both with the same id.
       let variant: any;
+      let colorVariant: any;
       let colorName = '';
       for (const cv of colorVariants) {
         const match = cv.variants.find(
@@ -1519,6 +1536,7 @@ export class ProductService {
         );
         if (match) {
           variant = match;
+          colorVariant = cv;
           colorName = cv.name;
           break;
         }
@@ -1537,9 +1555,31 @@ export class ProductService {
           `Not enough stock for ${colorName} (${variant.size})`,
         );
       }
-      variant.stock -= totalQuantity;
+
+      // Atomic, guaranteed-persisted decrement of the doubly-nested size-variant
+      // stock. Mutating the subdocument in memory + product.save() does NOT
+      // reliably mark a nested-array-within-array path dirty in Mongoose, so the
+      // decrement could silently fail to persist — which is why clothing stock
+      // appeared unchanged after an order. (Matches the atomic pattern
+      // restoreInventory already uses for accessories/fabric.)
+      const res = await this.productModel.updateOne(
+        { _id: item.product },
+        {
+          $inc: {
+            'clothing.color_variants.$[cv].variants.$[v].stock': -totalQuantity,
+          },
+        },
+        {
+          arrayFilters: [{ 'cv._id': colorVariant._id }, { 'v._id': variant._id }],
+          session,
+        },
+      );
+      if (res.modifiedCount === 0) {
+        throw new BadRequestException(
+          `Failed to deduct stock for variant ${selection.variant_id}`,
+        );
+      }
     }
-    await product.save({ session });
   }
 
   async updateAccessoryVariantStock(
