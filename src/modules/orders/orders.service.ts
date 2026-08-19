@@ -2706,16 +2706,49 @@ export class OrderService {
 
           await order.save();
 
-          // Also deduct the penalty from the actual BusinessEarning records
-          // so the cron doesn't release the full un-penalized amount
-          this.businessEarningsModel.updateMany(
-            { order: order._id, business: businessId, released: false },
-            { $inc: { net_amount: -incrementalPenalty } },
-          ).catch((err) =>
+          // Charge the penalty to the vendor. Take it from their UNRELEASED
+          // earnings first — reduce each earning's net_amount (so the release
+          // cron pays out less) and drop the matching amount from the wallet's
+          // pending balance. If that isn't enough (the earnings were already
+          // released into their spendable balance), claw the remainder back from
+          // that balance — otherwise the vendor keeps their money while the
+          // platform funds the customer's compensation. (A per-earning loop, not
+          // one $inc across all records, so bespoke upfront+completion earnings
+          // aren't each charged the full penalty.)
+          try {
+            let remaining = incrementalPenalty;
+            const unreleased = await this.businessEarningsModel.find({
+              order: order._id,
+              business: businessId,
+              released: false,
+            });
+            for (const earning of unreleased) {
+              if (remaining <= 0) break;
+              const take = Math.min(remaining, earning.net_amount || 0);
+              if (take <= 0) continue;
+              earning.net_amount = (earning.net_amount || 0) - take;
+              await earning.save();
+              await this.walletsService.reconcileBusinessWallet(businessId, {
+                pending: -take,
+              });
+              remaining -= take;
+            }
+            if (remaining > 0) {
+              // Already-released earnings → claw back from spendable balance.
+              // reconcileBusinessWallet floors at 0, so this only recovers what
+              // is still in the wallet (unrecoverable if already withdrawn).
+              await this.walletsService.reconcileBusinessWallet(businessId, {
+                balance: -remaining,
+              });
+              this.logger.warn(
+                `[LatePenalty] Clawed back ₦${remaining} from ${businessName}'s released balance on order ${order.reference} (pending earnings did not cover the penalty).`,
+              );
+            }
+          } catch (err: any) {
             this.logger.error(
-              `[LatePenalty] Failed to deduct penalty from earnings: ${err.message}`,
-            ),
-          );
+              `[LatePenalty] Failed to charge penalty to vendor ${businessId}: ${err.message}`,
+            );
+          }
 
           // Refund the incremental amount to the customer, then only tell them
           // they were compensated if the credit actually landed — the vendor
