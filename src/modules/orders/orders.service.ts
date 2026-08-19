@@ -828,17 +828,39 @@ export class OrderService {
     const fabric = product.fabric;
 
     // --- Color Variants ---
+    // `color_variant_id` is expected to be the INNER size-variant _id (a specific
+    // size within a colour) — that is what inventory deduction matches on. Some
+    // clients instead send the OUTER colour-variant _id, so fall back to
+    // resolving the size within that colour via the `size` field (or the sole
+    // variant). Either way we normalise to the inner size-variant id; without
+    // this the selection stored empty and stock never changed.
     const normalizedColorVariants: VariantSelectionDto[] = [];
     for (const cvs of selections.color_variant_selections || []) {
-      const colorVariant = clothing?.color_variants?.find((cv) =>
+      let colorVariant = clothing?.color_variants?.find((cv) =>
         cv.variants.some((v) => v._id?.equals(cvs.color_variant_id)),
       );
-      if (!colorVariant) continue;
-
-      const variant = colorVariant.variants.find((v) =>
+      let variant = colorVariant?.variants.find((v) =>
         v._id?.equals(cvs.color_variant_id),
       );
-      if (!variant) continue;
+
+      // Fallback: the id was the OUTER colour variant → pick the size within it.
+      if (!variant) {
+        const outer = clothing?.color_variants?.find((cv) =>
+          (cv as any)._id?.equals(cvs.color_variant_id),
+        );
+        if (outer) {
+          colorVariant = outer;
+          variant =
+            (cvs.size
+              ? outer.variants.find(
+                  (v) =>
+                    v.size?.toLowerCase() === String(cvs.size).toLowerCase(),
+                )
+              : undefined) ??
+            (outer.variants.length === 1 ? outer.variants[0] : undefined);
+        }
+      }
+      if (!colorVariant || !variant) continue;
 
       const quantity = cvs.quantity ?? 1;
       normalizedColorVariants.push({
