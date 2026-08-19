@@ -1077,7 +1077,10 @@ export class ProductService {
    * Called on order cancellation, full refund, or vendor rejection.
    * Mirrors updateInventory() but adds stock back instead of deducting.
    */
-  async restoreInventory(orderId: Types.ObjectId) {
+  async restoreInventory(
+    orderId: Types.ObjectId,
+    businessId?: string | Types.ObjectId,
+  ) {
     const session = await this.connection.startSession();
 
     try {
@@ -1094,7 +1097,16 @@ export class ProductService {
           return;
         }
 
-        for (const item of order.items) {
+        // A vendor rejection / auto-reject restores only THAT vendor's items;
+        // the rest of a multi-vendor order stays deducted. A full order
+        // cancel/return passes no businessId and restores everything.
+        const items = businessId
+          ? order.items.filter(
+              (i) => String((i as any).business) === String(businessId),
+            )
+          : order.items;
+
+        for (const item of items) {
           // Restore fabric yardage
           const fabricSelections = item.fabric_selections || [];
           for (const selection of fabricSelections) {
@@ -1284,10 +1296,15 @@ export class ProductService {
           }
         }
 
-        // Clear the flag so the order's inventory can be deducted again if it is
-        // ever re-processed, and so a second restore is a no-op.
-        (order as any).inventory_deducted = false;
-        await order.save({ session });
+        // Only a FULL restore clears the order-level flag (so a re-process can
+        // deduct again and a second full restore is a no-op). A per-vendor
+        // restore leaves other vendors' deductions — and the flag — intact; the
+        // reject flow's own guards (shipment.rejected / the atomic refund claim)
+        // stop the same vendor being restored twice.
+        if (!businessId) {
+          (order as any).inventory_deducted = false;
+          await order.save({ session });
+        }
       });
       this.logger.log(`[RestoreInventory] Inventory restored for order ${orderId}`);
     } catch (err: any) {
