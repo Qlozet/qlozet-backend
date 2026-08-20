@@ -372,7 +372,20 @@ export class PaymentService {
   }
 
   /** ---------------- Send Payout ---------------- */
-  async sendPayout(businessId: string, amount: number, reason?: string) {
+  /**
+   * Sends a Paystack transfer to the vendor's linked bank account.
+   *
+   * @param existingReference When the caller has already created the payout
+   *   ledger entry (e.g. a manual withdrawal), pass its reference so we reuse
+   *   it instead of creating a duplicate transaction. Omit it for automatic
+   *   payouts, where this method owns the ledger entry.
+   */
+  async sendPayout(
+    businessId: string,
+    amount: number,
+    reason?: string,
+    existingReference?: string,
+  ) {
     const business = await this.businessModel.findById(businessId);
     if (!business) throw new NotFoundException('Vendor not found');
 
@@ -382,27 +395,36 @@ export class PaymentService {
       );
     }
 
-    // Amount is already post-commission (net_amount from BusinessEarning).
-    // Do NOT call platformService.compute() here — commission was already
-    // deducted when recording earnings. Transferring the exact amount.
-    const transaction = await this.transactionService.create({
-      initiator: businessId as unknown as Types.ObjectId,
-      amount,
-      type: TransactionType.CREDIT,
-      description: reason || `Payout for ${business.business_name}`,
-      channel: 'payout',
-      metadata: {
-        payout_amount: amount,
-        business_name: business.business_name,
-      },
-    });
+    // Reuse the caller's ledger entry when given one; otherwise create our own.
+    // A payout is money LEAVING the vendor, so the entry is a DEBIT (it was
+    // mistyped as CREDIT, which — together with the caller's own debit — showed
+    // up as a duplicate credit+debit pair on a manual withdrawal).
+    let reference = existingReference;
+    if (!reference) {
+      // Amount is already post-commission (net_amount from BusinessEarning).
+      // Do NOT call platformService.compute() here — commission was already
+      // deducted when recording earnings. Transferring the exact amount.
+      const transaction = await this.transactionService.create({
+        initiator: businessId as unknown as Types.ObjectId,
+        amount,
+        type: TransactionType.DEBIT,
+        status: TransactionStatus.PENDING,
+        description: reason || `Payout for ${business.business_name}`,
+        channel: 'payout',
+        metadata: {
+          payout_amount: amount,
+          business_name: business.business_name,
+        },
+      });
+      reference = transaction.reference;
+    }
 
     const payload = {
       source: 'balance',
       amount: Math.round(amount * 100), // Paystack uses kobo (integer)
       recipient: business.transfer_recipient_code,
       reason: reason || `Payout for ${business.business_name}`,
-      reference: transaction.reference,
+      reference,
     };
 
     const url = `https://api.paystack.co/transfer`;

@@ -53,8 +53,12 @@ export class WalletsController {
     private readonly paymentService: PaymentService,
   ) {}
 
-  // Fund wallet
+  // Fund wallet. Customers fund their own wallet (they bypass the vendor-role
+  // check below). For a vendor business wallet, only the OWNER and OPERATIONS
+  // roles may move money — other team members (tailor, marketing, support,
+  // sales, data analyst) are blocked.
   @Roles(UserType.CUSTOMER, UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Post('fund')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Fund wallet via Paystack' })
@@ -145,7 +149,7 @@ export class WalletsController {
    * Validates minimum payout, balance, and bank account.
    */
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Post('withdraw')
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ValidationPipe({ transform: true }))
