@@ -259,8 +259,11 @@ export class Business extends Document {
   @Prop({ type: [String], default: [] })
   payout_history?: string[]; // store payout ref IDs for audit
 
-  @Prop({ default: null })
-  transfer_recipient_code?: number;
+  // Paystack transfer recipient code (e.g. "RCP_xxxxx") — a STRING. It was
+  // typed as number, so Mongoose cast the "RCP_..." code to NaN on save and it
+  // never persisted, leaving vendors unable to withdraw ("link a bank account").
+  @Prop({ type: String, default: null })
+  transfer_recipient_code?: string;
   @Prop()
   createdAt?: Date;
 
