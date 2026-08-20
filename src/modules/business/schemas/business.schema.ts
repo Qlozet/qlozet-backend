@@ -242,9 +242,6 @@ export class Business extends Document {
   })
   team_members?: Types.ObjectId[];
   @Prop({ type: Number, default: 0 })
-  pending_payout_balance: number; // Money waiting for payout
-
-  @Prop({ type: Number, default: 0 })
   lifetime_earned?: number;
 
   @Prop({ type: Number, default: 0 })
