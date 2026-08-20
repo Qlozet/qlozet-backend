@@ -111,7 +111,14 @@ export class OrderValidationService {
               `Not enough stock for variant "${variant._id}". Remaining: ${variant.stock}`,
             );
 
-          const price = variant.price ?? 0;
+          // `variant.price` is an optional per-size override; when unset the
+          // selling price lives at the product level (discounted → base).
+          const price =
+            variant.price && variant.price > 0
+              ? variant.price
+              : product.discounted_price && product.discounted_price > 0
+                ? product.discounted_price
+                : (product.base_price ?? 0);
           totalPrice += price * (cv.quantity ?? 1);
 
           breakdown.variants.push({

@@ -691,6 +691,21 @@ export class PriceCalculationService {
     return this.round(total);
   }
 
+  /**
+   * Selling price of a clothing size-variant. `variant.price` is an optional
+   * per-size override; when it is 0/unset the price lives at the product level
+   * (discounted price if a discount applies, otherwise the base price).
+   */
+  private resolveClothingUnitPrice(
+    variant: { price?: number },
+    product: ProductDocument,
+  ): number {
+    if (variant?.price && variant.price > 0) return variant.price;
+    if (product.discounted_price && product.discounted_price > 0)
+      return product.discounted_price;
+    return product.base_price ?? 0;
+  }
+
   async calculateColorVariantCost(
     selections: VariantSelectionDto[],
     product: ProductDocument,
@@ -734,7 +749,13 @@ export class PriceCalculationService {
         );
       }
 
-      total += (variant.price ?? 0) * (s.quantity ?? 1);
+      // Per-size `variant.price` is an optional override. When the vendor leaves
+      // it at 0/unset the selling price lives at the product level, so fall back
+      // to the discounted price (if any) then the base price. Without this the
+      // item is priced at 0 — free goods, and a min:1 validation failure on save.
+      const unitPrice = this.resolveClothingUnitPrice(variant, product);
+
+      total += unitPrice * (s.quantity ?? 1);
     }
 
     return this.round(total);
