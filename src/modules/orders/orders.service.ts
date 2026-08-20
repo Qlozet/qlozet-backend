@@ -152,6 +152,10 @@ export class OrderService {
             (cv: any) => ({
               variant_id: cv.variant_id ?? cv.color_variant_id,
               size: cv.size,
+              // Snapshot the colour name + hex so order/item views can show the
+              // colour without re-resolving it from the (mutable) product.
+              color: cv.color,
+              hex: cv.hex,
               price: cv.price,
               quantity: cv.quantity,
               total_amount: cv.total_amount,
@@ -878,6 +882,10 @@ export class OrderService {
       normalizedColorVariants.push({
         color_variant_id: new Types.ObjectId(variant._id),
         size: variant.size,
+        // Colour name + hex from the parent colour variant, snapshotted so the
+        // order/item views can show the colour directly.
+        color: colorVariant.name,
+        hex: colorVariant.hex,
         price: unitPrice,
         quantity,
         total_amount: unitPrice * quantity,
@@ -956,6 +964,11 @@ export class OrderService {
         variant_id: accessoryVariant?._id
           ? new Types.ObjectId(accessoryVariant._id)
           : undefined,
+        // Snapshot the accessory name + chosen variant colour so order/item
+        // views can show them without re-resolving the product.
+        name: isAccessoryExist.name,
+        color: (accessoryVariant as any)?.color?.name,
+        hex: (accessoryVariant as any)?.color?.hex,
         price: isAccessoryExist.price,
         quantity,
         total_amount: isAccessoryExist.price * quantity,
