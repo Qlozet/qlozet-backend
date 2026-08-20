@@ -277,8 +277,14 @@ export class WalletsService {
           `[Withdrawal] Could not mark transaction ${transaction.reference} FAILED: ${statusErr.message}`,
         );
       }
+      // Surface the underlying reason (e.g. the Transfers-OTP guidance) so the
+      // vendor knows what to fix, rather than a generic "try again later".
+      const reason =
+        err instanceof BadRequestException
+          ? err.message
+          : 'Please try again later.';
       throw new BadRequestException(
-        'Withdrawal failed. Your wallet has been restored. Please try again later.',
+        `Withdrawal failed and your wallet has been restored. ${reason}`,
       );
     }
 

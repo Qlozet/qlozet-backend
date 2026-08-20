@@ -437,6 +437,26 @@ export class PaymentService {
     if (!response.data.status || !response.data.data) {
       throw new BadRequestException('Failed to send payout');
     }
+
+    // A Paystack transfer comes back with a status. Only `success`/`pending`
+    // means it is actually on its way (the transfer.success/failed webhook then
+    // finalises it). `otp` means the account has Transfers OTP enabled and the
+    // transfer is NOT sent until finalised with the OTP — treating that as
+    // success is what left the withdrawal debit stuck pending. Surface it so the
+    // caller reverses the debit instead of silently stranding the money.
+    const transferStatus: string = response.data.data.status;
+    if (transferStatus === 'otp') {
+      throw new BadRequestException(
+        'Payouts require an OTP on this Paystack account. Disable “Transfers OTP” ' +
+          'in your Paystack dashboard (Settings → Preferences) to enable automatic payouts.',
+      );
+    }
+    if (!['success', 'pending'].includes(transferStatus)) {
+      throw new BadRequestException(
+        `Payout could not be sent (status: ${transferStatus}).`,
+      );
+    }
+
     return response.data.data.reference;
   }
 
