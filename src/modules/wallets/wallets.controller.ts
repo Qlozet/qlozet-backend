@@ -161,13 +161,17 @@ export class WalletsController {
 
   // ─── Payout (bank) account ─────────────────────────────────────────────────
 
+  // NOTE: the global response interceptor wraps whatever we return as the
+  // envelope's `data`. Return the RAW payload here (no { message, data }
+  // wrapper) — wrapping would make the interceptor spread `data.data`, which
+  // corrupts an array into an object ("e.find is not a function" on the client).
+
   /** List supported banks for the payout-account picker. */
   @Roles(UserType.VENDOR)
   @Get('banks')
   @ApiOperation({ summary: 'List supported banks for payout' })
   async listBanks(@Query('currency') currency = 'NGN') {
-    const data = await this.paymentService.listBanks(currency);
-    return { message: 'Banks retrieved', data };
+    return this.paymentService.listBanks(currency);
   }
 
   /** Return the vendor's currently linked payout account (masked). */
@@ -179,8 +183,7 @@ export class WalletsController {
     if (!businessId) {
       throw new Error('Business context required');
     }
-    const data = await this.paymentService.getPayoutAccount(businessId);
-    return { message: 'Payout account retrieved', data };
+    return this.paymentService.getPayoutAccount(businessId);
   }
 
   /** Resolve an account number → account name before linking (confirmation). */
@@ -191,8 +194,7 @@ export class WalletsController {
   @ApiOperation({ summary: 'Resolve a bank account name before linking' })
   @ApiBody({ type: VerifyBankAccountDto })
   async resolvePayoutAccount(@Body() dto: VerifyBankAccountDto) {
-    const data = await this.paymentService.resolveBankAccount(dto);
-    return { message: 'Account resolved', data };
+    return this.paymentService.resolveBankAccount(dto);
   }
 
   /** Link (create/replace) the vendor's payout bank account. */
@@ -211,6 +213,18 @@ export class WalletsController {
     if (!businessId) {
       throw new Error('Business context required');
     }
-    return this.paymentService.createTransferRecipient(businessId, dto);
+    const result = await this.paymentService.createTransferRecipient(
+      businessId,
+      dto,
+    );
+    // Object payload → safe to let the interceptor promote `message` and spread
+    // the rest under `data` (see the note above the GET routes).
+    return {
+      message: result.message,
+      data: {
+        recipient_code: result.recipient_code,
+        account: result.account,
+      },
+    };
   }
 }
