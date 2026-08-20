@@ -279,13 +279,95 @@ export class PaymentService {
       throw new BadRequestException('Failed to create transfer recipient');
     }
 
-    // Save recipient code to vendor for future payouts
-    vendor.transfer_recipient_code = response.data.data.recipient_code;
+    const recipient = response.data.data;
+    const details = recipient.details || {};
+
+    // Save the recipient code (used for payouts) + the display details so the
+    // vendor's Settings → Payout screen can show what's linked.
+    vendor.transfer_recipient_code = recipient.recipient_code;
+    vendor.payout_bank_name = details.bank_name ?? dto.bank_name ?? null;
+    vendor.payout_bank_code = details.bank_code ?? dto.bank_code;
+    vendor.payout_account_number =
+      details.account_number ?? dto.account_number;
+    vendor.payout_account_name = details.account_name ?? dto.name;
     await vendor.save();
 
     return {
-      message: 'Recipient created successfully',
-      recipient_code: response.data.data.recipient_code,
+      message: 'Payout account linked successfully',
+      recipient_code: recipient.recipient_code,
+      account: this.formatPayoutAccount(vendor),
+    };
+  }
+
+  /** ---------------- List supported banks ---------------- */
+  async listBanks(currency = 'NGN') {
+    const url = `https://api.paystack.co/bank?currency=${currency}`;
+    const response: any = await firstValueFrom(
+      this.httpService.get(url, { headers: this.getPaystackHeaders() }),
+    );
+
+    if (!response.data?.status || !Array.isArray(response.data.data)) {
+      throw new BadGatewayException('Unable to fetch bank list');
+    }
+
+    // Trim to what the client needs to render a picker.
+    return response.data.data.map((b: any) => ({
+      name: b.name,
+      code: b.code,
+      slug: b.slug,
+    }));
+  }
+
+  /**
+   * Resolve an account number against a bank to confirm the name before the
+   * vendor links it. Returns the resolved account name for confirmation.
+   */
+  async resolveBankAccount(dto: VerifyBankAccountDto) {
+    const url = `https://api.paystack.co/bank/resolve?account_number=${dto.account_number}&bank_code=${dto.bank_code}`;
+    let response: any;
+    try {
+      response = await firstValueFrom(
+        this.httpService.get(url, { headers: this.getPaystackHeaders() }),
+      );
+    } catch {
+      // Paystack returns 4xx for an unresolvable account — surface a clean 400.
+      throw new BadRequestException(
+        'Could not verify that account number for the selected bank.',
+      );
+    }
+
+    if (!response.data?.status || !response.data.data?.account_name) {
+      throw new BadRequestException(
+        'Could not verify that account number for the selected bank.',
+      );
+    }
+
+    return {
+      account_number: response.data.data.account_number,
+      account_name: response.data.data.account_name,
+      bank_code: dto.bank_code,
+    };
+  }
+
+  /** Current linked payout account (masked) for the Settings screen. */
+  async getPayoutAccount(businessId: string) {
+    const vendor = await this.businessModel.findById(businessId);
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    return this.formatPayoutAccount(vendor);
+  }
+
+  /** Shapes the stored payout details for the client, masking the account no. */
+  private formatPayoutAccount(vendor: BusinessDocument) {
+    const linked = !!vendor.transfer_recipient_code;
+    const accountNumber = vendor.payout_account_number || '';
+    return {
+      linked,
+      bank_name: vendor.payout_bank_name || null,
+      bank_code: vendor.payout_bank_code || null,
+      account_name: vendor.payout_account_name || null,
+      account_number: accountNumber
+        ? `******${accountNumber.slice(-4)}`
+        : null,
     };
   }
 

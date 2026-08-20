@@ -264,6 +264,20 @@ export class Business extends Document {
   // never persisted, leaving vendors unable to withdraw ("link a bank account").
   @Prop({ type: String, default: null })
   transfer_recipient_code?: string;
+
+  // Linked payout (bank) account details, saved when the recipient is created
+  // so the vendor's Settings → Payout screen can show what's linked.
+  @Prop({ type: String, default: null })
+  payout_bank_name?: string;
+
+  @Prop({ type: String, default: null })
+  payout_bank_code?: string;
+
+  @Prop({ type: String, default: null })
+  payout_account_number?: string;
+
+  @Prop({ type: String, default: null })
+  payout_account_name?: string;
   @Prop()
   createdAt?: Date;
 

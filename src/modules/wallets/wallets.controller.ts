@@ -32,6 +32,10 @@ import { TokenService } from './token.service';
 import { PaymentService } from '../payment/payment.service';
 import { WithdrawDto } from './dto/withdraw.dto';
 import {
+  CreateTransferRecipientDto,
+  VerifyBankAccountDto,
+} from '../payment/dto/payment.dto';
+import {
   FundWalletResponseDto,
   VerifyPaymentResponseDto,
   WalletBalanceResponseDto,
@@ -153,5 +157,60 @@ export class WalletsController {
       throw new Error('Business context required for withdrawal');
     }
     return this.walletsService.requestWithdrawal(businessId, dto.amount);
+  }
+
+  // ─── Payout (bank) account ─────────────────────────────────────────────────
+
+  /** List supported banks for the payout-account picker. */
+  @Roles(UserType.VENDOR)
+  @Get('banks')
+  @ApiOperation({ summary: 'List supported banks for payout' })
+  async listBanks(@Query('currency') currency = 'NGN') {
+    const data = await this.paymentService.listBanks(currency);
+    return { message: 'Banks retrieved', data };
+  }
+
+  /** Return the vendor's currently linked payout account (masked). */
+  @Roles(UserType.VENDOR)
+  @Get('payout-account')
+  @ApiOperation({ summary: 'Get the vendor’s linked payout account' })
+  async getPayoutAccount(@Req() req: any) {
+    const businessId = req.business?._id?.toString() || req.business?.id;
+    if (!businessId) {
+      throw new Error('Business context required');
+    }
+    const data = await this.paymentService.getPayoutAccount(businessId);
+    return { message: 'Payout account retrieved', data };
+  }
+
+  /** Resolve an account number → account name before linking (confirmation). */
+  @Roles(UserType.VENDOR)
+  @Post('payout-account/resolve')
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  @ApiOperation({ summary: 'Resolve a bank account name before linking' })
+  @ApiBody({ type: VerifyBankAccountDto })
+  async resolvePayoutAccount(@Body() dto: VerifyBankAccountDto) {
+    const data = await this.paymentService.resolveBankAccount(dto);
+    return { message: 'Account resolved', data };
+  }
+
+  /** Link (create/replace) the vendor's payout bank account. */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Post('payout-account')
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  @ApiOperation({ summary: 'Link a payout bank account for the vendor' })
+  @ApiBody({ type: CreateTransferRecipientDto })
+  async linkPayoutAccount(
+    @Body() dto: CreateTransferRecipientDto,
+    @Req() req: any,
+  ) {
+    const businessId = req.business?._id?.toString() || req.business?.id;
+    if (!businessId) {
+      throw new Error('Business context required');
+    }
+    return this.paymentService.createTransferRecipient(businessId, dto);
   }
 }

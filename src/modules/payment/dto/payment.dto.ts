@@ -19,6 +19,13 @@ export class CreateTransferRecipientDto {
   bank_code: string;
 
   @ApiPropertyOptional({
+    description: 'Display name of the selected bank (for showing the linked account)',
+  })
+  @IsString()
+  @IsOptional()
+  bank_name?: string;
+
+  @ApiPropertyOptional({
     description: 'Currency of the account, default NGN',
     default: 'NGN',
   })
