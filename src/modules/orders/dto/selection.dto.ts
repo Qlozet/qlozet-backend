@@ -21,6 +21,15 @@ export class VariantSelectionDto {
   @IsOptional()
   size: string;
 
+  // Colour name + hex snapshot, filled server-side in normalizeSelections.
+  @IsString()
+  @IsOptional()
+  color?: string;
+
+  @IsString()
+  @IsOptional()
+  hex?: string;
+
   @IsNumber()
   @IsPositive()
   @IsOptional()
@@ -71,6 +80,19 @@ export class AccessorySelectionDto {
   @IsMongoId()
   @IsOptional()
   variant_id?: Types.ObjectId;
+
+  // Snapshots filled server-side in normalizeSelections for display.
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string;
+
+  @IsString()
+  @IsOptional()
+  hex?: string;
 
   @IsNumber()
   @IsPositive()

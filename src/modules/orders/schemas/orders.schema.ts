@@ -37,6 +37,12 @@ class VariantSelection {
 
   @Prop({ type: String })
   size?: string;
+  // Colour name + hex snapshot (from the product's colour variant) so order and
+  // item views can show the chosen colour without re-resolving the product.
+  @Prop({ type: String })
+  color?: string;
+  @Prop({ type: String })
+  hex?: string;
   @Prop({ type: Number, min: 1 })
   price: number;
   @Prop({ type: Number, min: 1 })
@@ -85,6 +91,13 @@ class AccessorySelection {
   // ValidationError (surfaced as a 500) when saving such an order.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Variant', required: false })
   variant_id?: Types.ObjectId;
+  // Display snapshots (accessory name + chosen variant colour).
+  @Prop({ type: String })
+  name?: string;
+  @Prop({ type: String })
+  color?: string;
+  @Prop({ type: String })
+  hex?: string;
   @Prop({ type: Number, min: 1 })
   price: number;
   @Prop({ type: Number, min: 1 })
