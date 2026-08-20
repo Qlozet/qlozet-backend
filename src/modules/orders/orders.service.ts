@@ -517,8 +517,10 @@ export class OrderService {
       }
       this.logger?.error('Create order failed', error.stack || error);
 
+      // TEMP(diagnostic): surface the real cause in the response so we can see
+      // what's actually failing (revert to the generic message once fixed).
       throw new InternalServerErrorException(
-        'Unable to create order at this time. Please try again.',
+        `Unable to create order [${error?.name || 'Error'}]: ${error?.message || 'unknown error'}`,
       );
     }
   }
@@ -863,12 +865,22 @@ export class OrderService {
       if (!colorVariant || !variant) continue;
 
       const quantity = cvs.quantity ?? 1;
+      // `variant.price` is an optional per-size override; when it is 0/unset the
+      // selling price lives at the product level. Fall back to discounted → base
+      // price, otherwise price/total_amount save as 0 and fail the min:1
+      // validator on the order item.
+      const unitPrice =
+        variant.price && variant.price > 0
+          ? variant.price
+          : product.discounted_price && product.discounted_price > 0
+            ? product.discounted_price
+            : (product.base_price ?? 0);
       normalizedColorVariants.push({
         color_variant_id: new Types.ObjectId(variant._id),
         size: variant.size,
-        price: variant.price,
+        price: unitPrice,
         quantity,
-        total_amount: variant.price * quantity,
+        total_amount: unitPrice * quantity,
       });
     }
 
