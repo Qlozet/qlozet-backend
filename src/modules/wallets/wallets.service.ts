@@ -251,6 +251,9 @@ export class WalletsService {
         businessId,
         amount,
         `Withdrawal for ${business.business_name}`,
+        // Reuse the DEBIT ledger entry created above — without this, sendPayout
+        // creates a second transaction and the vendor sees a duplicate pair.
+        transaction.reference,
       );
 
       this.logger.log(
