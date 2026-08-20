@@ -430,15 +430,17 @@ export class WebhookService {
     const businessId =
       ((transaction.metadata as any)?.business_id as string) ??
       (transaction.initiator as unknown as string);
-    const business = await this.businessService.findBusinessById(businessId);
+    // Load a real Mongoose document. businessService.findBusinessById returns an
+    // aggregate result (a plain object with no .save()), so the payout
+    // bookkeeping below used to throw and never persist — lifetime_paid_out /
+    // payout_history were silently lost and orders never marked paid.
+    const business = await this.businessModel.findById(businessId);
     if (!business) {
       this.logger.warn(
         `[Payout] Could not resolve business for transaction ${transaction.reference}; skipping payout bookkeeping.`,
       );
       return;
     }
-
-    // Compute vendor earnings
 
     business.lifetime_paid_out =
       (business.lifetime_paid_out || 0) + transaction.amount;
