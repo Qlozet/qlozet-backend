@@ -442,7 +442,6 @@ export class WebhookService {
 
     business.lifetime_paid_out =
       (business.lifetime_paid_out || 0) + transaction.amount;
-    business.pending_payout_balance = 0;
     business.last_payout_date = new Date();
     business.payout_history = business.payout_history || [];
     business.payout_history.push(transaction.reference);
