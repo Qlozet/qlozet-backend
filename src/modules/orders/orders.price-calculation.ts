@@ -698,23 +698,35 @@ export class PriceCalculationService {
     let total = 0;
 
     for (const s of selections) {
-      const color = product.clothing?.color_variants?.find(
+      // color_variant_id may be the INNER size-variant id (preferred) or the
+      // OUTER colour-variant id. Resolve the colour + the specific size variant
+      // from either form — kept in sync with normalizeSelections / validation.
+      let color = product.clothing?.color_variants?.find((cv) =>
+        (cv.variants || []).some(
+          (v) => String(v._id) === String(s.color_variant_id),
+        ),
+      );
+      let variant = color?.variants?.find(
         (v) => String(v._id) === String(s.color_variant_id),
       );
 
-      if (!color) {
-        throw new BadRequestException('Selected variant not found in clothing');
+      // Fallback: the id was the OUTER colour variant → price the selected size.
+      if (!variant) {
+        color = product.clothing?.color_variants?.find(
+          (cv) => String(cv._id) === String(s.color_variant_id),
+        );
+        variant =
+          (s.size
+            ? color?.variants?.find(
+                (v) => v.size?.toLowerCase() === String(s.size).toLowerCase(),
+              )
+            : undefined) ??
+          (color?.variants?.length === 1 ? color.variants[0] : undefined);
       }
 
-      // Price ONLY the selected size's variant — not every size of the colour.
-      // (The previous loop summed all sizes, multiplying the price by the number
-      // of sizes the colour has.)
-      const variant = s.size
-        ? color.variants.find(
-            (v) => v.size?.toLowerCase() === String(s.size).toLowerCase(),
-          )
-        : color.variants[0];
-      if (!variant) continue;
+      if (!color || !variant) {
+        throw new BadRequestException('Selected variant not found in clothing');
+      }
 
       if ((variant.stock ?? 0) < (s.quantity ?? 0)) {
         throw new BadRequestException(

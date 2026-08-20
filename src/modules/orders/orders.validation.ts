@@ -76,31 +76,49 @@ export class OrderValidationService {
         color_variant_selections?.length
       ) {
         for (const cv of color_variant_selections) {
-          const color = clothing.color_variants?.find(
-            (vDoc) => String(vDoc._id) === String(cv.color_variant_id),
+          // `color_variant_id` may be the INNER size-variant _id (preferred) or
+          // the OUTER colour-variant _id. Resolve the colour + the specific size
+          // variant from either form — kept in sync with normalizeSelections so
+          // validation and inventory deduction agree on the same variant.
+          let color = clothing.color_variants?.find((vDoc: any) =>
+            (vDoc.variants || []).some(
+              (v: any) => String(v._id) === String(cv.color_variant_id),
+            ),
           );
-          if (!color)
+          let variant = (color?.variants || []).find(
+            (v: any) => String(v._id) === String(cv.color_variant_id),
+          );
+
+          // Fallback: the id was the OUTER colour variant → pick the size in it.
+          if (!variant) {
+            color = clothing.color_variants?.find(
+              (vDoc: any) => String(vDoc._id) === String(cv.color_variant_id),
+            );
+            variant =
+              (cv.size
+                ? (color?.variants || []).find((v: any) => v.size === cv.size)
+                : undefined) ??
+              (color?.variants?.length === 1 ? color.variants[0] : undefined);
+          }
+
+          if (!color || !variant)
             throw new BadRequestException(
               `Color variant not found: ${cv.color_variant_id}`,
             );
 
-          for (const v of color.variants) {
-            if (v.size === cv.size) {
-              if ((v.stock ?? 0) < (cv.quantity ?? 0))
-                throw new BadRequestException(
-                  `Not enough stock for variant "${v._id}". Remaining: ${v.stock}`,
-                );
+          if ((variant.stock ?? 0) < (cv.quantity ?? 0))
+            throw new BadRequestException(
+              `Not enough stock for variant "${variant._id}". Remaining: ${variant.stock}`,
+            );
 
-              const price = v.price ?? 0;
-              totalPrice += price * (cv.quantity ?? 1);
+          const price = variant.price ?? 0;
+          totalPrice += price * (cv.quantity ?? 1);
 
-              breakdown.variants.push({
-                name: v._id,
-                price,
-                quantity: cv.quantity ?? 1,
-              });
-            }
-          }
+          breakdown.variants.push({
+            name: variant._id,
+            price,
+            quantity: cv.quantity ?? 1,
+          });
         }
       }
 
