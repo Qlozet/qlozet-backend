@@ -2895,6 +2895,7 @@ export class OrderService {
         const need = cvs?.quantity ?? qty;
         if (variantId) {
           let stock: number | undefined;
+          // Preferred: id is the INNER size-variant _id.
           for (const cv of product.clothing?.color_variants || []) {
             const v = cv.variants?.find(
               (x: any) => String(x._id) === String(variantId),
@@ -2902,6 +2903,23 @@ export class OrderService {
             if (v) {
               stock = v.stock ?? 0;
               break;
+            }
+          }
+          // Fallback: id is the OUTER colour variant → check the selected size.
+          if (stock === undefined) {
+            const outer = (product.clothing?.color_variants || []).find(
+              (cv: any) => String(cv._id) === String(variantId),
+            );
+            if (outer) {
+              const v =
+                (cvs?.size
+                  ? outer.variants?.find(
+                      (x: any) =>
+                        x.size?.toLowerCase() === String(cvs.size).toLowerCase(),
+                    )
+                  : undefined) ??
+                (outer.variants?.length === 1 ? outer.variants[0] : undefined);
+              if (v) stock = v.stock ?? 0;
             }
           }
           if (stock !== undefined && stock < need) {
