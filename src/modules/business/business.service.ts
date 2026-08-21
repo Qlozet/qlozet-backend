@@ -1468,6 +1468,7 @@ export class BusinessService implements OnModuleInit {
         await this.businessEarningsModel.create({
           business: businessId,
           order: order._id,
+          item: (item as any)._id,
           amount: gross * (upfrontPercent / 100),
           commission: commission * (upfrontPercent / 100),
           net_amount: upfrontNet,
@@ -1479,6 +1480,7 @@ export class BusinessService implements OnModuleInit {
         await this.businessEarningsModel.create({
           business: businessId,
           order: order._id,
+          item: (item as any)._id,
           amount: gross * ((100 - upfrontPercent) / 100),
           commission: commission * ((100 - upfrontPercent) / 100),
           net_amount: completionNet,
@@ -1495,6 +1497,7 @@ export class BusinessService implements OnModuleInit {
         await this.businessEarningsModel.create({
           business: businessId,
           order: order._id,
+          item: (item as any)._id,
           amount: gross,
           commission,
           net_amount: net,
@@ -1541,6 +1544,9 @@ export class BusinessService implements OnModuleInit {
             await this.businessEarningsModel.create({
               business: fabricVendorId,
               order: order._id,
+              // Linked to the TAILOR's item that applied this fabric, so
+              // rejecting that item reverses the fabric vendor's earning too.
+              item: (item as any)._id,
               amount: externalFabric,
               commission: fabricCommission,
               net_amount: fabricNet,

@@ -11,6 +11,11 @@ export class BusinessEarning extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
+  // The specific order item this earning is for. Enables reversing a single
+  // item's earning on per-item vendor rejection. Null for older records.
+  @Prop({ type: Types.ObjectId, default: null })
+  item?: Types.ObjectId;
+
   @Prop({ type: Number, required: true })
   amount: number; // gross amount for this business
 

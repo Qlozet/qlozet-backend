@@ -125,7 +125,10 @@ class AddonSelection {
 }
 
 /** ------------------ Sub-schema for each item ------------------ */
-@Schema({ _id: false })
+// _id is enabled (Mongoose default) so a single item can be targeted for
+// per-item vendor rejection. Orders placed before this change have no item ids
+// and fall back to whole-shipment rejection.
+@Schema()
 export class OrderItem {
   // Optional: bespoke order items have no catalog product (the design/quote hold
   // the details). Standard order items always set this.
@@ -178,6 +181,17 @@ export class OrderItem {
     discount: number;
     final: number;
   };
+
+  // Per-item vendor rejection (e.g. out of stock on just this line). Refunds
+  // and restocks only this item; the rest of the order proceeds.
+  @Prop({ type: Boolean, default: false })
+  rejected?: boolean;
+
+  @Prop({ type: Date, default: null })
+  rejected_at?: Date;
+
+  @Prop({ type: String })
+  rejection_reason?: string;
 }
 
 

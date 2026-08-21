@@ -306,6 +306,35 @@ export class OrderController {
     return this.orderService.rejectVendorShipment(reference, req.business, body?.reason);
   }
 
+  /**
+   * ❌ Vendor rejects a SINGLE item in the order (e.g. out of stock on one
+   * line). Refunds + restocks only that item; the rest of the order proceeds.
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @Patch(':reference/items/:itemId/reject')
+  @ApiOperation({
+    summary: 'Vendor rejects a single order item — refunds just that item',
+    description:
+      'Declines one item (by its order-item _id). The customer is refunded for that item (and its external fabric, if any); the rest of the order proceeds. If it was the vendor’s last active item, their shipment is cancelled too.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference (e.g. ORD-XXXX)' })
+  @ApiParam({ name: 'itemId', description: 'The order item _id to reject' })
+  @ApiResponse({ status: 200, description: 'Item rejected and refund initiated' })
+  async rejectOrderItem(
+    @Param('reference') reference: string,
+    @Param('itemId') itemId: string,
+    @Body() body: { reason?: string },
+    @Req() req,
+  ) {
+    return this.orderService.rejectOrderItem(
+      reference,
+      req.business,
+      itemId,
+      body?.reason,
+    );
+  }
+
   @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Patch('cancel/:reference')
