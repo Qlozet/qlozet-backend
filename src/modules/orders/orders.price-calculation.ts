@@ -692,18 +692,20 @@ export class PriceCalculationService {
   }
 
   /**
-   * Selling price of a clothing size-variant. `variant.price` is an optional
-   * per-size override; when it is 0/unset the price lives at the product level
-   * (discounted price if a discount applies, otherwise the base price).
+   * Selling price of a clothing size/colour variant. `variant.price` is an
+   * "extra cost" SURCHARGE added on top of the product's selling price
+   * (discounted price if a discount applies, otherwise base price), NOT a
+   * replacement. 0/unset → just the base price.
    */
   private resolveClothingUnitPrice(
     variant: { price?: number },
     product: ProductDocument,
   ): number {
-    if (variant?.price && variant.price > 0) return variant.price;
-    if (product.discounted_price && product.discounted_price > 0)
-      return product.discounted_price;
-    return product.base_price ?? 0;
+    const base =
+      product.discounted_price && product.discounted_price > 0
+        ? product.discounted_price
+        : (product.base_price ?? 0);
+    return base + (variant?.price || 0);
   }
 
   async calculateColorVariantCost(

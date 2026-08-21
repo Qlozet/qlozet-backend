@@ -869,16 +869,14 @@ export class OrderService {
       if (!colorVariant || !variant) continue;
 
       const quantity = cvs.quantity ?? 1;
-      // `variant.price` is an optional per-size override; when it is 0/unset the
-      // selling price lives at the product level. Fall back to discounted → base
-      // price, otherwise price/total_amount save as 0 and fail the min:1
-      // validator on the order item.
-      const unitPrice =
-        variant.price && variant.price > 0
-          ? variant.price
-          : product.discounted_price && product.discounted_price > 0
-            ? product.discounted_price
-            : (product.base_price ?? 0);
+      // `variant.price` is an "extra cost" SURCHARGE added on top of the
+      // product's selling price (discounted → base), not a replacement. 0/unset
+      // → just the base price.
+      const base =
+        product.discounted_price && product.discounted_price > 0
+          ? product.discounted_price
+          : (product.base_price ?? 0);
+      const unitPrice = base + (variant.price || 0);
       normalizedColorVariants.push({
         color_variant_id: new Types.ObjectId(variant._id),
         size: variant.size,
