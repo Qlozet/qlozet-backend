@@ -261,20 +261,14 @@ export class PriceCalculationService {
       // Component quantities (accessories, fabrics, etc.) only multiply their own prices.
       total += basePrice * qty;
     } else {
-      // Ready-to-wear: the price comes from the selected colour variant. When no
-      // variant is selected — or the variant rows carry no explicit price (the
-      // price lives on the product's base_price) — fall back to the product's
-      // effective price, otherwise the item would be charged at ₦0.
+      // Ready-to-wear: always the garment's base (effective) price, ONCE. Any
+      // per-size surcharge is added via `variantTotal` below. (variantTotal is
+      // now surcharge-only, so we must add the base unconditionally — otherwise
+      // a size with a surcharge would be priced at just the surcharge.)
       const effectivePrice = (product.discounted_price != null && product.discounted_price > 0 && product.discounted_price < product.base_price)
         ? product.discounted_price
         : (product.base_price || 0);
-      if (
-        !selections.color_variant_selection ||
-        selections.color_variant_selection.length === 0 ||
-        variantTotal === 0
-      ) {
-        total += effectivePrice * qty;
-      }
+      total += effectivePrice * qty;
     }
 
     if (selections.fabric_selection)
@@ -373,14 +367,10 @@ export class PriceCalculationService {
       let baseDiscount = 0; // product-level markdown folded into the base
       if (isCustomize) {
         base = (product.base_price || 0) * qty;
-      } else if (!sel.color_variant_selection?.length || variant === 0) {
-        // Ready-to-wear: the price normally comes from the selected colour
-        // variant. But when the variant rows carry no explicit price (the price
-        // lives on the product's base_price), pricing it purely by the variant
-        // would return ₦0 — which is why the PDP showed ₦0 while the grid (which
-        // reads base_price directly) showed the real price. Fall back to the
-        // product's base price, and expose the discount so the pre-discount
-        // price is still shown.
+      } else {
+        // Ready-to-wear: always the garment's base price ONCE; the per-size
+        // surcharge is reported separately in `variant`. Expose the product
+        // markdown as `discount` so the pre-discount price still shows.
         base = (product.base_price || 0) * qty;
         baseDiscount = Math.max(0, base - effectivePrice * qty);
       }
@@ -691,23 +681,6 @@ export class PriceCalculationService {
     return this.round(total);
   }
 
-  /**
-   * Selling price of a clothing size/colour variant. `variant.price` is an
-   * "extra cost" SURCHARGE added on top of the product's selling price
-   * (discounted price if a discount applies, otherwise base price), NOT a
-   * replacement. 0/unset → just the base price.
-   */
-  private resolveClothingUnitPrice(
-    variant: { price?: number },
-    product: ProductDocument,
-  ): number {
-    const base =
-      product.discounted_price && product.discounted_price > 0
-        ? product.discounted_price
-        : (product.base_price ?? 0);
-    return base + (variant?.price || 0);
-  }
-
   async calculateColorVariantCost(
     selections: VariantSelectionDto[],
     product: ProductDocument,
@@ -751,13 +724,12 @@ export class PriceCalculationService {
         );
       }
 
-      // Per-size `variant.price` is an optional override. When the vendor leaves
-      // it at 0/unset the selling price lives at the product level, so fall back
-      // to the discounted price (if any) then the base price. Without this the
-      // item is priced at 0 — free goods, and a min:1 validation failure on save.
-      const unitPrice = this.resolveClothingUnitPrice(variant, product);
-
-      total += unitPrice * (s.quantity ?? 1);
+      // SURCHARGE ONLY: `variant.price` is the per-size "extra cost", added on
+      // top of the base. The base price is added by the caller
+      // (calculateClothingTotal / the breakdown), so folding it in here too
+      // would double-count the base — which is exactly what inflated customize
+      // garments (base + a base-sized "variant" cost). 0/unset → adds nothing.
+      total += (variant.price || 0) * (s.quantity ?? 1);
     }
 
     return this.round(total);
