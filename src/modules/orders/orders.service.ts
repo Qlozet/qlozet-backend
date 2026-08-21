@@ -1277,8 +1277,10 @@ export class OrderService {
     commission?: { type: string; percent: number; flat: number },
   ) {
     const bid = String(businessId);
+    // Exclude items the vendor rejected — they've been refunded, so they no
+    // longer count toward this vendor's subtotal / commission / net earnings.
     const myItems = (order?.items || []).filter(
-      (i: any) => String(i?.business) === bid,
+      (i: any) => String(i?.business) === bid && !i?.rejected,
     );
     const cType = commission?.type ?? 'percent';
     const cPercent = commission?.percent ?? 10;
