@@ -2179,20 +2179,25 @@ export class OrderService {
     // So cancel the WHOLE order — full refund, restore all stock (incl. the
     // applied fabric), reverse all earnings.
     if (shipment.shipment_type === ShipmentType.FABRIC_TRANSFER) {
-      const refundAmount = await this.cancelOrderForRejectedFabricTransfer(
-        order,
-        shipment,
-        reason || 'Fabric vendor declined the order',
-      );
+      const { refundAmount, orderCancelled } =
+        await this.unwindRejectedFabricTransfer(
+          order,
+          shipment,
+          reason || 'Fabric vendor declined the order',
+        );
       this.notifyCustomerVendorRejected(order, business, reason).catch((err) =>
         this.logger.error('Failed to send fabric rejection notification', err),
       );
-      this.notifyVendorsOrderCancelled(order).catch(() => undefined);
+      if (orderCancelled) {
+        this.notifyVendorsOrderCancelled(order).catch(() => undefined);
+      }
       return {
-        message: `Fabric transfer declined — the order was cancelled and ₦${refundAmount.toLocaleString()} refunded to the customer.`,
+        message: orderCancelled
+          ? `Fabric transfer declined — the order was cancelled and ₦${refundAmount.toLocaleString()} refunded to the customer.`
+          : `Fabric transfer declined — the affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded. Other vendors' items are unaffected.`,
         data: {
           rejected: true,
-          order_cancelled: true,
+          order_cancelled: orderCancelled,
           refund_amount: refundAmount,
           order_status: order.status,
         },
@@ -2272,68 +2277,133 @@ export class OrderService {
   }
 
   /**
-   * Cancels the whole order when a fabric-transfer leg is declined (manually or
-   * by auto-reject). The bespoke garment can't be produced without the
-   * customer's chosen fabric, so this is a full unwind: mark every still-open
-   * shipment failed, refund the remaining order total to the customer, reverse
-   * ALL vendors' earnings, and restore ALL inventory (no businessId → the
-   * tailor's items AND the applied fabric on the fabric vendor's product are
-   * both restored). Returns the amount refunded.
+   * Unwinds a declined fabric transfer WITHOUT touching unrelated vendors. The
+   * fabric leg (fabric vendor → tailor) and the tailor's dependent garment
+   * shipment are failed and refunded — garment item totals + the external-fabric
+   * value the customer paid the fabric vendor + BOTH shipping legs — and the
+   * tailor's item stock + the applied fabric are restored, with the fabric
+   * vendor's and tailor's earnings reversed. Every OTHER vendor on the order is
+   * left alone. The order is cancelled only if no active shipment remains.
+   * Returns the amount refunded and whether the whole order cancelled.
+   *
+   * Scoped at the tailor-SHIPMENT granularity (order items have no id to target
+   * yet), so a tailor who also had an unrelated item in the SAME order would see
+   * that item cancelled too — acceptable until per-item rejection lands.
    *
    * NOTE: the refund is not internally idempotent — callers must ensure it runs
    * once per order (the manual path is a single user action; the auto-reject
    * cron claims the shipment's `refunded` flag before calling).
    */
-  private async cancelOrderForRejectedFabricTransfer(
+  private async unwindRejectedFabricTransfer(
     order: OrderDocument,
-    shipment: any,
+    fabricShipment: any,
     reason: string,
-  ): Promise<number> {
-    shipment.rejected = true;
-    shipment.rejected_at = new Date();
-    shipment.rejection_reason = reason;
-    shipment.status = ShipmentStatus.FAILED;
-    // Every other still-open shipment (e.g. the tailor's garment) can no longer
-    // be fulfilled — mark them failed so the cancelled order is consistent.
-    for (const s of order.shipments) {
-      if (s === shipment) continue;
-      if (!s.rejected && s.status !== ShipmentStatus.DELIVERED) {
-        s.rejected = true;
-        s.rejected_at = new Date();
-        s.rejection_reason = 'Order cancelled: required fabric transfer declined';
-        s.status = ShipmentStatus.FAILED;
+  ): Promise<{ refundAmount: number; orderCancelled: boolean }> {
+    const fabricVendorId = fabricShipment.business.toString();
+    const tailorId = fabricShipment.destination_business?.toString();
+
+    // 1) Fail the fabric leg.
+    fabricShipment.rejected = true;
+    fabricShipment.rejected_at = new Date();
+    fabricShipment.rejection_reason = reason;
+    fabricShipment.status = ShipmentStatus.FAILED;
+
+    // 2) Fail the tailor's garment shipment — it can't proceed without the
+    //    customer's fabric. Other vendors' shipments are untouched.
+    const tailorShipment = order.shipments.find(
+      (s) =>
+        s.shipment_type !== ShipmentType.FABRIC_TRANSFER &&
+        tailorId != null &&
+        s.business?.toString() === tailorId &&
+        !s.rejected,
+    );
+    if (tailorShipment) {
+      tailorShipment.rejected = true;
+      tailorShipment.rejected_at = new Date();
+      tailorShipment.rejection_reason =
+        'Cancelled: required fabric transfer was declined';
+      tailorShipment.status = ShipmentStatus.FAILED;
+    }
+
+    // 3) Refund = the tailor's item totals + the external-fabric value the
+    //    customer paid the fabric vendor + both shipping legs.
+    const tailorItems = tailorId
+      ? order.items.filter((i) => i.business?.toString() === tailorId)
+      : [];
+    const tailorItemsTotal = tailorItems.reduce(
+      (sum, i) => sum + (i.total_price || 0),
+      0,
+    );
+    const externalFabricTotal = tailorItems.reduce(
+      (sum, i) => sum + ((i as any).pricing?.external_fabric || 0),
+      0,
+    );
+    const fabricShippingFee = fabricShipment.shipping_fee || 0;
+    const tailorShippingFee = tailorShipment?.shipping_fee || 0;
+    const refundAmount =
+      tailorItemsTotal +
+      externalFabricTotal +
+      fabricShippingFee +
+      tailorShippingFee;
+
+    // 4) Adjust order totals for the cancelled portion.
+    order.subtotal = Math.max(0, (order.subtotal || 0) - tailorItemsTotal);
+    order.shipping_fee = Math.max(
+      0,
+      (order.shipping_fee || 0) - fabricShippingFee - tailorShippingFee,
+    );
+    order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+    // 5) Cancel the order only if nothing active remains; else keep it moving.
+    const orderCancelled = order.shipments.every((s) => s.rejected);
+    if (orderCancelled) {
+      order.status = OrderStatus.CANCELLED;
+      (order as any).refund_status = 'refunded';
+    } else {
+      const active = order.shipments.filter((s) => !s.rejected);
+      if (active.length && active.every((s) => s.confirmed)) {
+        order.status = OrderStatus.PROCESSING;
       }
     }
 
-    const refundAmount = order.total || 0;
-    order.status = OrderStatus.CANCELLED;
-    (order as any).refund_status = 'refunded';
     order.markModified('shipments');
     await order.save();
 
-    // Full refund to the customer (wallet, or Paystack → wallet).
+    // 6) Refund the customer (wallet, or Paystack → wallet).
     await this.processPartialRefund(order, refundAmount, reason).catch((err) =>
       this.logger.error(
         `[FabricReject] Refund failed for ${order.reference}: ${err.message}`,
       ),
     );
-    // Reverse every vendor's earnings on this order (fabric vendor + tailor).
-    await this.reverseBusinessEarnings(order).catch((err) =>
+
+    // 7) Reverse the fabric vendor's and the tailor's earnings for this order.
+    await this.reverseBusinessEarnings(order, fabricVendorId).catch((err) =>
       this.logger.error(
-        `[FabricReject] Earnings reversal failed for ${order.reference}: ${err.message}`,
+        `[FabricReject] Fabric-vendor earnings reversal failed for ${order.reference}: ${err.message}`,
       ),
     );
-    // Restore ALL inventory — no businessId, so the applied fabric on the fabric
-    // vendor's product is restored (a per-vendor restore would miss it).
-    await this.productService
-      .restoreInventory(order._id as Types.ObjectId)
-      .catch((err) =>
+    if (tailorId) {
+      await this.reverseBusinessEarnings(order, tailorId).catch((err) =>
         this.logger.error(
-          `[FabricReject] Inventory restore failed for ${order.reference}: ${err.message}`,
+          `[FabricReject] Tailor earnings reversal failed for ${order.reference}: ${err.message}`,
         ),
       );
+    }
 
-    return refundAmount;
+    // 8) Restore the tailor's item stock + the applied fabric (both live on the
+    //    tailor's items, so a tailor-scoped restore covers them; the fabric
+    //    vendor owns no order items).
+    if (tailorId) {
+      await this.productService
+        .restoreInventory(order._id as Types.ObjectId, tailorId)
+        .catch((err) =>
+          this.logger.error(
+            `[FabricReject] Inventory restore failed for ${order.reference}: ${err.message}`,
+          ),
+        );
+    }
+
+    return { refundAmount, orderCancelled };
   }
 
   /**
@@ -2586,7 +2656,7 @@ export class OrderService {
 
       for (const order of staleOrders) {
         let orderChanged = false;
-        let fabricCancelled = false;
+        let fabricHandled = false;
 
         for (const shipment of order.shipments) {
           // Skip already confirmed or rejected shipments
@@ -2616,18 +2686,21 @@ export class OrderService {
 
             const business = await this.businessModel.findById(shipment.business);
             const businessName = business?.business_name || 'The fabric vendor';
-            const refundAmount = await this.cancelOrderForRejectedFabricTransfer(
-              order as OrderDocument,
-              shipment,
-              'Auto-rejected: fabric vendor did not confirm within 24 hours',
-            );
+            const { refundAmount, orderCancelled } =
+              await this.unwindRejectedFabricTransfer(
+                order as OrderDocument,
+                shipment,
+                'Auto-rejected: fabric vendor did not confirm within 24 hours',
+              );
             this.notificationsService
               .create({
                 recipient: order.customer.toString(),
                 category: NotificationCategory.ORDER,
                 type: NotificationType.ORDER_CANCELLED,
-                title: 'Order Cancelled',
-                body: `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`,
+                title: orderCancelled ? 'Order Cancelled' : 'Item Cancelled',
+                body: orderCancelled
+                  ? `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`
+                  : `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet; the rest of your order is unaffected.`,
                 metadata: {
                   order_id: order._id,
                   order_reference: order.reference,
@@ -2641,7 +2714,7 @@ export class OrderService {
                 this.logger.error(`[AutoReject] Failed to notify customer: ${err.message}`),
               );
 
-            fabricCancelled = true;
+            fabricHandled = true;
             break; // whole order cancelled — stop processing its other shipments
           }
 
@@ -2753,9 +2826,10 @@ export class OrderService {
           );
         }
 
-        // A fabric-transfer cancellation already unwound + saved the whole
-        // order; don't re-derive its status below (which could flip it back).
-        if (fabricCancelled) continue;
+        // A fabric-transfer rejection already unwound + saved the affected part
+        // of the order and set its status; don't re-derive it below (which could
+        // flip it back). Other stale shipments get picked up on the next run.
+        if (fabricHandled) continue;
 
         if (orderChanged) {
           // Check if ALL shipments are now rejected → cancel entire order
