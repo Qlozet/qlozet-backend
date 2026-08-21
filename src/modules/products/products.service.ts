@@ -1080,6 +1080,7 @@ export class ProductService {
   async restoreInventory(
     orderId: Types.ObjectId,
     businessId?: string | Types.ObjectId,
+    itemId?: string | Types.ObjectId,
   ) {
     const session = await this.connection.startSession();
 
@@ -1099,12 +1100,25 @@ export class ProductService {
 
         // A vendor rejection / auto-reject restores only THAT vendor's items;
         // the rest of a multi-vendor order stays deducted. A full order
-        // cancel/return passes no businessId and restores everything.
-        const items = businessId
+        // cancel/return passes no businessId and restores everything. A per-item
+        // rejection additionally passes itemId to restore just that one line.
+        let items = businessId
           ? order.items.filter(
               (i) => String((i as any).business) === String(businessId),
             )
           : order.items;
+        if (itemId) {
+          // Per-item restore: exactly this line (it is being rejected right now,
+          // so its own `rejected` flag must NOT exclude it).
+          items = items.filter(
+            (i) => String((i as any)._id) === String(itemId),
+          );
+        } else {
+          // Vendor/full restore: skip items already individually rejected — their
+          // stock was restored when they were rejected, so restoring again would
+          // double-count.
+          items = items.filter((i) => !(i as any).rejected);
+        }
 
         for (const item of items) {
           // Restore fabric yardage
