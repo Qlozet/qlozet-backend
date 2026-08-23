@@ -463,9 +463,18 @@ export class ProductService {
       });
     }
 
-    // 🏷️ ON SALE — products with an active discount.
+    // 🏷️ ON SALE — a real discounted price below base (matches the shop's
+    // hasDiscount: discounted_price > 0 AND < base_price). Some products set the
+    // sale price without a percentage, so key off the price, not the percentage.
     if (on_sale) {
-      filter.discount_percentage = { $gt: 0 };
+      andClauses.push({
+        $expr: {
+          $and: [
+            { $gt: ['$discounted_price', 0] },
+            { $lt: ['$discounted_price', '$base_price'] },
+          ],
+        },
+      });
     }
 
     // 👗 CLOTHING TYPE — 'customize' | 'non_customize'.
@@ -500,8 +509,11 @@ export class ProductService {
           { 'accessory.variants.stock': { $gt: 0 } },
           // Accessory base item flagged in stock.
           { $and: [{ 'accessory.in_stock': true }] },
-          // Fabric with remaining yardage.
-          { $expr: { $gt: [{ $ifNull: ['$fabric.yard_length', 0] }, 0] } },
+          // Fabric with enough remaining yardage to cut the minimum.
+          { $expr: { $and: [
+            { $gt: [{ $ifNull: ['$fabric.yard_length', 0] }, 0] },
+            { $gte: [{ $ifNull: ['$fabric.yard_length', 0] }, { $ifNull: ['$fabric.min_cut', 0] }] },
+          ] } },
         ],
       });
     }
