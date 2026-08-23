@@ -427,9 +427,14 @@ export class BusinessService implements OnModuleInit {
         vendors.map((v: any) => v._id),
       ),
     );
+    // Active-product count per vendor, so the storefront can hide empty shops.
+    const productCounts = await this.productService.countActiveByBusinessIds(
+      vendors.map((v: any) => v._id),
+    );
     const data = vendors.map((v: any) => ({
       ...v,
       has_active_discount: discountedIds.has(String(v._id)),
+      total_products: productCounts[String(v._id)] ?? 0,
     }));
 
     return { data, total, page, pages: Math.ceil(total / limit) };
