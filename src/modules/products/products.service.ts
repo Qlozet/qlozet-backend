@@ -317,6 +317,11 @@ export class ProductService {
       product_type,
       category,
       audience,
+      minPrice,
+      maxPrice,
+      on_sale,
+      in_stock,
+      type,
     } = dto;
 
     const filter: any = {};
@@ -458,10 +463,65 @@ export class ProductService {
       });
     }
 
+    // 🏷️ ON SALE — a real discounted price below base (matches the shop's
+    // hasDiscount: discounted_price > 0 AND < base_price). Some products set the
+    // sale price without a percentage, so key off the price, not the percentage.
+    if (on_sale) {
+      andClauses.push({
+        $expr: {
+          $and: [
+            { $gt: ['$discounted_price', 0] },
+            { $lt: ['$discounted_price', '$base_price'] },
+          ],
+        },
+      });
+    }
+
+    // 👗 CLOTHING TYPE — 'customize' | 'non_customize'.
+    if (type) {
+      filter['clothing.type'] = type;
+    }
+
+    // 💰 PRICE RANGE — filter on the EFFECTIVE price (discounted_price when set
+    // and > 0, otherwise base_price). Pushed as $and clauses so they never
+    // clobber the taxonomy/search $or arrays.
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      const effPrice = {
+        $cond: [{ $gt: ['$discounted_price', 0] }, '$discounted_price', '$base_price'],
+      };
+      if (minPrice !== undefined) {
+        andClauses.push({ $expr: { $gte: [effPrice, minPrice] } });
+      }
+      if (maxPrice !== undefined) {
+        andClauses.push({ $expr: { $lte: [effPrice, maxPrice] } });
+      }
+    }
+
+    // 📦 IN STOCK — mirror product-availability.ts stock rules per kind.
+    if (in_stock) {
+      andClauses.push({
+        $or: [
+          // Customize clothing is made-to-order → always available.
+          { $and: [{ kind: 'clothing' }, { 'clothing.type': 'customize' }] },
+          // Non-customize clothing with at least one variant in stock.
+          { 'clothing.color_variants.variants.stock': { $gt: 0 } },
+          // Accessory with per-variant stock.
+          { 'accessory.variants.stock': { $gt: 0 } },
+          // Accessory base item flagged in stock.
+          { $and: [{ 'accessory.in_stock': true }] },
+          // Fabric with enough remaining yardage to cut the minimum.
+          { $expr: { $and: [
+            { $gt: [{ $ifNull: ['$fabric.yard_length', 0] }, 0] },
+            { $gte: [{ $ifNull: ['$fabric.yard_length', 0] }, { $ifNull: ['$fabric.min_cut', 0] }] },
+          ] } },
+        ],
+      });
+    }
+
     if (andClauses.length > 0) {
       filter.$and = andClauses;
     }
-    
+
     // Remove the old direct filter.$or as we've moved everything to $and
     delete filter.$or;
 
@@ -477,6 +537,9 @@ export class ProductService {
         break;
       case 'date':
         sort = { createdAt: sortOrder };
+        break;
+      case 'price':
+        sort = { base_price: sortOrder };
         break;
       case 'relevance':
         sort = search

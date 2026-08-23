@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsMongoId,
   IsNumber,
@@ -63,11 +65,46 @@ export class FindAllProductsDto {
   status?: 'active' | 'draft' | 'archived';
 
   @ApiPropertyOptional({
-    enum: ['rating', 'date', 'relevance'],
+    description: 'Minimum effective price (discounted_price if set, else base_price)',
   })
   @IsOptional()
-  @IsEnum(['rating', 'date', 'relevance'])
-  sortBy?: 'rating' | 'date' | 'relevance';
+  @Transform(({ value }) => (value === undefined || value === '' ? value : Number(value)))
+  @IsNumber()
+  @Min(0)
+  minPrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Maximum effective price (discounted_price if set, else base_price)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === '' ? value : Number(value)))
+  @IsNumber()
+  @Min(0)
+  maxPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Only products currently on sale (discount_percentage > 0)' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  on_sale?: boolean;
+
+  @ApiPropertyOptional({ description: 'Only products that are in stock' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  in_stock?: boolean;
+
+  @ApiPropertyOptional({ description: "Clothing type ('customize' | 'non_customize')" })
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @ApiPropertyOptional({
+    enum: ['rating', 'date', 'relevance', 'price'],
+  })
+  @IsOptional()
+  @IsEnum(['rating', 'date', 'relevance', 'price'])
+  sortBy?: 'rating' | 'date' | 'relevance' | 'price';
 
   @ApiPropertyOptional({
     enum: ['asc', 'desc'],
