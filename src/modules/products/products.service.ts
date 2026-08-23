@@ -231,6 +231,25 @@ export class ProductService {
   }
 
   /**
+   * Count ACTIVE products per business, for the given business ids.
+   * Returns a map of businessId → active-product count (missing = 0).
+   * Used by the public vendor list so the storefront can hide empty shops.
+   */
+  async countActiveByBusinessIds(
+    businessIds: (Types.ObjectId | string)[],
+  ): Promise<Record<string, number>> {
+    if (!businessIds?.length) return {};
+    const ids = businessIds.map((b) => new Types.ObjectId(String(b)));
+    const rows = await this.productModel.aggregate([
+      { $match: { business: { $in: ids }, status: ProductStatus.ACTIVE } },
+      { $group: { _id: '$business', count: { $sum: 1 } } },
+    ]);
+    const map: Record<string, number> = {};
+    for (const r of rows) map[String(r._id)] = r.count;
+    return map;
+  }
+
+  /**
    * Create a product and compute its price dynamically based on type
    */
   async upsert(
