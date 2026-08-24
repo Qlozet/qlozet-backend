@@ -8,7 +8,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { RecommendationsService } from './recommendations.service';
-import { ApiBearerAuth } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { Public } from 'src/common/decorators/public.decorator';
 
@@ -22,6 +22,13 @@ export class RecommendationsController {
   ) {}
 
   @Get('feed')
+  @ApiQuery({ name: 'sessionId', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'budgetMax', required: false, type: Number })
+  @ApiQuery({ name: 'deadlineDays', required: false, type: Number })
+  @ApiQuery({ name: 'category', required: false })
+  @ApiQuery({ name: 'gender', required: false })
+  @ApiQuery({ name: 'userId', required: false })
   async getFeed(
     @Req() req: any,
     @Query('sessionId') sessionId?: string,
@@ -50,6 +57,9 @@ export class RecommendationsController {
   }
 
   @Get('vendors')
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'productsPerVendor', required: false, type: Number })
+  @ApiQuery({ name: 'userId', required: false })
   async getVendorFeed(
     @Req() req: any,
     @Query('limit') limit: number = 10,
@@ -88,6 +98,8 @@ export class RecommendationsController {
   }
 
   @Get('bought-together')
+  @ApiQuery({ name: 'itemId', required: true })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getBoughtTogether(
     @Query('itemId') itemId: string,
     @Query('limit') limit: number = 10,
@@ -103,6 +115,9 @@ export class RecommendationsController {
   }
 
   @Get('complete-look')
+  @ApiQuery({ name: 'itemIds', required: true })
+  @ApiQuery({ name: 'userId', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async getCompleteTheLook(
     @Req() req: any,
     @Query('itemIds') itemIds: string,
