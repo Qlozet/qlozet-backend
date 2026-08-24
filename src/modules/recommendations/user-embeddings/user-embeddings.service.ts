@@ -110,13 +110,26 @@ export class UserEmbeddingsService {
     }
 
     // Simplified measurement encoder (mock implementation for 16-dims)
-    private computeMeasurementVector(measurements: Record<string, number>): number[] {
+    private computeMeasurementVector(measurements: unknown): number[] {
         // In reality: normalize chest, waist, hips, height, etc. to 0-1 range or z-score
-        // Here: Just output a placeholder 16-dim vector seeded by values
+        // Here: Just output a placeholder 16-dim vector seeded by values.
+        //
+        // `measurements` is stored as a Mongoose Map (type: Map, of: Number).
+        // Object.values() on a Mongoose Map returns its INTERNAL metadata, not
+        // the numbers — which produced NaN and broke the u_fit cast on save.
+        // Handle Map / plain object and coerce each value defensively.
         const vec = new Array(16).fill(0);
-        const values = Object.values(measurements);
-        for (let i = 0; i < 16; i++) {
-            if (i < values.length) vec[i] = Math.min(Math.max(values[i] / 200, 0), 1); // Normalize approx
+
+        let values: unknown[] = [];
+        if (measurements instanceof Map) {
+            values = Array.from(measurements.values());
+        } else if (measurements && typeof measurements === 'object') {
+            values = Object.values(measurements as Record<string, unknown>);
+        }
+
+        for (let i = 0; i < 16 && i < values.length; i++) {
+            const n = Number(values[i]);
+            vec[i] = Number.isFinite(n) ? Math.min(Math.max(n / 200, 0), 1) : 0; // Normalize approx
         }
         return vec;
     }
@@ -209,12 +222,21 @@ export class UserEmbeddingsService {
         return this.userEmbeddingModel.findOne({ userId }).exec();
     }
 
+    /** Replace any NaN/Infinity with 0 so a bad value can never break the
+     *  Mongoose Number cast on save (which would 500 the whole feed request). */
+    private sanitizeVector(v?: number[]): number[] | undefined {
+        if (!Array.isArray(v)) return v;
+        return v.map((x) => (Number.isFinite(x) ? x : 0));
+    }
+
     private async saveEmbedding(userId: string, data: Partial<UserEmbedding>): Promise<UserEmbedding> {
         return this.userEmbeddingModel.findOneAndUpdate(
             { userId },
             {
                 userId,
                 ...data,
+                u_style: this.sanitizeVector(data.u_style),
+                u_fit: this.sanitizeVector(data.u_fit),
                 version: 'v1',
                 lastUpdated: new Date()
             },
