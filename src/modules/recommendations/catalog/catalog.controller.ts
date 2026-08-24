@@ -43,7 +43,7 @@ export class CatalogController {
     @Get('diagnostics/vector-search')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(UserType.ADMIN)
-    @ApiBearerAuth()
+    @ApiBearerAuth('access-token')
     @ApiOperation({ summary: 'Test if Atlas vector search index exists and works (admin only)' })
     async checkVectorSearch() {
         const result = await this.vectorSearchService.testIndex('items_style_vindex');
@@ -60,7 +60,7 @@ export class CatalogController {
     @Get('diagnostics/stats')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(UserType.ADMIN)
-    @ApiBearerAuth()
+    @ApiBearerAuth('access-token')
     @ApiOperation({ summary: 'Get catalog health stats: item count, embedding coverage (admin only)' })
     async getStats() {
         return this.catalogService.getStats();
