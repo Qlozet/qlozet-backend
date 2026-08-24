@@ -250,6 +250,38 @@ export class ProductService {
   }
 
   /**
+   * Computed vendor rating per business, for the given business ids: the mean of
+   * ALL individual product ratings (sum of rating values / number of ratings)
+   * across the vendor's active products — the same formula as the single-vendor
+   * storefront profile. Used so vendor cards in lists show a real rating.
+   * Returns a map of businessId → { average (1dp), count }.
+   */
+  async getRatingsByBusinessIds(
+    businessIds: (Types.ObjectId | string)[],
+  ): Promise<Record<string, { average: number; count: number }>> {
+    if (!businessIds?.length) return {};
+    const ids = businessIds.map((b) => new Types.ObjectId(String(b)));
+    const rows = await this.productModel.aggregate([
+      { $match: { business: { $in: ids }, status: ProductStatus.ACTIVE } },
+      {
+        $group: {
+          _id: '$business',
+          sum: { $sum: { $sum: '$ratings.value' } },
+          count: { $sum: { $size: { $ifNull: ['$ratings', []] } } },
+        },
+      },
+    ]);
+    const map: Record<string, { average: number; count: number }> = {};
+    for (const r of rows) {
+      map[String(r._id)] = {
+        average: r.count > 0 ? Math.round((r.sum / r.count) * 10) / 10 : 0,
+        count: r.count,
+      };
+    }
+    return map;
+  }
+
+  /**
    * Create a product and compute its price dynamically based on type
    */
   async upsert(
