@@ -431,10 +431,17 @@ export class BusinessService implements OnModuleInit {
     const productCounts = await this.productService.countActiveByBusinessIds(
       vendors.map((v: any) => v._id),
     );
+    // Computed vendor rating (mean of product ratings) — the Business schema has
+    // no own rating field, so vendor cards would otherwise show 0.
+    const ratings = await this.productService.getRatingsByBusinessIds(
+      vendors.map((v: any) => v._id),
+    );
     const data = vendors.map((v: any) => ({
       ...v,
       has_active_discount: discountedIds.has(String(v._id)),
       total_products: productCounts[String(v._id)] ?? 0,
+      average_rating: ratings[String(v._id)]?.average ?? 0,
+      total_ratings: ratings[String(v._id)]?.count ?? 0,
     }));
 
     return { data, total, page, pages: Math.ceil(total / limit) };
