@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Query,
+  Req,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -22,20 +23,23 @@ export class RecommendationsController {
 
   @Get('feed')
   async getFeed(
-    @Query('userId') userId: string,
+    @Req() req: any,
     @Query('sessionId') sessionId?: string,
     @Query('limit') limit: number = 30,
     @Query('budgetMax') budgetMax?: number,
     @Query('deadlineDays') deadlineDays?: number,
     @Query('category') category?: string,
     @Query('gender') gender?: string,
+    @Query('userId') userId?: string,
   ) {
-    if (!userId) {
+    // Prefer the authenticated user; fall back to an explicit query param.
+    const uid = req.user?.id ?? userId;
+    if (!uid) {
       return { error: 'userId required' };
     }
 
     return this.recommendationsService.getHomeFeed({
-      userId,
+      userId: uid,
       sessionId,
       limit: Number(limit),
       budgetMax: budgetMax ? Number(budgetMax) : undefined,
@@ -47,16 +51,18 @@ export class RecommendationsController {
 
   @Get('vendors')
   async getVendorFeed(
-    @Query('userId') userId: string,
+    @Req() req: any,
     @Query('limit') limit: number = 10,
     @Query('productsPerVendor') productsPerVendor: number = 3,
+    @Query('userId') userId?: string,
   ) {
-    if (!userId) {
+    const uid = req.user?.id ?? userId;
+    if (!uid) {
       return { error: 'userId required' };
     }
 
     return this.recommendationsService.getVendorFeed({
-      userId,
+      userId: uid,
       limit: Number(limit),
       productsPerVendor: Number(productsPerVendor),
     });
@@ -98,6 +104,7 @@ export class RecommendationsController {
 
   @Get('complete-look')
   async getCompleteTheLook(
+    @Req() req: any,
     @Query('itemIds') itemIds: string,
     @Query('userId') userId?: string,
     @Query('limit') limit: number = 10,
@@ -110,7 +117,7 @@ export class RecommendationsController {
 
     return this.recommendationsService.getCompleteTheLook({
       itemIds: itemIdArray,
-      userId,
+      userId: req.user?.id ?? userId,
       limit: Number(limit),
     });
   }
