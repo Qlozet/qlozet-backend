@@ -313,7 +313,8 @@ export class RecommendationsService {
 
         return {
           vendorId: vendorData.vendorId,
-          vendorName: vendorData.business?.name || 'Unknown Vendor',
+          vendorName: vendorData.business?.business_name || 'Unknown Vendor',
+          vendorLogo: vendorData.business?.business_logo_url,
           vendorScore: vendorData.score,
           reasonCodes: ['VENDOR_QUALITY', 'PRODUCT_RELEVANCE'],
           explanations: vendorExplanations,

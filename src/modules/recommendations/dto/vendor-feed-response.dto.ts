@@ -9,6 +9,8 @@ export class VendorFeedItemDto {
     @IsString()
     vendorName: string;
 
+    vendorLogo?: string;
+
     @IsNumber()
     vendorScore: number;
 

@@ -154,20 +154,12 @@ export class ProductService {
   async findBusinessIdsBySearch(search: string): Promise<Types.ObjectId[]> {
     const term = search?.trim();
     if (!term) return [];
-    const rx = { $regex: term, $options: 'i' };
+    // Same tokenized/synonym/typo-tolerant matching as the product search.
+    const searchClause = this.buildSearchClause(term);
+    if (!searchClause) return [];
     const ids = await this.productModel.distinct('business', {
       status: ProductStatus.ACTIVE,
-      $or: [
-        { 'clothing.name': rx },
-        { 'accessory.name': rx },
-        { 'fabric.name': rx },
-        { 'clothing.taxonomy.categories': rx },
-        { 'accessory.taxonomy.categories': rx },
-        { 'fabric.taxonomy.categories': rx },
-        { 'clothing.taxonomy.attributes': rx },
-        { 'accessory.taxonomy.attributes': rx },
-        { 'fabric.taxonomy.attributes': rx },
-      ],
+      ...searchClause,
     });
     const approved = new Set(
       (await this.getApprovedBusinessIds()).map((x) => x.toString()),
@@ -355,6 +347,68 @@ export class ProductService {
   /**
    * Get all products
    */
+  /** Fashion-domain synonyms so "gown" finds dresses, "pants" finds trousers, etc. */
+  private static readonly SEARCH_SYNONYMS: Record<string, string[]> = {
+    dress: ['gown'], gown: ['dress'],
+    trousers: ['trouser', 'pants', 'pant'], trouser: ['trousers', 'pants', 'pant'],
+    pants: ['trousers', 'trouser', 'pant'], pant: ['pants', 'trousers', 'trouser'],
+    top: ['blouse'], blouse: ['top', 'shirt'], shirt: ['top', 'blouse'],
+    agbada: ['babariga', 'boubou'], kaftan: ['caftan'], caftan: ['kaftan'],
+    ankara: ['wax'], sneakers: ['sneaker', 'trainers'], sneaker: ['sneakers', 'trainers'],
+    bag: ['purse', 'handbag'], purse: ['bag', 'handbag'], handbag: ['bag', 'purse'],
+    jacket: ['blazer', 'coat'], blazer: ['jacket'], coat: ['jacket'],
+    skirt: ['skirts'], shoes: ['shoe', 'footwear'], shoe: ['shoes', 'footwear'],
+  };
+
+  private static escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Build a MongoDB clause for a free-text product search that is:
+   *  • word-order independent — each token must appear somewhere (so "silk
+   *    agbada" matches "Agbada in Silk"),
+   *  • synonym-aware (gown↔dress, pants↔trousers, kaftan↔caftan, …),
+   *  • lightly typo-tolerant — one wrong letter on longer tokens
+   *    (e.g. "agbida" still finds "agbada"),
+   *  • regex-safe — user input is escaped so special chars can't break or abuse
+   *    the query.
+   * Comprehensive fuzzy matching (insertions/deletions/transpositions) belongs
+   * in Atlas Search's `fuzzy` operator — a good follow-up, like the vector index.
+   */
+  private buildSearchClause(search: string): any | null {
+    const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return null;
+
+    const fields = [
+      'clothing.name', 'accessory.name', 'fabric.name',
+      'clothing.taxonomy.categories', 'accessory.taxonomy.categories', 'fabric.taxonomy.categories',
+      'clothing.taxonomy.attributes', 'accessory.taxonomy.attributes', 'fabric.taxonomy.attributes',
+    ];
+
+    const perToken = tokens.map((token) => {
+      const variants = new Set<string>();
+      variants.add(ProductService.escapeRegex(token));
+      for (const syn of ProductService.SEARCH_SYNONYMS[token] ?? []) {
+        variants.add(ProductService.escapeRegex(syn));
+      }
+      // Single-substitution typo tolerance for longer tokens: replace each
+      // position with a wildcard so one wrong letter still matches.
+      if (token.length >= 5 && token.length <= 20) {
+        for (let i = 0; i < token.length; i++) {
+          variants.add(
+            ProductService.escapeRegex(token.slice(0, i)) + '.' + ProductService.escapeRegex(token.slice(i + 1)),
+          );
+        }
+      }
+      const rx = { $regex: `(?:${[...variants].join('|')})`, $options: 'i' };
+      return { $or: fields.map((f) => ({ [f]: rx })) };
+    });
+
+    // Every token must match somewhere → order-independent AND across tokens.
+    return perToken.length === 1 ? perToken[0] : { $and: perToken };
+  }
+
   async findAll(dto: FindAllProductsDto) {
     const {
       page = 1,
@@ -499,19 +553,9 @@ export class ProductService {
     }
 
     if (search) {
-      andClauses.push({
-        $or: [
-          { 'clothing.name': { $regex: search, $options: 'i' } },
-          { 'accessory.name': { $regex: search, $options: 'i' } },
-          { 'fabric.name': { $regex: search, $options: 'i' } },
-          { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
-          { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
-          { 'fabric.taxonomy.categories': { $regex: search, $options: 'i' } },
-          { 'clothing.taxonomy.attributes': { $regex: search, $options: 'i' } },
-          { 'accessory.taxonomy.attributes': { $regex: search, $options: 'i' } },
-          { 'fabric.taxonomy.attributes': { $regex: search, $options: 'i' } },
-        ],
-      });
+      // Tokenized, synonym-aware, lightly typo-tolerant, regex-safe search.
+      const searchClause = this.buildSearchClause(search);
+      if (searchClause) andClauses.push(searchClause);
     }
 
     // 🏷️ ON SALE — a real discounted price below base (matches the shop's
