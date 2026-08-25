@@ -6,6 +6,19 @@ import { FilterSpec } from './dto/filter-spec.dto';
 export class FiltersService {
     private readonly logger = new Logger(FiltersService.name);
 
+    /**
+     * Normalize gender/demographic values to a canonical token so the feed's
+     * request gender (male/female) matches the catalog's targetDemographic
+     * (men/women/mens/womens). Without this the recommendation feed dropped
+     * every gendered garment and only surfaced unisex items.
+     */
+    private normalizeGender(value?: string): string {
+        const s = (value || '').toLowerCase().trim();
+        if (['male', 'man', 'men', 'mens', "men's", 'm'].includes(s)) return 'men';
+        if (['female', 'woman', 'women', 'womens', "women's", 'f'].includes(s)) return 'women';
+        return s; // 'unisex' or unknown → left as-is
+    }
+
     buildFilterSpecFromRequest(query: any, userProfile?: any): FilterSpec {
         const spec = new FilterSpec();
 
@@ -71,9 +84,11 @@ export class FiltersService {
                 return false;
             }
 
-            // 4. Gender / Demographic
+            // 4. Gender / Demographic (synonym-aware: male↔men, female↔women)
             if (spec.gender && item.fitMeta?.targetDemographic) {
-                if (item.fitMeta.targetDemographic !== 'unisex' && item.fitMeta.targetDemographic !== spec.gender) {
+                const target = this.normalizeGender(item.fitMeta.targetDemographic);
+                const want = this.normalizeGender(spec.gender);
+                if (target !== 'unisex' && target !== want) {
                     metrics.dropped_demographic++;
                     return false;
                 }
