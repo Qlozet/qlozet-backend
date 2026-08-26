@@ -113,7 +113,9 @@ export class CollectionService {
       productFilter.business = collection.business;
     }
 
-    const products = await this.productModel.find(productFilter).exec();
+    // Lean read — we only evaluate fields + write via updateOne, so we don't
+    // need hydrated Mongoose documents (lighter + avoids full-doc validation).
+    const products = await this.productModel.find(productFilter).lean();
     this.logger.log(`Checking ${products.length} products for collection match`);
 
     const collectionObjectId = new Types.ObjectId(collectionId);
@@ -143,23 +145,32 @@ export class CollectionService {
         shouldBelong = this.evaluateProductAgainstConditions(product, collection);
       }
 
-      if (!product.collections) product.collections = [];
-      const alreadyIn = product.collections.some((id) =>
+      const alreadyIn = (product.collections || []).some((id: Types.ObjectId) =>
         id.equals(collectionObjectId),
       );
 
-      if (shouldBelong && !alreadyIn) {
-        // Add to collection
-        product.collections.push(collectionObjectId);
-        await product.save();
-        updatedCount++;
-      } else if (!shouldBelong && alreadyIn) {
-        // Remove from collection
-        product.collections = product.collections.filter(
-          (id) => !id.equals(collectionObjectId),
+      // Write via updateOne ($addToSet/$pull) instead of product.save(): it's
+      // atomic, fast, and — crucially — does NOT run full-document validation,
+      // so one legacy/invalid product can't abort the whole platform sweep.
+      // Each write is isolated so a single failure never stops the loop.
+      try {
+        if (shouldBelong && !alreadyIn) {
+          await this.productModel.updateOne(
+            { _id: product._id },
+            { $addToSet: { collections: collectionObjectId } },
+          );
+          updatedCount++;
+        } else if (!shouldBelong && alreadyIn) {
+          await this.productModel.updateOne(
+            { _id: product._id },
+            { $pull: { collections: collectionObjectId } },
+          );
+          updatedCount++;
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Failed to update product ${productIdStr} for collection ${collectionId}: ${(e as Error).message}`,
         );
-        await product.save();
-        updatedCount++;
       }
     }
 
@@ -721,7 +732,7 @@ export class CollectionService {
    * Evaluate a product against a collection's conditions.
    */
   private evaluateProductAgainstConditions(
-    product: ProductDocument,
+    product: any,
     collection: CollectionDocument,
   ): boolean {
     if (!collection.conditions?.length) return false;
