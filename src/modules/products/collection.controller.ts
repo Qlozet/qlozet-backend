@@ -55,11 +55,19 @@ export class CollectionController {
   @Get('platform')
   @ApiOperation({
     summary: 'Get active platform collections (Public)',
-    description: 'Returns active platform-wide collections for homepage/explore pages.',
+    description:
+      'Returns active platform-wide collections for homepage/explore pages. ' +
+      'Optional kind / product_type scope the list to a specific explore page; ' +
+      'collections with no scope show everywhere.',
   })
+  @ApiQuery({ name: 'kind', required: false, example: 'clothing' })
+  @ApiQuery({ name: 'product_type', required: false, example: 'agbada' })
   @ApiOkResponse({ type: [CollectionResponseDto] })
-  getPlatformCollections() {
-    return this.collectionService.getPlatformCollections();
+  getPlatformCollections(
+    @Query('kind') kind?: string,
+    @Query('product_type') productType?: string,
+  ) {
+    return this.collectionService.getPlatformCollections(kind, productType);
   }
 
   @Public()

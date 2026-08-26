@@ -611,9 +611,30 @@ export class CollectionService {
   /**
    * Get active platform collections for homepage/explore (PUBLIC)
    */
-  async getPlatformCollections() {
+  async getPlatformCollections(kind?: string, productType?: string) {
+    // Explore scoping: a collection with an empty (or absent) kinds/
+    // product_types array shows on every explore page; otherwise it only shows
+    // where the page's kind / product_type is listed.
+    const filter: any = { scope: CollectionScope.PLATFORM, is_active: true };
+    const and: any[] = [];
+    if (kind) {
+      and.push({
+        $or: [{ kinds: { $size: 0 } }, { kinds: { $exists: false } }, { kinds: kind }],
+      });
+    }
+    if (productType) {
+      and.push({
+        $or: [
+          { product_types: { $size: 0 } },
+          { product_types: { $exists: false } },
+          { product_types: productType },
+        ],
+      });
+    }
+    if (and.length) filter.$and = and;
+
     return this.collectionModel
-      .find({ scope: CollectionScope.PLATFORM, is_active: true })
+      .find(filter)
       .sort({ sort_order: 1, createdAt: -1 })
       .lean();
   }

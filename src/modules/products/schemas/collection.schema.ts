@@ -53,6 +53,16 @@ export class Collection {
   @Prop({ required: false })
   cover_image?: string;
 
+  // ── Explore scoping (platform collections) ──
+  // Which explore contexts a platform collection appears in. Empty = shows on
+  // every explore page; otherwise only where the page's kind / product_type
+  // matches. Admin-controlled merchandising, not inferred.
+  @Prop({ type: [String], default: [] })
+  kinds: string[]; // e.g. ['clothing', 'accessory', 'fabric']
+
+  @Prop({ type: [String], default: [] })
+  product_types: string[]; // e.g. ['agbada', 'dress']
+
   @Prop({
     type: [{ type: Types.ObjectId, ref: 'Product' }],
     default: [],
