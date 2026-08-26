@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -23,6 +24,7 @@ import {
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 
 import { Types } from 'mongoose';
+import { AdminDashboardMetricsWrapperDto } from './dto/admin-dashboard.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserService } from '../ums/services';
 import { TicketService } from '../ticket/ticket.service';
@@ -152,7 +154,12 @@ export class PlatformController {
   }
   /** ---------------- Admin Dashboard ---------------- */
   @Get('dashboard')
-  @ApiOperation({ summary: 'Get admin dashboard metrics' })
+  @ApiOperation({
+    summary: 'Get admin dashboard metrics',
+    description:
+      'Platform-wide overview counters for the admin console. Takes no request payload and no query parameters: every figure is all-time and cannot be narrowed to a period.',
+  })
+  @ApiOkResponse({ type: AdminDashboardMetricsWrapperDto })
   async getAdminDashboard() {
     return this.orderService.getAdminDashboardMetrics();
   }
