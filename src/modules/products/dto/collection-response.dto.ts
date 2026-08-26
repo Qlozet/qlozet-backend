@@ -65,6 +65,12 @@ export class CollectionResponseDto {
   @ApiProperty({ example: 0, description: 'Sort order for display' })
   sort_order: number;
 
+  @ApiPropertyOptional({ type: [String], example: ['clothing'], description: 'Explore kinds scope (empty = all pages)' })
+  kinds?: string[];
+
+  @ApiPropertyOptional({ type: [String], example: ['agbada'], description: 'Explore product_types scope (empty = all pages)' })
+  product_types?: string[];
+
   @ApiProperty({ example: '2026-07-01T12:00:00.000Z' })
   createdAt: string;
 

@@ -160,6 +160,18 @@ export class UpdateCollectionDto {
   @IsNumber()
   sort_order?: number;
 
+  @ApiPropertyOptional({ type: [String], example: ['clothing'], description: 'Explore kinds scope (platform collections)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  kinds?: string[];
+
+  @ApiPropertyOptional({ type: [String], example: ['agbada'], description: 'Explore product_types scope (platform collections)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  product_types?: string[];
+
   @ApiPropertyOptional({
     description: 'Product IDs to forcibly include in this collection',
     type: [String],
@@ -206,4 +218,26 @@ export class CreatePlatformCollectionDto extends CreateCollectionDto {
   @IsOptional()
   @IsNumber()
   sort_order?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Explore scoping — kinds this collection shows under. Empty = every explore page.',
+    example: ['clothing'],
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  kinds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Explore scoping — product_types this collection shows under. Empty = every explore page.',
+    example: ['agbada', 'kaftan'],
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  product_types?: string[];
 }
