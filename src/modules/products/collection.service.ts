@@ -507,7 +507,11 @@ export class CollectionService {
 
     // Re-apply conditions if rules, overrides, or active status changed
     if (dto.conditions || dto.manual_includes || dto.manual_excludes || dto.is_active !== undefined) {
-      this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+      try {
+        await this.applyCollectionToMatchingProducts(saved.id);
+      } catch (e) {
+        this.logger.error(`applyCollection failed for ${saved.id}`, e as Error);
+      }
     }
 
     return saved;
@@ -556,8 +560,13 @@ export class CollectionService {
 
     const saved = await collection.save();
 
-    // Apply conditions to all platform products
-    this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+    // Stamp matching products now (awaited) so the collection isn't empty right
+    // after creation. Failures are logged, not thrown — the collection is saved.
+    try {
+      await this.applyCollectionToMatchingProducts(saved.id);
+    } catch (e) {
+      this.logger.error(`applyCollection failed for ${saved.id}`, e as Error);
+    }
 
     return saved;
   }
@@ -586,7 +595,11 @@ export class CollectionService {
     const saved = await collection.save();
 
     if (dto.conditions || dto.manual_includes || dto.manual_excludes || dto.is_active !== undefined) {
-      this.applyCollectionToMatchingProducts(saved.id).catch(() => {});
+      try {
+        await this.applyCollectionToMatchingProducts(saved.id);
+      } catch (e) {
+        this.logger.error(`applyCollection failed for ${saved.id}`, e as Error);
+      }
     }
 
     return saved;
@@ -685,10 +698,19 @@ export class CollectionService {
    * Admin: get ALL platform collections (including inactive)
    */
   async getAllPlatformCollections() {
-    return this.collectionModel
+    const collections = await this.collectionModel
       .find({ scope: CollectionScope.PLATFORM })
       .sort({ sort_order: 1, createdAt: -1 })
       .lean();
+
+    // Attach how many products currently belong to each collection so the admin
+    // list reflects what the sync actually stamped.
+    return Promise.all(
+      collections.map(async (c) => ({
+        ...c,
+        product_count: await this.productModel.countDocuments({ collections: c._id }),
+      })),
+    );
   }
 
   // ─────────────────────────────────────────────────────────
@@ -759,10 +781,13 @@ export class CollectionService {
     expected: any,
   ): boolean {
     switch (operator) {
+      // Case/whitespace-insensitive so matching agrees with the admin builder's
+      // live preview (which normalizes with toLowerCase). A case mismatch here
+      // previously matched in the preview but stamped nothing on save.
       case 'is_equal_to':
-        return value == expected;
+        return String(value).trim().toLowerCase() === String(expected).trim().toLowerCase();
       case 'not_equal_to':
-        return value != expected;
+        return String(value).trim().toLowerCase() !== String(expected).trim().toLowerCase();
       case 'greater_than':
         return Number(value) > Number(expected);
       case 'less_than':
