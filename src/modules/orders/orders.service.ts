@@ -56,13 +56,17 @@ import {
   VariantSelectionDto,
 } from './dto/selection.dto';
 import { TransactionService } from '../transactions/transactions.service';
-import { User } from '../ums/schemas';
+import { User, UserType } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
 import { BusinessService } from '../business/business.service';
 import { ProductService } from '../products/products.service';
 import { computeAvailability } from '../products/product-availability';
-import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import {
+  Business,
+  BusinessDocument,
+  BusinessStatus,
+} from '../business/schemas/business.schema';
 import { BusinessEarningDocument } from '../business/schemas/business-earnings.schema';
 import {
   PlatformSettings,
@@ -1730,53 +1734,92 @@ export class OrderService {
     return Utils.getPagingData({ count: total, rows: orders }, page, size);
   }
   async getAdminDashboardMetrics() {
-    const [totalOrders, ordersDelivered, ordersInTransit, topProducts] =
-      await Promise.all([
-        this.orderModel.countDocuments(), // total orders
-        this.orderModel.countDocuments({ status: OrderStatus.COMPLETED }), // delivered
-        this.orderModel.countDocuments({ status: OrderStatus.PROCESSING }), // in transit
-        this.orderModel.aggregate([
-          { $unwind: '$items' },
-          {
-            $group: {
-              _id: '$items.product',
-              totalOrdered: {
-                $sum: {
-                  $sum: [
-                    '$items.variant_selections.quantity',
-                    '$items.fabric_selections.quantity',
-                    '$items.accessory_selections.quantity',
-                  ],
-                },
+    const [
+      totalOrders,
+      ordersDelivered,
+      ordersInTransit,
+      topProducts,
+      totalVendors,
+      verifiedVendors,
+      totalCustomers,
+      grossSales,
+    ] = await Promise.all([
+      this.orderModel.countDocuments(), // total orders
+      this.orderModel.countDocuments({ status: OrderStatus.COMPLETED }), // delivered
+      this.orderModel.countDocuments({ status: OrderStatus.PROCESSING }), // in transit
+      this.orderModel.aggregate([
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            totalOrdered: {
+              // Units per item live inside the selection arrays, so each one is
+              // summed on its own first — `$sum` over a list of array-valued
+              // expressions skips them as non-numeric and yields 0. Styles and
+              // addons are options ON a unit, not units, so they are excluded.
+              $sum: {
+                $add: [
+                  { $sum: '$items.color_variant_selections.quantity' },
+                  { $sum: '$items.fabric_selections.quantity' },
+                  { $sum: '$items.accessory_selections.quantity' },
+                ],
               },
             },
           },
-          { $sort: { totalOrdered: -1 } },
-          { $limit: 5 }, // top 5 must-purchase products
-          {
-            $lookup: {
-              from: 'products',
-              localField: '_id',
-              foreignField: '_id',
-              as: 'product',
-            },
+        },
+        { $sort: { totalOrdered: -1 } },
+        { $limit: 5 }, // top 5 must-purchase products
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product',
           },
-          { $unwind: '$product' },
-          {
-            $project: {
-              _id: 0,
-              product_id: '$_id',
-              name: '$product.name',
-              totalOrdered: 1,
+        },
+        { $unwind: '$product' },
+        {
+          $project: {
+            _id: 0,
+            product_id: '$_id',
+            // Products are polymorphic on `kind`: the name lives under the
+            // kind-specific subdocument, never at the top level.
+            name: {
+              $ifNull: [
+                '$product.clothing.name',
+                {
+                  $ifNull: [
+                    '$product.accessory.name',
+                    { $ifNull: ['$product.fabric.name', null] },
+                  ],
+                },
+              ],
             },
+            totalOrdered: 1,
           },
-        ]),
-      ]);
+        },
+      ]),
+      this.businessModel.countDocuments(), // total vendors
+      this.businessModel.countDocuments({ status: BusinessStatus.VERIFIED }), // verified vendors
+      // Same definition of "customer" the admin customers list uses, so the
+      // card and the table can never disagree.
+      this.userModel.countDocuments({ type: UserType.CUSTOMER }),
+      // Gross, not net: every order the customer actually paid for, before
+      // refunds, commission or payouts are taken out.
+      this.orderModel.aggregate<{ _id: null; total: number }>([
+        { $match: { payment_status: 'paid' } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]),
+    ]);
 
     return {
       total_orders: totalOrders,
       orders_delivered: ordersDelivered,
       orders_in_transit: ordersInTransit,
+      total_vendors: totalVendors,
+      verified_vendors: verifiedVendors,
+      total_customers: totalCustomers,
+      gross_sales: grossSales[0]?.total ?? 0,
       must_purchase_products: topProducts,
     };
   }
