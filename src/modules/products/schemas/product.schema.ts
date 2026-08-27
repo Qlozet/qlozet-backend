@@ -6,6 +6,7 @@ import { Clothing, ClothingSchema } from './clothing.schema';
 
 export type ProductDocument = Product & Document;
 import { ProductStatus } from '../enums/product-status.enum';
+import { ProductModerationStatus } from '../enums/product-moderation.enum';
 
 export enum ProductKind {
   CLOTHING = 'clothing',
@@ -91,6 +92,37 @@ export class Product extends Document {
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'SizeGuide', default: null })
   size_guide: Types.ObjectId;
+
+  /**
+   * Platform-side moderation, set from the admin catalogue. Independent of
+   * `status`, which stays the vendor's own publish switch — a rejected product
+   * is hidden from customers no matter what the vendor sets `status` to.
+   * Undefined on legacy documents, which read as PENDING.
+   */
+  @Prop({
+    type: {
+      status: {
+        type: String,
+        enum: ProductModerationStatus,
+        default: ProductModerationStatus.PENDING,
+      },
+      reason: { type: String, default: null },
+      moderated_at: { type: Date, default: null },
+      moderated_by: {
+        type: MongooseSchema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+    },
+    default: () => ({ status: ProductModerationStatus.PENDING }),
+    _id: false,
+  })
+  moderation?: {
+    status: ProductModerationStatus;
+    reason?: string | null;
+    moderated_at?: Date | null;
+    moderated_by?: Types.ObjectId | null;
+  };
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

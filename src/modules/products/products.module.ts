@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { ProductsController } from './products.controller';
+import { AdminProductsController } from './admin-products.controller';
 import { ProductService } from './products.service';
 import { DiscountService } from './discount.service';
 import { DiscountController } from './discount.controller';
@@ -42,7 +43,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
     NotificationsModule, // provides NotificationsService (low-stock alerts)
   ],
-  controllers: [ProductsController, DiscountController, CollectionController],
+  controllers: [
+    ProductsController,
+    AdminProductsController,
+    DiscountController,
+    CollectionController,
+  ],
   providers: [JwtService, ProductService, DiscountService, CollectionService],
   exports: [JwtService, ProductService, DiscountService, CollectionService, MongooseModule],
 })

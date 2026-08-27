@@ -20,6 +20,7 @@ import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
+import { ProductModerationStatus } from './enums/product-moderation.enum';
 
 import { User, UserDocument } from '../ums/schemas';
 import { Cron } from '@nestjs/schedule';
@@ -30,6 +31,10 @@ import {
 } from '../orders/schemas/orders.schema';
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { FindAllProductsDto } from './dto/find-all-products.dto';
+import {
+  AdminFindProductsDto,
+  AdminUpdateProductDto,
+} from './dto/admin-products.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   PlatformSettings,
@@ -190,6 +195,9 @@ export class ProductService {
    */
   private async assertPubliclyVisible(product: any): Promise<void> {
     if (!product || product.status !== ProductStatus.ACTIVE) {
+      throw new NotFoundException('Product not found');
+    }
+    if (product.moderation?.status === ProductModerationStatus.REJECTED) {
       throw new NotFoundException('Product not found');
     }
     const bizId = (product.business as any)?._id ?? product.business;
@@ -442,6 +450,10 @@ export class ProductService {
     // which is unaffected by this.
     filter.status = ProductStatus.ACTIVE;
     filter.business = { $in: await this.getApprovedBusinessIds() };
+    // A listing the admin rejected stays out of the catalogue regardless of the
+    // status the vendor sets. Legacy documents have no moderation field at all,
+    // so match on "not rejected" rather than "approved".
+    filter['moderation.status'] = { $ne: ProductModerationStatus.REJECTED };
 
     if (kind) {
       filter.kind = kind;
@@ -687,7 +699,10 @@ export class ProductService {
         { $set: { status: ProductStatus.ARCHIVED } },
         { new: true }
       );
-    } else if (userType === 'admin') {
+    } else if (userType === 'admin' || userType === 'platform') {
+      // UserType.ADMIN is the string 'platform' (see ums/schemas/user.schema),
+      // so a real admin token arrives as 'platform' — matching only 'admin'
+      // silently fell through and 404'd every admin delete.
       result = await this.productModel.findOneAndDelete({
         _id: new Types.ObjectId(id),
       });
@@ -1874,5 +1889,671 @@ export class ProductService {
 
     this.logger.log(`Accessory-kind product variant updated successfully`);
     return { type: 'accessory_kind', new_stock };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Admin catalogue                                                     */
+  /*                                                                     */
+  /* `findAll` above is the customer-facing catalogue: it hard-codes      */
+  /* status=ACTIVE and gates on approved vendors, so a moderator looking  */
+  /* through it would only ever see the products that need no attention. */
+  /* Everything below reads the collection unfiltered instead.           */
+  /* ------------------------------------------------------------------ */
+
+  /** Product name across all three kinds, falling back to the SEO title. */
+  private static productName(p: any): string {
+    return (
+      p?.clothing?.name ??
+      p?.accessory?.name ??
+      p?.fabric?.name ??
+      p?.seo?.title ??
+      'this product'
+    );
+  }
+
+  /** Mongo filter for the admin catalogue — the shared half of list + stats. */
+  private buildAdminFilter(dto: AdminFindProductsDto): any {
+    const and: any[] = [];
+    const filter: any = {};
+
+    if (dto.kind) filter.kind = dto.kind;
+    if (dto.status) filter.status = dto.status;
+    if (dto.type) filter['clothing.type'] = dto.type;
+
+    if (dto.moderation_status) {
+      and.push(
+        dto.moderation_status === ProductModerationStatus.PENDING
+          ? {
+              // Legacy products predate the moderation field: absent reads as pending.
+              $or: [
+                { 'moderation.status': ProductModerationStatus.PENDING },
+                { 'moderation.status': { $exists: false } },
+                { moderation: null },
+              ],
+            }
+          : { 'moderation.status': dto.moderation_status },
+      );
+    }
+
+    if (dto.business_id) {
+      and.push({
+        $or: [
+          { business: new Types.ObjectId(dto.business_id) },
+          { business: dto.business_id },
+        ],
+      });
+    }
+
+    if (dto.product_type) {
+      and.push({
+        $or: [
+          { 'clothing.taxonomy.product_type': dto.product_type },
+          { 'accessory.taxonomy.product_type': dto.product_type },
+          { 'fabric.taxonomy.product_type': dto.product_type },
+        ],
+      });
+    }
+
+    if (dto.category) {
+      and.push({
+        $or: [
+          { 'clothing.taxonomy.categories': dto.category },
+          { 'accessory.taxonomy.categories': dto.category },
+          { 'fabric.taxonomy.categories': dto.category },
+        ],
+      });
+    }
+
+    if (dto.audience) {
+      const synonyms: Record<string, string> = {
+        male: 'men',
+        female: 'women',
+        men: 'male',
+        women: 'female',
+      };
+      const values = [
+        dto.audience,
+        ...(synonyms[dto.audience] ? [synonyms[dto.audience]] : []),
+      ];
+      and.push({
+        $or: [
+          { 'clothing.taxonomy.audience': { $in: values } },
+          { 'accessory.taxonomy.audience': { $in: values } },
+          { 'fabric.taxonomy.audience': { $in: values } },
+        ],
+      });
+    }
+
+    if (dto.tag) {
+      and.push({
+        $or: [
+          { 'tags.slug': dto.tag },
+          { 'tags.name': dto.tag },
+          { 'metafields.tags.slug': dto.tag },
+          { 'metafields.tags.name': dto.tag },
+        ],
+      });
+    }
+
+    if (dto.search) {
+      const clause = this.buildSearchClause(dto.search);
+      if (clause) and.push(clause);
+    }
+
+    if (dto.on_sale) {
+      and.push({
+        $expr: {
+          $and: [
+            { $gt: ['$discounted_price', 0] },
+            { $lt: ['$discounted_price', '$base_price'] },
+          ],
+        },
+      });
+    }
+
+    if (dto.in_stock) {
+      and.push({
+        $or: [
+          { $and: [{ kind: 'clothing' }, { 'clothing.type': 'customize' }] },
+          { 'clothing.color_variants.variants.stock': { $gt: 0 } },
+          { 'accessory.variants.stock': { $gt: 0 } },
+          { 'accessory.in_stock': true },
+          {
+            $expr: {
+              $and: [
+                { $gt: [{ $ifNull: ['$fabric.yard_length', 0] }, 0] },
+                {
+                  $gte: [
+                    { $ifNull: ['$fabric.yard_length', 0] },
+                    { $ifNull: ['$fabric.min_cut', 0] },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      });
+    }
+
+    if (dto.minPrice !== undefined || dto.maxPrice !== undefined) {
+      const effective = {
+        $cond: [
+          { $gt: ['$discounted_price', 0] },
+          '$discounted_price',
+          '$base_price',
+        ],
+      };
+      if (dto.minPrice !== undefined) {
+        and.push({ $expr: { $gte: [effective, dto.minPrice] } });
+      }
+      if (dto.maxPrice !== undefined) {
+        and.push({ $expr: { $lte: [effective, dto.maxPrice] } });
+      }
+    }
+
+    if (dto.from || dto.to) {
+      const range: any = {};
+      if (dto.from) range.$gte = new Date(dto.from);
+      if (dto.to) {
+        // `to` is a calendar day from a date picker — include the whole day.
+        const end = new Date(dto.to);
+        end.setHours(23, 59, 59, 999);
+        range.$lte = end;
+      }
+      filter.createdAt = range;
+    }
+
+    if (and.length) filter.$and = and;
+    return filter;
+  }
+
+  /** The full catalogue for the admin table — every status, every vendor. */
+  async adminFindAll(dto: AdminFindProductsDto) {
+    const { page = 1, size = 10, sortBy, order = 'desc' } = dto;
+    const filter = this.buildAdminFilter(dto);
+    const { take, skip } = await Utils.getPagination(Number(page), Number(size));
+
+    const direction = order === 'asc' ? 1 : -1;
+    const sortMap: Record<string, Record<string, 1 | -1>> = {
+      date: { createdAt: direction },
+      price: { base_price: direction },
+      rating: { average_rating: direction },
+      // Only one kind's name is ever set per document, so sorting across all
+      // three keys orders the mixed list correctly.
+      name: {
+        'clothing.name': direction,
+        'accessory.name': direction,
+        'fabric.name': direction,
+      },
+      stock: { 'fabric.yard_length': direction },
+    };
+    const sort = sortMap[sortBy ?? 'date'] ?? { createdAt: -1 as const };
+
+    const [rows, count, thresholds] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .populate('business', 'business_name business_logo_url status is_active')
+        .sort(sort as any)
+        .skip(skip)
+        .limit(take)
+        .lean()
+        .exec(),
+      this.productModel.countDocuments(filter),
+      this.getStockThresholds(),
+    ]);
+
+    const data = rows.map((r) => withAvailability(r, thresholds));
+    return Utils.getPagingData({ rows: data, count }, Number(page), Number(size));
+  }
+
+  /** One product for the admin, ungated by status or vendor approval. */
+  async adminFindOne(productId: string) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new BadRequestException('Invalid product id');
+    }
+    const [product, thresholds] = await Promise.all([
+      this.productModel
+        .findById(productId)
+        .populate(
+          'business',
+          'business_name business_logo_url cover_image_url theme_color description status is_active',
+        )
+        .lean()
+        .exec(),
+      this.getStockThresholds(),
+    ]);
+    if (!product) throw new NotFoundException('Product not found');
+    return withAvailability(product, thresholds);
+  }
+
+  /**
+   * Header metrics for the admin catalogue: the status split, plus a real
+   * sales-by-category breakdown from delivered order items (the donut had been
+   * drawing a hard-coded four-way split).
+   */
+  async adminStats(dto: AdminFindProductsDto) {
+    // Counts ignore the status filter — the cards describe the whole catalogue
+    // for this kind, not the slice the table happens to be showing.
+    const { status, moderation_status, ...rest } = dto;
+    const base = this.buildAdminFilter(rest as AdminFindProductsDto);
+
+    const [byStatus, byModeration, total] = await Promise.all([
+      this.productModel.aggregate([
+        { $match: base },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      this.productModel.aggregate([
+        { $match: base },
+        {
+          $group: {
+            _id: { $ifNull: ['$moderation.status', ProductModerationStatus.PENDING] },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      this.productModel.countDocuments(base),
+    ]);
+
+    const pick = (rows: any[], key: string) =>
+      rows.find((r) => r._id === key)?.count ?? 0;
+
+    return {
+      total_products: total,
+      active_products: pick(byStatus, ProductStatus.ACTIVE),
+      draft_products: pick(byStatus, ProductStatus.DRAFT),
+      archived_products: pick(byStatus, ProductStatus.ARCHIVED),
+      scheduled_products: await this.productModel.countDocuments({
+        ...base,
+        scheduled_activation_date: { $ne: null },
+      }),
+      pending_products: pick(byModeration, ProductModerationStatus.PENDING),
+      approved_products: pick(byModeration, ProductModerationStatus.APPROVED),
+      rejected_products: pick(byModeration, ProductModerationStatus.REJECTED),
+      sales_by_category: await this.salesByCategory(dto.kind),
+    };
+  }
+
+  /**
+   * Units sold per taxonomy category, from paid orders. Order items carry no
+   * top-level quantity — it lives on the colour-variant selections — so a line
+   * with no selections counts as one unit. Falls back to the catalogue's own
+   * category spread when nothing has sold yet, so the donut still says
+   * something true rather than rendering empty.
+   */
+  private async salesByCategory(
+    kind?: string,
+  ): Promise<{ name: string; value: number }[]> {
+    const firstCategory = {
+      $ifNull: [
+        { $arrayElemAt: ['$product.clothing.taxonomy.categories', 0] },
+        {
+          $ifNull: [
+            { $arrayElemAt: ['$product.accessory.taxonomy.categories', 0] },
+            { $arrayElemAt: ['$product.fabric.taxonomy.categories', 0] },
+          ],
+        },
+      ],
+    };
+
+    const sold = await this.orderModel
+      .aggregate([
+        { $match: { payment_status: 'paid' } },
+        { $unwind: '$items' },
+        {
+          $match: {
+            'items.product': { $ne: null },
+            'items.rejected': { $ne: true },
+          },
+        },
+        {
+          $project: {
+            product_id: '$items.product',
+            units: {
+              $let: {
+                vars: {
+                  q: { $sum: '$items.color_variant_selections.quantity' },
+                },
+                in: { $cond: [{ $gt: ['$$q', 0] }, '$$q', 1] },
+              },
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'product_id',
+            foreignField: '_id',
+            as: 'product',
+          },
+        },
+        { $unwind: '$product' },
+        ...(kind ? [{ $match: { 'product.kind': kind } }] : []),
+        { $project: { units: 1, category: firstCategory } },
+        { $match: { category: { $ne: null } } },
+        { $group: { _id: '$category', value: { $sum: '$units' } } },
+        { $sort: { value: -1 } },
+        { $limit: 4 },
+      ])
+      .catch(() => [] as any[]);
+
+    if (sold.length) {
+      return sold.map((r: any) => ({ name: r._id, value: r.value }));
+    }
+
+    const spread = await this.productModel.aggregate([
+      ...(kind ? [{ $match: { kind } }] : []),
+      {
+        $project: {
+          categories: {
+            $ifNull: [
+              '$clothing.taxonomy.categories',
+              {
+                $ifNull: [
+                  '$accessory.taxonomy.categories',
+                  '$fabric.taxonomy.categories',
+                ],
+              },
+            ],
+          },
+        },
+      },
+      { $unwind: '$categories' },
+      { $group: { _id: '$categories', value: { $sum: 1 } } },
+      { $sort: { value: -1 } },
+      { $limit: 4 },
+    ]);
+    return spread.map((r: any) => ({ name: r._id, value: r.value }));
+  }
+
+  /**
+   * The values actually present in the catalogue, for the table's "Filter By"
+   * menu. Read from the data rather than the taxonomy master list so the menu
+   * can never offer a filter that returns nothing.
+   */
+  async adminFilterOptions(kind?: string) {
+    const match: any = kind ? { kind } : {};
+    const paths = kind
+      ? [kind]
+      : ['clothing', 'accessory', 'fabric'];
+
+    const distinctAcross = async (leaf: string) => {
+      const values = await Promise.all(
+        paths.map((p) =>
+          this.productModel.distinct(`${p}.taxonomy.${leaf}`, match),
+        ),
+      );
+      return [
+        ...new Set(
+          values
+            .flat()
+            .filter((v): v is string => typeof v === 'string' && v.length > 0),
+        ),
+      ].sort();
+    };
+
+    const [product_types, categories, audiences, tagDocs, vendors] =
+      await Promise.all([
+        distinctAcross('product_type'),
+        distinctAcross('categories'),
+        distinctAcross('audience'),
+        this.productModel.distinct('tags', match),
+        this.productModel.aggregate([
+          { $match: match },
+          { $group: { _id: '$business', count: { $sum: 1 } } },
+          {
+            $lookup: {
+              from: 'businesses',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'business',
+            },
+          },
+          { $unwind: '$business' },
+          {
+            $project: {
+              _id: 0,
+              id: '$_id',
+              name: '$business.business_name',
+              count: 1,
+            },
+          },
+          { $sort: { name: 1 } },
+        ]),
+      ]);
+
+    const tags = [
+      ...new Map(
+        (tagDocs as any[])
+          .filter((t) => t?.name)
+          .map((t) => [t.slug ?? t.name, { name: t.name, slug: t.slug ?? t.name }]),
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      product_types,
+      categories,
+      audiences,
+      tags,
+      vendors,
+      statuses: Object.values(ProductStatus),
+      moderation_statuses: Object.values(ProductModerationStatus),
+    };
+  }
+
+  /**
+   * Apply an admin edit. Only the keys present are written, so the form can
+   * send a partial without wiping fields it doesn't render.
+   *
+   * Editing a rejected listing sends it back for review rather than silently
+   * leaving the rejection in place — the admin has just changed the thing that
+   * was wrong with it.
+   */
+  async adminUpdate(productId: string, dto: AdminUpdateProductDto) {
+    const product = await this.assertProduct(productId);
+
+    if (dto.seo) {
+      product.seo = { ...(product.seo ?? {}), ...dto.seo };
+    }
+    if (dto.metafields) {
+      product.metafields = { ...(product.metafields ?? {}), ...dto.metafields };
+    }
+    if (dto.base_price !== undefined) {
+      product.base_price = dto.base_price;
+    }
+    if (dto.status) {
+      product.status = dto.status;
+      product.scheduled_activation_date = undefined;
+    }
+
+    // Only the sub-document matching this product's own kind is applied — an
+    // accessory payload must not graft a `clothing` block onto a fabric.
+    const kind = product.kind as 'clothing' | 'accessory' | 'fabric';
+    const detail = dto[kind];
+    if (detail && Object.keys(detail).length) {
+      const current = (product as any)[kind];
+      const plain =
+        current && typeof current.toObject === 'function'
+          ? current.toObject()
+          : (current ?? {});
+      (product as any)[kind] = { ...plain, ...detail };
+      product.markModified(kind);
+    }
+
+    if (product.moderation?.status === ProductModerationStatus.REJECTED) {
+      product.moderation = {
+        status: ProductModerationStatus.PENDING,
+        reason: null,
+        moderated_at: new Date(),
+        moderated_by: null,
+      };
+    }
+
+    await product.save();
+    return {
+      message: 'Product updated',
+      data: product.toJSON(),
+    };
+  }
+
+  /**
+   * Admin publish switch (Activate / Deactivate). Unlike the vendor route this
+   * skips the business-ownership check — moderating any vendor's listing is the
+   * whole point — and notifies the vendor that the platform moved it.
+   */
+  async adminUpdateStatus(
+    productId: string,
+    status: ProductStatus,
+    reason?: string,
+  ) {
+    const product = await this.assertProduct(productId);
+
+    product.status = status;
+    // A manual switch overrides any pending schedule, same as the vendor path.
+    product.scheduled_activation_date = undefined;
+    if (reason) {
+      product.moderation = {
+        ...(product.moderation ?? { status: ProductModerationStatus.PENDING }),
+        reason,
+        moderated_at: new Date(),
+      } as any;
+    }
+    await product.save();
+
+    await this.notifyVendorOfProduct(
+      product,
+      NotificationType.PRODUCT_STATUS_CHANGED,
+      status === ProductStatus.ACTIVE ? 'Product activated' : 'Product updated',
+      `${ProductService.productName(product)} was set to "${status}" by the Qlozet team.${
+        reason ? ` Reason: ${reason}` : ''
+      }`,
+    );
+
+    return {
+      message: `Product status updated to ${status}`,
+      data: product.toJSON(),
+    };
+  }
+
+  /** Admin-side scheduling — the vendor route is business-scoped. */
+  async adminScheduleActivation(productId: string, activationDate: Date) {
+    const product = await this.assertProduct(productId);
+
+    if (Number.isNaN(activationDate.getTime())) {
+      throw new BadRequestException('Invalid activation date');
+    }
+    if (activationDate <= new Date()) {
+      throw new BadRequestException('Activation date must be in the future');
+    }
+
+    product.scheduled_activation_date = activationDate;
+    // Keep the product out of the catalogue until the cron flips it live.
+    if (product.status === ProductStatus.ACTIVE) {
+      product.status = ProductStatus.SCHEDULED;
+    }
+    await product.save();
+
+    await this.notifyVendorOfProduct(
+      product,
+      NotificationType.PRODUCT_STATUS_CHANGED,
+      'Product activation scheduled',
+      `${ProductService.productName(product)} will go live on ${activationDate.toUTCString()}.`,
+    );
+
+    return {
+      message: 'Product scheduled for automatic activation',
+      data: {
+        _id: product._id,
+        status: product.status,
+        scheduled_activation_date: product.scheduled_activation_date,
+      },
+    };
+  }
+
+  /**
+   * Approve or reject a listing. Rejection does not delete anything — it flags
+   * the product and takes it out of the customer catalogue (see the moderation
+   * gate in `findAll`), leaving the vendor able to fix and resubmit.
+   */
+  async adminModerate(
+    productId: string,
+    decision: ProductModerationStatus,
+    adminUserId?: string,
+    reason?: string,
+  ) {
+    if (decision === ProductModerationStatus.REJECTED && !reason?.trim()) {
+      throw new BadRequestException('A reason is required to reject a product');
+    }
+
+    const product = await this.assertProduct(productId);
+
+    product.moderation = {
+      status: decision,
+      reason: reason ?? null,
+      moderated_at: new Date(),
+      moderated_by: adminUserId ? new Types.ObjectId(adminUserId) : null,
+    };
+
+    // A rejected product must not stay in the storefront.
+    if (decision === ProductModerationStatus.REJECTED) {
+      product.status = ProductStatus.DRAFT;
+      product.scheduled_activation_date = undefined;
+    }
+    await product.save();
+
+    const approved = decision === ProductModerationStatus.APPROVED;
+    await this.notifyVendorOfProduct(
+      product,
+      approved
+        ? NotificationType.PRODUCT_APPROVED
+        : NotificationType.PRODUCT_REJECTED,
+      approved ? 'Product approved ✅' : 'Product rejected',
+      approved
+        ? `${ProductService.productName(product)} has been approved and can go live.`
+        : `${ProductService.productName(product)} was rejected. Reason: ${reason}`,
+    );
+
+    return {
+      message: approved ? 'Product approved' : 'Product rejected',
+      data: product.toJSON(),
+    };
+  }
+
+  private async assertProduct(productId: string): Promise<ProductDocument> {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new BadRequestException('Invalid product id');
+    }
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
+
+  /** Best-effort vendor notification; never fails the moderation action. */
+  private async notifyVendorOfProduct(
+    product: ProductDocument,
+    type: NotificationType,
+    title: string,
+    body: string,
+  ): Promise<void> {
+    try {
+      const business = await this.businessModel
+        .findById(product.business)
+        .select('created_by')
+        .lean();
+      const recipient = (business as any)?.created_by?.id?.toString();
+      if (!recipient) return;
+
+      await this.notificationsService.create({
+        recipient,
+        recipient_business: product.business?.toString?.(),
+        category: NotificationCategory.PRODUCT,
+        type,
+        title,
+        body,
+        metadata: { product_id: product._id },
+        action_url: '/products',
+      });
+    } catch (err: any) {
+      this.logger.warn(`Product notification failed: ${err.message}`);
+    }
   }
 }

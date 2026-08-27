@@ -43,6 +43,8 @@ export enum NotificationType {
   NEW_REVIEW = 'new_review',
   LOW_STOCK = 'low_stock',
   PRODUCT_APPROVED = 'product_approved',
+  PRODUCT_REJECTED = 'product_rejected',
+  PRODUCT_STATUS_CHANGED = 'product_status_changed',
 
   // Team
   TEAM_MEMBER_JOINED = 'team_member_joined',
