@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Param,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   Req,
@@ -28,9 +29,22 @@ import {
 import { RolesService, UserService } from './services';
 import { InviteTeamMemberDto, UpdateTeamMemberDto } from './dto/team.dto';
 import { TeamService } from './services/team.service';
+import { AdminsService } from './services/admins.service';
+import { PermissionService } from './services/permissions.service';
+import {
+  CreateAdminDto,
+  FetchAdminsDto,
+  UpdateAdminDto,
+  UpdateAdminStatusDto,
+} from './dto/admin.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
-import { PlatformRole, Role, VendorRole } from './schemas/role.schema';
+import {
+  PlatformRole,
+  Role,
+  RoleType,
+  VendorRole,
+} from './schemas/role.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { TeamMember } from './schemas/team.schema';
 import {
@@ -55,10 +69,31 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly teamService: TeamService,
+    private readonly adminsService: AdminsService,
+    private readonly permissionsService: PermissionService,
     private readonly rolesService: RolesService,
     private readonly platformService: PlatformService,
     private readonly businessService: BusinessService,
   ) {}
+
+  /**
+   * The caller's business id, for the vendor-scoped routes below.
+   *
+   * RolesGuard only attaches `req.business` on its vendor branch — a platform
+   * admin passes the guard on the admin bypass with no business at all, so
+   * every one of these handlers used to read `.id` off undefined and answer a
+   * 500 ("Cannot read properties of undefined"). Platform staff belong on
+   * /users/admins; say so instead.
+   */
+  private businessIdOf(req: any): string {
+    const businessId = req?.business?.id;
+    if (!businessId) {
+      throw new ForbiddenException(
+        'This route manages a vendor business team. Platform administrators are managed at /users/admins.',
+      );
+    }
+    return businessId;
+  }
 
   @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER)
@@ -91,11 +126,14 @@ export class UserController {
     @Req() req: any,
   ) {
     const inviter = req.user;
-    const business = req.business;
+    // Called for the guard, not the value: the service takes the business
+    // document, and without this a caller who has none reaches it as undefined.
+    this.businessIdOf(req);
+
     return this.teamService.inviteTeamMember(
       inviteTeamMemberDto,
       inviter,
-      business,
+      req.business,
     );
   }
   @Roles(UserType.VENDOR)
@@ -103,7 +141,7 @@ export class UserController {
   @Get('team/members')
   @ApiOperation({ summary: 'Get all team members' })
   async getTeamMembers(@Req() req: any): Promise<TeamMember[]> {
-    return this.teamService.listTeamMembers(req.business.id);
+    return this.teamService.listTeamMembers(this.businessIdOf(req));
   }
 
   @Roles(UserType.VENDOR)
@@ -117,7 +155,7 @@ export class UserController {
     @Body() dto: UpdateTeamMemberDto,
     @Req() req: any,
   ) {
-    return this.teamService.updateMember(id, req.business.id, dto);
+    return this.teamService.updateMember(id, this.businessIdOf(req), dto);
   }
 
   @Roles(UserType.VENDOR)
@@ -126,7 +164,111 @@ export class UserController {
   @ApiOperation({ summary: 'Remove a team member' })
   @ApiParam({ name: 'id', description: 'Team member ID' })
   async removeTeamMember(@Param('id') id: string, @Req() req: any) {
-    return this.teamService.removeMember(id, req.business.id);
+    return this.teamService.removeMember(id, this.businessIdOf(req));
+  }
+
+  // ==============================
+  // PLATFORM ADMINISTRATORS
+  // ==============================
+  //
+  // The console's Admin Management screen. Kept apart from the team routes
+  // above on purpose: those manage a VENDOR's staff, scoped to a business,
+  // while these manage Qlozet's own — Users with `type: platform` and a
+  // platform role, which is what `loginPlatform` authenticates.
+
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Get('admins')
+  @ApiOperation({
+    summary: 'List platform administrators',
+    description:
+      'The Administrators table. Paginated, newest first, with optional search over name, email and phone, and filters by role (id or name) and account status.',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  @ApiQuery({ name: 'search', required: false, example: 'shola' })
+  @ApiQuery({ name: 'role', required: false, example: 'operations' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'inactive', 'suspended'],
+  })
+  async listAdmins(@Query() filters: FetchAdminsDto) {
+    return this.adminsService.list(filters);
+  }
+
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Get('admins/:id')
+  @ApiOperation({ summary: 'Get one platform administrator' })
+  @ApiParam({ name: 'id', description: 'Admin (User) id' })
+  @ApiResponse({ status: 404, description: 'Admin not found' })
+  async getAdmin(@Param('id') id: string) {
+    return this.adminsService.findOne(id);
+  }
+
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Post('admins')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Add a platform administrator',
+    description:
+      'Creates the account outright — there is no accept-invite step for platform staff — and emails them a temporary password to sign in with. The role must be a platform role; a vendor role is rejected.',
+  })
+  @ApiBody({ type: CreateAdminDto })
+  @ApiResponse({ status: 201, description: 'Admin created' })
+  @ApiResponse({ status: 400, description: 'Unknown role, or a vendor role' })
+  @ApiResponse({
+    status: 409,
+    description: 'That email or phone number is already in use',
+  })
+  async createAdmin(@Body() dto: CreateAdminDto, @Req() req: any) {
+    return this.adminsService.create(dto, req.user);
+  }
+
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Patch('admins/:id')
+  @ApiOperation({
+    summary: 'Edit a platform administrator',
+    description:
+      "Name, phone, role and account status. Email is the sign-in identity and is not editable here. Refuses any change that would leave no active super admin, and refuses to change your OWN status — locking yourself out of the console is never the intent.",
+  })
+  @ApiParam({ name: 'id', description: 'Admin (User) id' })
+  @ApiBody({ type: UpdateAdminDto })
+  @ApiResponse({ status: 404, description: 'Admin not found' })
+  async updateAdmin(
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminDto,
+    @Req() req: any,
+  ) {
+    return this.adminsService.update(id, dto, req.user?.id);
+  }
+
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Patch('admins/:id/status')
+  @ApiOperation({
+    summary: "Activate or deactivate an administrator",
+    description:
+      "Platform sign-in requires status 'active', so this is what actually admits or locks out an admin.",
+  })
+  @ApiParam({ name: 'id', description: 'Admin (User) id' })
+  @ApiBody({ type: UpdateAdminStatusDto })
+  async setAdminStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminStatusDto,
+    @Req() req: any,
+  ) {
+    return this.adminsService.setStatus(id, dto.status, req.user?.id);
+  }
+
+  @Roles(PlatformRole.SUPER_ADMIN)
+  @Delete('admins/:id')
+  @ApiOperation({
+    summary: 'Permanently delete an administrator',
+    description:
+      'Super admins only — deactivating is the reversible option and should be the default. Refuses to delete you, or the last active super admin.',
+  })
+  @ApiParam({ name: 'id', description: 'Admin (User) id' })
+  async deleteAdmin(@Param('id') id: string, @Req() req: any) {
+    return this.adminsService.remove(id, req.user?.id);
   }
 
   // ==============================
@@ -140,31 +282,69 @@ export class UserController {
     return this.rolesService.getVendorRoles();
   }
 
-  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN, PlatformRole.SALES)
+  @Roles(
+    UserType.VENDOR,
+    PlatformRole.ADMIN,
+    PlatformRole.SUPER_ADMIN,
+    PlatformRole.SALES,
+  )
   @Get('roles')
-  @ApiOperation({ summary: 'Get all roles (platform + vendor)' })
-  async getAllRoles(): Promise<Role[]> {
-    return this.rolesService.findAll();
+  @ApiOperation({
+    summary: 'Get all roles (platform + vendor)',
+    description:
+      "Pass ?type=platform for the console's own roles, or ?type=vendor for the ones a business grants its team. Unfiltered returns both, which is rarely what a screen wants — a role picker showing vendor roles to an admin will offer roles their user type can never hold.",
+  })
+  @ApiQuery({ name: 'type', required: false, enum: ['platform', 'vendor'] })
+  async getAllRoles(@Query('type') type?: string): Promise<Role[]> {
+    const filter =
+      type === 'platform'
+        ? RoleType.PLATFORM
+        : type === 'vendor'
+          ? RoleType.VENDOR
+          : undefined;
+    return this.rolesService.findAll(filter);
   }
 
-  @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @Get('permissions')
+  @ApiOperation({
+    summary: "The console's permission grid",
+    description:
+      "Every module x action cell the Edit Access screen renders, with the permission id behind it — the ids to send back in PUT /users/roles/:id/permissions. Cells missing from the catalogue are created on first read, so the grid is never empty.",
+  })
+  async getConsolePermissions() {
+    return this.permissionsService.getConsoleCatalogue();
+  }
+
+  @Roles(PlatformRole.SUPER_ADMIN, PlatformRole.ADMIN)
+  @Post('roles/defaults')
+  @ApiOperation({
+    summary: 'Create the default platform roles',
+    description:
+      "Idempotent. Creates any of the console's standard platform roles (super admin, admin, customer support, operations, marketing, data analyst, sales) that do not exist yet, each with a sensible starting grant. Never touches a role that already exists.",
+  })
+  async createDefaultRoles() {
+    return this.rolesService.ensurePlatformDefaults();
+  }
+
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Get('roles/:id')
   @ApiOperation({ summary: 'Get role by ID' })
   async getRoleById(@Param('id') id: string): Promise<Role> {
     return this.rolesService.findById(id);
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @VendorRoles(VendorRole.OWNER)
   @Post('roles')
   @ApiOperation({ summary: 'Create a new role' })
   @ApiBody({ type: CreateRoleDto })
+  @ApiResponse({ status: 409, description: 'A role of that name already exists' })
   async createRole(@Body() dto: CreateRoleDto): Promise<Role> {
-    return this.rolesService.create(dto);
+    return this.rolesService.createFromDto(dto);
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @VendorRoles(VendorRole.OWNER)
   @Patch('roles/:id')
   @ApiOperation({ summary: 'Update an existing role' })
@@ -173,19 +353,39 @@ export class UserController {
     @Param('id') id: string,
     @Body() dto: UpdateRoleDto,
   ): Promise<Role> {
-    return this.rolesService.updateRole(id, dto);
+    return this.rolesService.updateFromDto(id, dto);
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @VendorRoles(VendorRole.OWNER)
   @Delete('roles/:id')
-  @ApiOperation({ summary: 'Delete a role by ID' })
+  @ApiOperation({
+    summary: 'Delete a role by ID',
+    description:
+      'Refuses with a 409 while anyone still holds the role, or when it is a built-in one.',
+  })
   async deleteRole(@Param('id') id: string): Promise<{ message: string }> {
     await this.rolesService.deleteRole(id);
     return { message: 'Role deleted successfully' };
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
+  @VendorRoles(VendorRole.OWNER)
+  @Put('roles/:id/permissions')
+  @ApiOperation({
+    summary: "Replace a role's permissions",
+    description:
+      "Sets the role's grant to exactly these permission ids. The Edit Access grid is a complete picture of what a role may do, so saving it has to clear what was unticked — which assign/remove, being additive and subtractive halves, cannot do in one call.",
+  })
+  @ApiBody({ type: AssignPermissionsDto })
+  async setRolePermissions(
+    @Param('id') id: string,
+    @Body() dto: AssignPermissionsDto,
+  ): Promise<Role> {
+    return this.rolesService.setPermissions(id, dto.permission_ids);
+  }
+
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @VendorRoles(VendorRole.OWNER)
   @Post('roles/:id/assign-permissions')
   @ApiOperation({ summary: 'Assign permissions to a role' })
@@ -197,7 +397,7 @@ export class UserController {
     return this.rolesService.assignPermissionsToRole(id, dto.permission_ids);
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @VendorRoles(VendorRole.OWNER)
   @Post('roles/:id/remove-permissions')
   @ApiOperation({ summary: 'Remove permissions from a role' })

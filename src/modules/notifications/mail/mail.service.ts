@@ -435,6 +435,59 @@ export class MailService {
     }
   }
 
+  /**
+   * A brand-new PLATFORM administrator's credentials.
+   *
+   * The vendor twin above needs a business name and points at the vendor app;
+   * an admin belongs to Qlozet itself and signs in to the console, so neither
+   * fits. Inline HTML rather than a template file, like sendTeamAddedEmail.
+   */
+  async sendAdminInviteEmail(
+    to: string,
+    name: string,
+    role: string,
+    temporaryPassword: string,
+    invitedBy?: string,
+  ) {
+    try {
+      const loginUrl = `${process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qlozet-admin.vercel.app'}/login`;
+      const roleLabel = role.replace(/[_-]+/g, ' ');
+      const invitedLine = invitedBy
+        ? `<p><strong>${invitedBy}</strong> added you to the Qlozet admin console.</p>`
+        : `<p>You have been added to the Qlozet admin console.</p>`;
+
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #2C1810;">
+          <h2 style="color: #2C1810;">Welcome to the Qlozet admin console</h2>
+          <p>Hello <strong>${name}</strong>,</p>
+          ${invitedLine}
+          <p>Your role is <strong>${roleLabel}</strong>.</p>
+          <p>Sign in with the credentials below, then change your password from your profile.</p>
+          <div style="background:#F7F4F1;border-radius:10px;padding:16px;margin:18px 0;">
+            <p style="margin:0 0 6px;"><strong>Email:</strong> ${to}</p>
+            <p style="margin:0;"><strong>Temporary password:</strong> ${temporaryPassword}</p>
+          </div>
+          <p style="margin:22px 0;">
+            <a href="${loginUrl}" target="_blank"
+               style="display:inline-block;background:#2C1810;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600;">Sign in</a>
+          </p>
+          <p style="color:#8A7C6E;font-size:13px;">If you were not expecting this, contact ${process.env.SUPPORT_EMAIL || 'support@qoobea.com'}.</p>
+        </div>`;
+
+      await this.mailerService.sendMail({
+        to,
+        subject: 'Your Qlozet admin account',
+        html,
+      });
+
+      console.log('✅ Admin invite email sent successfully to:', to);
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send admin invite email:', error);
+      throw error;
+    }
+  }
+
   // ================================================================
   // BESPOKE QUOTE EMAIL METHODS
   // ================================================================
