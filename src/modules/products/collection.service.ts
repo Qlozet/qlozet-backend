@@ -697,7 +697,10 @@ export class CollectionService {
 
     return {
       collection,
-      products: Utils.getPagingData(
+      // NOTE: getPagingData is async — must be awaited, otherwise `products`
+      // serializes to an unresolved Promise ({}), and the shop shows an empty
+      // collection even though `find` returned matches.
+      products: await Utils.getPagingData(
         { count: totalCount, rows: products },
         page,
         limit,
