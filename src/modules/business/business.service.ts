@@ -220,6 +220,8 @@ export class BusinessService {
     search?: string,
     sort?: string,
     order?: string,
+    startDate?: string,
+    endDate?: string,
   ) {
     const skip = (page - 1) * size;
     const limit = size;
@@ -228,6 +230,7 @@ export class BusinessService {
       // Narrow before the lookups below, so a filtered page does not join
       // products and orders for businesses it is about to discard.
       ...BusinessService.vendorStatusStage(status),
+      ...BusinessService.vendorOnboardedStage(startDate, endDate),
       // -------------------- Vendor info --------------------
       {
         $lookup: {
@@ -335,6 +338,32 @@ export class BusinessService {
     ]);
 
     return { ...paging, summary };
+  }
+
+  /**
+   * Date-onboarded range, matched on `createdAt` — the "Date onboarded" column.
+   *
+   * An invalid date is ignored rather than turned into a match on Invalid Date,
+   * which would silently return nothing.
+   */
+  private static vendorOnboardedStage(
+    startDate?: string,
+    endDate?: string,
+  ): PipelineStage[] {
+    const range: Record<string, Date> = {};
+
+    const parse = (value?: string): Date | undefined => {
+      if (!value?.trim()) return undefined;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? undefined : date;
+    };
+
+    const from = parse(startDate);
+    const to = parse(endDate);
+    if (from) range.$gte = from;
+    if (to) range.$lte = to;
+
+    return Object.keys(range).length ? [{ $match: { createdAt: range } }] : [];
   }
 
   /** Table column -> the field the pipeline can actually sort on. */

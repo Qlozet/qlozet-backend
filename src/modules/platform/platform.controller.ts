@@ -113,6 +113,17 @@ export class PlatformController {
     enum: ['asc', 'desc'],
     description: "Sort direction. Defaults to 'asc'.",
   })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    description:
+      'Only vendors onboarded on or after this ISO date. Matched on createdAt — the table\'s "Date onboarded" column.',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    description: 'Only vendors onboarded on or before this ISO date.',
+  })
   async getAllBusinesses(
     @Query('page') page: number,
     @Query('size') size: number,
@@ -120,6 +131,8 @@ export class PlatformController {
     @Query('search') search?: string,
     @Query('sort') sort?: string,
     @Query('order') order?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     return this.businessService.findAllBusinesses(
       page,
@@ -128,6 +141,8 @@ export class PlatformController {
       search,
       sort,
       order,
+      startDate,
+      endDate,
     );
   }
   // ------------------------------------------------------
