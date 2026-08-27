@@ -2043,7 +2043,21 @@ export class OrderService {
             $project: {
               _id: 0,
               product_id: '$_id',
-              name: '$product.name',
+              // Products are polymorphic on `kind`: the name lives under the
+              // kind-specific subdocument, never at the top level. Reading
+              // `$product.name` sent null for every row, which is why the
+              // vendor dashboard's "Most purchased" card had nothing to show.
+              name: {
+                $ifNull: [
+                  '$product.clothing.name',
+                  {
+                    $ifNull: [
+                      '$product.accessory.name',
+                      { $ifNull: ['$product.fabric.name', null] },
+                    ],
+                  },
+                ],
+              },
               totalOrdered: 1,
             },
           },
