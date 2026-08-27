@@ -15,6 +15,7 @@
     "migrate:normalize-refs": "ts-node scripts/normalize-objectid-refs.ts",
     "backfill:order-payment": "ts-node scripts/backfill-order-payment-status.ts",
     "reset:stuck-shipments": "ts-node scripts/reset-stuck-shipments.ts",
+    "fix:sparse-indexes": "ts-node scripts/fix-sparse-indexes.ts",
     "build": "nest build && copyfiles src/modules/notifications/mail/templates/**/* dist/src/modules/notifications/mail/templates",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",

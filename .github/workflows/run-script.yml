@@ -25,6 +25,8 @@ on:
           - "migrate:normalize-refs (apply)"
           - "backfill:order-payment (dry-run)"
           - "backfill:order-payment (apply)"
+          - "fix:sparse-indexes (dry-run)"
+          - "fix:sparse-indexes (apply)"
 
 concurrency: run-script-group
 
@@ -57,6 +59,12 @@ jobs:
               CMD="npm run backfill:order-payment -- --dry" ;;
             "backfill:order-payment (apply)")
               CMD="npm run backfill:order-payment" ;;
+            # Was BusinessService.onModuleInit, running on every boot. Restart
+            # the app afterwards so Mongoose rebuilds the dropped indexes.
+            "fix:sparse-indexes (dry-run)")
+              CMD="npm run fix:sparse-indexes -- --dry" ;;
+            "fix:sparse-indexes (apply)")
+              CMD="npm run fix:sparse-indexes" ;;
             *)
               echo "Unknown script: $SCRIPT_CHOICE"; exit 1 ;;
           esac

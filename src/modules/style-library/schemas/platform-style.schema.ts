@@ -72,4 +72,6 @@ export const PlatformStyleSchema =
 
 // Index for efficient filtering
 PlatformStyleSchema.index({ category: 1, type: 1, is_active: 1 });
-PlatformStyleSchema.index({ style_code: 1 }, { unique: true });
+// No index on style_code here: @Prop({ unique: true }) above already declares it.
+// Declaring both makes Mongoose build the same index twice and log a
+// "Duplicate schema index" warning.

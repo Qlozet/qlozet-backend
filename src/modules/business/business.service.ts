@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types, PipelineStage } from 'mongoose';
@@ -43,7 +42,7 @@ import {
 import { sanitizeBusiness } from 'src/common/utils/sanitization';
 
 @Injectable()
-export class BusinessService implements OnModuleInit {
+export class BusinessService {
   private readonly logger = new Logger(BusinessService.name);
   constructor(
     @InjectModel(Business.name)
@@ -65,68 +64,12 @@ export class BusinessService implements OnModuleInit {
     private transactionModel: Model<TransactionDocument>,
   ) {}
 
-  /**
-   * On startup: drop old non-sparse unique index on business_email
-   * and let Mongoose recreate it with sparse: true.
-   * This is a one-time migration fix for E11000 duplicate key errors on null.
-   */
-  async onModuleInit() {
-    // Fix business_email index
-    try {
-      await this.businessModel.collection.dropIndex('business_email_1');
-      this.logger.log('✅ Dropped old business_email_1 index (non-sparse)');
-    } catch (e: any) {
-      if (e.codeName !== 'IndexNotFound') {
-        this.logger.log(`ℹ️ business_email_1 index: ${e.message}`);
-      }
-    }
-    try {
-      await this.businessModel.ensureIndexes();
-      this.logger.log('✅ Business indexes ensured (with sparse)');
-    } catch (e: any) {
-      this.logger.warn(`⚠️ ensureIndexes (business): ${e.message}`);
-    }
-
-    // Fix user phone_number index
-    try {
-      await this.userModel.collection.dropIndex('phone_number_1');
-      this.logger.log('✅ Dropped old phone_number_1 index (non-sparse)');
-    } catch (e: any) {
-      if (e.codeName !== 'IndexNotFound') {
-        this.logger.log(`ℹ️ phone_number_1 index: ${e.message}`);
-      }
-    }
-
-    // Fix user username index — sparse only skips undefined, NOT null
-    // So we must convert all null usernames to undefined (unset)
-    try {
-      const result = await this.userModel.collection.updateMany(
-        { username: null },
-        { $unset: { username: '' } },
-      );
-      if (result.modifiedCount > 0) {
-        this.logger.log(`✅ Unset ${result.modifiedCount} null usernames`);
-      }
-    } catch (e: any) {
-      this.logger.warn(`⚠️ Failed to unset null usernames: ${e.message}`);
-    }
-
-    try {
-      await this.userModel.collection.dropIndex('username_1');
-      this.logger.log('✅ Dropped old username_1 index');
-    } catch (e: any) {
-      if (e.codeName !== 'IndexNotFound') {
-        this.logger.log(`ℹ️ username_1 index: ${e.message}`);
-      }
-    }
-
-    try {
-      await this.userModel.ensureIndexes();
-      this.logger.log('✅ User indexes ensured (with sparse)');
-    } catch (e: any) {
-      this.logger.warn(`⚠️ ensureIndexes (user): ${e.message}`);
-    }
-  }
+  // The legacy non-sparse unique index migration that used to live here as
+  // onModuleInit now lives in scripts/fix-sparse-indexes.ts, runnable from the
+  // Actions tab ("Run maintenance script" -> fix:sparse-indexes). It ran on
+  // every boot and could never converge — dropIndex removed the index that
+  // ensureIndexes then recreated under the same auto-generated name — so each
+  // restart opened a window with no uniqueness enforcement at all.
 
   async createWarehouse(
     dto: CreateWarehouseDto,
