@@ -657,10 +657,24 @@ export class CollectionService {
     }
     if (and.length) filter.$and = and;
 
-    return this.collectionModel
+    const collections = await this.collectionModel
       .find(filter)
       .sort({ sort_order: 1, createdAt: -1 })
       .lean();
+
+    // When a collection has no cover image, borrow one from a product that
+    // belongs to it so the explore card isn't blank.
+    const approvedBusinessIds = await this.getApprovedBusinessIds();
+    return Promise.all(
+      collections.map(async (c) => {
+        if (c.cover_image) return c;
+        const product = await this.productModel
+          .findOne(this.buildPlatformCollectionProductQuery(c, approvedBusinessIds))
+          .lean();
+        const img = this.extractProductImage(product);
+        return img ? { ...c, cover_image: img } : c;
+      }),
+    );
   }
 
   /**
@@ -694,6 +708,12 @@ export class CollectionService {
       this.productModel.find(pcQuery).skip(skip).limit(take).lean(),
       this.productModel.countDocuments(pcQuery),
     ]);
+
+    // No cover image? Borrow one from the first matched product.
+    if (!collection.cover_image) {
+      const img = this.extractProductImage(products[0]);
+      if (img) collection.cover_image = img;
+    }
 
     return {
       collection,
@@ -757,6 +777,24 @@ export class CollectionService {
     return collection.condition_match === 'all'
       ? matches.every((r) => r)
       : matches.some((r) => r);
+  }
+
+  /** First available image URL from a raw product, across all kinds. */
+  private extractProductImage(product: any): string | undefined {
+    if (!product) return undefined;
+    const first = (arr: any): string | undefined => {
+      if (!Array.isArray(arr) || !arr.length) return undefined;
+      const img = arr[0];
+      return typeof img === 'string' ? img : img?.url;
+    };
+    return (
+      first(product.clothing?.images) ||
+      first(product.clothing?.color_variants?.[0]?.variants?.[0]?.images) ||
+      first(product.clothing?.color_variants?.[0]?.images) ||
+      first(product.accessory?.images) ||
+      first(product.fabric?.images) ||
+      first(product.images)
+    );
   }
 
   /** Escape a user value for safe use inside a RegExp. */
