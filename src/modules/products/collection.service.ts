@@ -684,12 +684,12 @@ export class CollectionService {
 
     const { take, skip } = await Utils.getPagination(page, limit);
 
-    // Public page: only active products from approved vendors.
-    const pcQuery = {
-      collections: collection._id,
-      status: 'active',
-      business: { $in: await this.getApprovedBusinessIds() },
-    };
+    // Resolve products from the collection's CONDITIONS at query time (plus any
+    // stamped/manual-included, minus manual-excluded) so the listing works even
+    // if the background sync hasn't stamped product.collections. Public page:
+    // only active products from approved vendors.
+    const approvedIds = await this.getApprovedBusinessIds();
+    const pcQuery = this.buildPlatformCollectionProductQuery(collection, approvedIds);
     const [products, totalCount] = await Promise.all([
       this.productModel.find(pcQuery).skip(skip).limit(take).lean(),
       this.productModel.countDocuments(pcQuery),
@@ -714,12 +714,17 @@ export class CollectionService {
       .sort({ sort_order: 1, createdAt: -1 })
       .lean();
 
-    // Attach how many products currently belong to each collection so the admin
-    // list reflects what the sync actually stamped.
+    // Attach how many products currently belong to each collection. Counted the
+    // same way the public listing resolves them (live conditions + stamped +
+    // manual includes, minus excludes, active + approved vendors) so the admin
+    // count matches what the shop actually shows.
+    const approvedBusinessIds = await this.getApprovedBusinessIds();
     return Promise.all(
       collections.map(async (c) => ({
         ...c,
-        product_count: await this.productModel.countDocuments({ collections: c._id }),
+        product_count: await this.productModel.countDocuments(
+          this.buildPlatformCollectionProductQuery(c, approvedBusinessIds),
+        ),
       })),
     );
   }
@@ -749,6 +754,93 @@ export class CollectionService {
     return collection.condition_match === 'all'
       ? matches.every((r) => r)
       : matches.some((r) => r);
+  }
+
+  /** Escape a user value for safe use inside a RegExp. */
+  private escapeRegexValue(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Translate a single collection condition into a Mongo clause. Mirrors
+   * evaluateOperator (case-insensitive) but as a query so we can resolve
+   * matching products directly from the DB without relying on the sync having
+   * stamped product.collections. Returns null for conditions we can't express.
+   */
+  private conditionToMongoClause(cond: {
+    field: string;
+    operator: string;
+    value: any;
+  }): Record<string, any> | null {
+    const { field, operator } = cond;
+    const raw = String(cond.value ?? '');
+    if (!field || raw === '') return null;
+    const esc = this.escapeRegexValue(raw.trim());
+    switch (operator) {
+      case 'is_equal_to':
+        return { [field]: { $regex: `^${esc}$`, $options: 'i' } };
+      case 'not_equal_to':
+        return { [field]: { $not: new RegExp(`^${esc}$`, 'i') } };
+      case 'contains':
+        return { [field]: { $regex: esc, $options: 'i' } };
+      case 'starts_with':
+        return { [field]: { $regex: `^${esc}`, $options: 'i' } };
+      case 'ends_with':
+        return { [field]: { $regex: `${esc}$`, $options: 'i' } };
+      case 'greater_than':
+        return { [field]: { $gt: Number(raw) } };
+      case 'less_than':
+        return { [field]: { $lt: Number(raw) } };
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Build the product filter for a platform collection's listing. A product
+   * belongs if it matches the CONDITIONS (resolved live), OR was already
+   * stamped, OR is manually included — minus anything manually excluded, and
+   * always scoped to active products from approved vendors. This makes the
+   * public listing self-sufficient: it works even if the background sync never
+   * stamped product.collections.
+   */
+  private buildPlatformCollectionProductQuery(
+    collection: any,
+    approvedBusinessIds: Types.ObjectId[],
+  ): Record<string, any> {
+    const belong: Record<string, any>[] = [{ collections: collection._id }];
+
+    const conds = (collection.conditions || []).filter(
+      (c: any) => c?.field && c?.operator && c?.value !== undefined && c?.value !== '',
+    );
+    const clauses = conds
+      .map((c: any) => this.conditionToMongoClause(c))
+      .filter((c: any): c is Record<string, any> => !!c);
+    if (clauses.length) {
+      belong.push(
+        collection.condition_match === 'any'
+          ? { $or: clauses }
+          : { $and: clauses },
+      );
+    }
+
+    const includes = (collection.manual_includes || []).map(
+      (id: any) => new Types.ObjectId(String(id)),
+    );
+    if (includes.length) belong.push({ _id: { $in: includes } });
+
+    const query: Record<string, any> = {
+      $or: belong,
+      status: 'active',
+      business: { $in: approvedBusinessIds },
+    };
+
+    const excludes = (collection.manual_excludes || []).map(
+      (id: any) => new Types.ObjectId(String(id)),
+    );
+    if (excludes.length) query._id = { $nin: excludes };
+
+    return query;
   }
 
   private generateSlug(title: string): string {
