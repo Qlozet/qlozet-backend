@@ -308,7 +308,12 @@ export class ProductsController {
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   async delete(@Param('id') id: string, @Req() req: any) {
-    await this.productService.delete(id, req.user.id, req.user.user_type);
+    // `req.user.type`, not `user_type`: the User schema field is `type` (see
+    // ums/schemas/user.schema) and RolesGuard attaches the document as-is.
+    // `user_type` was the only reference to that name in the codebase and
+    // always read undefined, so delete() matched neither of its branches and
+    // 404'd every caller, admin and vendor alike.
+    await this.productService.delete(id, req.user.id, req.user.type);
     return { message: 'Product deleted successfully' };
   }
   @Post(':id/rate')

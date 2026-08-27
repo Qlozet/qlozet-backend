@@ -58,6 +58,7 @@ import {
 } from '../ticket/dto/ticket-reply.dto';
 import { PlatformService } from './platform.service';
 import { TransactionService } from '../transactions/transactions.service';
+import { ProductService } from '../products/products.service';
 import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @ApiTags('Admin')
@@ -74,6 +75,7 @@ export class PlatformController {
     private readonly platformService: PlatformService,
     private readonly transactionService: TransactionService,
     private readonly vendorNotesService: VendorNotesService,
+    private readonly productService: ProductService,
   ) {}
 
   // ------------------------------------------------------
@@ -281,6 +283,85 @@ export class PlatformController {
     return this.ticketService.create(id, {
       issue_type: dto.issue_type,
       description: dto.description,
+    });
+  }
+
+  // ------------------------------------------------------
+  // PRODUCT NOTES, FLAGS AND ESCALATION
+  //
+  // Same three operations as the vendor block above, against one listing
+  // instead of the whole vendor, and served by the same VendorNotesService and
+  // TicketService — a product note has the same author, body, kind and
+  // resolution as a vendor note, so it is the same record with a subject.
+  // Clearing and deleting are already subject-agnostic: /admin/vendor-notes/:id
+  // works on either.
+  // ------------------------------------------------------
+  @Get('products/:id/notes')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: "List one product's internal notes and flags",
+    description:
+      "The admin console's own record of a listing. Never shown to the vendor. Cleared and deleted through /admin/vendor-notes/{noteId}, the same as a vendor note.",
+  })
+  @ApiParam({ name: 'id', description: 'Product ID', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 20 })
+  async getProductNotes(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 20,
+  ) {
+    return this.vendorNotesService.listForProduct(id, Number(page), Number(size));
+  }
+
+  @Post('products/:id/notes')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Add a note, or flag the product',
+    description:
+      "kind 'flag' raises a concern about this listing; kind 'note' (the default) is an ordinary remark. A product flag deliberately does NOT set the vendor's is_flagged — one bad listing is not a concern about the whole vendor.",
+  })
+  @ApiParam({ name: 'id', description: 'Product ID', type: String })
+  @ApiResponse({ status: 404, description: 'Product not found' })
+  async addProductNote(
+    @Param('id') id: string,
+    @Body() dto: CreateVendorNoteDto,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    const product = await this.productService.findById(id);
+    return this.vendorNotesService.createForProduct(
+      id,
+      product.business.toString(),
+      req.user?.id ?? '',
+      dto,
+    );
+  }
+
+  @Post('products/:id/escalate')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Escalate a product to support',
+    description:
+      "Raises a support ticket against the product's vendor, the same way vendor escalation does — tickets already carry a business, a status and an assignee, and the console already has a queue and a detail screen for them. The product is named in the description so whoever picks it up knows which listing it is about.",
+  })
+  @ApiParam({ name: 'id', description: 'Product ID', type: String })
+  async escalateProduct(
+    @Param('id') id: string,
+    @Body() dto: EscalateVendorDto,
+  ) {
+    const product = await this.productService.findById(id);
+    const name =
+      (product as any).clothing?.name ??
+      (product as any).accessory?.name ??
+      (product as any).fabric?.name ??
+      (product as any).seo?.title ??
+      'a product';
+
+    return this.ticketService.create(product.business.toString(), {
+      issue_type: dto.issue_type,
+      // A ticket has no product field, so the listing is named in the body —
+      // adding one for this would change a schema the whole support queue reads.
+      description: `Product: ${name} (${id})\n\n${dto.description}`,
     });
   }
 

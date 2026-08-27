@@ -95,6 +95,31 @@ export class AdminProductsController {
     return this.productService.adminFindOne(productId);
   }
 
+  @Get(':product_id/reviews')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: "Reviews left on one product (admin)",
+    description:
+      "Summary buckets, a page of reviews and its pagination — the same shape as a vendor's and a customer's reviews, so the console's reviews drawer renders any of the three. GET /products/{id}/ratings answers a different question: the storefront summary, with no buckets, no reviewer and no pagination.",
+  })
+  @ApiParam({ name: 'product_id', description: 'Product ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'size', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['recent', 'highest', 'lowest'] })
+  async reviews(
+    @Param('product_id') productId: string,
+    @Query('page') page = 1,
+    @Query('size') size = 20,
+    @Query('sortBy') sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
+  ) {
+    return this.productService.getProductReviews(
+      productId,
+      Number(page),
+      Number(size),
+      sortBy,
+    );
+  }
+
   @Patch(':product_id')
   @Roles(UserType.PLATFORM)
   @ApiOperation({
