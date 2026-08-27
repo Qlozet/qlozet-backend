@@ -723,6 +723,8 @@ export class AuthService {
         refresh_token: hashedRt,
       });
 
+      this.stampLastLogin(vendor._id);
+
       return {
         message: 'Login successful. Welcome back!',
         data: {
@@ -841,6 +843,8 @@ export class AuthService {
         refreshToken: hashedRt,
       });
 
+      this.stampLastLogin(user._id);
+
       return {
         message: 'Platform admin login successful.',
         data: {
@@ -929,6 +933,8 @@ export class AuthService {
         email: user.email,
       });
 
+      this.stampLastLogin(user._id);
+
       return {
         message: 'Login successful. Welcome back!',
         data: {
@@ -974,6 +980,27 @@ export class AuthService {
       );
       return null;
     }
+  }
+
+  /**
+   * Record a successful sign-in on the user document.
+   *
+   * Deliberately not awaited: `last_login_at` is reporting data for the admin
+   * console, and a write failure here must never turn a valid sign-in into an
+   * error the person cannot get past. The rejection is caught and logged so it
+   * can never surface as an unhandled rejection either.
+   */
+  private stampLastLogin(userId: unknown): void {
+    void this.userModel
+      .updateOne({ _id: userId as any }, { $set: { last_login_at: new Date() } })
+      .exec()
+      .then(
+        () => undefined,
+        (error: any) =>
+          this.logger.warn(
+            `Could not stamp last_login_at for ${String(userId)}: ${error?.message}`,
+          ),
+      );
   }
 
   /**

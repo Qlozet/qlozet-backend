@@ -14,6 +14,11 @@ import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { Token, TokenSchema } from '../wallets/schema/token.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
+import {
+  FabricReservation,
+  FabricReservationSchema,
+} from '../fabric-reservation/schemas/fabric-reservation.schema';
 import {
   JwtAuthGuard,
   PermissionsGuard,
@@ -42,6 +47,10 @@ import { SizeGuideModule } from '../size-guide/size-guide.module';
       // UmsModule alone is not enough, and the mismatch fails at DI time on
       // boot, not at compile time.
       { name: Order.name, schema: OrderSchema },
+      // Same reason: UserService.getCustomerDetail reads authored product
+      // ratings and organised fabric reservations for the admin console.
+      { name: Product.name, schema: ProductSchema },
+      { name: FabricReservation.name, schema: FabricReservationSchema },
     ]),
     PassportModule,
     JwtModule.registerAsync({
