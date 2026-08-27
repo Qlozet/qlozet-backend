@@ -92,6 +92,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { Cron } from '@nestjs/schedule';
+import { percentageChange } from '../../common/utils/percentageChange';
 import type {
   AdminDashboardChartsDto,
   ChartDto,
@@ -1835,14 +1836,7 @@ export class OrderService {
       this.getRecentTrend(),
     ]);
 
-    // Percentage movement over the trend window, for the console's stat-card
-    // badges. Null — not 0, and not the "+100%" the vendor dashboard reports —
-    // when the previous window had nothing to compare against: a first-ever
-    // order is not a 100% increase over anything.
-    const percentChange = (current: number, previous: number): number | null => {
-      if (previous === 0) return current === 0 ? 0 : null;
-      return Math.round(((current - previous) / previous) * 1000) / 10;
-    };
+
 
     return {
       total_orders: totalOrders,
@@ -1855,13 +1849,13 @@ export class OrderService {
       must_purchase_products: topProducts,
       changes: {
         period_days: OrderService.TREND_WINDOW_DAYS,
-        total_orders: percentChange(...trend.orders),
-        orders_delivered: percentChange(...trend.delivered),
-        orders_in_transit: percentChange(...trend.inTransit),
-        total_vendors: percentChange(...trend.vendors),
-        verified_vendors: percentChange(...trend.verifiedVendors),
-        total_customers: percentChange(...trend.customers),
-        gross_sales: percentChange(...trend.grossSales),
+        total_orders: percentageChange(...trend.orders),
+        orders_delivered: percentageChange(...trend.delivered),
+        orders_in_transit: percentageChange(...trend.inTransit),
+        total_vendors: percentageChange(...trend.vendors),
+        verified_vendors: percentageChange(...trend.verifiedVendors),
+        total_customers: percentageChange(...trend.customers),
+        gross_sales: percentageChange(...trend.grossSales),
       },
     };
   }
@@ -1999,8 +1993,15 @@ export class OrderService {
   }
 
   async getVendorDashboardMetrics(businessId: Types.ObjectId) {
-    const [totalOrders, ordersDelivered, ordersInTransit, topProducts] =
-      await Promise.all([
+    const [
+      totalOrders,
+      ordersDelivered,
+      ordersInTransit,
+      topProducts,
+      grossSales,
+      totalProducts,
+      totalCustomers,
+    ] = await Promise.all([
         this.orderModel.countDocuments({ 'items.business': businessId }), // total orders for this business
         this.orderModel.countDocuments({
           'items.business': businessId,
@@ -2047,6 +2048,19 @@ export class OrderService {
             },
           },
         ]),
+        // Gross: what customers paid on this vendor's orders, before refunds,
+        // commission and payouts — the same definition the platform-wide
+        // gross_sales uses.
+        this.orderModel.aggregate<{ _id: null; total: number }>([
+          { $match: { 'items.business': businessId, payment_status: 'paid' } },
+          { $group: { _id: null, total: { $sum: '$total' } } },
+        ]),
+        this.productModel.countDocuments({ business: businessId }),
+        // Distinct buyers, not orders: a customer who ordered five times is one
+        // customer.
+        this.orderModel.distinct('customer', {
+          'items.business': businessId,
+        }),
       ]);
 
     return {
@@ -2054,6 +2068,11 @@ export class OrderService {
       orders_delivered: ordersDelivered,
       orders_in_transit: ordersInTransit,
       must_purchase_products: topProducts,
+      // Added for the admin console's per-vendor Analytics cards, which had
+      // nothing to read and showed a dash for every figure.
+      gross_sales: grossSales[0]?.total ?? 0,
+      total_products: totalProducts,
+      total_customers: totalCustomers.length,
     };
   }
 

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -41,6 +42,7 @@ import {
   TicketReplyResponseDto,
 } from '../ticket/dto/ticket-reply.dto';
 import { PlatformService } from './platform.service';
+import { TransactionService } from '../transactions/transactions.service';
 import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @ApiTags('Admin')
@@ -55,6 +57,7 @@ export class PlatformController {
     private readonly businessService: BusinessService,
     private readonly orderService: OrderService,
     private readonly platformService: PlatformService,
+    private readonly transactionService: TransactionService,
   ) {}
 
   // ------------------------------------------------------
@@ -78,12 +81,98 @@ export class PlatformController {
     description: 'Number of items per page',
     type: Number,
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description:
+      "Filter by the console's status buckets — 'active', 'inactive' or 'pending' (Awaiting verification) — or by a raw BusinessStatus such as 'verified'. Omit for all. The `summary` counts are always whole-collection and ignore this.",
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description:
+      "Case-insensitive match across the business name and email and the owning vendor's name and email — the identity fields the vendors table displays.",
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: ['revenue', 'products', 'orders', 'date', 'name'],
+    description:
+      "Column to sort by. Defaults to 'date' (oldest first), which is the order this endpoint returned before sorting was supported.",
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: "Sort direction. Defaults to 'asc'.",
+  })
   async getAllBusinesses(
     @Query('page') page: number,
     @Query('size') size: number,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+    @Query('order') order?: string,
   ) {
-    return this.businessService.findAllBusinesses(page, size);
+    return this.businessService.findAllBusinesses(
+      page,
+      size,
+      status,
+      search,
+      sort,
+      order,
+    );
   }
+  // ------------------------------------------------------
+  // PER-VENDOR CHARTS + LEDGER (admin-scoped)
+  // ------------------------------------------------------
+  //
+  // Declared before 'businesses/:id' so neither is shadowed by it.
+  @Get('businesses/:id/chart')
+  @ApiOperation({
+    summary: 'Get one vendor’s charts (admin)',
+    description:
+      "The same bundle a vendor sees at GET /orders/chart — summary plus charts by audience, location, product, product kind and day of week — but scoped to the business in the path rather than to the caller's own token, so an admin can read any vendor's.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  async getBusinessChartForAdmin(@Param('id') id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.orderService.getBusinessChart(id);
+  }
+
+  @Get('businesses/:id/transactions')
+  @ApiOperation({
+    summary: 'Get one vendor’s transactions (admin)',
+    description:
+      "Wallet ledger for the business in the path — the admin console's vendor Activity Log. GET /transactions/vendor cannot serve this: it derives the business from the caller's own token, so an admin calling it dereferences an absent business.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: "Optional transaction status filter; 'all' for every status.",
+  })
+  async getBusinessTransactions(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+    @Query('status') status?: string,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.transactionService.findByBusiness(
+      new Types.ObjectId(id),
+      Number(page),
+      Number(size),
+      status,
+    );
+  }
+
   @Get('businesses/:id')
   @ApiOperation({ summary: 'Get a single business by ID' })
   @ApiParam({ name: 'id', description: 'Business ID', type: String })
@@ -240,12 +329,19 @@ export class PlatformController {
     description:
       "Optional filter to one buyer's orders — backs the admin customer detail page, which needs the same order shape this endpoint already returns.",
   })
+  @ApiQuery({
+    name: 'businessId',
+    required: false,
+    description:
+      "Optional filter to one vendor's orders. The service has always supported this filter; it simply was not reachable from this route, so the console's vendor page could only link to the platform-wide list.",
+  })
   async findVendorOrders(
     @Query('page')
     page = 1,
     @Query('size') size = 10,
     @Query('status') status?: string,
     @Query('customerId') customerId?: string,
+    @Query('businessId') businessId?: string,
   ) {
     // An unparseable id would throw inside the aggregation; treat it as no
     // filter rather than a 500.
@@ -254,11 +350,16 @@ export class PlatformController {
         ? new Types.ObjectId(customerId)
         : undefined;
 
+    const business =
+      businessId && Types.ObjectId.isValid(businessId)
+        ? new Types.ObjectId(businessId)
+        : undefined;
+
     return this.orderService.findVendorOrders(
       Number(page),
       Number(size),
       status,
-      undefined,
+      business,
       customer,
     );
   }
