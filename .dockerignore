@@ -3,6 +3,16 @@
 /node_modules
 /build
 
+# Not needed at runtime. Deliberately NOT excluded:
+#   /src     — mail template resolution reads process.cwd()/src/... at runtime
+#   /scripts — run-script.yml executes ts-node against scripts/*.ts in the machine
+.git
+.github
+/test
+/docs
+**/*.spec.ts
+README.md
+
 # Logs
 logs
 *.log
