@@ -299,6 +299,31 @@ export class ReturnsService {
     returnReq.refunded_at = new Date();
     await returnReq.save();
 
+    // If every still-active item in the order has now been returned+refunded,
+    // reflect that on the order itself — otherwise a fully returned order keeps
+    // reading as "completed". Partial returns (some items/vendors) leave the
+    // order completed.
+    const processedReturns = await this.returnModel
+      .find({ order: returnReq.order, status: ReturnStatus.REFUND_PROCESSED })
+      .lean();
+    const returnedProductIds = new Set<string>();
+    processedReturns.forEach((r) =>
+      (r.items || []).forEach((i: any) => returnedProductIds.add(i.toString())),
+    );
+    const activeItems = order.items.filter((i: any) => !i.rejected);
+    const allReturned =
+      activeItems.length > 0 &&
+      activeItems.every((i: any) =>
+        returnedProductIds.has(i.product?.toString()),
+      );
+    if (allReturned && order.status !== OrderStatus.RETURNED) {
+      order.status = OrderStatus.RETURNED;
+      await order.save();
+      this.logger.log(
+        `[Return] Order ${order.reference} fully returned → status RETURNED`,
+      );
+    }
+
     this.logger.log(
       `[Return] Return ${returnId} received + refund of ₦${refundAmount.toLocaleString()} processed`,
     );
