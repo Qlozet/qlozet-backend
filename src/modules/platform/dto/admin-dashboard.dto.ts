@@ -37,6 +37,77 @@ export class MustPurchaseProductDto {
  * Every figure is platform-wide and all-time — the endpoint accepts no query
  * parameters, so a client's period filter cannot narrow it.
  */
+/**
+ * Percentage movement over the last `period_days` versus the window before it,
+ * for the console's stat-card badges.
+ *
+ * A field is `null` when the previous window had nothing to compare against —
+ * not 0, and not "+100%": a first-ever order is not a 100% increase over
+ * anything, and the card renders no badge rather than assert a trend.
+ *
+ * `measurement_accuracy` has no entry because the metric itself does not exist
+ * on this endpoint.
+ */
+export class AdminDashboardChangesDto {
+  @ApiProperty({
+    example: 30,
+    description: 'Length of the comparison window, in days',
+  })
+  period_days: number;
+
+  @ApiProperty({
+    example: 2.5,
+    nullable: true,
+    description: 'Orders created in the window, vs the window before',
+  })
+  total_orders: number | null;
+
+  @ApiProperty({
+    example: -1.2,
+    nullable: true,
+    description:
+      "Orders currently 'completed' whose updatedAt falls in the window. An Order carries no per-status timestamp (delivered_at is on VendorShipment), so this is a proxy for delivery throughput rather than a measure of it.",
+  })
+  orders_delivered: number | null;
+
+  @ApiProperty({
+    example: 8,
+    nullable: true,
+    description:
+      "Orders currently 'processing' whose updatedAt falls in the window. Same proxy caveat as orders_delivered.",
+  })
+  orders_in_transit: number | null;
+
+  @ApiProperty({
+    example: 4.3,
+    nullable: true,
+    description: 'Businesses created in the window',
+  })
+  total_vendors: number | null;
+
+  @ApiProperty({
+    example: 0,
+    nullable: true,
+    description:
+      "Businesses currently 'verified' whose updatedAt falls in the window. Same proxy caveat as orders_delivered.",
+  })
+  verified_vendors: number | null;
+
+  @ApiProperty({
+    example: 12.5,
+    nullable: true,
+    description: "Users of type 'customer' created in the window",
+  })
+  total_customers: number | null;
+
+  @ApiProperty({
+    example: 6.1,
+    nullable: true,
+    description: 'Sum of paid order totals created in the window',
+  })
+  gross_sales: number | null;
+}
+
 export class AdminDashboardMetricsDto {
   @ApiProperty({ example: 131, description: 'Every order ever placed' })
   total_orders: number;
@@ -81,6 +152,13 @@ export class AdminDashboardMetricsDto {
     description: 'Top 5 products by units ordered, highest first',
   })
   must_purchase_products: MustPurchaseProductDto[];
+
+  @ApiProperty({
+    type: AdminDashboardChangesDto,
+    description:
+      'Percentage movement for the stat-card badges. The figures above remain all-time; only these are windowed.',
+  })
+  changes: AdminDashboardChangesDto;
 }
 
 export class AdminDashboardMetricsWrapperDto extends BaseResponseDto {
