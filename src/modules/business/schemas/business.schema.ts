@@ -168,6 +168,14 @@ export class Business extends Document {
   @Prop({ default: true })
   is_active?: boolean;
 
+  /**
+   * True while the vendor has at least one unresolved flag. Denormalised from
+   * the vendor_notes collection so the vendors LIST can mark flagged rows
+   * without joining notes per row; VendorNotesService keeps it in step.
+   */
+  @Prop({ type: Boolean, default: false, index: true })
+  is_flagged?: boolean;
+
   @Prop({ default: false })
   two_factor_auth?: boolean;
 

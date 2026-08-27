@@ -4,6 +4,11 @@ import { BusinessService } from './business.service';
 import { BusinessController } from './business.controller';
 import { Business, BusinessSchema } from './schemas/business.schema';
 import { BusinessEarning, BusinessEarningSchema } from './schemas/business-earnings.schema';
+import {
+  VendorNote,
+  VendorNoteSchema,
+} from './schemas/vendor-note.schema';
+import { VendorNotesService } from './vendor-notes.service';
 import { Warehouse, WarehouseSchema } from './schemas/warehouse.schema';
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
@@ -26,6 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MongooseModule.forFeature([
       { name: Business.name, schema: BusinessSchema },
       { name: BusinessEarning.name, schema: BusinessEarningSchema },
+      { name: VendorNote.name, schema: VendorNoteSchema },
       { name: Warehouse.name, schema: WarehouseSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
       { name: User.name, schema: UserSchema },
@@ -41,12 +47,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
   exports: [
     BusinessService,
     BusinessEarningsCron,
-    MongooseModule,
-  ],
+    MongooseModule, VendorNotesService],
   providers: [
     BusinessService,
     JwtService,
-    BusinessEarningsCron,
-  ],
+    BusinessEarningsCron, VendorNotesService],
 })
 export class BusinessModule {}

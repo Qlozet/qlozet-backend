@@ -33,6 +33,8 @@ import {
   FabricReservationDocument,
 } from 'src/modules/fabric-reservation/schemas/fabric-reservation.schema';
 import type { AdminCustomerDetailDto } from 'src/modules/platform/dto/admin-customer-detail.dto';
+import type { AdminCustomerMeasurementsDto } from 'src/modules/platform/dto/admin-customer-measurements.dto';
+import type { AdminCustomerReviewsPageDto } from 'src/modules/platform/dto/admin-customer-reviews.dto';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
 import { classifyBodyType } from 'src/common/utils/body-type-classifier';
@@ -423,6 +425,282 @@ export class UserService {
       total_returns: UserService.money(orders?.total_returns),
       lifetime_spending: UserService.money(orders?.lifetime_spending),
     };
+  }
+
+  /**
+   * A customer's saved body measurements and body-type classification, for the
+   * admin console's "Body Measurement" panel.
+   *
+   * The routes under /measurements are all `@Roles(CUSTOMER)` and read the
+   * caller's id from the token, so an admin hitting them got their own (empty)
+   * sets. This one takes the customer from the path.
+   *
+   * Read-only, unlike getBodyType(), which caches a freshly computed
+   * classification back onto the user document. An admin opening a panel must
+   * not write to the record they are reading, so an uncached classification is
+   * computed here in memory and returned unsaved — `computed_at` is null to
+   * say so.
+   */
+  async getCustomerMeasurements(
+    customerId: string,
+  ): Promise<AdminCustomerMeasurementsDto> {
+    // A 404 rather than a 400 for a malformed id, matching getCustomerDetail:
+    // from the console's side both are "no such customer", and the alternative
+    // is a CastError surfacing as a 500.
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const customer = await this.userModel
+      .findOne({
+        _id: new Types.ObjectId(customerId),
+        type: UserType.CUSTOMER,
+      })
+      .select('full_name gender measurementSets body_type_classification')
+      .lean<Pick<
+        User,
+        'full_name' | 'gender' | 'measurementSets' | 'body_type_classification'
+      > | null>();
+
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    // Active first, so the console can open on it without scanning. Ties keep
+    // insertion order, which is oldest-saved first.
+    const sets = (customer.measurementSets ?? [])
+      .map((set) => ({
+        name: set?.name ?? 'default',
+        unit: (set?.unit === 'inch' ? 'inch' : 'cm') as 'cm' | 'inch',
+        active: !!set?.active,
+        created_at: set?.createdAt ?? null,
+        measurements: UserService.plainMeasurements(set?.measurements),
+      }))
+      .sort((a, b) => Number(b.active) - Number(a.active));
+
+    const activeSet = sets[0] ?? null;
+
+    return {
+      full_name: customer.full_name,
+      gender: customer.gender ?? null,
+      sets,
+      active_set: activeSet,
+      body_type: this.readBodyType(customer, activeSet),
+    };
+  }
+
+  /**
+   * The cached body-type classification, or one derived from the active set
+   * for this response only. Null when there is nothing to derive it from.
+   */
+  private readBodyType(
+    customer: Pick<User, 'gender' | 'body_type_classification'>,
+    activeSet: { name: string; measurements: Record<string, number> } | null,
+  ): AdminCustomerMeasurementsDto['body_type'] {
+    const cached = customer.body_type_classification;
+    if (cached?.bodyType) {
+      return {
+        type: cached.bodyType,
+        confidence: cached.confidence,
+        flattering_fits: cached.flattering_fits ?? [],
+        avoid_fits: cached.avoid_fits ?? [],
+        style_advice: cached.style_advice ?? [],
+        computed_at: cached.computed_at ?? null,
+        from_set: cached.from_set ?? null,
+      };
+    }
+
+    if (!activeSet || !Object.keys(activeSet.measurements).length) return null;
+
+    const result = classifyBodyType(activeSet.measurements, customer.gender);
+    return {
+      type: result.bodyType,
+      confidence: result.confidence,
+      flattering_fits: result.flattering_fits,
+      avoid_fits: result.avoid_fits,
+      style_advice: result.styleAdvice,
+      // Null because nothing was stored: this was worked out for this response.
+      computed_at: null,
+      from_set: activeSet.name,
+    };
+  }
+
+  /**
+   * The reviews this customer WROTE — what the `reviews_count` on their detail
+   * header counts.
+   *
+   * Ratings are embedded in `products.ratings[]`, one entry per product per
+   * user, so there is no reviews collection to page: this unwinds the array and
+   * keeps only this customer's entries. The second $match is not redundant —
+   * the first one selects PRODUCTS this customer rated, and without the second
+   * every other reviewer's rating on those products would survive the unwind.
+   *
+   * The summary is over their whole history, not the page: the distribution
+   * bars describe the customer, and would otherwise move as the reader pages.
+   */
+  async getCustomerReviews(
+    customerId: string,
+    page = 1,
+    size = 20,
+    sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
+  ): Promise<AdminCustomerReviewsPageDto> {
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const _id = new Types.ObjectId(customerId);
+    const currentPage = Math.max(1, Math.floor(Number(page) || 1));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(size) || 20)));
+
+    // Ratings carry no timestamp, so "recent" sorts by the subdocument's
+    // ObjectId — generated when the rating was pushed, which is the same thing.
+    const sortStage: Record<string, 1 | -1> =
+      sortBy === 'highest'
+        ? { 'ratings.value': -1 }
+        : sortBy === 'lowest'
+          ? { 'ratings.value': 1 }
+          : { 'ratings._id': -1 };
+
+    // Whichever variant this product is. A product is exactly one of the three.
+    const productName = {
+      $ifNull: [
+        '$clothing.name',
+        { $ifNull: ['$fabric.name', '$accessory.name'] },
+      ],
+    };
+    // `<array>.url` maps the field across the array, so this is the list of
+    // urls; the projection below takes the first.
+    const productImageUrls = {
+      $ifNull: [
+        '$clothing.images.url',
+        {
+          $ifNull: [
+            '$fabric.images.url',
+            { $ifNull: ['$accessory.images.url', []] },
+          ],
+        },
+      ],
+    };
+
+    const [result] = await this.productModel.aggregate<{
+      reviews: AdminCustomerReviewsPageDto['reviews'];
+      summary: Record<string, number>[];
+    }>([
+      { $match: { 'ratings.user': _id } },
+      { $unwind: '$ratings' },
+      // Keeps THEIR ratings, not every rating on a product they happened to
+      // review.
+      { $match: { 'ratings.user': _id } },
+      {
+        $lookup: {
+          from: 'businesses',
+          localField: 'business',
+          foreignField: '_id',
+          as: 'business_info',
+        },
+      },
+      {
+        $unwind: { path: '$business_info', preserveNullAndEmptyArrays: true },
+      },
+      { $sort: sortStage },
+      {
+        $facet: {
+          reviews: [
+            { $skip: (currentPage - 1) * pageSize },
+            { $limit: pageSize },
+            {
+              $project: {
+                _id: 0,
+                product_id: { $toString: '$_id' },
+                product_name: productName,
+                product_kind: '$kind',
+                // `images.url` on an array yields the urls; first one or null.
+                product_image: {
+                  $ifNull: [{ $arrayElemAt: [productImageUrls, 0] }, null],
+                },
+                vendor_name: { $ifNull: ['$business_info.business_name', null] },
+                rating: '$ratings.value',
+                comment: { $ifNull: ['$ratings.comment', null] },
+                // Legacy entries saved before subdocument ids get null rather
+                // than a $toDate failure on the whole pipeline.
+                created_at: {
+                  $cond: [
+                    { $eq: [{ $type: '$ratings._id' }, 'objectId'] },
+                    { $toDate: '$ratings._id' },
+                    null,
+                  ],
+                },
+              },
+            },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                total_reviews: { $sum: 1 },
+                average_rating: { $avg: '$ratings.value' },
+                five_star: {
+                  $sum: { $cond: [{ $eq: ['$ratings.value', 5] }, 1, 0] },
+                },
+                four_star: {
+                  $sum: { $cond: [{ $eq: ['$ratings.value', 4] }, 1, 0] },
+                },
+                three_star: {
+                  $sum: { $cond: [{ $eq: ['$ratings.value', 3] }, 1, 0] },
+                },
+                two_star: {
+                  $sum: { $cond: [{ $eq: ['$ratings.value', 2] }, 1, 0] },
+                },
+                one_star: {
+                  $sum: { $cond: [{ $eq: ['$ratings.value', 1] }, 1, 0] },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const raw = (result?.summary as unknown as Record<string, number>[])?.[0];
+    const summary = {
+      total_reviews: raw?.total_reviews ?? 0,
+      // One decimal, like every other average this backend prints.
+      average_rating: Math.round((raw?.average_rating ?? 0) * 10) / 10,
+      five_star: raw?.five_star ?? 0,
+      four_star: raw?.four_star ?? 0,
+      three_star: raw?.three_star ?? 0,
+      two_star: raw?.two_star ?? 0,
+      one_star: raw?.one_star ?? 0,
+    };
+
+    return {
+      summary,
+      reviews: result?.reviews ?? [],
+      pagination: {
+        page: currentPage,
+        size: pageSize,
+        total: summary.total_reviews,
+        pages: Math.ceil(summary.total_reviews / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Measurements are a Mongoose Map. `.lean()` hands one back as a real Map on
+   * some driver versions and as a plain object on others, so normalise both
+   * and drop anything that is not a usable number.
+   */
+  private static plainMeasurements(
+    measurements: unknown,
+  ): Record<string, number> {
+    const entries =
+      measurements instanceof Map
+        ? Array.from(measurements.entries())
+        : Object.entries((measurements ?? {}) as Record<string, unknown>);
+
+    return entries.reduce<Record<string, number>>((acc, [key, value]) => {
+      const n = Number(value);
+      if (Number.isFinite(n)) acc[key] = n;
+      return acc;
+    }, {});
   }
 
   /**
