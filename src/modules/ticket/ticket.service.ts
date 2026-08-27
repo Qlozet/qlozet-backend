@@ -155,14 +155,19 @@ export class TicketService {
           path: 'replies',
           model: 'TicketReply',
           options: { sort: { createdAt: 1 } },
-        }),
+        })
+        // The console's "Assigned To" column had only a bare id to render, so
+        // it showed a truncated ObjectId where a person's name belongs.
+        .populate('assigned_to', 'full_name email'),
     ]);
 
     return Utils.getPagingData({ count, rows }, page, size);
   }
 
   async findOne(id: string) {
-    const ticket = await this.ticketModel.findById(id);
+    const ticket = await this.ticketModel
+      .findById(id)
+      .populate('assigned_to', 'full_name email');
     if (!ticket) throw new NotFoundException('Ticket not found');
     return ticket;
   }
@@ -177,11 +182,13 @@ export class TicketService {
   }
 
   async assign(id: string, dto: AssignTicketDto) {
-    const updated = await this.ticketModel.findByIdAndUpdate(
-      id,
-      { assigned_to: dto.support_team_id, status: 'in_progress' },
-      { new: true },
-    );
+    const updated = await this.ticketModel
+      .findByIdAndUpdate(
+        id,
+        { assigned_to: dto.support_team_id, status: 'in_progress' },
+        { new: true },
+      )
+      .populate('assigned_to', 'full_name email');
 
     if (!updated) throw new NotFoundException('Ticket not found');
     return updated;

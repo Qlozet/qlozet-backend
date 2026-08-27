@@ -5,6 +5,7 @@ import { PermissionService } from './services/permissions.service';
 import { SeedService } from './services/seed.service';
 import { UserController } from './users.controller';
 import { TeamService } from './services/team.service';
+import { AdminsService } from './services/admins.service';
 import { JwtService } from '@nestjs/jwt';
 
 // Import modules instead of directly listing foreign services
@@ -63,6 +64,7 @@ import {
     SeedService,
     UserService,
     TeamService,
+    AdminsService,
     JwtService,
   ],
   exports: [
@@ -71,6 +73,7 @@ import {
     SeedService,
     UserService,
     TeamService,
+    AdminsService,
     JwtService,
     MongooseModule,
   ],
