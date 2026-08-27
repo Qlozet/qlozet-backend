@@ -312,3 +312,57 @@ describe('BusinessService.findAllBusinesses — sort', () => {
     expect(sortAt).toBeLessThan(facetAt);
   });
 });
+
+describe('BusinessService.findAllBusinesses — date onboarded', () => {
+  const rangeOf = (pipeline: Pipeline) =>
+    pipeline.find((stage) => stage.$match?.createdAt)?.$match?.createdAt;
+
+  it('adds no stage without a range', async () => {
+    const { service, listPipeline } = buildService();
+    await service.findAllBusinesses(1, 8);
+    expect(rangeOf(listPipeline())).toBeUndefined();
+  });
+
+  it('matches createdAt — the column the table shows', async () => {
+    const { service, listPipeline } = buildService();
+    await service.findAllBusinesses(
+      1, 8, undefined, undefined, undefined, undefined,
+      '2026-01-01', '2026-06-30T23:59:59.999Z',
+    );
+
+    expect(rangeOf(listPipeline())).toEqual({
+      $gte: new Date('2026-01-01'),
+      $lte: new Date('2026-06-30T23:59:59.999Z'),
+    });
+  });
+
+  it('accepts an open-ended range', async () => {
+    const { service, listPipeline } = buildService();
+    await service.findAllBusinesses(
+      1, 8, undefined, undefined, undefined, undefined, '2026-01-01',
+    );
+    expect(Object.keys(rangeOf(listPipeline()))).toEqual(['$gte']);
+  });
+
+  it('ignores an unparseable date rather than matching nothing', async () => {
+    // new Date('nonsense') is Invalid Date; comparing against it silently
+    // returns an empty table.
+    const { service, listPipeline } = buildService();
+    await service.findAllBusinesses(
+      1, 8, undefined, undefined, undefined, undefined, 'nonsense',
+    );
+    expect(rangeOf(listPipeline())).toBeUndefined();
+  });
+
+  it('narrows before the joins', async () => {
+    const { service, listPipeline } = buildService();
+    await service.findAllBusinesses(
+      1, 8, undefined, undefined, undefined, undefined, '2026-01-01',
+    );
+
+    const pipeline = listPipeline();
+    const dateAt = pipeline.findIndex((stage) => stage.$match?.createdAt);
+    const lookupAt = pipeline.findIndex((stage) => stage.$lookup);
+    expect(dateAt).toBeLessThan(lookupAt);
+  });
+});
