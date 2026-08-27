@@ -18,6 +18,9 @@ import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
 import { percentageChange } from 'src/common/utils/percentageChange';
+import {
+  type CustomerStatus,
+} from '../dto/customer-status.dto';
 import { Order, OrderDocument } from 'src/modules/orders/schemas/orders.schema';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
@@ -169,6 +172,69 @@ export class UserService {
         last_order_at: stat?.last_order_at ?? null,
       };
     });
+  }
+
+  /**
+   * Set a customer's account state (admin).
+   *
+   * Sign-in matches on `status: 'active'`, so this is what actually locks an
+   * account out rather than a cosmetic flag.
+   *
+   * Scoped to customers on purpose: the same collection holds vendors and
+   * platform staff, and an admin suspending themselves — or a vendor, through a
+   * route the console never meant to reach — is a foot-gun worth closing here
+   * rather than trusting the caller to avoid.
+   */
+  async setCustomerStatus(customerId: string, status: CustomerStatus) {
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new BadRequestException('Invalid customer id');
+    }
+
+    const updated = await this.userModel
+      .findOneAndUpdate(
+        { _id: customerId, type: UserType.CUSTOMER },
+        { $set: { status } },
+        { new: true },
+      )
+      .lean();
+
+    if (!updated) throw new NotFoundException('Customer not found');
+    return updated;
+  }
+
+  /**
+   * Permanently remove a customer (admin).
+   *
+   * Refuses when the customer has orders. Their `customer` reference would
+   * dangle, and the admin order list populates it — so every one of their past
+   * orders would render an unattributable buyer, and the platform's revenue
+   * history would lose the person it belongs to. Suspending achieves the same
+   * lock-out without destroying that history, so the error says so.
+   *
+   * This is a hard delete, kept for what it is genuinely for: spam and test
+   * accounts that never transacted.
+   */
+  async deleteCustomer(customerId: string) {
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new BadRequestException('Invalid customer id');
+    }
+
+    const customer = await this.userModel
+      .findOne({ _id: customerId, type: UserType.CUSTOMER })
+      .lean();
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const orders = await this.orderModel.countDocuments({
+      customer: new Types.ObjectId(customerId),
+    });
+    if (orders > 0) {
+      throw new ConflictException(
+        `This customer has ${orders} order${orders === 1 ? '' : 's'}. Deleting them would leave those orders without a buyer — suspend the account instead.`,
+      );
+    }
+
+    await this.userModel.deleteOne({ _id: customerId });
+    return { deleted: true, id: customerId };
   }
 
   /** How far back the customer stat cards' percentage badges compare. */

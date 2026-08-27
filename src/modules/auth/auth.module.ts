@@ -13,6 +13,7 @@ import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { Token, TokenSchema } from '../wallets/schema/token.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import {
   JwtAuthGuard,
   PermissionsGuard,
@@ -36,6 +37,11 @@ import { SizeGuideModule } from '../size-guide/size-guide.module';
       { name: Address.name, schema: AddressSchema },
       { name: Token.name, schema: TokenSchema },
       { name: Wallet.name, schema: WalletSchema },
+      // AuthModule provides UserService itself (see providers below), so it
+      // must register every model UserService injects — registering Order in
+      // UmsModule alone is not enough, and the mismatch fails at DI time on
+      // boot, not at compile time.
+      { name: Order.name, schema: OrderSchema },
     ]),
     PassportModule,
     JwtModule.registerAsync({
