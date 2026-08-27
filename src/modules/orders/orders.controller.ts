@@ -343,6 +343,19 @@ export class OrderController {
     return this.orderService.cancelOrder(reference);
   }
 
+  @Roles(UserType.CUSTOMER)
+  @Patch('customer/cancel/:reference')
+  @ApiOperation({
+    summary: 'Customer cancels their own (not-yet-shipped) order + refund',
+  })
+  async cancelOrderByCustomer(
+    @Param('reference') reference: string,
+    @Req() req: any,
+  ) {
+    const customerId = req.user?.id || req.user?._id;
+    return this.orderService.cancelOrder(reference, { customerId });
+  }
+
   @Roles(UserType.VENDOR)
   @Get('chart')
   @ApiOperation({ summary: 'Get chart data' })

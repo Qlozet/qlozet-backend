@@ -1839,13 +1839,34 @@ export class OrderService {
     };
   }
 
-  async cancelOrder(reference: string) {
+  async cancelOrder(reference: string, opts?: { customerId?: string }) {
     const order = await this.orderModel.findOne({ reference });
     if (!order) throw new BadRequestException('Order not found');
 
-    // Prevent cancelling already cancelled or completed orders
+    // When a customer initiates the cancel, it must be their own order.
+    if (
+      opts?.customerId &&
+      order.customer?.toString() !== String(opts.customerId)
+    ) {
+      throw new ForbiddenException('You can only cancel your own orders');
+    }
+
+    // Prevent cancelling already cancelled orders.
     if (order.status === OrderStatus.CANCELLED) {
       throw new BadRequestException('Order is already cancelled');
+    }
+
+    // Cancellation is only valid before the order ships. Once it's in transit,
+    // completed or returned, the customer must go through returns/disputes.
+    const NON_CANCELLABLE: OrderStatus[] = [
+      OrderStatus.IN_TRANSIT,
+      OrderStatus.COMPLETED,
+      OrderStatus.RETURNED,
+    ];
+    if (NON_CANCELLABLE.includes(order.status)) {
+      throw new BadRequestException(
+        'This order can no longer be cancelled because it has shipped. Please request a return instead.',
+      );
     }
 
     // Find the original payment transaction
