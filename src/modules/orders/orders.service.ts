@@ -92,6 +92,18 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { Cron } from '@nestjs/schedule';
+import type {
+  AdminDashboardChartsDto,
+  ChartDto,
+  ExpectedEarningsChartDto,
+} from '../platform/dto/admin-dashboard-charts.dto';
+import type {
+  CustomerAnalyticsDto,
+  CustomerAnalyticsSummaryDto,
+} from '../platform/dto/customer-analytics.dto';
+import type { EventDocument } from '../recommendations/events/schemas/event.schema';
+import type { AdminProfileOverviewDto } from '../platform/dto/admin-profile.dto';
+import { Ticket, TicketStatus } from '../ticket/schema/ticket.schema';
 
 @Injectable()
 export class OrderService {
@@ -118,6 +130,10 @@ export class OrderService {
     private rateCacheModel: Model<CheckoutRateCacheDocument>,
     @InjectModel('User') private userModel: Model<User>,
     @InjectModel('Dispute') private disputeModel: Model<any>,
+    @InjectModel('Event') private eventModel: Model<EventDocument>,
+    // Read-only: tickets are the work the platform assigns to an admin,
+    // so they back the profile drawer's task list and counters.
+    @InjectModel(Ticket.name) private ticketModel: Model<Ticket>,
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
@@ -1085,10 +1101,15 @@ export class OrderService {
     size: number = 10,
     status?: string,
     business?: Types.ObjectId,
+    customer?: Types.ObjectId,
   ) {
     try {
       const { skip, take } = await Utils.getPagination(page, size);
       const filter: any = {};
+      // Admin customer detail page: the same list, narrowed to one buyer.
+      if (customer) {
+        filter.customer = customer;
+      }
       if (business) {
         // A vendor's orders include (a) those where they sell an item, AND
         // (b) those where they are the SOURCE of a shipment — specifically a
@@ -4066,143 +4087,486 @@ export class OrderService {
     };
   }
 
-  async getChart(): Promise<any> {
-    const [ordersByGender, ordersByLocation, ordersByProduct] =
-      await Promise.all([
-        this.getOrdersByGenderChart(),
-        this.getOrdersByLocationChart(),
-        this.getOrdersByProductChart(),
-      ]);
+  // ==================== ADMIN DASHBOARD CHARTS ====================
+  //
+  // Platform-wide counterpart to getBusinessChart(). Same envelope the vendor
+  // app already consumes — `{ summary, charts: { <name>: { chartType, title,
+  // series: [{ key, name, color?, data: [{ label, value, color? }] }] } } }` —
+  // so the admin console can reuse the vendor chart readers verbatim.
+  //
+  // The previous platform helpers (getChart / getOrdersByGenderChart /
+  // getOrdersByLocationChart / getOrdersByProductChart) were never routed by
+  // any controller, and read `users.gender` / `users.address.city` — fields the
+  // vendor charts deliberately abandoned because they are almost always unset
+  // and, for gender, describe the buyer rather than who the garment is for.
+  // They are replaced here by the sources the vendor charts settled on:
+  // product taxonomy audience, and the ORDER's shipping state.
 
+  /** Months are 1-indexed in `$month`; the axis always reads Jan…Dec. */
+  private static readonly MONTH_LABELS = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
+  /**
+   * Expand a `{ _id: <1-12>, value }` aggregation into a dense twelve-point
+   * series, so a month with no orders is an explicit 0 rather than a gap.
+   */
+  private static toMonthlySeries(
+    rows: { _id: number; value: number }[],
+  ): { label: string; value: number }[] {
+    return OrderService.MONTH_LABELS.map((label, index) => {
+      const row = rows.find((r) => r._id === index + 1);
+      // Money is summed in naira; round to kobo so floating-point addition
+      // doesn't surface as 156921.99000000002 on the card.
+      return { label, value: row ? Math.round(row.value * 100) / 100 : 0 };
+    });
+  }
+
+  /** UTC bounds of `year` — matches how Mongo stores `createdAt`. */
+  private static yearRange(year: number): { $gte: Date; $lt: Date } {
     return {
-      charts: {
-        ordersByGender: ordersByGender.data,
-        ordersByLocation: ordersByLocation.data,
-        ordersByProduct: ordersByProduct.data,
-      },
+      $gte: new Date(Date.UTC(year, 0, 1)),
+      $lt: new Date(Date.UTC(year + 1, 0, 1)),
     };
   }
 
-  async getOrdersByGenderChart(): Promise<any> {
-    const data = await this.orderModel.aggregate([
-      {
-        // Join with the users collection to get customer details
-        $lookup: {
-          from: 'users', // MongoDB collection name
-          localField: 'customer',
-          foreignField: '_id',
-          as: 'customer_info',
-        },
-      },
-      { $unwind: '$customer_info' }, // Flatten the array
+  /** `$dayOfWeek` is 1=Sun … 7=Sat. */
+  private static readonly DAY_LABELS = [
+    'Sun',
+    'Mon',
+    'Tue',
+    'Wed',
+    'Thu',
+    'Fri',
+    'Sat',
+  ];
+
+  /** Dense seven-point Sun–Sat series from a `{ _id: <1-7>, value }` roll-up. */
+  private static toWeekdaySeries(
+    rows: { _id: number; value: number }[],
+  ): { label: string; value: number }[] {
+    return OrderService.DAY_LABELS.map((label, index) => {
+      const row = rows.find((r) => r._id === index + 1);
+      return { label, value: row ? Math.round(row.value * 100) / 100 : 0 };
+    });
+  }
+
+  /**
+   * Revenue by day of the week, all-time. The weekly-rhythm counterpart to
+   * revenueByMonth — which day of the week the marketplace actually sells on.
+   * Same weekday bucketing the vendor dashboard uses for its Earnings card.
+   */
+  async getPlatformEarningsByDayChart(): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
+      { $match: { payment_status: 'paid' } },
       {
         $group: {
-          _id: '$customer_info.gender', // Group by gender
-          count: { $sum: 1 }, // Count orders per gender
+          _id: {
+            $dayOfWeek: {
+              date: '$createdAt',
+              timezone: OrderService.PLATFORM_TZ,
+            },
+          },
+          value: { $sum: '$total' },
         },
       },
     ]);
 
-    const capitalize = (s: string) =>
-      s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
-
-    const genderColor = (raw: string | null): string => {
-      const g = (raw || '').toLowerCase();
-      if (g === 'male') return '#3d2817';
-      if (g === 'female') return '#d4c5b9';
-      return '#a0a0a0';
-    };
-
-    // Transform to chart JSON format
-    const chartData = {
+    return {
       data: {
-        chartType: 'pie',
-        title: 'Orders by Gender',
+        chartType: 'bar',
+        title: 'Earnings',
         series: [
           {
-            key: 'gender',
-            name: 'Gender Distribution',
-            data: data.map((d) => ({
-              label: d._id ? capitalize(d._id) : 'Not set',
-              value: d.count,
-              color: genderColor(d._id),
-            })),
+            key: 'earnings',
+            name: 'Earnings',
+            color: '#c4b5a0',
+            data: OrderService.toWeekdaySeries(rows),
           },
         ],
       },
     };
-
-    return chartData;
   }
-  async getOrdersByLocationChart(): Promise<any> {
-    const data = await this.orderModel.aggregate([
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'customer',
-          foreignField: '_id',
-          as: 'customer_info',
-        },
-      },
-      { $unwind: '$customer_info' },
+
+  /** Order volume by day of the week, all-time. Every order, paid or not. */
+  async getPlatformOrderCountByDayChart(): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
       {
         $group: {
           _id: {
-            location: '$customer_info.address.city',
-            gender: '$customer_info.gender',
+            $dayOfWeek: {
+              date: '$createdAt',
+              timezone: OrderService.PLATFORM_TZ,
+            },
+          },
+          value: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Order Count',
+        series: [
+          {
+            key: 'order_count',
+            name: 'Orders',
+            color: '#c4b5a0',
+            data: OrderService.toWeekdaySeries(rows),
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * The admin dashboard bundle. `year` scopes every time series; the
+   * distribution charts (audience / location / status / product kind) are
+   * all-time, matching the counters on GET /admin/dashboard.
+   */
+  async getAdminChart(year?: number): Promise<AdminDashboardChartsDto> {
+    // Default to the latest year that actually has an order, not the wall
+    // clock: a staging database whose newest order is from last year would
+    // otherwise render twelve empty months.
+    const resolvedYear = year ?? (await this.latestOrderYear());
+
+    const [
+      revenueByMonth,
+      orderCountByMonth,
+      earningsByDay,
+      orderCountByDay,
+      ordersByStatus,
+      ordersByAudience,
+      ordersByLocation,
+      ordersByProductKind,
+      expectedEarnings,
+    ] = await Promise.all([
+      this.getPlatformRevenueByMonthChart(resolvedYear),
+      this.getPlatformOrderCountByMonthChart(resolvedYear),
+      this.getPlatformEarningsByDayChart(),
+      this.getPlatformOrderCountByDayChart(),
+      this.getPlatformOrdersByStatusChart(),
+      this.getPlatformOrdersByAudienceChart(),
+      this.getPlatformOrdersByLocationChart(),
+      this.getPlatformOrdersByProductKindChart(),
+      this.getPlatformExpectedEarningsChart(),
+    ]);
+
+    // Headline figures the charts are annotated with, so the client never has
+    // to re-sum a series to render the number above it.
+    const revenueSeries = revenueByMonth.data.series[0].data;
+    const totalRevenue = revenueSeries.reduce(
+      (sum, point) => sum + point.value,
+      0,
+    );
+
+    return {
+      year: resolvedYear,
+      currency: 'NGN',
+      summary: {
+        revenueThisYear: Math.round(totalRevenue * 100) / 100,
+        ordersThisYear: orderCountByMonth.data.series[0].data.reduce(
+          (sum, point) => sum + point.value,
+          0,
+        ),
+        expectedEarnings: expectedEarnings.data.total,
+      },
+      charts: {
+        revenueByMonth: revenueByMonth.data,
+        orderCountByMonth: orderCountByMonth.data,
+        earningsByDay: earningsByDay.data,
+        orderCountByDay: orderCountByDay.data,
+        ordersByStatus: ordersByStatus.data,
+        ordersByAudience: ordersByAudience.data,
+        ordersByLocation: ordersByLocation.data,
+        ordersByProductKind: ordersByProductKind.data,
+        expectedEarnings: expectedEarnings.data,
+      },
+    };
+  }
+
+  /**
+   * Calendar year of the most recent order; the current year when there are
+   * none. Pass a customer to scope it to their own order history.
+   */
+  private async latestOrderYear(customer?: Types.ObjectId): Promise<number> {
+    const [newest] = await this.orderModel
+      .find(customer ? { customer } : {})
+      .sort({ createdAt: -1 })
+      .select('createdAt')
+      .limit(1)
+      .lean();
+
+    const createdAt = (newest as { createdAt?: Date } | undefined)?.createdAt;
+    return createdAt
+      ? new Date(createdAt).getUTCFullYear()
+      : new Date().getUTCFullYear();
+  }
+
+  /**
+   * Revenue per month from orders the customer actually paid for. Gross: taken
+   * before refunds, commission and payouts, so it agrees with `gross_sales` on
+   * GET /admin/dashboard.
+   */
+  async getPlatformRevenueByMonthChart(
+    year: number,
+  ): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
+      {
+        $match: {
+          payment_status: 'paid',
+          createdAt: OrderService.yearRange(year),
+        },
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          value: { $sum: '$total' },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Revenue by Month',
+        series: [
+          {
+            key: 'revenue',
+            name: 'Revenue',
+            color: '#3d2817',
+            data: OrderService.toMonthlySeries(rows),
+          },
+        ],
+      },
+    };
+  }
+
+  /** Order volume per month — every order, paid or not. */
+  async getPlatformOrderCountByMonthChart(
+    year: number,
+  ): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
+      { $match: { createdAt: OrderService.yearRange(year) } },
+      { $group: { _id: { $month: '$createdAt' }, value: { $sum: 1 } } },
+    ]);
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Order Count by Month',
+        series: [
+          {
+            key: 'order_count',
+            name: 'Orders',
+            color: '#c4b5a0',
+            data: OrderService.toMonthlySeries(rows),
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * Every order grouped by delivery status, highest first. All seven statuses
+   * are emitted even at zero so the legend is stable between refreshes.
+   */
+  async getPlatformOrdersByStatusChart(): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: string;
+      count: number;
+    }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]);
+
+    const STATUS_COLORS: Record<string, string> = {
+      [OrderStatus.PENDING]: '#d4c5b9',
+      [OrderStatus.IN_REVIEW]: '#c4b5a0',
+      [OrderStatus.PROCESSING]: '#9C8578',
+      [OrderStatus.IN_TRANSIT]: '#6b5644',
+      [OrderStatus.COMPLETED]: '#3d2817',
+      [OrderStatus.CANCELLED]: '#b0b0b0',
+      [OrderStatus.RETURNED]: '#8a8a8a',
+    };
+
+    const humanise = (status: string) =>
+      status
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+
+    const data = Object.values(OrderStatus)
+      .map((status) => ({
+        label: humanise(status),
+        value: rows.find((row) => row._id === status)?.count ?? 0,
+        color: STATUS_COLORS[status],
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Status',
+        series: [{ key: 'status', name: 'Status', data }],
+      },
+    };
+  }
+
+  /**
+   * Which audience the sold garments target, read from the product's taxonomy
+   * rather than the buyer's profile gender. Platform-wide twin of
+   * getBusinessOrdersByGenderChart.
+   */
+  async getPlatformOrdersByAudienceChart(): Promise<{ data: ChartDto }> {
+    const data = await this.orderModel.aggregate([
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product_info',
+        },
+      },
+      { $unwind: { path: '$product_info', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            $toLower: {
+              $trim: {
+                input: {
+                  $ifNull: [
+                    '$product_info.clothing.taxonomy.audience',
+                    {
+                      $ifNull: [
+                        '$product_info.accessory.taxonomy.audience',
+                        {
+                          $ifNull: [
+                            '$product_info.fabric.taxonomy.audience',
+                            '',
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
           },
           count: { $sum: 1 },
         },
       },
     ]);
 
-    // Extract unique locations
-    const locations = Array.from(
-      new Set(data.map((d) => d._id.location || d._id.gender || 'Unknown')),
-    );
+    const bucketFor = (raw: string): 'Men' | 'Women' | 'Unisex' => {
+      const g = (raw || '').toLowerCase();
+      if (['men', 'male', 'man', 'boys'].includes(g)) return 'Men';
+      if (['women', 'female', 'woman', 'girls'].includes(g)) return 'Women';
+      return 'Unisex'; // unisex, blank, or anything unrecognised
+    };
+    const buckets = new Map<string, number>();
+    for (const d of data) {
+      const bucket = bucketFor(d._id as string);
+      buckets.set(bucket, (buckets.get(bucket) ?? 0) + d.count);
+    }
 
-    // Helper to generate series
-    const generateSeries = (gender: string, color: string) => ({
-      key: gender.toLowerCase(),
-      name: gender,
-      color,
-      data: locations.map((loc) => {
-        const record = data.find(
-          (d) => d._id.location === loc && d._id.gender === gender,
-        );
-        return { label: loc, value: record ? record.count : 0 };
-      }),
-    });
-
-    // Ensure both Male and Female series exist, even if no orders
-    const maleSeries = generateSeries('Male', '#3d2817');
-    const femaleSeries = generateSeries('Female', '#9C8578');
+    const COLORS: Record<string, string> = {
+      Men: '#3d2817',
+      Women: '#d4c5b9',
+      Unisex: '#9C8578',
+    };
 
     return {
       data: {
-        chartType: 'stacked_bar',
-        title: 'Orders by Location',
-        series: [maleSeries, femaleSeries],
+        chartType: 'pie',
+        title: 'Orders by Audience',
+        series: [
+          {
+            key: 'audience',
+            name: 'Audience',
+            data: ['Men', 'Women', 'Unisex']
+              .filter((bucket) => (buckets.get(bucket) ?? 0) > 0)
+              .map((bucket) => ({
+                label: bucket,
+                value: buckets.get(bucket)!,
+                color: COLORS[bucket],
+              })),
+          },
+        ],
       },
     };
   }
-  async getOrdersByProductChart(): Promise<any> {
+
+  /**
+   * Top states by order count, from the ORDER's shipping address rather than
+   * the customer's profile address. Platform-wide twin of
+   * getBusinessOrdersByLocationChart.
+   */
+  async getPlatformOrdersByLocationChart(): Promise<{ data: ChartDto }> {
     const data = await this.orderModel.aggregate([
-      // Join with users to get gender
       {
-        $lookup: {
-          from: 'users',
-          localField: 'customer',
-          foreignField: '_id',
-          as: 'customer_info',
+        $group: {
+          // Normalise: trim, and treat null/missing/blank state as 'Unknown'
+          // so a blank state doesn't render as an empty, unlabelled bar.
+          _id: {
+            $let: {
+              vars: {
+                s: { $trim: { input: { $ifNull: ['$address.state', ''] } } },
+              },
+              in: { $cond: [{ $eq: ['$$s', ''] }, 'Unknown', '$$s'] },
+            },
+          },
+          count: { $sum: 1 },
         },
       },
-      { $unwind: '$customer_info' },
+      { $sort: { count: -1 } },
+      { $limit: 6 },
+    ]);
 
-      // Unwind each order's items
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Orders by Location',
+        series: [
+          {
+            key: 'orders',
+            name: 'Orders',
+            color: '#3d2817',
+            data: data.map((d) => ({
+              label: (d._id as string) || 'Unknown',
+              value: d.count,
+            })),
+          },
+        ],
+      },
+    };
+  }
+
+  /** Accessory / Custom / Fabric / Non-Custom split, platform-wide. */
+  async getPlatformOrdersByProductKindChart(): Promise<{ data: ChartDto }> {
+    const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
-
-      // Join with products to get product name
       {
         $lookup: {
           from: 'products',
@@ -4212,57 +4576,601 @@ export class OrderService {
         },
       },
       { $unwind: '$product_info' },
+      {
+        $addFields: {
+          product_category: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ['$product_info.kind', 'accessory'] },
+                  then: 'Accessory',
+                },
+                {
+                  case: { $eq: ['$product_info.kind', 'fabric'] },
+                  then: 'Fabric',
+                },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      { $eq: ['$product_info.clothing.type', 'customize'] },
+                    ],
+                  },
+                  then: 'Custom',
+                },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      { $eq: ['$product_info.clothing.type', 'non_customize'] },
+                    ],
+                  },
+                  then: 'Non-Custom',
+                },
+              ],
+              default: 'Other',
+            },
+          },
+        },
+      },
+      { $group: { _id: '$product_category', count: { $sum: 1 } } },
+    ]);
 
-      // Group by product name and gender
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Product Kind',
+        series: [
+          {
+            key: 'product_kind',
+            name: 'Product Kind Distribution',
+            data: data.map((d) => ({
+              label: (d._id as string) || 'Unknown',
+              value: d.count,
+            })),
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * "Expected earnings": platform commission that is booked against an order
+   * but not yet released to the vendor — the same BusinessEarning population
+   * BusinessService.getUpcomingEarnings pages through, summed platform-wide and
+   * bucketed by the month it is due to release.
+   *
+   * This is a forward-looking figure taken from money already committed, NOT a
+   * forecast: nothing here extrapolates from past orders.
+   *
+   * Earnings whose release_date is still null (delivery hasn't happened, so the
+   * payout clock hasn't started) are real commission but have no month to sit
+   * in. They are counted in `total` and reported separately as `unscheduled`,
+   * rather than being silently dropped or parked in an arbitrary month.
+   */
+  async getPlatformExpectedEarningsChart(): Promise<{
+    data: ExpectedEarningsChartDto;
+  }> {
+    const [rows, unscheduled] = await Promise.all([
+      this.businessEarningsModel.aggregate<{
+        _id: { year: number; month: number };
+        value: number;
+      }>([
+        { $match: { released: false, release_date: { $ne: null } } },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$release_date' },
+              month: { $month: '$release_date' },
+            },
+            value: { $sum: '$commission' },
+          },
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+      ]),
+      this.businessEarningsModel.aggregate<{ _id: null; value: number }>([
+        { $match: { released: false, release_date: null } },
+        { $group: { _id: null, value: { $sum: '$commission' } } },
+      ]),
+    ]);
+
+    // Chronological across year boundaries — a December release and the
+    // following January must not collapse onto the same bar.
+    const data = rows.map((row) => ({
+      label: `${OrderService.MONTH_LABELS[row._id.month - 1]} ${row._id.year}`,
+      value: Math.round(row.value * 100) / 100,
+    }));
+
+    const unscheduledTotal =
+      Math.round((unscheduled[0]?.value ?? 0) * 100) / 100;
+    const scheduledTotal = data.reduce((sum, point) => sum + point.value, 0);
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Expected Earnings',
+        total: Math.round((scheduledTotal + unscheduledTotal) * 100) / 100,
+        unscheduled: unscheduledTotal,
+        currency: 'NGN',
+        series: [
+          {
+            key: 'expected_earnings',
+            name: 'Expected Earnings',
+            color: '#3d2817',
+            data,
+          },
+        ],
+      },
+    };
+  }
+
+  // ==================== ADMIN PROFILE OVERVIEW ====================
+  //
+  // Backs the admin console's profile drawer. Two of the design's figures are
+  // platform-wide (the marketplace this admin oversees) and the rest are that
+  // admin's own workload, so the payload keeps them in separate groups rather
+  // than one flat bag where "vendors" and "vendors managed" read alike.
+  //
+  // "Task" here means an assigned support ticket. There is no separate task or
+  // audit-log collection in this backend, and tickets are the only work the
+  // platform actually assigns to an admin — they carry an assignee, a status
+  // that maps cleanly onto the design's Completed/Pending tabs, and a vendor.
+
+  /** A ticket in one of these statuses is finished work. */
+  private static readonly DONE_TICKET_STATUSES = [
+    TicketStatus.RESOLVED,
+    TicketStatus.CLOSED,
+  ];
+
+  /** The design's "Task Last Month" window. */
+  private static readonly TASK_WINDOW_DAYS = 30;
+
+  /** How many tasks the drawer lists. */
+  private static readonly TASK_LIMIT = 10;
+
+  async getAdminProfileOverview(
+    adminId: string,
+  ): Promise<AdminProfileOverviewDto> {
+    if (!Types.ObjectId.isValid(adminId)) {
+      throw new BadRequestException('Invalid admin id');
+    }
+    const admin = new Types.ObjectId(adminId);
+
+    const since = new Date();
+    since.setDate(since.getDate() - OrderService.TASK_WINDOW_DAYS);
+
+    const done = { $in: OrderService.DONE_TICKET_STATUSES };
+
+    const [
+      dashboard,
+      ticketsClosed,
+      ticketsResolvedByMe,
+      tasksCompletedThisMonth,
+      vendorsManaged,
+      tasks,
+    ] = await Promise.all([
+      // Reuses the dashboard roll-up rather than re-counting customers,
+      // vendors and gross sales — the drawer and the dashboard cards can then
+      // never disagree.
+      this.getAdminDashboardMetrics(),
+      this.ticketModel.countDocuments({ status: done }),
+      this.ticketModel.countDocuments({ assigned_to: admin, status: done }),
+      // Deliberately a narrower figure than ticketsResolved: the drawer shows
+      // both, and two identical numbers under different labels would look like
+      // a bug.
+      this.ticketModel.countDocuments({
+        assigned_to: admin,
+        status: done,
+        updatedAt: { $gte: since },
+      }),
+      // "Vendors managed" — no business carries an assigned admin, so this is
+      // the vendors this admin has actually handled a ticket for.
+      this.ticketModel
+        .distinct('business', { assigned_to: admin })
+        .then((ids) => ids.filter(Boolean).length),
+      // `timestamps: true` adds createdAt but the Ticket class does not declare
+      // it, so the lean result is typed explicitly rather than cast at the use
+      // site.
+      this.ticketModel
+        .find({ assigned_to: admin, createdAt: { $gte: since } })
+        .select('issue_type status business createdAt')
+        .populate('business', 'business_name')
+        .sort({ createdAt: -1 })
+        .limit(OrderService.TASK_LIMIT)
+        .lean<
+          {
+            _id: Types.ObjectId;
+            issue_type: string;
+            status: TicketStatus;
+            business?: { business_name?: string } | null;
+            createdAt: Date;
+          }[]
+        >(),
+    ]);
+
+    return {
+      currency: 'NGN',
+      taskWindowDays: OrderService.TASK_WINDOW_DAYS,
+      stats: {
+        customers: dashboard.total_customers,
+        vendors: dashboard.total_vendors,
+        tasksCompleted: tasksCompletedThisMonth,
+        ticketsClosed,
+      },
+      metrics: {
+        vendorsManaged,
+        ticketsResolved: ticketsResolvedByMe,
+        totalSalesOversight: dashboard.gross_sales,
+      },
+      tasks: tasks.map((ticket) => ({
+        id: String(ticket._id),
+        // issue_type is the ticket's headline; the description is the body and
+        // is far too long for a drawer row.
+        title: ticket.issue_type,
+        vendor: ticket.business?.business_name ?? null,
+        status: OrderService.DONE_TICKET_STATUSES.includes(ticket.status)
+          ? ('completed' as const)
+          : ('pending' as const),
+        // The client renders this as "5d ago", so it needs the raw instant.
+        at: ticket.createdAt,
+      })),
+    };
+  }
+
+  // ==================== ADMIN CUSTOMER ANALYTICS ====================
+  //
+  // Per-customer counterpart to getAdminChart(), for the admin console's
+  // customer detail page. Same `{ chartType, title, series }` envelope.
+  //
+  // Every card in that page's analytics row used to be fabricated: a hardcoded
+  // gross-sales figure, a 55/45 returns split, and an hourly traffic curve
+  // peaking at 50,000 sessions — for a single customer. Worse, the earnings and
+  // recent-orders cards were reading PLATFORM-wide data on a page about one
+  // person. These charts are scoped to the customer or they don't render.
+
+  /** Hour-of-day labels, in the platform's timezone (see PLATFORM_TZ). */
+  private static readonly HOUR_LABELS = Array.from(
+    { length: 24 },
+    (_, hour) => {
+      if (hour === 0) return '12am';
+      if (hour === 12) return '12pm';
+      return hour < 12 ? `${hour}am` : `${hour - 12}pm`;
+    },
+  );
+
+  // The marketplace is Nigerian and the payout cron already runs on Lagos time.
+  // Bucketing activity in UTC would shift every bar an hour and put "evening
+  // browsing" in the wrong part of the day.
+  private static readonly PLATFORM_TZ = 'Africa/Lagos';
+
+  /**
+   * Order history, spend and on-platform activity for one customer.
+   *
+   * `year` scopes the spend series only; the distributions and the summary are
+   * all-time, so the headline figures match the customer's lifetime record.
+   */
+  async getCustomerAnalytics(
+    customerId: string,
+    year?: number,
+  ): Promise<CustomerAnalyticsDto> {
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new BadRequestException('Invalid customer id');
+    }
+    const customer = new Types.ObjectId(customerId);
+
+    const resolvedYear = year ?? (await this.latestOrderYear(customer));
+
+    const [
+      summary,
+      spendByMonth,
+      ordersByProductKind,
+      returnsRate,
+      activityByHour,
+    ] = await Promise.all([
+      this.getCustomerOrderSummary(customer),
+      this.getCustomerSpendByMonthChart(customer, resolvedYear),
+      this.getCustomerOrdersByProductKindChart(customer),
+      this.getCustomerReturnsRateChart(customer),
+      this.getCustomerActivityByHourChart(customerId),
+    ]);
+
+    return {
+      customer: customerId,
+      year: resolvedYear,
+      currency: 'NGN',
+      summary,
+      charts: {
+        spendByMonth: spendByMonth.data,
+        ordersByProductKind: ordersByProductKind.data,
+        returnsRate: returnsRate.data,
+        activityByHour: activityByHour.data,
+      },
+    };
+  }
+
+  /** Lifetime order count, spend and last-order date for one customer. */
+  private async getCustomerOrderSummary(
+    customer: Types.ObjectId,
+  ): Promise<CustomerAnalyticsSummaryDto> {
+    const [row] = await this.orderModel.aggregate<{
+      totalOrders: number;
+      totalSpent: number;
+      paidOrders: number;
+      returnedOrders: number;
+      lastOrderAt: Date | null;
+    }>([
+      { $match: { customer } },
       {
         $group: {
-          _id: {
-            product: '$product_info.clothing.name', // or use .fabric.name/.accessory.name depending on product type
-            gender: '$customer_info.gender',
+          _id: null,
+          totalOrders: { $sum: 1 },
+          // Spend is what the customer actually paid, so an abandoned unpaid
+          // order does not inflate their lifetime value.
+          totalSpent: {
+            $sum: {
+              $cond: [
+                { $eq: ['$payment_status', 'paid'] },
+                { $ifNull: ['$total', 0] },
+                0,
+              ],
+            },
           },
-          count: { $sum: 1 },
+          paidOrders: {
+            $sum: { $cond: [{ $eq: ['$payment_status', 'paid'] }, 1, 0] },
+          },
+          returnedOrders: {
+            $sum: {
+              $cond: [
+                { $in: ['$refund_status', ['partial', 'refunded']] },
+                1,
+                0,
+              ],
+            },
+          },
+          lastOrderAt: { $max: '$createdAt' },
         },
       },
     ]);
 
-    // Extract unique product names
-    const products = Array.from(
-      new Set(data.map((d) => d._id.product || 'Unknown')),
-    );
+    // Return rate is against PAID orders: an order that was never paid for
+    // could not have been returned, and counting it would deflate the rate.
+    const paidOrders = row?.paidOrders ?? 0;
+    const returnedOrders = row?.returnedOrders ?? 0;
 
-    // Prepare male and female series
-    const maleSeries = {
-      key: 'male',
-      name: 'Male',
-      color: '#3d2817',
-      data: products.map((prod) => {
-        const record = data.find(
-          (d) => d._id.product === prod && d._id.gender === 'Male',
-        );
-        return { label: prod, value: record ? record.count : 0 };
-      }),
+    return {
+      totalOrders: row?.totalOrders ?? 0,
+      totalSpent: Math.round((row?.totalSpent ?? 0) * 100) / 100,
+      returnedOrders,
+      returnRate:
+        paidOrders === 0
+          ? 0
+          : Math.round((returnedOrders / paidOrders) * 1000) / 10,
+      lastOrderAt: row?.lastOrderAt ?? null,
     };
+  }
 
-    const femaleSeries = {
-      key: 'female',
-      name: 'Female',
-      color: '#9C8578',
-      data: products.map((prod) => {
-        const record = data.find(
-          (d) => d._id.product === prod && d._id.gender === 'Female',
-        );
-        return { label: prod, value: record ? record.count : 0 };
-      }),
-    };
+  /** What this customer paid, per month of `year`. */
+  private async getCustomerSpendByMonthChart(
+    customer: Types.ObjectId,
+    year: number,
+  ): Promise<{ data: ChartDto }> {
+    const rows = await this.orderModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
+      {
+        $match: {
+          customer,
+          payment_status: 'paid',
+          createdAt: OrderService.yearRange(year),
+        },
+      },
+      { $group: { _id: { $month: '$createdAt' }, value: { $sum: '$total' } } },
+    ]);
 
     return {
       data: {
-        chartType: 'stacked_bar',
-        title: 'Orders by Product',
-        series: [maleSeries, femaleSeries],
+        chartType: 'bar',
+        title: 'Spend by Month',
+        series: [
+          {
+            key: 'spend',
+            name: 'Spend',
+            color: '#c4b5a0',
+            data: OrderService.toMonthlySeries(rows),
+          },
+        ],
       },
     };
   }
+
+  /** Accessory / Custom / Fabric / Non-Custom split of this customer's orders. */
+  private async getCustomerOrdersByProductKindChart(
+    customer: Types.ObjectId,
+  ): Promise<{ data: ChartDto }> {
+    const data = await this.orderModel.aggregate<{
+      _id: string;
+      count: number;
+    }>([
+      { $match: { customer } },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product_info',
+        },
+      },
+      { $unwind: '$product_info' },
+      {
+        $addFields: {
+          product_category: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ['$product_info.kind', 'accessory'] },
+                  then: 'Accessory',
+                },
+                {
+                  case: { $eq: ['$product_info.kind', 'fabric'] },
+                  then: 'Fabric',
+                },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      { $eq: ['$product_info.clothing.type', 'customize'] },
+                    ],
+                  },
+                  then: 'Custom',
+                },
+                {
+                  case: {
+                    $and: [
+                      { $eq: ['$product_info.kind', 'clothing'] },
+                      {
+                        $eq: ['$product_info.clothing.type', 'non_customize'],
+                      },
+                    ],
+                  },
+                  then: 'Non-Custom',
+                },
+              ],
+              default: 'Other',
+            },
+          },
+        },
+      },
+      { $group: { _id: '$product_category', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Orders by Product Type',
+        series: [
+          {
+            key: 'product_kind',
+            name: 'Product Type',
+            data: data.map((d) => ({
+              label: d._id || 'Unknown',
+              value: d.count,
+            })),
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * Returned vs kept across this customer's PAID orders.
+   *
+   * Emits nothing at all when they have no paid orders — a 0% return rate for
+   * someone who has never completed a purchase is not a fact about them, and
+   * the card should show its empty template instead.
+   */
+  private async getCustomerReturnsRateChart(
+    customer: Types.ObjectId,
+  ): Promise<{ data: ChartDto }> {
+    const [row] = await this.orderModel.aggregate<{
+      paid: number;
+      returned: number;
+    }>([
+      { $match: { customer, payment_status: 'paid' } },
+      {
+        $group: {
+          _id: null,
+          paid: { $sum: 1 },
+          returned: {
+            $sum: {
+              $cond: [
+                { $in: ['$refund_status', ['partial', 'refunded']] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const paid = row?.paid ?? 0;
+    const returned = row?.returned ?? 0;
+
+    return {
+      data: {
+        chartType: 'pie',
+        title: 'Returns Rate',
+        series: [
+          {
+            key: 'returns',
+            name: 'Returns',
+            data: paid
+              ? [
+                  { label: 'Returned', value: returned, color: '#3d2817' },
+                  { label: 'Kept', value: paid - returned, color: '#d4c5b9' },
+                ]
+              : [],
+          },
+        ],
+      },
+    };
+  }
+
+  /**
+   * When this customer is active, by hour of day, from the recommendations
+   * `events` collection.
+   *
+   * NOTE: nothing in this backend writes to that collection — events arrive
+   * only from clients POSTing /recommendations/events. Until a client does, the
+   * series is a flat 24 zeroes and the card renders its empty template. That is
+   * the honest outcome; the hardcoded curve this replaced peaked at 50,000
+   * "sessions" for a single customer.
+   */
+  private async getCustomerActivityByHourChart(
+    customerId: string,
+  ): Promise<{ data: ChartDto }> {
+    const rows = await this.eventModel.aggregate<{
+      _id: number;
+      value: number;
+    }>([
+      { $match: { userId: customerId } },
+      {
+        $group: {
+          _id: {
+            $hour: {
+              date: '$timestamp',
+              timezone: OrderService.PLATFORM_TZ,
+            },
+          },
+          value: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return {
+      data: {
+        chartType: 'bar',
+        title: 'Activity by Time of Day',
+        series: [
+          {
+            key: 'activity',
+            name: 'Activity',
+            color: '#8a7060',
+            // All 24 hours, so the x-axis is a full day rather than only the
+            // hours this customer happened to be online.
+            data: OrderService.HOUR_LABELS.map((label, hour) => ({
+              label,
+              value: rows.find((row) => row._id === hour)?.value ?? 0,
+            })),
+          },
+        ],
+      },
+    };
+  }
+
   async getBusinessChart(businessId: string): Promise<any> {
     const businessObjectId = new Types.ObjectId(businessId);
 

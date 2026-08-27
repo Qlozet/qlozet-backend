@@ -25,6 +25,9 @@ import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 
 import { Types } from 'mongoose';
 import { AdminDashboardMetricsWrapperDto } from './dto/admin-dashboard.dto';
+import { AdminDashboardChartsWrapperDto } from './dto/admin-dashboard-charts.dto';
+import { CustomerAnalyticsWrapperDto } from './dto/customer-analytics.dto';
+import { AdminProfileOverviewWrapperDto } from './dto/admin-profile.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserService } from '../ums/services';
 import { TicketService } from '../ticket/ticket.service';
@@ -152,6 +155,20 @@ export class PlatformController {
   setInReview(@Param('id') id: string) {
     return this.businessService.setInReview(id);
   }
+  /** ---------------- Admin Profile Drawer ---------------- */
+  //
+  // Declared before the ':id' routes below so 'me' is never taken for an id.
+  @Get('me/overview')
+  @ApiOperation({
+    summary: 'Get the signed-in admin’s profile overview',
+    description:
+      'Backs the admin console\'s profile drawer: marketplace counters this admin oversees, their own ticket workload, and their assigned tickets from the last 30 days. A "task" is an assigned support ticket — this backend has no separate task or audit-log collection.',
+  })
+  @ApiOkResponse({ type: AdminProfileOverviewWrapperDto })
+  async getAdminProfileOverview(@Req() req: { user?: { id?: string } }) {
+    return this.orderService.getAdminProfileOverview(req.user?.id ?? '');
+  }
+
   /** ---------------- Admin Dashboard ---------------- */
   @Get('dashboard')
   @ApiOperation({
@@ -162,6 +179,43 @@ export class PlatformController {
   @ApiOkResponse({ type: AdminDashboardMetricsWrapperDto })
   async getAdminDashboard() {
     return this.orderService.getAdminDashboardMetrics();
+  }
+
+  /** ---------------- Admin Dashboard Charts ---------------- */
+  //
+  // Sibling of GET /admin/dashboard rather than part of it: the counters above
+  // are three countDocuments calls, while these are seven aggregations over the
+  // whole orders collection. Folding them together would make every card on the
+  // page wait for the slowest chart.
+  @Get('dashboard/charts')
+  @ApiOperation({
+    summary: 'Get admin dashboard chart series',
+    description:
+      'Platform-wide chart data for the admin console, in the same `{ chartType, title, series }` envelope the vendor dashboard uses at GET /orders/chart. The time series (revenueByMonth, orderCountByMonth) are scoped to `year`; the distribution charts are all-time, matching the counters on GET /admin/dashboard.',
+  })
+  @ApiQuery({
+    name: 'year',
+    type: Number,
+    required: false,
+    description:
+      'Calendar year for the monthly series. Defaults to the year of the most recent order — not the current year, so a database whose newest order is older still renders a populated chart.',
+  })
+  @ApiOkResponse({ type: AdminDashboardChartsWrapperDto })
+  async getAdminDashboardCharts(@Query('year') year?: string) {
+    // ValidationPipe({ transform: true }) only coerces DTO-typed bodies and
+    // params, not a bare @Query scalar, so `year` arrives as a string. An
+    // unparseable or out-of-range value falls back to the default rather than
+    // producing a NaN date range that matches nothing.
+    const parsed = Number(year);
+    const resolved =
+      year !== undefined &&
+      Number.isInteger(parsed) &&
+      parsed >= 2000 &&
+      parsed <= 2100
+        ? parsed
+        : undefined;
+
+    return this.orderService.getAdminChart(resolved);
   }
 
   /** ---------------- Vendor Dashboard ---------------- */
@@ -180,16 +234,32 @@ export class PlatformController {
     required: false,
     description: 'Optional order status filter',
   })
+  @ApiQuery({
+    name: 'customerId',
+    required: false,
+    description:
+      "Optional filter to one buyer's orders — backs the admin customer detail page, which needs the same order shape this endpoint already returns.",
+  })
   async findVendorOrders(
     @Query('page')
     page = 1,
     @Query('size') size = 10,
     @Query('status') status?: string,
+    @Query('customerId') customerId?: string,
   ) {
+    // An unparseable id would throw inside the aggregation; treat it as no
+    // filter rather than a 500.
+    const customer =
+      customerId && Types.ObjectId.isValid(customerId)
+        ? new Types.ObjectId(customerId)
+        : undefined;
+
     return this.orderService.findVendorOrders(
       Number(page),
       Number(size),
       status,
+      undefined,
+      customer,
     );
   }
 
@@ -197,6 +267,38 @@ export class PlatformController {
   @ApiOperation({ summary: 'Fetch customers with filters' })
   async fetchCustomers(@Query() filters: FetchCustomersDto) {
     return this.userService.fetchCustomers(filters.page, filters.size, filters);
+  }
+
+  /** ---------------- Customer Analytics ---------------- */
+  @Get('customer/:id/analytics')
+  @ApiOperation({
+    summary: 'Get analytics for one customer',
+    description:
+      'Order history, spend and on-platform activity for a single customer, in the same `{ chartType, title, series }` envelope as GET /admin/dashboard/charts. The summary is all-time; only `spendByMonth` is scoped to `year`.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiQuery({
+    name: 'year',
+    type: Number,
+    required: false,
+    description:
+      "Calendar year for the spend series. Defaults to the year of this customer's most recent order.",
+  })
+  @ApiOkResponse({ type: CustomerAnalyticsWrapperDto })
+  async getCustomerAnalytics(
+    @Param('id') id: string,
+    @Query('year') year?: string,
+  ) {
+    const parsed = Number(year);
+    const resolved =
+      year !== undefined &&
+      Number.isInteger(parsed) &&
+      parsed >= 2000 &&
+      parsed <= 2100
+        ? parsed
+        : undefined;
+
+    return this.orderService.getCustomerAnalytics(id, resolved);
   }
 
   @Roles(UserType.PLATFORM)
