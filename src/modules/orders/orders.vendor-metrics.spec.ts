@@ -3,9 +3,10 @@ import { OrderService } from './orders.service';
 import { OrderStatus } from './schemas/orders.schema';
 
 /**
- * getVendorDashboardMetrics() backs the admin console's per-vendor Analytics
- * cards. Three of its four figures — gross sales, products, customers — were
- * not in the payload at all, so the cards could only ever render a dash.
+ * getVendorDashboardMetrics() backs both the admin console's per-vendor
+ * Analytics cards and the vendor app's own order stats (GET /orders/dashboard).
+ * Three of its figures — gross sales, products, customers — were not in the
+ * payload at all, so the cards could only ever render a dash.
  */
 const BUSINESS = new Types.ObjectId();
 
@@ -150,5 +151,26 @@ describe('OrderService.getVendorDashboardMetrics', () => {
 
     expect(orderCountQueries[1].status).toBe(OrderStatus.COMPLETED);
     expect(orderCountQueries[2].status).toBe('processing');
+  });
+
+  it('resolves the top product name from the kind subdocument', async () => {
+    // Products are polymorphic on `kind`; nothing lives at `product.name`, so
+    // projecting it sent null for every row and the "Most purchased" card had
+    // nothing to render.
+    const { service, aggregations } = buildService({});
+
+    await service.getVendorDashboardMetrics(BUSINESS);
+
+    const topProducts = aggregations.find((pipeline) =>
+      (pipeline as Record<string, any>[]).some(
+        (stage) => stage.$group?._id === '$items.product',
+      ),
+    ) as Record<string, any>[];
+    const project = topProducts.find((stage) => stage.$project)!.$project;
+
+    expect(project.name).not.toBe('$product.name');
+    expect(JSON.stringify(project.name)).toContain('$product.clothing.name');
+    expect(JSON.stringify(project.name)).toContain('$product.accessory.name');
+    expect(JSON.stringify(project.name)).toContain('$product.fabric.name');
   });
 });
