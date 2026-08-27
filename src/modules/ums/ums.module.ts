@@ -21,6 +21,7 @@ import { TeamMember, TeamMemberSchema } from './schemas/team.schema';
 import { Role, RoleSchema } from './schemas/role.schema';
 import { Permission, PermissionSchema } from './schemas/permission.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 
 @Module({
   imports: [
@@ -31,6 +32,8 @@ import { Business, BusinessSchema } from '../business/schemas/business.schema';
       { name: Role.name, schema: RoleSchema },
       { name: Permission.name, schema: PermissionSchema },
       { name: Business.name, schema: BusinessSchema },
+      // Read-only: the admin customers list joins order stats per row.
+      { name: Order.name, schema: OrderSchema },
     ]),
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService

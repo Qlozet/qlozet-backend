@@ -17,6 +17,8 @@ import { Address, AddressDocument } from '../schemas/address.schema';
 import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
+import { percentageChange } from 'src/common/utils/percentageChange';
+import { Order, OrderDocument } from 'src/modules/orders/schemas/orders.schema';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
 import { classifyBodyType } from 'src/common/utils/body-type-classifier';
@@ -30,6 +32,11 @@ export class UserService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Address.name)
     private readonly addressModel: Model<AddressDocument>,
+    // Read-only: the customers list joins each row's order count and last
+    // order date, and the page's stat cards count buyers, locations and the
+    // most-ordered product.
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<OrderDocument>,
     private readonly mailService: MailService,
     private readonly logisticService: LogisticsService,
     @Inject(forwardRef(() => SizeGuideService))
@@ -52,12 +59,20 @@ export class UserService {
     const query: any = { type: UserType.CUSTOMER };
 
     if (filters?.search) {
-      const s = filters.search.trim();
+      // The User schema has `full_name`, `username` and `phone_number`. This
+      // used to search first_name / last_name / phone — none of which exist on
+      // the document — so a search by name or phone always came back empty and
+      // only the email clause ever matched.
+      //
+      // Escaped: a phone search for "+234..." would otherwise be an invalid
+      // pattern, and "." would match any character.
+      const s = filters.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(s, 'i');
       query.$or = [
-        { first_name: new RegExp(s, 'i') },
-        { last_name: new RegExp(s, 'i') },
-        { email: new RegExp(s, 'i') },
-        { phone: new RegExp(s, 'i') },
+        { full_name: rx },
+        { username: rx },
+        { email: rx },
+        { phone_number: rx },
       ];
     }
 
@@ -89,12 +104,205 @@ export class UserService {
 
     const { take, skip } = await Utils.getPagination(page, size);
 
-    const [rows, count] = await Promise.all([
-      this.userModel.find(query).skip(skip).limit(take).sort({ createdAt: -1 }),
+    const [rows, count, summary] = await Promise.all([
+      // `.lean()`: the order stats below are attached to each row, and
+      // properties set on a Mongoose document are not serialised.
+      this.userModel
+        .find(query)
+        .skip(skip)
+        .limit(take)
+        .sort({ createdAt: -1 })
+        .lean(),
       this.userModel.countDocuments(query),
+      this.getCustomerSummary(),
     ]);
 
-    return Utils.getPagingData({ count, rows }, page, size);
+    const withOrders = await this.attachOrderStats(rows);
+    const paging = await Utils.getPagingData(
+      { count, rows: withOrders },
+      page,
+      size,
+    );
+
+    return { ...paging, summary };
+  }
+
+  /**
+   * Order count and last-order date for the customers on this page.
+   *
+   * One aggregation over the page's ids, not one per row: the table shows both
+   * columns for every customer and an N+1 here would be a query per row.
+   */
+  private async attachOrderStats<T extends { _id: unknown }>(
+    rows: T[],
+  ): Promise<(T & { total_orders: number; last_order_at: Date | null })[]> {
+    if (!rows.length) return [];
+
+    const ids = rows.map((row) => new Types.ObjectId(String(row._id)));
+    const stats = await this.orderModel.aggregate<{
+      _id: Types.ObjectId;
+      total_orders: number;
+      last_order_at: Date;
+    }>([
+      { $match: { customer: { $in: ids } } },
+      {
+        $group: {
+          _id: '$customer',
+          total_orders: { $sum: 1 },
+          last_order_at: { $max: '$createdAt' },
+        },
+      },
+    ]);
+
+    const byCustomer = new Map(
+      stats.map((stat) => [String(stat._id), stat] as const),
+    );
+
+    return rows.map((row) => {
+      const stat = byCustomer.get(String(row._id));
+      // 0 and null, not undefined: a customer who has never ordered has zero
+      // orders, which is a fact. The table would render undefined as a dash and
+      // imply the figure is unknown.
+      return {
+        ...row,
+        total_orders: stat?.total_orders ?? 0,
+        last_order_at: stat?.last_order_at ?? null,
+      };
+    });
+  }
+
+  /** How far back the customer stat cards' percentage badges compare. */
+  private static readonly CUSTOMER_TREND_DAYS = 30;
+
+  /**
+   * Whole-collection figures for the customers page's four stat cards.
+   *
+   * Unfiltered on purpose: the cards describe the customer base, so they must
+   * not move as the reader searches or pages the table.
+   */
+  private async getCustomerSummary() {
+    const days = UserService.CUSTOMER_TREND_DAYS;
+    const now = Date.now();
+    const current = { $gte: new Date(now - days * 86_400_000) };
+    const previous = {
+      $gte: new Date(now - 2 * days * 86_400_000),
+      $lt: new Date(now - days * 86_400_000),
+    };
+    const isCustomer = { type: UserType.CUSTOMER };
+
+    const [
+      totalCustomers,
+      totalCurrent,
+      totalPrevious,
+      buyers,
+      buyersCurrent,
+      buyersPrevious,
+      topLocation,
+      favourite,
+    ] = await Promise.all([
+      this.userModel.countDocuments(isCustomer),
+      this.userModel.countDocuments({ ...isCustomer, createdAt: current }),
+      this.userModel.countDocuments({ ...isCustomer, createdAt: previous }),
+      // "Unique" customers are the ones who have actually bought something, as
+      // opposed to the registered accounts counted above.
+      this.orderModel.distinct('customer'),
+      this.orderModel.distinct('customer', { createdAt: current }),
+      this.orderModel.distinct('customer', { createdAt: previous }),
+      // Location comes from the ORDER's shipping state: a user's profile
+      // address is almost always unset. Counts distinct customers per state, so
+      // one customer ordering ten times does not make their state the busiest.
+      this.orderModel.aggregate<{ _id: string; count: number }>([
+        {
+          $group: {
+            _id: {
+              $let: {
+                vars: {
+                  s: { $trim: { input: { $ifNull: ['$address.state', ''] } } },
+                },
+                in: { $cond: [{ $eq: ['$$s', ''] }, null, '$$s'] },
+              },
+            },
+            customers: { $addToSet: '$customer' },
+          },
+        },
+        { $match: { _id: { $ne: null } } },
+        { $project: { count: { $size: '$customers' } } },
+        { $sort: { count: -1 } },
+        { $limit: 1 },
+      ]),
+      // The product customers order most, by units.
+      this.orderModel.aggregate<{ name: string | null; totalOrdered: number }>([
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            totalOrdered: {
+              $sum: {
+                $add: [
+                  { $sum: '$items.color_variant_selections.quantity' },
+                  { $sum: '$items.fabric_selections.quantity' },
+                  { $sum: '$items.accessory_selections.quantity' },
+                ],
+              },
+            },
+          },
+        },
+        { $sort: { totalOrdered: -1 } },
+        { $limit: 1 },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product',
+          },
+        },
+        { $unwind: '$product' },
+        {
+          $project: {
+            _id: 0,
+            totalOrdered: 1,
+            // Products are polymorphic on `kind`; the name lives under the
+            // kind-specific subdocument, never at the top level.
+            name: {
+              $ifNull: [
+                '$product.clothing.name',
+                {
+                  $ifNull: [
+                    '$product.accessory.name',
+                    { $ifNull: ['$product.fabric.name', null] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ]),
+    ]);
+
+    const location = topLocation[0];
+    const top = favourite[0];
+
+    return {
+      total_customers: totalCustomers,
+      unique_customers: buyers.length,
+      top_location: location
+        ? { label: location._id, customers: location.count }
+        : null,
+      // Null rather than a placeholder name when nothing has been ordered.
+      favourite_product:
+        top && top.totalOrdered > 0
+          ? { name: top.name, units: top.totalOrdered }
+          : null,
+      changes: {
+        period_days: days,
+        total_customers: percentageChange(totalCurrent, totalPrevious),
+        unique_customers: percentageChange(
+          buyersCurrent.length,
+          buyersPrevious.length,
+        ),
+      },
+    };
   }
 
   /**
