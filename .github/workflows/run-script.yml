@@ -21,6 +21,10 @@ on:
           - "migrate:payout-delay"
           - "reset:stuck-shipments (dry-run)"
           - "reset:stuck-shipments (apply)"
+          - "migrate:normalize-refs (dry-run)"
+          - "migrate:normalize-refs (apply)"
+          - "backfill:order-payment (dry-run)"
+          - "backfill:order-payment (apply)"
 
 concurrency: run-script-group
 
@@ -43,6 +47,16 @@ jobs:
               CMD="npm run reset:stuck-shipments -- --dry-run" ;;
             "reset:stuck-shipments (apply)")
               CMD="npm run reset:stuck-shipments" ;;
+            # Both take `--dry` (not `--dry-run`). These used to run as the fly.toml
+            # release_command on every deploy; they are on-demand now — see fly.toml.
+            "migrate:normalize-refs (dry-run)")
+              CMD="npm run migrate:normalize-refs -- --dry" ;;
+            "migrate:normalize-refs (apply)")
+              CMD="npm run migrate:normalize-refs" ;;
+            "backfill:order-payment (dry-run)")
+              CMD="npm run backfill:order-payment -- --dry" ;;
+            "backfill:order-payment (apply)")
+              CMD="npm run backfill:order-payment" ;;
             *)
               echo "Unknown script: $SCRIPT_CHOICE"; exit 1 ;;
           esac
