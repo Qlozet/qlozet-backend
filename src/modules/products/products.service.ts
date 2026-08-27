@@ -987,7 +987,17 @@ export class ProductService {
                   name: '$ratings.user_info.name',
                   email: '$ratings.user_info.email',
                 },
-                created_at: '$ratings._id',
+                // A rating carries no timestamp of its own, so it comes from
+                // its ObjectId. Legacy entries saved before subdocument ids get
+                // null rather than failing $toDate for the whole pipeline —
+                // this mirrors the customer-reviews projection.
+                created_at: {
+                  $cond: [
+                    { $eq: [{ $type: '$ratings._id' }, 'objectId'] },
+                    { $toDate: '$ratings._id' },
+                    null,
+                  ],
+                },
               },
             },
           ],
