@@ -24,6 +24,7 @@ import { ProductStatus } from './enums/product-status.enum';
 import { ProductModerationStatus } from './enums/product-moderation.enum';
 
 import { User, UserDocument } from '../ums/schemas';
+import { UserType } from '../ums/schemas/user.schema';
 import { Cron } from '@nestjs/schedule';
 import {
   Order,
@@ -692,22 +693,40 @@ export class ProductService {
   /**
    * Delete a product
    */
+  /**
+   * A vendor "deleting" a product archives it; an admin removes the document.
+   *
+   * The unrecognised-type branch throws rather than falling through to the
+   * not-found message below. That fall-through is what hid two separate bugs
+   * for as long as it did: UserType.ADMIN is the string 'platform', not
+   * 'admin', and the caller was reading `req.user.user_type` where the schema
+   * field is `type` — so `userType` arrived undefined, matched nothing, and
+   * every delete reported "product not found" instead of saying it had no idea
+   * who was asking.
+   */
   async delete(id: string, userId: string, userType: string): Promise<void> {
-    let result;
-    if (userType === 'vendor') {
-      result = await this.productModel.findOneAndUpdate(
-        { _id: new Types.ObjectId(id) },
-        { $set: { status: ProductStatus.ARCHIVED } },
-        { new: true }
-      );
-    } else if (userType === 'admin' || userType === 'platform') {
-      // UserType.ADMIN is the string 'platform' (see ums/schemas/user.schema),
-      // so a real admin token arrives as 'platform' — matching only 'admin'
-      // silently fell through and 404'd every admin delete.
-      result = await this.productModel.findOneAndDelete({
-        _id: new Types.ObjectId(id),
-      });
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid product id');
     }
+
+    const isVendor = userType === UserType.VENDOR;
+    const isAdmin = userType === UserType.ADMIN || userType === 'admin';
+
+    if (!isVendor && !isAdmin) {
+      throw new ForbiddenException(
+        `Unrecognised user type "${userType}" — cannot delete a product`,
+      );
+    }
+
+    const result = isVendor
+      ? await this.productModel.findOneAndUpdate(
+          { _id: new Types.ObjectId(id) },
+          { $set: { status: ProductStatus.ARCHIVED } },
+          { new: true },
+        )
+      : await this.productModel.findOneAndDelete({
+          _id: new Types.ObjectId(id),
+        });
 
     if (!result) {
       throw new NotFoundException(
@@ -883,6 +902,51 @@ export class ProductService {
     size = 20,
     sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
   ) {
+    return this.reviewsFor(
+      { business: new Types.ObjectId(businessId), 'ratings.0': { $exists: true } },
+      page,
+      size,
+      sortBy,
+    );
+  }
+
+  /**
+   * The reviews left on ONE product, in the same shape as a vendor's — summary
+   * buckets, a page of rows and its pagination — so the console's reviews
+   * drawer renders either without knowing which it was given.
+   *
+   * GET /products/{id}/ratings already exists but answers a different question:
+   * it is the storefront's rating summary (average, count, items sold) with no
+   * buckets, no reviewer and no pagination.
+   */
+  async getProductReviews(
+    productId: string,
+    page = 1,
+    size = 20,
+    sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
+  ) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new BadRequestException('Invalid product id');
+    }
+    return this.reviewsFor(
+      { _id: new Types.ObjectId(productId) },
+      page,
+      size,
+      sortBy,
+    );
+  }
+
+  /**
+   * Ratings live embedded on products, so "a vendor's reviews" and "a product's
+   * reviews" are the same unwind-and-bucket pipeline over a different set of
+   * products. Only the $match differs.
+   */
+  private async reviewsFor(
+    match: Record<string, unknown>,
+    page = 1,
+    size = 20,
+    sortBy: 'recent' | 'highest' | 'lowest' = 'recent',
+  ) {
     const skip = (page - 1) * size;
 
     const sortStage: Record<string, 1 | -1> =
@@ -893,7 +957,7 @@ export class ProductService {
           : { 'ratings._id': -1 }; // recent (default, by ObjectId descending)
 
     const pipeline: any[] = [
-      { $match: { business: new Types.ObjectId(businessId), 'ratings.0': { $exists: true } } },
+      { $match: match },
       { $unwind: '$ratings' },
       {
         $lookup: {
@@ -947,7 +1011,9 @@ export class ProductService {
 
     const [result] = await this.productModel.aggregate(pipeline);
 
-    const summary = result.summary[0] || {
+    // $facet yields no document at all when the match selects nothing, so a
+    // product with no ratings would have thrown on `result.summary`.
+    const summary = result?.summary?.[0] || {
       total_reviews: 0,
       average_rating: 0,
       five_star: 0,
@@ -962,7 +1028,7 @@ export class ProductService {
         ...summary,
         average_rating: Math.round((summary.average_rating || 0) * 10) / 10,
       },
-      reviews: result.reviews,
+      reviews: result?.reviews ?? [],
       pagination: {
         page,
         size,
@@ -2397,6 +2463,73 @@ export class ProductService {
     };
   }
 
+  /** Colour identity for variant matching — hex if there is one, else name. */
+  private static colourKey(colour: any): string {
+    return (colour?.hex ?? colour?.name ?? '').toString().trim().toLowerCase();
+  }
+
+  private static sizeKey(size: unknown): string {
+    return (size ?? '').toString().trim().toLowerCase();
+  }
+
+  /**
+   * Carry existing variant `_id`s onto an incoming edit, matched on
+   * colour + size.
+   *
+   * An edit form re-sends the whole `color_variants` array, so writing it
+   * straight through hands Mongoose a fresh set of subdocuments and it mints
+   * new `_id`s for every one. Those ids are not cosmetic: an order line stores
+   * `color_variant_selections[].variant_id` against them, and stock deduction
+   * matches with `arrayFilters: [{ 'variant._id': variant_id }]`. Regenerating
+   * them would leave every open order pointing at variants that no longer
+   * exist — the filter matches nothing, no stock moves, and nothing errors.
+   *
+   * A colour or size the edit removed simply doesn't come back, and a newly
+   * added one gets a fresh id, which is correct in both cases.
+   */
+  private static mergeColorVariants(existing: any[], incoming: any[]): any[] {
+    const colours = new Map<string, any>();
+    const variants = new Map<string, any>();
+
+    for (const colour of existing ?? []) {
+      const ck = ProductService.colourKey(colour);
+      if (ck) colours.set(ck, colour);
+      for (const variant of colour?.variants ?? []) {
+        variants.set(`${ck}::${ProductService.sizeKey(variant?.size)}`, variant);
+      }
+    }
+
+    return (incoming ?? []).map((colour) => {
+      const ck = ProductService.colourKey(colour);
+      const previousColour = colours.get(ck);
+      return {
+        ...colour,
+        ...(previousColour?._id ? { _id: previousColour._id } : {}),
+        variants: (colour?.variants ?? []).map((variant: any) => {
+          const previous = variants.get(
+            `${ck}::${ProductService.sizeKey(variant?.size)}`,
+          );
+          return previous?._id ? { ...variant, _id: previous._id } : variant;
+        }),
+      };
+    });
+  }
+
+  /** The same id-preserving merge for a flat variant list (accessories). */
+  private static mergeFlatVariants(existing: any[], incoming: any[]): any[] {
+    const key = (variant: any) =>
+      `${ProductService.colourKey(variant?.color)}::${ProductService.sizeKey(variant?.size)}`;
+
+    const previous = new Map<string, any>(
+      (existing ?? []).map((variant) => [key(variant), variant]),
+    );
+
+    return (incoming ?? []).map((variant) => {
+      const match = previous.get(key(variant));
+      return match?._id ? { ...variant, _id: match._id } : variant;
+    });
+  }
+
   /**
    * Apply an admin edit. Only the keys present are written, so the form can
    * send a partial without wiping fields it doesn't render.
@@ -2417,7 +2550,10 @@ export class ProductService {
     if (dto.base_price !== undefined) {
       product.base_price = dto.base_price;
     }
-    if (dto.status) {
+    if (dto.status && dto.status !== product.status) {
+      // Only a genuine status change cancels a pending activation. Clearing it
+      // on any edit that merely echoes the current status back would silently
+      // unschedule a product because someone fixed a typo in its description.
       product.status = dto.status;
       product.scheduled_activation_date = undefined;
     }
@@ -2432,7 +2568,27 @@ export class ProductService {
         current && typeof current.toObject === 'function'
           ? current.toObject()
           : (current ?? {});
-      (product as any)[kind] = { ...plain, ...detail };
+
+      const merged: Record<string, any> = { ...plain, ...detail };
+
+      // `status` is top-level on the product; the sub-schema has no such path,
+      // so a copy inside the kind document is a stray key at best.
+      delete merged.status;
+
+      if (detail.color_variants) {
+        merged.color_variants = ProductService.mergeColorVariants(
+          plain.color_variants,
+          detail.color_variants,
+        );
+      }
+      if (detail.variants) {
+        merged.variants = ProductService.mergeFlatVariants(
+          plain.variants,
+          detail.variants,
+        );
+      }
+
+      (product as any)[kind] = merged;
       product.markModified(kind);
     }
 
