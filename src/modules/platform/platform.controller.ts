@@ -34,7 +34,15 @@ import {
   AdminCustomerDetailWrapperDto,
   AdminCustomerTransactionsWrapperDto,
 } from './dto/admin-customer-detail.dto';
+import { AdminCustomerMeasurementsWrapperDto } from './dto/admin-customer-measurements.dto';
+import { AdminCustomerReviewsWrapperDto } from './dto/admin-customer-reviews.dto';
 import { AdminProfileOverviewWrapperDto } from './dto/admin-profile.dto';
+import { AdminUpdateBusinessDto } from './dto/admin-update-business.dto';
+import {
+  CreateVendorNoteDto,
+  EscalateVendorDto,
+} from '../business/dto/vendor-note.dto';
+import { VendorNotesService } from '../business/vendor-notes.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserService } from '../ums/services';
 import { TicketService } from '../ticket/ticket.service';
@@ -65,6 +73,7 @@ export class PlatformController {
     private readonly orderService: OrderService,
     private readonly platformService: PlatformService,
     private readonly transactionService: TransactionService,
+    private readonly vendorNotesService: VendorNotesService,
   ) {}
 
   // ------------------------------------------------------
@@ -150,6 +159,131 @@ export class PlatformController {
   // ------------------------------------------------------
   //
   // Declared before 'businesses/:id' so neither is shadowed by it.
+  @Patch('businesses/:id')
+  @ApiOperation({
+    summary: 'Update a vendor’s profile (admin)',
+    description:
+      "Edits another business's own details — name, contact, address, imagery and payout account. PATCH /business/profile only ever updates the CALLER's business, so an admin had no way to correct a vendor's record. The body is an allowlist: status has its own approve/verify/reject routes, and earnings, payout history and the transfer recipient code are never writable here.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiResponse({ status: 404, description: 'Business not found' })
+  // The allowlist above is only real with `whitelist`. The global pipe sets
+  // `transform` but not `whitelist`, so unknown keys survive validation — and
+  // `updateBusinessProfile` `$set`s the body wholesale, which meant a request
+  // carrying `status`, `earnings` or `transfer_recipient_code` wrote them
+  // straight to the record. Stripping happens here rather than globally so no
+  // other endpoint's payload changes shape.
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async updateBusiness(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateBusinessDto,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.businessService.updateBusinessProfile(id, dto);
+  }
+
+  @Get('businesses/:id/warehouses')
+  @ApiOperation({
+    summary: 'List a vendor’s warehouses (admin)',
+    description:
+      "GET /business/warehouse is scoped to the caller's own business, so the console could only ever show a warehouse COUNT with nothing behind it. This takes the id in the path.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  async getBusinessWarehouses(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.businessService.findAllWarehouse(id, {
+      page: Number(page),
+      size: Number(size),
+    });
+  }
+
+  // ------------------------------------------------------
+  // VENDOR NOTES, FLAGS AND ESCALATION (admin)
+  // ------------------------------------------------------
+  @Get('businesses/:id/notes')
+  @ApiOperation({
+    summary: 'List a vendor’s internal notes and flags',
+    description:
+      "The admin console's own record of a vendor. Never shown to the vendor. Notes and flags share one collection: a flag without a reason is useless, and a reason is a note.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 20 })
+  async getVendorNotes(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 20,
+  ) {
+    return this.vendorNotesService.list(id, Number(page), Number(size));
+  }
+
+  @Post('businesses/:id/notes')
+  @ApiOperation({
+    summary: 'Add a note, or flag the vendor',
+    description:
+      "kind 'flag' raises a concern and marks the vendor flagged in the vendors list; kind 'note' (the default) is an ordinary remark.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiResponse({ status: 404, description: 'Business not found' })
+  async addVendorNote(
+    @Param('id') id: string,
+    @Body() dto: CreateVendorNoteDto,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.vendorNotesService.create(id, req.user?.id ?? '', dto);
+  }
+
+  @Patch('vendor-notes/:noteId/resolve')
+  @ApiOperation({
+    summary: 'Clear a flag',
+    description:
+      'Only a flag can be resolved — a "resolved" note would just be a hidden one. The vendor stays flagged while any other flag is still open.',
+  })
+  @ApiParam({ name: 'noteId', description: 'Note ID', type: String })
+  async resolveVendorNote(
+    @Param('noteId') noteId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.vendorNotesService.resolve(noteId, req.user?.id ?? '');
+  }
+
+  @Delete('vendor-notes/:noteId')
+  @ApiOperation({ summary: 'Delete a note or flag' })
+  @ApiParam({ name: 'noteId', description: 'Note ID', type: String })
+  async deleteVendorNote(@Param('noteId') noteId: string) {
+    return this.vendorNotesService.remove(noteId);
+  }
+
+  @Post('businesses/:id/escalate')
+  @ApiOperation({
+    summary: 'Escalate a vendor to support',
+    description:
+      "Raises a support ticket against the vendor. This is not a new concept: tickets already carry a business, a status and an assignee, and the console already has a queue and a detail screen for them — so escalation creates one rather than inventing a parallel record.",
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  async escalateVendor(
+    @Param('id') id: string,
+    @Body() dto: EscalateVendorDto,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.ticketService.create(id, {
+      issue_type: dto.issue_type,
+      description: dto.description,
+    });
+  }
+
   @Get('businesses/:id/chart')
   @ApiOperation({
     summary: 'Get one vendor’s charts (admin)',
@@ -445,6 +579,62 @@ export class PlatformController {
       Number(size),
       status,
     );
+  }
+
+  @Get('customer/:id/reviews')
+  @ApiOperation({
+    summary: "Get the reviews one customer wrote (admin)",
+    description:
+      "What the `reviews_count` on their detail header counts. Ratings are embedded in `products.ratings[]`, one entry per product per user, so there is no reviews collection to page — the pipeline unwinds the array and keeps only this customer's entries, joining the product's name, first image and selling vendor onto each.\n\nThe summary is over their whole history rather than the page: the star distribution describes the customer, and would otherwise move as the reader pages through.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 20 })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['recent', 'highest', 'lowest'],
+    description:
+      "Defaults to 'recent'. Ratings carry no timestamp, so recency is the generation time of the rating's ObjectId — when it was pushed.",
+  })
+  @ApiOkResponse({ type: AdminCustomerReviewsWrapperDto })
+  @ApiResponse({
+    status: 404,
+    description: 'The id is not an ObjectId',
+  })
+  async getCustomerReviews(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 20,
+    @Query('sortBy') sortBy?: 'recent' | 'highest' | 'lowest',
+  ) {
+    return this.userService.getCustomerReviews(
+      id,
+      Number(page),
+      Number(size),
+      sortBy,
+    );
+  }
+
+  // Platform staff only, like the order-scoped twin below: body
+  // measurements are the most personal record this backend holds, and the
+  // rest of the customer routes here are gated by the console's own login
+  // rather than by a role on the handler.
+  @Roles(UserType.PLATFORM)
+  @Get('customer/:id/measurements')
+  @ApiOperation({
+    summary: "Get one customer's body measurements and body type (admin)",
+    description:
+      "The console's Body Measurement panel. Every route under /measurements is customer-scoped and reads the caller's id from the token, so an admin hitting them got their own (empty) sets; this one takes the customer from the path.\n\nReturns every saved set (active first) with its unit and its flat { key: number } map — only the keys the customer actually recorded — plus the body-type classification. Read-only: where GET /measurements/body-type caches a fresh classification onto the user, this one computes an uncached result in memory and returns it with `computed_at: null` rather than writing to the record an admin is merely looking at.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiOkResponse({ type: AdminCustomerMeasurementsWrapperDto })
+  @ApiResponse({
+    status: 404,
+    description: 'No customer with that id, or the id is not an ObjectId',
+  })
+  async getCustomerMeasurements(@Param('id') id: string) {
+    return this.userService.getCustomerMeasurements(id);
   }
 
   // ------------------------------------------------------
