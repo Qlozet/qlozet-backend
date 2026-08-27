@@ -13,6 +13,11 @@ import { Address, AddressSchema } from '../ums/schemas/address.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
+import {
+  Event,
+  EventSchema,
+} from '../recommendations/events/schemas/event.schema';
+import { Ticket, TicketSchema } from '../ticket/schema/ticket.schema';
 import { JwtService } from '@nestjs/jwt';
 
 // Import modules instead of directly listing their services
@@ -35,6 +40,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: User.name, schema: UserSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
       { name: Dispute.name, schema: DisputeSchema },
+      // Read-only: the admin customer page aggregates activity by hour of day.
+      { name: Event.name, schema: EventSchema },
+      // Read-only: tickets back the admin profile drawer's tasks and counters.
+      { name: Ticket.name, schema: TicketSchema },
     ]),
     TransactionsModule,  // provides TransactionService + Transaction model
     BusinessModule,      // provides BusinessService, LogisticsService + Business, BusinessEarning models

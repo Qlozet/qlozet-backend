@@ -6,16 +6,17 @@
 app = 'qlozet-backend'
 primary_region = 'lhr'
 
-# One-off data migrations, run before each release goes live. Both are
-# idempotent (safe to leave for a deploy or two) — REMOVE this block once
-# `fly logs` shows them done. Order matters: normalise-refs must run first so
-# transactions.order is an ObjectId before the payment backfill reads it. A
-# non-zero exit aborts the deploy.
-#   1. normalize-refs  — string-typed ObjectId refs -> ObjectId
-#      (addresses/wallets/transactions/users/teammembers)
-#   2. order-payment   — derive Order.payment_status / refund_status from txns
-[deploy]
-  release_command = "npm run migrate:normalize-refs && npm run backfill:order-payment"
+# No [deploy] release_command on purpose.
+#
+# normalize-refs and order-payment used to run here, before every release. Both
+# are idempotent, so re-running them was harmless — but it was never free: each
+# scans whole collections just to decide there is nothing left to convert.
+# `$expr` predicates cannot use an index, and `transactions` carries no index on
+# status/channel/type/order, so every deploy paid for ~18 full collection scans
+# whose cost grows with the data. On 2026-08-26 that wedged a deploy for 44
+# minutes and it was cancelled without ever rolling out.
+#
+# Run them on demand instead: Actions tab -> "Run maintenance script".
 
 [env]
   PORT = "5000"
