@@ -43,9 +43,9 @@ All live on the `Admin` controller, base path `/api/admin`, guarded by
 token is rejected by `RolesGuard`.
 
 **Update semantics:** `PATCH /settings` accepts a partial body and merges it.
-Because the pipe is `ValidationPipe({ transform: true })` **without
-`whitelist`**, any schema field sent in the body is persisted — even fields the
-DTO does not declare (see [§6](#6-known-gaps--caveats)).
+The route runs `ValidationPipe({ transform: true, whitelist: true })` against a
+fully-typed `UpdatePlatformSettingsDto`, so every setting is validated and any
+unknown key is **stripped** rather than persisted.
 
 ### Example
 
@@ -173,31 +173,21 @@ in `wallets/token.service.ts`.
 
 ## 6. Known gaps & caveats
 
-1. **DTO only documents 7 of ~30 fields.** `UpdatePlatformSettingsDto` declares
-   only `payout_cycle`, `minimum_payout`, `payout_delay_days`,
-   `tailored_order_upfront`, `platform_commission_percent`,
-   `payment_handling_fee_percent`, `payment_handling_fee_flat`. The rest are
-   updatable (no `whitelist` on the pipe) but **untyped/undocumented and
-   unvalidated**. Any typo in a field name is silently written as a new key.
+> **Resolved.** The DTO is now fully typed, validated & whitelisted: all ~30
+> settings carry `@ApiPropertyOptional` + `class-validator` constraints (so
+> they're Swagger-visible and range-checked); the update route strips unknown
+> keys; and the upfront field was renamed `tailored_order_upfront` →
+> `tailored_order_upfront_percent`, so it maps to the payout logic instead of
+> silently no-op-ing.
 
-2. **Field-name mismatch → silent no-op.** The DTO exposes
-   `tailored_order_upfront`, but the schema and payout logic read
-   `tailored_order_upfront_percent`. Sending the *documented* field writes a key
-   nothing reads, so the upfront % never changes. Fix: rename the DTO field to
-   `tailored_order_upfront_percent`.
-
-3. **`payout_cycle` is unused.** No scheduler or service reads it; changing it
+1. **`payout_cycle` is unused.** No scheduler or service reads it; changing it
    has no effect today.
 
-4. **`defaultSettings()` vs `@Prop` defaults diverge** for a few fields (e.g.
+2. **`defaultSettings()` vs `@Prop` defaults diverge** for a few fields (e.g.
    `tailored_order_upfront_percent`: schema `0` vs seed `65`; `tax_percent`:
    schema `0` vs seed `0.75`; `token_price.ngn.amount`: schema `15` vs seed
    `0`). The seed wins on first create; the `@Prop` default only applies to
    fields the seed omits. The tables in §3 list the **effective** default.
-
-5. **No input validation.** Values like percentages accept any number
-   (negative, >100). Consider adding `class-validator` constraints when the DTO
-   is expanded.
 
 ---
 
