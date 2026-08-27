@@ -22,6 +22,13 @@ import { Role, RoleSchema } from './schemas/role.schema';
 import { Permission, PermissionSchema } from './schemas/permission.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
+import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
+import { Token, TokenSchema } from '../wallets/schema/token.schema';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
+import {
+  FabricReservation,
+  FabricReservationSchema,
+} from '../fabric-reservation/schemas/fabric-reservation.schema';
 
 @Module({
   imports: [
@@ -34,6 +41,13 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
       { name: Business.name, schema: BusinessSchema },
       // Read-only: the admin customers list joins order stats per row.
       { name: Order.name, schema: OrderSchema },
+      // Read-only: the admin customer DETAIL header reads a wallet balance, a
+      // token balance, the product ratings they authored and the fabric
+      // reservations they organised.
+      { name: Wallet.name, schema: WalletSchema },
+      { name: Token.name, schema: TokenSchema },
+      { name: Product.name, schema: ProductSchema },
+      { name: FabricReservation.name, schema: FabricReservationSchema },
     ]),
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -29,6 +30,10 @@ import { Types } from 'mongoose';
 import { AdminDashboardMetricsWrapperDto } from './dto/admin-dashboard.dto';
 import { AdminDashboardChartsWrapperDto } from './dto/admin-dashboard-charts.dto';
 import { CustomerAnalyticsWrapperDto } from './dto/customer-analytics.dto';
+import {
+  AdminCustomerDetailWrapperDto,
+  AdminCustomerTransactionsWrapperDto,
+} from './dto/admin-customer-detail.dto';
 import { AdminProfileOverviewWrapperDto } from './dto/admin-profile.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserService } from '../ums/services';
@@ -370,6 +375,61 @@ export class PlatformController {
   @ApiOperation({ summary: 'Fetch customers with filters' })
   async fetchCustomers(@Query() filters: FetchCustomersDto) {
     return this.userService.fetchCustomers(filters.page, filters.size, filters);
+  }
+
+  // ------------------------------------------------------
+  // CUSTOMER DETAIL (admin)
+  // ------------------------------------------------------
+  @Get('customer/:id')
+  @ApiOperation({
+    summary: 'Get one customer with their full profile and account totals',
+    description:
+      "Everything the console's customer detail header shows, in one call: profile fields, the default address (plus a ready-made `location` string), last sign-in, order counts and lifetime spend, wallet and token balances, followed vendors, reserved fabrics and authored reviews.\n\nsnake_case keys, like every other endpoint here. Counts and money are numbers including 0 — a customer with no orders has zero orders, which is a fact; a null there would render as a dash and claim the figure is unknown. Only a genuinely absent value is null.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiOkResponse({ type: AdminCustomerDetailWrapperDto })
+  @ApiResponse({
+    status: 404,
+    description: 'No customer with that id, or the id is not an ObjectId',
+  })
+  async getCustomerDetail(@Param('id') id: string) {
+    return this.userService.getCustomerDetail(id);
+  }
+
+  @Get('customer/:id/transactions')
+  @ApiOperation({
+    summary: "Get one customer's transactions (admin)",
+    description:
+      "The admin-scoped twin of GET /transactions/customer, which reads the CALLER's id from the token — so an admin hitting it got their own (empty) ledger instead of the customer's. This one takes the customer from the path.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Optional transaction status filter',
+  })
+  @ApiOkResponse({ type: AdminCustomerTransactionsWrapperDto })
+  @ApiResponse({ status: 404, description: 'The id is not an ObjectId' })
+  async getCustomerTransactions(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 10,
+    @Query('status') status?: string,
+  ) {
+    // Without this an unparseable id reaches the query as a cast failure and
+    // surfaces as a 500 rather than the 404 it actually is.
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    return this.transactionService.findByCustomer(
+      id,
+      Number(page),
+      Number(size),
+      status,
+    );
   }
 
   // ------------------------------------------------------

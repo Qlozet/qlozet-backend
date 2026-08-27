@@ -22,6 +22,17 @@ import {
   type CustomerStatus,
 } from '../dto/customer-status.dto';
 import { Order, OrderDocument } from 'src/modules/orders/schemas/orders.schema';
+import { Wallet, WalletDocument } from 'src/modules/wallets/schema/wallet.schema';
+import { Token, TokenDocument } from 'src/modules/wallets/schema/token.schema';
+import {
+  Product,
+  ProductDocument,
+} from 'src/modules/products/schemas/product.schema';
+import {
+  FabricReservation,
+  FabricReservationDocument,
+} from 'src/modules/fabric-reservation/schemas/fabric-reservation.schema';
+import type { AdminCustomerDetailDto } from 'src/modules/platform/dto/admin-customer-detail.dto';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
 import { classifyBodyType } from 'src/common/utils/body-type-classifier';
@@ -40,6 +51,17 @@ export class UserService {
     // most-ordered product.
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
+    // Read-only, all four: the admin customer detail header reads a wallet
+    // balance, a token balance, the reservations they organised and the
+    // product ratings they authored. Nothing here writes to them.
+    @InjectModel(Wallet.name)
+    private readonly walletModel: Model<WalletDocument>,
+    @InjectModel(Token.name)
+    private readonly tokenModel: Model<TokenDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
+    @InjectModel(FabricReservation.name)
+    private readonly fabricReservationModel: Model<FabricReservationDocument>,
     private readonly mailService: MailService,
     private readonly logisticService: LogisticsService,
     @Inject(forwardRef(() => SizeGuideService))
@@ -235,6 +257,180 @@ export class UserService {
 
     await this.userModel.deleteOne({ _id: customerId });
     return { deleted: true, id: customerId };
+  }
+
+  /**
+   * Everything the admin console's customer detail header shows, for one
+   * customer.
+   *
+   * snake_case keys throughout, matching every other endpoint here — the admin
+   * app reads them verbatim.
+   *
+   * Counts and money are numbers, 0 included: "no orders yet" is a fact about
+   * this person, and a null would make the console render a dash and claim the
+   * figure is unknown. Only a genuinely absent value (a last name `full_name`
+   * does not carry, a sign-in that predates `last_login_at`) is null.
+   *
+   * The eight reads below are independent, so they go out together rather than
+   * turning one page load into eight sequential round trips.
+   */
+  async getCustomerDetail(customerId: string): Promise<AdminCustomerDetailDto> {
+    // A 404 rather than a 400 for a malformed id: from the console's side an
+    // id that does not resolve to a customer is the same situation either way,
+    // and the alternative is a CastError 500 from inside the aggregation.
+    if (!Types.ObjectId.isValid(customerId)) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const _id = new Types.ObjectId(customerId);
+
+    const customer = await this.userModel
+      .findOne({ _id, type: UserType.CUSTOMER })
+      .lean<
+        (User & {
+          _id: Types.ObjectId;
+          createdAt?: Date;
+          // Legacy: some documents predate the separate `addresses`
+          // collection and carry the address inline.
+          address?: { state?: string; city?: string };
+        }) | null
+      >();
+
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const [orderStats, address, wallet, token, reservations, reviews] =
+      await Promise.all([
+        // One pass over their orders for all four order-derived figures.
+        this.orderModel.aggregate<{
+          total_orders: number;
+          last_order_at: Date | null;
+          lifetime_spending: number;
+          total_returns: number;
+        }>([
+          { $match: { customer: _id } },
+          {
+            $group: {
+              _id: null,
+              total_orders: { $sum: 1 },
+              last_order_at: { $max: '$createdAt' },
+              // Spend is what they actually paid for: an abandoned unpaid
+              // order must not inflate their lifetime value.
+              lifetime_spending: {
+                $sum: {
+                  $cond: [
+                    { $eq: ['$payment_status', 'paid'] },
+                    { $ifNull: ['$total', 0] },
+                    0,
+                  ],
+                },
+              },
+              // Orders carry a refund STATE but no refunded amount, so a
+              // partial refund contributes its whole order total. Documented
+              // on the DTO so the console does not read this as cash returned.
+              total_returns: {
+                $sum: {
+                  $cond: [
+                    { $in: ['$refund_status', ['partial', 'refunded']] },
+                    { $ifNull: ['$total', 0] },
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ]),
+
+        // Default address, falling back to the most recent — read-only, unlike
+        // getDefaultAddress(), which promotes the fallback to default as a
+        // side effect. An admin viewing a page should not mutate the record.
+        this.addressModel
+          .findOne(this.customerFilter(customerId))
+          .sort({ is_default: -1, createdAt: -1 })
+          .select('city state')
+          .lean<{ city?: string; state?: string } | null>(),
+
+        this.walletModel
+          .findOne({ customer: _id })
+          .select('balance pending_balance')
+          .lean<{ balance?: number; pending_balance?: number } | null>(),
+
+        this.tokenModel
+          .findOne({ customer: _id })
+          .select('tokens')
+          .lean<{ tokens?: number } | null>(),
+
+        this.fabricReservationModel.countDocuments({ organizer: _id }),
+
+        // Ratings are embedded in products.ratings[], one entry per product
+        // per user, so this counts the entries this customer authored rather
+        // than the products that happen to carry one.
+        this.productModel.aggregate<{ reviews_count: number }>([
+          { $match: { 'ratings.user': _id } },
+          {
+            $project: {
+              authored: {
+                $size: {
+                  $filter: {
+                    input: { $ifNull: ['$ratings', []] },
+                    as: 'rating',
+                    cond: { $eq: ['$$rating.user', _id] },
+                  },
+                },
+              },
+            },
+          },
+          { $group: { _id: null, reviews_count: { $sum: '$authored' } } },
+        ]),
+      ]);
+
+    const orders = orderStats[0];
+
+    // The schema stores one name field. Split it rather than invent two.
+    const nameParts = String(customer.full_name ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const state = address?.state ?? customer.address?.state ?? null;
+    const city = address?.city ?? customer.address?.city ?? null;
+    const location = [city, state].filter(Boolean).join(', ') || null;
+
+    return {
+      _id: String(customer._id),
+      full_name: customer.full_name,
+      first_name: nameParts[0] ?? null,
+      last_name: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+      username: customer.username ?? null,
+      email: customer.email,
+      phone: customer.phone_number ?? null,
+      gender: customer.gender ?? null,
+      status: customer.status,
+      profile_picture: customer.profile_picture ?? null,
+      // Always an object, so the console can read `address.state` without
+      // guarding every access; the members carry the nulls.
+      address: { state, city },
+      location,
+      created_at: customer.createdAt ?? null,
+      last_login_at: customer.last_login_at ?? null,
+      total_orders: orders?.total_orders ?? 0,
+      last_order_at: orders?.last_order_at ?? null,
+      reviews_count: reviews[0]?.reviews_count ?? 0,
+      followed_vendors: customer.following_businesses?.length ?? 0,
+      reserved_fabrics: reservations,
+      wallet_balance: UserService.money(wallet?.balance),
+      pending_balance: UserService.money(wallet?.pending_balance),
+      token_balance: token?.tokens ?? 0,
+      total_returns: UserService.money(orders?.total_returns),
+      lifetime_spending: UserService.money(orders?.lifetime_spending),
+    };
+  }
+
+  /**
+   * A money figure the console can print: never null, never a float artefact
+   * of summing kobo-precision totals.
+   */
+  private static money(value: number | null | undefined): number {
+    return Math.round((Number(value) || 0) * 100) / 100;
   }
 
   /** How far back the customer stat cards' percentage badges compare. */

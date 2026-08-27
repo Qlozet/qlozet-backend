@@ -85,6 +85,17 @@ export class User extends Document {
   @Prop({ type: String, select: true })
   refresh_token?: string;
 
+  /**
+   * When this user last signed in successfully.
+   *
+   * Stamped by AuthService on every login (customer, vendor and platform), so
+   * the admin console can tell a dormant account from an active one. `null`
+   * means "has not signed in since this field existed" — not "never signed
+   * in" — for accounts created before it was added.
+   */
+  @Prop({ type: Date, default: null })
+  last_login_at?: Date;
+
   @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Product', default: [] })
   wishlist?: Types.ObjectId[];
 
