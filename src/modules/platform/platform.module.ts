@@ -11,6 +11,7 @@ import { CurrencyModule } from '../currency/currency.module';
 import { TicketModule } from '../ticket/ticket.module';
 import { BusinessModule } from '../business/business.module';
 import { OrdersModule } from '../orders/orders.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OrdersModule } from '../orders/orders.module';
     TicketModule,       // provides TicketService (needed by PlatformController)
     BusinessModule,     // provides BusinessService (needed by PlatformController)
     forwardRef(() => OrdersModule),  // forwardRef: OrdersModule → PaymentModule → PlatformModule
+    TransactionsModule,  // provides TransactionService (vendor ledger for the admin console)
   ],
   controllers: [PlatformController],
   providers: [PlatformService, JwtService],

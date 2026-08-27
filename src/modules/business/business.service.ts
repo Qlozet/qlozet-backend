@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { Connection, Model, Types, PipelineStage } from 'mongoose';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 import {
   Transaction,
@@ -24,6 +24,7 @@ import {
   BusinessStatus,
 } from './schemas/business.schema';
 import { Utils } from 'src/common/utils/pagination';
+import { percentageChange } from '../../common/utils/percentageChange';
 import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { LogisticsService } from '../logistics/logistics.service';
@@ -269,11 +270,21 @@ export class BusinessService implements OnModuleInit {
     }
     return { message: 'Warehouse deleted successfully' };
   }
-  async findAllBusinesses(page: number = 1, size: number = 10) {
+  async findAllBusinesses(
+    page: number = 1,
+    size: number = 10,
+    status?: string,
+    search?: string,
+    sort?: string,
+    order?: string,
+  ) {
     const skip = (page - 1) * size;
     const limit = size;
 
     const result = await this.businessModel.aggregate([
+      // Narrow before the lookups below, so a filtered page does not join
+      // products and orders for businesses it is about to discard.
+      ...BusinessService.vendorStatusStage(status),
       // -------------------- Vendor info --------------------
       {
         $lookup: {
@@ -287,6 +298,13 @@ export class BusinessService implements OnModuleInit {
         },
       },
       { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+
+      // -------------------- Search --------------------
+      // Placed after the vendor lookup so it can match the vendor's own name
+      // and email — the table falls back to those when a business carries
+      // neither — but before the product and order joins, so discarded rows are
+      // never joined.
+      ...BusinessService.vendorSearchStage(search),
 
       // -------------------- Products --------------------
       {
@@ -345,6 +363,12 @@ export class BusinessService implements OnModuleInit {
         },
       },
 
+      // -------------------- Sort --------------------
+      // After $addFields, so the computed columns (revenue, products, orders)
+      // are sortable, and before $facet so the sort applies to the whole
+      // result rather than to one page of it.
+      ...BusinessService.vendorSortStage(sort, order),
+
       // -------------------- Pagination --------------------
       {
         $facet: {
@@ -357,7 +381,219 @@ export class BusinessService implements OnModuleInit {
     const count = result[0]?.metadata[0]?.total || 0;
     const rows = result[0]?.data || [];
 
-    return Utils.getPagingData({ count, rows }, page, size);
+    // getPagingData is async — spreading it unawaited yields a Promise's own
+    // (zero) enumerable properties, silently dropping total_items/data/… from
+    // the response.
+    const [paging, summary] = await Promise.all([
+      Utils.getPagingData({ count, rows }, page, size),
+      // Whole-collection figures for the page's stat cards, so they do not
+      // change as the reader pages through the table or filters it.
+      this.getVendorSummary(),
+    ]);
+
+    return { ...paging, summary };
+  }
+
+  /** Table column -> the field the pipeline can actually sort on. */
+  private static readonly VENDOR_SORT_FIELDS: Record<string, string> = {
+    revenue: 'total_revenue',
+    products: 'total_products',
+    orders: 'total_orders',
+    date: 'createdAt',
+    name: 'business_name',
+  };
+
+  /**
+   * Sort stage for the vendors table.
+   *
+   * Defaults to oldest-first by `createdAt`. That is the order the collection
+   * happened to return before this stage existed, so adding an explicit sort
+   * does not silently reshuffle the page — but it is now guaranteed rather than
+   * incidental, which also makes pagination stable.
+   */
+  private static vendorSortStage(sort?: string, order?: string): PipelineStage[] {
+    const field =
+      BusinessService.VENDOR_SORT_FIELDS[sort?.trim().toLowerCase() ?? ''] ??
+      'createdAt';
+    const direction = order?.trim().toLowerCase() === 'desc' ? -1 : 1;
+
+    // `_id` breaks ties: without it, documents with equal revenue can be
+    // returned in a different order per page, so one could appear twice while
+    // another never shows.
+    return [{ $sort: { [field]: direction, _id: 1 } }];
+  }
+
+  /**
+   * Case-insensitive search across everything the vendors table displays as
+   * identity: the business name and email, and the owning vendor's name and
+   * email.
+   *
+   * Returns an empty array (no stage) for a blank term, so the caller can
+   * spread it unconditionally.
+   */
+  private static vendorSearchStage(search?: string): PipelineStage[] {
+    const term = search?.trim();
+    if (!term) return [];
+
+    // Escaped: a vendor searching for "a+b" or "c.o" must not have those read
+    // as regex syntax.
+    const rx = {
+      $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      $options: 'i',
+    };
+
+    return [
+      {
+        $match: {
+          $or: [
+            { business_name: rx },
+            { business_email: rx },
+            { 'vendor.full_name': rx },
+            { 'vendor.email': rx },
+          ],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Translate the admin console's status filter into a Mongo match.
+   *
+   * The console offers three buckets — Active / Awaiting verification /
+   * Inactive — while the collection stores five statuses, so the buckets map to
+   * sets rather than values. A raw status ('verified', 'in-review', …) is also
+   * accepted so the endpoint stays usable directly.
+   *
+   * Returns undefined for an empty or unrecognised filter, which means "all".
+   */
+  private static vendorStatusStage(status?: string): PipelineStage[] {
+    const raw = status?.trim().toLowerCase();
+    if (!raw) return [];
+
+    const match = (value: Record<string, unknown>): PipelineStage[] => [
+      { $match: { status: value } },
+    ];
+
+    if (raw === 'active') {
+      return match({ $in: BusinessService.ACTIVE_VENDOR_STATUSES });
+    }
+    if (raw === 'inactive') {
+      return match({ $in: BusinessService.INACTIVE_VENDOR_STATUSES });
+    }
+    // The console labels this bucket "Awaiting verification" and sends
+    // 'pending'. Expressed as an exclusion rather than a list, so a status
+    // added later lands here instead of vanishing from every bucket.
+    if (raw === 'pending' || raw === 'awaiting') {
+      return match({
+        $nin: [
+          ...BusinessService.ACTIVE_VENDOR_STATUSES,
+          ...BusinessService.INACTIVE_VENDOR_STATUSES,
+        ],
+      });
+    }
+
+    const known = Object.values(BusinessStatus) as string[];
+    return known.includes(raw) ? [{ $match: { status: raw } }] : [];
+  }
+
+  /** How far back the vendor stat cards' percentage badges compare. */
+  private static readonly VENDOR_TREND_DAYS = 30;
+
+  /**
+   * Status buckets, matching what the vendors TABLE renders — see
+   * `getVendorStatus` in the admin app. The cards would otherwise contradict
+   * the rows directly beneath them.
+   *
+   * Deliberately NOT `is_active`: that field defaults to true and nothing ever
+   * sets it false, so it reports every vendor as active including the ones the
+   * table shows as Inactive.
+   */
+  private static readonly ACTIVE_VENDOR_STATUSES = [
+    BusinessStatus.APPROVED,
+    BusinessStatus.VERIFIED,
+    'active',
+  ];
+
+  private static readonly INACTIVE_VENDOR_STATUSES = [
+    BusinessStatus.REJECTED,
+    // Not in the enum, but the admin app maps them and a deployment may hold
+    // them from an earlier schema.
+    'suspended',
+    'disabled',
+    'inactive',
+  ];
+
+  /**
+   * Totals and 30-day movement for the vendors page's three stat cards.
+   *
+   * CAVEAT on the active/inactive movement: a Business carries no record of
+   * *when* its status changed, so those two compare documents currently in the
+   * bucket whose `updatedAt` falls in the window. `total_vendors` is by
+   * `createdAt` and has no such caveat.
+   */
+  private async getVendorSummary() {
+    const days = BusinessService.VENDOR_TREND_DAYS;
+    const now = Date.now();
+    const current = { $gte: new Date(now - days * 86_400_000) };
+    const previous = {
+      $gte: new Date(now - 2 * days * 86_400_000),
+      $lt: new Date(now - days * 86_400_000),
+    };
+
+    const active = { $in: BusinessService.ACTIVE_VENDOR_STATUSES };
+    const inactive = { $in: BusinessService.INACTIVE_VENDOR_STATUSES };
+    const tally = (match: Record<string, unknown>) => [
+      { $match: match },
+      { $count: 'n' },
+    ];
+
+    const [rows] = await this.businessModel.aggregate<
+      Record<string, { n: number }[]>
+    >([
+      {
+        $facet: {
+          total: tally({}),
+          active: tally({ status: active }),
+          inactive: tally({ status: inactive }),
+          totalCurrent: tally({ createdAt: current }),
+          totalPrevious: tally({ createdAt: previous }),
+          activeCurrent: tally({ status: active, updatedAt: current }),
+          activePrevious: tally({ status: active, updatedAt: previous }),
+          inactiveCurrent: tally({ status: inactive, updatedAt: current }),
+          inactivePrevious: tally({ status: inactive, updatedAt: previous }),
+        },
+      },
+    ]);
+
+    const read = (key: string): number => rows?.[key]?.[0]?.n ?? 0;
+    const total = read('total');
+    const activeCount = read('active');
+    const inactiveCount = read('inactive');
+
+    return {
+      total_vendors: total,
+      active_vendors: activeCount,
+      inactive_vendors: inactiveCount,
+      // Everything that is neither: pending and in-review. Exposed so the three
+      // cards visibly account for the whole population rather than appearing to
+      // lose vendors.
+      awaiting_vendors: total - activeCount - inactiveCount,
+      changes: {
+        period_days: days,
+        total_vendors: percentageChange(
+          read('totalCurrent'),
+          read('totalPrevious'),
+        ),
+        active_vendors: percentageChange(
+          read('activeCurrent'),
+          read('activePrevious'),
+        ),
+        inactive_vendors: percentageChange(
+          read('inactiveCurrent'),
+          read('inactivePrevious'),
+        ),
+      },
+    };
   }
 
   /**
