@@ -9,7 +9,13 @@ jobs:
   deploy:
     name: Deploy app
     runs-on: ubuntu-latest
-    concurrency: deploy-group # optional: ensure only one action runs at a time
+    # Serialises deploys. Do NOT add `cancel-in-progress: true` here: with
+    # `--remote-only` the build and any release machine run inside Fly, so
+    # cancelling the GitHub job kills only the local flyctl client and leaves
+    # that remote work running. You can end up with two mutating maintenance
+    # runs racing on the same database, or a rollout abandoned with machines on
+    # mixed images. Queueing is the safe behaviour.
+    concurrency: deploy-group
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
