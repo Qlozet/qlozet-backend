@@ -1764,6 +1764,7 @@ export class OrderService {
       verifiedVendors,
       totalCustomers,
       grossSales,
+      trend,
     ] = await Promise.all([
       this.orderModel.countDocuments(), // total orders
       this.orderModel.countDocuments({ status: OrderStatus.COMPLETED }), // delivered
@@ -1831,7 +1832,17 @@ export class OrderService {
         { $match: { payment_status: 'paid' } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
+      this.getRecentTrend(),
     ]);
+
+    // Percentage movement over the trend window, for the console's stat-card
+    // badges. Null — not 0, and not the "+100%" the vendor dashboard reports —
+    // when the previous window had nothing to compare against: a first-ever
+    // order is not a 100% increase over anything.
+    const percentChange = (current: number, previous: number): number | null => {
+      if (previous === 0) return current === 0 ? 0 : null;
+      return Math.round(((current - previous) / previous) * 1000) / 10;
+    };
 
     return {
       total_orders: totalOrders,
@@ -1842,8 +1853,151 @@ export class OrderService {
       total_customers: totalCustomers,
       gross_sales: grossSales[0]?.total ?? 0,
       must_purchase_products: topProducts,
+      changes: {
+        period_days: OrderService.TREND_WINDOW_DAYS,
+        total_orders: percentChange(...trend.orders),
+        orders_delivered: percentChange(...trend.delivered),
+        orders_in_transit: percentChange(...trend.inTransit),
+        total_vendors: percentChange(...trend.vendors),
+        verified_vendors: percentChange(...trend.verifiedVendors),
+        total_customers: percentChange(...trend.customers),
+        gross_sales: percentChange(...trend.grossSales),
+      },
     };
   }
+
+  /** How far back the stat cards' percentage badges compare. */
+  private static readonly TREND_WINDOW_DAYS = 30;
+
+  /** `[current, previous]` counts for one metric over the trend window. */
+  private static pair(
+    rows: Record<string, { n: number }[]> | undefined,
+    key: string,
+  ): [number, number] {
+    return [rows?.[`${key}Current`]?.[0]?.n ?? 0, rows?.[`${key}Previous`]?.[0]?.n ?? 0];
+  }
+
+  /**
+   * Movement over the trend window versus the window before it, for every stat
+   * card that has a countable history.
+   *
+   * CAVEAT on the delivered / in-transit / verified figures: neither an Order
+   * nor a Business carries a per-status timestamp — `delivered_at` lives on
+   * VendorShipment, not the order — so there is no record of *when* something
+   * reached a status. Those three count documents currently in that status
+   * whose `updatedAt` falls in the window. It is a good proxy (a completed
+   * order is rarely written to again) but it is not throughput. The
+   * creation-based figures — total orders, vendors, customers, gross sales —
+   * carry no such caveat.
+   */
+  private async getRecentTrend(): Promise<{
+    orders: [number, number];
+    delivered: [number, number];
+    inTransit: [number, number];
+    vendors: [number, number];
+    verifiedVendors: [number, number];
+    customers: [number, number];
+    grossSales: [number, number];
+  }> {
+    const days = OrderService.TREND_WINDOW_DAYS;
+    const now = Date.now();
+    const current = { $gte: new Date(now - days * 86_400_000) };
+    const previous = {
+      $gte: new Date(now - 2 * days * 86_400_000),
+      $lt: new Date(now - days * 86_400_000),
+    };
+
+    const count = (match: Record<string, unknown>) => [
+      { $match: match },
+      { $count: 'n' },
+    ];
+    // Gross sales is money, not a count, so it sums into the same `n` shape the
+    // others produce — keeping one reader for the whole facet.
+    const sum = (match: Record<string, unknown>) => [
+      { $match: match },
+      { $group: { _id: null, n: { $sum: '$total' } } },
+    ];
+
+    const [orderRows, businessRows, customerRows] = await Promise.all([
+      this.orderModel.aggregate<Record<string, { n: number }[]>>([
+        {
+          $facet: {
+            ordersCurrent: count({ createdAt: current }),
+            ordersPrevious: count({ createdAt: previous }),
+            deliveredCurrent: count({
+              status: OrderStatus.COMPLETED,
+              updatedAt: current,
+            }),
+            deliveredPrevious: count({
+              status: OrderStatus.COMPLETED,
+              updatedAt: previous,
+            }),
+            inTransitCurrent: count({
+              status: OrderStatus.PROCESSING,
+              updatedAt: current,
+            }),
+            inTransitPrevious: count({
+              status: OrderStatus.PROCESSING,
+              updatedAt: previous,
+            }),
+            grossSalesCurrent: sum({
+              payment_status: 'paid',
+              createdAt: current,
+            }),
+            grossSalesPrevious: sum({
+              payment_status: 'paid',
+              createdAt: previous,
+            }),
+          },
+        },
+      ]),
+      this.businessModel.aggregate<Record<string, { n: number }[]>>([
+        {
+          $facet: {
+            vendorsCurrent: count({ createdAt: current }),
+            vendorsPrevious: count({ createdAt: previous }),
+            verifiedVendorsCurrent: count({
+              status: BusinessStatus.VERIFIED,
+              updatedAt: current,
+            }),
+            verifiedVendorsPrevious: count({
+              status: BusinessStatus.VERIFIED,
+              updatedAt: previous,
+            }),
+          },
+        },
+      ]),
+      this.userModel.aggregate<Record<string, { n: number }[]>>([
+        {
+          $facet: {
+            customersCurrent: count({
+              type: UserType.CUSTOMER,
+              createdAt: current,
+            }),
+            customersPrevious: count({
+              type: UserType.CUSTOMER,
+              createdAt: previous,
+            }),
+          },
+        },
+      ]),
+    ]);
+
+    const orders = orderRows[0];
+    const businesses = businessRows[0];
+    const customers = customerRows[0];
+
+    return {
+      orders: OrderService.pair(orders, 'orders'),
+      delivered: OrderService.pair(orders, 'delivered'),
+      inTransit: OrderService.pair(orders, 'inTransit'),
+      grossSales: OrderService.pair(orders, 'grossSales'),
+      vendors: OrderService.pair(businesses, 'vendors'),
+      verifiedVendors: OrderService.pair(businesses, 'verifiedVendors'),
+      customers: OrderService.pair(customers, 'customers'),
+    };
+  }
+
   async getVendorDashboardMetrics(businessId: Types.ObjectId) {
     const [totalOrders, ordersDelivered, ordersInTransit, topProducts] =
       await Promise.all([
