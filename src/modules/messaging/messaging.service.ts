@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   OrderMessage,
   OrderMessageDocument,
@@ -15,6 +16,14 @@ import {
 // fulfilment). Reading history is allowed in any state.
 const SENDABLE_STATUSES = ['processing', 'in_transit'];
 
+// Emitted after a message is persisted; the MessagingGateway pushes it live to
+// each participant's socket room.
+export const ORDER_MESSAGE_CREATED = 'order-message.created';
+export interface OrderMessageCreatedEvent {
+  message: any;
+  participantUserIds: string[];
+}
+
 type Caller = { user?: { id?: string }; business?: { id?: string } };
 
 @Injectable()
@@ -23,6 +32,8 @@ export class MessagingService {
     @InjectModel(OrderMessage.name)
     private readonly messageModel: Model<OrderMessageDocument>,
     @InjectModel('Order') private readonly orderModel: Model<any>,
+    @InjectModel('Business') private readonly businessModel: Model<any>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // Resolve the order + the caller's role in its thread. Messaging is a
@@ -109,6 +120,23 @@ export class MessagingService {
       read_by_customer: role === 'customer',
       read_by_vendor: role === 'vendor',
     });
+
+    // Push the new message live to both participants (customer + tailor's user).
+    const business: any = await this.businessModel
+      .findById(tailorBusinessId)
+      .select('created_by')
+      .lean();
+    const vendorUserId = business?.created_by?.id
+      ? String(business.created_by.id)
+      : null;
+    const participantUserIds = [
+      String((order as any).customer),
+      ...(vendorUserId ? [vendorUserId] : []),
+    ];
+    this.eventEmitter.emit(ORDER_MESSAGE_CREATED, {
+      message: message.toObject ? message.toObject() : message,
+      participantUserIds,
+    } as OrderMessageCreatedEvent);
 
     return { data: message };
   }
