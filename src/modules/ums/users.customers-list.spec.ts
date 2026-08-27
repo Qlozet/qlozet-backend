@@ -1,3 +1,8 @@
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { UserService } from './services/users.service';
 import { UserType } from './schemas';
@@ -248,5 +253,119 @@ describe('UserService.fetchCustomers — stat-card summary', () => {
       expect(query.$or).toBeUndefined();
       expect(query.type).toBe(UserType.CUSTOMER);
     }
+  });
+});
+
+describe('UserService.setCustomerStatus', () => {
+  const CUSTOMER = new Types.ObjectId().toString();
+
+  const build = (updated: unknown, orders = 0) => {
+    let filter: Record<string, any> | undefined;
+    let update: Record<string, any> | undefined;
+
+    const service = Object.create(UserService.prototype) as UserService;
+    Object.assign(service, {
+      userModel: {
+        findOneAndUpdate: jest.fn((f: any, u: any) => {
+          filter = f;
+          update = u;
+          return { lean: () => Promise.resolve(updated) };
+        }),
+        findOne: jest.fn(() => ({ lean: () => Promise.resolve(updated) })),
+        deleteOne: jest.fn(() => Promise.resolve({ deletedCount: 1 })),
+      },
+      orderModel: { countDocuments: jest.fn(() => Promise.resolve(orders)) },
+    });
+
+    return { service, getFilter: () => filter, getUpdate: () => update };
+  };
+
+  it('rejects an id that is not an ObjectId', async () => {
+    const { service } = build({});
+    await expect(service.setCustomerStatus('nope', 'active')).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('only ever touches a customer', async () => {
+    // The users collection also holds vendors and platform staff; an admin
+    // suspending a vendor through this route would be a foot-gun.
+    const { service, getFilter } = build({ _id: CUSTOMER });
+
+    await service.setCustomerStatus(CUSTOMER, 'suspended');
+
+    expect(getFilter()!.type).toBe(UserType.CUSTOMER);
+  });
+
+  it('writes the requested state', async () => {
+    const { service, getUpdate } = build({ _id: CUSTOMER });
+    await service.setCustomerStatus(CUSTOMER, 'suspended');
+    expect(getUpdate()).toEqual({ $set: { status: 'suspended' } });
+  });
+
+  it('404s when no customer matches', async () => {
+    // Including when the id belongs to a vendor — the type filter excluded it.
+    const { service } = build(null);
+    await expect(
+      service.setCustomerStatus(CUSTOMER, 'active'),
+    ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('UserService.deleteCustomer', () => {
+  const CUSTOMER = new Types.ObjectId().toString();
+
+  const build = (customer: unknown, orders: number) => {
+    const service = Object.create(UserService.prototype) as UserService;
+    const deleteOne = jest.fn(() => Promise.resolve({ deletedCount: 1 }));
+    Object.assign(service, {
+      userModel: {
+        findOne: jest.fn(() => ({ lean: () => Promise.resolve(customer) })),
+        deleteOne,
+      },
+      orderModel: { countDocuments: jest.fn(() => Promise.resolve(orders)) },
+    });
+    return { service, deleteOne };
+  };
+
+  it('deletes a customer who never transacted', async () => {
+    const { service, deleteOne } = build({ _id: CUSTOMER }, 0);
+
+    await expect(service.deleteCustomer(CUSTOMER)).resolves.toEqual({
+      deleted: true,
+      id: CUSTOMER,
+    });
+    expect(deleteOne).toHaveBeenCalled();
+  });
+
+  it('refuses to delete a customer with orders', async () => {
+    // Their buyer reference would dangle and every past order would render
+    // unattributable, losing the revenue history's owner.
+    const { service, deleteOne } = build({ _id: CUSTOMER }, 3);
+
+    await expect(service.deleteCustomer(CUSTOMER)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('says how many orders, and what to do instead', async () => {
+    const { service } = build({ _id: CUSTOMER }, 3);
+
+    await expect(service.deleteCustomer(CUSTOMER)).rejects.toThrow(
+      /3 orders.*suspend the account instead/i,
+    );
+  });
+
+  it('gets the singular right for one order', async () => {
+    const { service } = build({ _id: CUSTOMER }, 1);
+    await expect(service.deleteCustomer(CUSTOMER)).rejects.toThrow(/1 order\b/);
+  });
+
+  it('404s for an unknown customer', async () => {
+    const { service } = build(null, 0);
+    await expect(service.deleteCustomer(CUSTOMER)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

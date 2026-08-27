@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -35,6 +36,7 @@ import { TicketService } from '../ticket/ticket.service';
 import { BusinessService } from '../business/business.service';
 import { OrderService } from '../orders/orders.service';
 import { FetchCustomersDto } from '../ums/dto/fetch-customer.dto';
+import { UpdateCustomerStatusDto } from '../ums/dto/customer-status.dto';
 import { UserType } from '../ums/schemas';
 import { AssignTicketDto, TicketFilterDto } from '../ticket/dto/ticket.dto';
 import {
@@ -368,6 +370,41 @@ export class PlatformController {
   @ApiOperation({ summary: 'Fetch customers with filters' })
   async fetchCustomers(@Query() filters: FetchCustomersDto) {
     return this.userService.fetchCustomers(filters.page, filters.size, filters);
+  }
+
+  // ------------------------------------------------------
+  // CUSTOMER ACCOUNT STATE (admin)
+  // ------------------------------------------------------
+  @Patch('customer/:id/status')
+  @ApiOperation({
+    summary: "Set a customer's account state",
+    description:
+      "Sign-in matches on status 'active', so this is what actually locks a customer out. Both 'inactive' and 'suspended' block access; the difference is intent — dormant versus acted-against. Scoped to customers: the users collection also holds vendors and platform staff.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiOkResponse({ description: 'The updated customer' })
+  @ApiResponse({ status: 404, description: 'Customer not found' })
+  async setCustomerStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateCustomerStatusDto,
+  ) {
+    return this.userService.setCustomerStatus(id, dto.status);
+  }
+
+  @Delete('customer/:id')
+  @ApiOperation({
+    summary: 'Permanently delete a customer',
+    description:
+      "Refuses with a 409 when the customer has orders: their buyer reference would dangle and every past order would render unattributable. Suspend instead. This exists for spam and test accounts that never transacted.",
+  })
+  @ApiParam({ name: 'id', description: 'Customer (User) id', type: String })
+  @ApiResponse({ status: 404, description: 'Customer not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'The customer has orders and cannot be deleted',
+  })
+  async deleteCustomer(@Param('id') id: string) {
+    return this.userService.deleteCustomer(id);
   }
 
   /** ---------------- Customer Analytics ---------------- */
