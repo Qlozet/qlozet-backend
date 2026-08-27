@@ -252,6 +252,9 @@ export class PlatformController {
   }
   @Roles(UserType.PLATFORM)
   @Patch('settings')
+  // whitelist strips any key not on UpdatePlatformSettingsDto, so a mistyped
+  // setting name is dropped rather than silently written as a junk field.
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   @ApiOperation({ summary: 'Update platform settings' })
   async updateSettings(@Body() dto: UpdatePlatformSettingsDto) {
     return this.platformService.update(dto);

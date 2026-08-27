@@ -7,6 +7,7 @@ import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { CurrencyService } from '../currency/currency.service';
 import { Cron } from '@nestjs/schedule';
+import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @Injectable()
 export class PlatformService {
@@ -57,9 +58,9 @@ export class PlatformService {
   }
 
   async update(
-    dto: Partial<PlatformSettings>,
+    dto: UpdatePlatformSettingsDto,
   ): Promise<PlatformSettingsDocument> {
-    return this.model.findOneAndUpdate({}, dto, {
+    return this.model.findOneAndUpdate({}, dto as Partial<PlatformSettings>, {
       new: true,
       upsert: true,
     });
