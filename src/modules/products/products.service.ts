@@ -18,6 +18,7 @@ import {
 } from './schemas';
 import { CreateProductDto } from './dto';
 import { Utils } from '../../common/utils/pagination';
+import { percentageChange } from '../../common/utils/percentageChange';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
 import { ProductModerationStatus } from './enums/product-moderation.enum';
@@ -1900,6 +1901,17 @@ export class ProductService {
   /* Everything below reads the collection unfiltered instead.           */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Window the catalogue stat cards compare, in days. Matches the vendors
+   * page's summary so the two consoles report movement over the same period.
+   *
+   * CAVEAT on the archived movement: a Product carries no record of *when* its
+   * status changed, so it compares documents currently archived whose
+   * `updatedAt` falls in the window — any other edit to an archived product
+   * counts it again. `total_products` is by `createdAt` and has no such caveat.
+   */
+  private static readonly CATALOGUE_TREND_DAYS = 30;
+
   /** Product name across all three kinds, falling back to the SEO title. */
   private static productName(p: any): string {
     return (
@@ -2137,38 +2149,83 @@ export class ProductService {
     const { status, moderation_status, ...rest } = dto;
     const base = this.buildAdminFilter(rest as AdminFindProductsDto);
 
-    const [byStatus, byModeration, total] = await Promise.all([
-      this.productModel.aggregate([
-        { $match: base },
-        { $group: { _id: '$status', count: { $sum: 1 } } },
-      ]),
-      this.productModel.aggregate([
-        { $match: base },
-        {
-          $group: {
-            _id: { $ifNull: ['$moderation.status', ProductModerationStatus.PENDING] },
-            count: { $sum: 1 },
+    const days = ProductService.CATALOGUE_TREND_DAYS;
+    const now = Date.now();
+    const current = { $gte: new Date(now - days * 86_400_000) };
+    const previous = {
+      $gte: new Date(now - 2 * days * 86_400_000),
+      $lt: new Date(now - days * 86_400_000),
+    };
+
+    const tally = (match: Record<string, unknown>) => [
+      { $match: { ...base, ...match } },
+      { $count: 'n' },
+    ];
+    const archived = { status: ProductStatus.ARCHIVED };
+
+    const [byStatus, byModeration, total, scheduled, [movement]] =
+      await Promise.all([
+        this.productModel.aggregate([
+          { $match: base },
+          { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]),
+        this.productModel.aggregate([
+          { $match: base },
+          {
+            $group: {
+              _id: {
+                $ifNull: [
+                  '$moderation.status',
+                  ProductModerationStatus.PENDING,
+                ],
+              },
+              count: { $sum: 1 },
+            },
           },
-        },
-      ]),
-      this.productModel.countDocuments(base),
-    ]);
+        ]),
+        this.productModel.countDocuments(base),
+        this.productModel.countDocuments({
+          ...base,
+          scheduled_activation_date: { $ne: null },
+        }),
+        // One round trip for the four trend windows, the way the vendors page's
+        // summary does it.
+        this.productModel.aggregate<Record<string, { n: number }[]>>([
+          {
+            $facet: {
+              totalCurrent: tally({ createdAt: current }),
+              totalPrevious: tally({ createdAt: previous }),
+              archivedCurrent: tally({ ...archived, updatedAt: current }),
+              archivedPrevious: tally({ ...archived, updatedAt: previous }),
+            },
+          },
+        ]),
+      ]);
 
     const pick = (rows: any[], key: string) =>
       rows.find((r) => r._id === key)?.count ?? 0;
+    const read = (key: string): number => movement?.[key]?.[0]?.n ?? 0;
 
     return {
       total_products: total,
       active_products: pick(byStatus, ProductStatus.ACTIVE),
       draft_products: pick(byStatus, ProductStatus.DRAFT),
       archived_products: pick(byStatus, ProductStatus.ARCHIVED),
-      scheduled_products: await this.productModel.countDocuments({
-        ...base,
-        scheduled_activation_date: { $ne: null },
-      }),
+      scheduled_products: scheduled,
       pending_products: pick(byModeration, ProductModerationStatus.PENDING),
       approved_products: pick(byModeration, ProductModerationStatus.APPROVED),
       rejected_products: pick(byModeration, ProductModerationStatus.REJECTED),
+      changes: {
+        period_days: days,
+        total_products: percentageChange(
+          read('totalCurrent'),
+          read('totalPrevious'),
+        ),
+        archived_products: percentageChange(
+          read('archivedCurrent'),
+          read('archivedPrevious'),
+        ),
+      },
       sales_by_category: await this.salesByCategory(dto.kind),
     };
   }
