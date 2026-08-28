@@ -253,13 +253,19 @@ Each phase is shippable and reversible. NG-only stays fully working throughout.
 
 ---
 
-## 16. Open items to confirm
+## 16. Decisions (locked)
 
-1. **Group currency = USD** (Qlozet, Inc. as parent) — confirm the parent for
-   consolidation.
-2. **Launch currencies** beyond NGN/USD (add GBP/EUR now, or later?).
-3. **International customer wallet:** refund-to-source only (recommended), or do
-   we want per-currency customer wallets eventually?
-4. **Which vendor countries** at Connect launch (US + UK only, or more?).
-5. **FX rate source** — reuse the current `CurrencyService` provider, or move to
-   a dedicated FX feed for accuracy/SLAs?
+1. **Group currency = USD** — Qlozet, Inc. is the consolidation parent.
+2. **Launch currencies: NGN + USD.** GBP/EUR added later (display list is a
+   setting, so this is config).
+3. **Refund-to-source only.** No per-currency customer wallets; card payments
+   refund via the original processor at the locked rate.
+4. **Connect launch countries: US + UK.**
+5. **FX source: keep UniRate (current `CurrencyService`), hardened:**
+   - Charge-path quotes **fail closed** — never use the hardcoded fallback
+     rates for a real charge; refuse to quote instead.
+   - Persist the last-good rate in the DB (survives restarts) rather than
+     in-memory cache only.
+   - The 2% markup buffers normal staleness (10-min cache).
+   - Provider stays swappable behind `CurrencyService`; revisit a dedicated
+     feed (OXR/Fixer) when volume justifies the SLA.
