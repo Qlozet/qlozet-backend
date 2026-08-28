@@ -6,8 +6,12 @@ import {
   IsNumber,
   IsArray,
   IsBoolean,
+  IsIn,
+  ArrayMinSize,
+  ValidateNested,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   StyleCategory,
   StyleType,
@@ -120,6 +124,16 @@ export class UpdatePlatformStyleDto {
   is_active?: boolean;
 }
 
+/** Bulk-create platform styles - mirrors POST /taxonomy/bulk's shape. */
+export class BulkCreatePlatformStylesDto {
+  @ApiProperty({ type: [CreatePlatformStyleDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreatePlatformStyleDto)
+  items: CreatePlatformStyleDto[];
+}
+
 export class QueryPlatformStyleDto {
   @ApiPropertyOptional({ enum: StyleCategory })
   @IsEnum(StyleCategory)
@@ -140,6 +154,23 @@ export class QueryPlatformStyleDto {
   @IsString()
   @IsOptional()
   search?: string;
+
+  // Admin-only browse controls (ignored for non-platform callers)
+  @ApiPropertyOptional({
+    enum: ['platform', 'vendor', 'all'],
+    description: "Admin: which tier to list. Defaults to 'platform'.",
+  })
+  @IsIn(['platform', 'vendor', 'all'])
+  @IsOptional()
+  scope?: 'platform' | 'vendor' | 'all';
+
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description: 'Admin: include soft-deleted (inactive) styles.',
+  })
+  @IsIn(['true', 'false'])
+  @IsOptional()
+  include_inactive?: string;
 }
 
 export class AddPlatformStylesDto {
