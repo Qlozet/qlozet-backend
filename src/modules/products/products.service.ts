@@ -60,6 +60,8 @@ export class ProductService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel('Event')
+    private readonly recEventModel: Model<any>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
     @InjectModel(Accessory.name)
@@ -835,6 +837,20 @@ export class ProductService {
         comment,
       });
     }
+
+    // Recommender signal: ratings are server-authoritative, so emit rate_item
+    // here (covers web + mobile with one implementation). Fire-and-forget.
+    this.recEventModel
+      .create({
+        userId,
+        eventType: 'rate_item',
+        properties: { itemId: productId, value },
+        context: { surface: 'reviews' },
+        timestamp: new Date(),
+      })
+      .catch((e: any) =>
+        this.logger.warn(`Failed to record rate_item event: ${e?.message}`),
+      );
 
     // Recalculate average rating
     const totalRatings = product.ratings.length;
