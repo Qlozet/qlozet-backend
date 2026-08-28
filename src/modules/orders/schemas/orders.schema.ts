@@ -414,6 +414,34 @@ export class Order {
   })
   refund_status?: 'none' | 'partial' | 'refunded';
 
+  // ── Multi-currency legs (plan Phase 1) ──
+  // Presentment = what the customer saw/paid; settlement = what the vendor
+  // earns (their business.default_currency); fx_rate is LOCKED at checkout
+  // (mid-market + fx_markup_percent) and reused for refunds. Existing pre-field
+  // orders read as all-NGN via the defaults. Amounts on the order itself remain
+  // major units today (subtotal/total); *_minor fields land with the
+  // minor-units migration.
+  @Prop({ type: String, default: 'NGN' })
+  presentment_currency?: string;
+
+  @Prop({ type: String, default: 'NGN' })
+  settlement_currency?: string;
+
+  @Prop({ type: Number, default: 1 })
+  fx_rate?: number; // presentment → settlement, incl. markup
+
+  @Prop({ type: Number, default: 0 })
+  fx_markup_percent?: number;
+
+  @Prop({ type: Number, default: null })
+  group_amount_usd?: number | null; // consolidation view (minor units)
+
+  @Prop({ type: String, enum: ['paystack', 'stripe'], default: 'paystack' })
+  processor?: 'paystack' | 'stripe';
+
+  @Prop({ type: String, enum: ['ng', 'us'], default: 'ng' })
+  entity?: 'ng' | 'us'; // which settlement entity the money landed in
+
   @Prop({
     type: {
       body_type: { type: String },
