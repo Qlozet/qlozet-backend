@@ -51,7 +51,7 @@ export class StripeProvider implements PaymentProvider {
       throw new BadRequestException('Charge amount is required for Stripe.');
     }
 
-    const FRONTEND_URL = process.env.FRONTEND_URL || '';
+    const FRONTEND_URL = this.frontendUrl();
     const session = await this.stripe().checkout.sessions.create({
       mode: 'payment',
       client_reference_id: input.reference,
@@ -127,6 +127,32 @@ export class StripeProvider implements PaymentProvider {
       );
     }
     return this.stripe().webhooks.constructEvent(rawBody, signature, secret);
+  }
+
+  /**
+   * Stripe validates success/cancel URLs strictly (Paystack does not), so a
+   * FRONTEND_URL like "qlozet.shop" or "qlozet.shop/" fails session creation
+   * with "Not a valid URL". Normalize: require it, default the scheme to
+   * https, and strip any trailing slash.
+   */
+  private frontendUrl(): string {
+    let url = (process.env.FRONTEND_URL || '').trim();
+    if (!url) {
+      throw new ServiceUnavailableException(
+        'FRONTEND_URL is not configured — required for the payment return page.',
+      );
+    }
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    url = url.replace(/\/+$/, '');
+    try {
+      // Final sanity check — throw OUR message rather than Stripe's.
+      new URL(url);
+    } catch {
+      throw new ServiceUnavailableException(
+        `FRONTEND_URL is not a valid URL: "${process.env.FRONTEND_URL}".`,
+      );
+    }
+    return url;
   }
 
   private async requirePaymentIntent(
