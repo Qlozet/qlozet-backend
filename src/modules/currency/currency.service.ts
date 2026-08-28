@@ -79,10 +79,20 @@ export class CurrencyService {
     } catch (error) {
       this.logger.warn(`Exchange rate API failed (${error.message}), using stale cache`);
       if (cached) return cached.data;
-      // Hardcoded fallback for first-ever call when no cache exists
+      // Hardcoded fallback for first-ever call when no cache exists. The table
+      // is USD-BASED, so cross rates must be derived (base→symbol =
+      // usd[symbol] / usd[base]) — returning the raw table entry for a non-USD
+      // base produced nonsense like NGN→USD = 1, which made converted prices
+      // show a new symbol with an unchanged number.
       this.logger.warn('No cached rate available, using hardcoded fallback');
-      const fallbackRates: Record<string, number> = { USD: 1, NGN: 1650, GBP: 0.79, EUR: 0.92 };
-      return { rates: { [symbols[0]]: fallbackRates[symbols[0]] || 1 } };
+      const usdBased: Record<string, number> = { USD: 1, NGN: 1650, GBP: 0.79, EUR: 0.92 };
+      const baseUsd = usdBased[base.toUpperCase()];
+      const rates: Record<string, number> = {};
+      for (const sym of symbols) {
+        const symUsd = usdBased[sym.toUpperCase()];
+        rates[sym] = baseUsd && symUsd ? symUsd / baseUsd : 1;
+      }
+      return { rates };
     }
   }
 
