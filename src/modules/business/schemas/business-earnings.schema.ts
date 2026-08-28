@@ -25,6 +25,11 @@ export class BusinessEarning extends Document {
   @Prop({ type: Number, required: true })
   net_amount: number; // amount to release to vendor
 
+  // Currency this earning is denominated in — the vendor's settlement currency
+  // (business.default_currency). Pre-field records read as NGN via the default.
+  @Prop({ type: String, default: 'NGN' })
+  currency?: string;
+
   @Prop({ default: false })
   released: boolean;
 

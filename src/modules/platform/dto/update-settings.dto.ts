@@ -1,9 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -284,4 +286,50 @@ export class UpdatePlatformSettingsDto {
   @ValidateNested()
   @Type(() => TokenPriceDto)
   token_price?: TokenPriceDto;
+
+  // ── Multi-currency ──
+  @ApiPropertyOptional({
+    description: 'Group/consolidation currency for platform revenue',
+    example: 'USD',
+  })
+  @IsOptional()
+  @IsString()
+  base_currency?: string;
+
+  @ApiPropertyOptional({
+    description: 'Currencies customers can browse/pay in',
+    example: ['NGN', 'USD'],
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  supported_currencies?: string[];
+
+  @ApiPropertyOptional({
+    description: 'FX spread over mid-market applied at checkout (%)',
+    example: 2,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  fx_markup_percent?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Processor per charge currency; 'default' covers the rest",
+    example: { NGN: 'paystack', default: 'stripe' },
+  })
+  @IsOptional()
+  @IsObject()
+  currency_processor_map?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    description: 'Enable Stripe charging (kill-switch for non-NGN payments)',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  stripe_enabled?: boolean;
 }

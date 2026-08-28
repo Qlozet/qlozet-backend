@@ -123,8 +123,20 @@ export class Business extends Document {
   @Prop({ type: Boolean, default: true })
   custom_order_options: boolean; // allow add-ons / customisation
 
+  // The vendor's SETTLEMENT currency (multi-currency plan): what they earn and
+  // are paid out in. Defaulted from country at onboarding (NG→NGN, US→USD,
+  // GB→GBP); also what their prices are denominated in.
   @Prop({ type: String, default: 'NGN' })
   default_currency: string; // NGN | USD | GBP | EUR
+
+  // Which rail pays this vendor: Paystack Transfers (₦) or Stripe Connect
+  // ($/£ — Phase 4). Follows default_currency.
+  @Prop({ type: String, enum: ['paystack', 'stripe_connect'], default: 'paystack' })
+  payout_rail?: 'paystack' | 'stripe_connect';
+
+  // Stripe Connect account id for US/UK vendors (Phase 4).
+  @Prop({ type: String, default: null })
+  stripe_connect_id?: string | null;
 
   @Prop({ default: false })
   email_verified: boolean;

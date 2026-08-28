@@ -110,6 +110,28 @@ export class PlatformSettings extends Document {
     usd: { amount: number; currency: string };
     ngn: { amount: number; currency: string; last_updated: Date };
   };
+
+  // ── Multi-currency (plan Phase 1) ──
+  // Group/consolidation currency for platform revenue (Qlozet, Inc. parent).
+  @Prop({ type: String, default: 'USD' })
+  base_currency: string;
+
+  // Currencies customers can browse/pay in. Launch: NGN + USD (GBP/EUR later —
+  // adding one here is the whole rollout for display).
+  @Prop({ type: [String], default: ['NGN', 'USD'] })
+  supported_currencies: string[];
+
+  // Spread over mid-market applied when locking a checkout FX rate.
+  @Prop({ type: Number, default: 2 })
+  fx_markup_percent: number;
+
+  // Which processor charges each currency; `default` covers the rest.
+  @Prop({ type: Object, default: { NGN: 'paystack', default: 'stripe' } })
+  currency_processor_map: Record<string, string>;
+
+  // Kill-switch: non-NGN routing refuses until Stripe (Phase 3) is live.
+  @Prop({ type: Boolean, default: false })
+  stripe_enabled: boolean;
 }
 
 export type PlatformSettingsDocument = PlatformSettings & Document;
