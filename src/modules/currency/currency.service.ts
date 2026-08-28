@@ -52,8 +52,14 @@ export class CurrencyService {
 
       const { data } = await firstValueFrom(this.http.get(url));
 
+      // UniRate IGNORES the `base` query param — it always answers with a
+      // USD-based table of every currency. Derive the rates the caller
+      // actually asked for: base→sym = table[sym] / table[base] (the
+      // response's own base counts as 1). Cache/persist the normalized rates.
+      const normalized = this.normalizeRates(data, base, symbols);
+
       this.rateCache.set(cacheKey, {
-        data,
+        data: normalized,
         expiresAt: Date.now() + this.CACHE_TTL_MS,
       });
 
@@ -61,7 +67,7 @@ export class CurrencyService {
       // short API outages (fire-and-forget; a write failure never blocks).
       const now = new Date();
       for (const sym of symbols) {
-        const r = data?.rates?.[sym];
+        const r = normalized.rates[sym];
         if (typeof r === 'number' && r > 0) {
           this.fxRateModel
             .updateOne(
@@ -75,7 +81,7 @@ export class CurrencyService {
         }
       }
 
-      return data;
+      return normalized;
     } catch (error) {
       this.logger.warn(`Exchange rate API failed (${error.message}), using stale cache`);
       if (cached) return cached.data;
@@ -94,6 +100,37 @@ export class CurrencyService {
       }
       return { rates };
     }
+  }
+
+  /**
+   * Convert a provider response (whatever base it actually used) into the
+   * rates the caller asked for. `base→sym = table[sym] / table[base]`, where
+   * the response's own base currency counts as 1.
+   */
+  private normalizeRates(
+    data: any,
+    base: string,
+    symbols: string[],
+  ): { base: string; rates: Record<string, number> } {
+    const table: Record<string, number> = data?.rates ?? {};
+    const apiBase = String(data?.base ?? base).toUpperCase();
+    const want = base.toUpperCase();
+    const valueOf = (ccy: string): number | undefined =>
+      ccy === apiBase ? 1 : table[ccy];
+
+    const baseVal = valueOf(want);
+    const rates: Record<string, number> = {};
+    for (const sym of symbols) {
+      const symVal = valueOf(sym.toUpperCase());
+      if (
+        typeof symVal === 'number' &&
+        typeof baseVal === 'number' &&
+        baseVal > 0
+      ) {
+        rates[sym] = symVal / baseVal;
+      }
+    }
+    return { base: want, rates };
   }
 
   async convert(amount: number, from: string, to: string) {
@@ -198,13 +235,16 @@ export class CurrencyService {
 
     const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbol}`;
     const { data } = await firstValueFrom(this.http.get(url));
-    const r = data?.rates?.[symbol];
+    // Same base-normalization as getRates — UniRate answers USD-based
+    // regardless of the requested base.
+    const normalized = this.normalizeRates(data, base, [symbol]);
+    const r = normalized.rates[symbol];
     if (typeof r !== 'number' || r <= 0) {
       throw new BadRequestException(`No rate for ${base}->${symbol}`);
     }
 
     this.rateCache.set(cacheKey, {
-      data,
+      data: normalized,
       expiresAt: Date.now() + this.CACHE_TTL_MS,
     });
     this.fxRateModel
