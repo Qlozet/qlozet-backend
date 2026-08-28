@@ -7,6 +7,7 @@ import {
 import { PaymentModule } from '../payment/payment.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { PaystackProvider } from './paystack.provider';
+import { StripeProvider } from './stripe.provider';
 import { ProviderRouter } from './provider-router.service';
 
 // Provider seam for multi-currency payments (plan Phase 1). Consumers inject
@@ -20,7 +21,7 @@ import { ProviderRouter } from './provider-router.service';
     forwardRef(() => PaymentModule),
     TransactionsModule,
   ],
-  providers: [PaystackProvider, ProviderRouter],
-  exports: [ProviderRouter, PaystackProvider],
+  providers: [PaystackProvider, StripeProvider, ProviderRouter],
+  exports: [ProviderRouter, PaystackProvider, StripeProvider],
 })
 export class PaymentProvidersModule {}

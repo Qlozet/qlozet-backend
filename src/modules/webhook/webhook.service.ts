@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { StripeProvider } from '../payment-providers/stripe.provider';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
 import {
@@ -42,6 +43,7 @@ export class WebhookService {
     private readonly productService: ProductService,
     private readonly paymentService: PaymentService,
     private readonly notificationsService: NotificationsService,
+    private readonly stripeProvider: StripeProvider,
 
     @InjectModel('Order') private orderModel: Model<Order>,
     @InjectModel(BusinessEarning.name)
@@ -151,6 +153,51 @@ export class WebhookService {
       reference: transaction.reference,
       walletUpdated,
     };
+  }
+
+  /**
+   * Stripe events (multi-currency plan Phase 3). The ledger transaction
+   * reference rides on the Checkout Session's client_reference_id (and the
+   * PaymentIntent's metadata.reference), so completion funnels into the SAME
+   * idempotent path as Paystack's charge.success — finalizeCheckoutOrder is
+   * safe against the duplicate session/PI success events Stripe can send.
+   */
+  async handleStripeWebhook(event: any) {
+    const type: string = event?.type ?? '';
+    const obj: any = event?.data?.object ?? {};
+    const reference: string | undefined =
+      obj?.client_reference_id || obj?.metadata?.reference;
+    if (!reference) return { status: 'ignored', message: 'No reference' };
+
+    const transaction = await this.transactionService
+      .findByReference(reference)
+      .catch(() => null);
+    if (!transaction)
+      return { status: 'ignored', message: 'Transaction not found' };
+
+    switch (type) {
+      case 'checkout.session.completed':
+      case 'payment_intent.succeeded':
+        await this.handleChargeSuccess(transaction);
+        transaction.status = TransactionStatus.SUCCESS;
+        break;
+
+      case 'payment_intent.payment_failed':
+        transaction.status = TransactionStatus.FAILED;
+        break;
+
+      default:
+        break;
+    }
+
+    transaction.metadata = {
+      ...transaction.metadata,
+      stripe_event: type,
+      processed_at: new Date().toISOString(),
+    };
+    await transaction.save();
+
+    return { status: 'success', received: true, reference };
   }
 
   // ------------------------ Helpers ------------------------
@@ -298,15 +345,32 @@ export class WebhookService {
       };
     }
 
-    // Card checkout: confirm with Paystack if not already settled.
+    // Card checkout: confirm with the processor that charged if not settled.
     if (transaction.status !== TransactionStatus.SUCCESS) {
-      await this.paymentService
-        .verifyPaystackPayment(reference)
-        .catch((e: any) =>
-          this.logger.error(
-            `[VerifyAndFinalize] Paystack verify failed for ${reference}: ${e?.message}`,
-          ),
-        );
+      const isStripe =
+        (transaction.metadata as any)?.payment_method === 'stripe';
+      if (isStripe) {
+        // Stripe reference — verifying via Paystack would wrongly fail it.
+        const check = await this.stripeProvider
+          .verifyCharge(reference)
+          .catch((e: any) => {
+            this.logger.error(
+              `[VerifyAndFinalize] Stripe verify failed for ${reference}: ${e?.message}`,
+            );
+            return null;
+          });
+        if (check?.paid) {
+          await this.transactionService.markSuccess(reference);
+        }
+      } else {
+        await this.paymentService
+          .verifyPaystackPayment(reference)
+          .catch((e: any) =>
+            this.logger.error(
+              `[VerifyAndFinalize] Paystack verify failed for ${reference}: ${e?.message}`,
+            ),
+          );
+      }
     }
 
     const fresh = await this.transactionService.findByReference(reference);

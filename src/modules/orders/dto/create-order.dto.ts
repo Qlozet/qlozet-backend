@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   ValidateNested,
@@ -103,4 +104,15 @@ export class CreateOrderDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   payment_method?: PaymentMethod = PaymentMethod.PAYSTACK;
+
+  @ApiPropertyOptional({
+    description:
+      'Charge (presentment) currency. NGN charges via Paystack; USD via ' +
+      'Stripe at an FX rate locked at checkout. Defaults to NGN.',
+    enum: ['NGN', 'USD'],
+    default: 'NGN',
+  })
+  @IsOptional()
+  @IsIn(['NGN', 'USD'])
+  currency?: string;
 }

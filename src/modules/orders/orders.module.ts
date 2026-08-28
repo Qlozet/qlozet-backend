@@ -25,6 +25,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { BusinessModule } from '../business/business.module';
 import { ProductModule } from '../products/products.module';
 import { PaymentModule } from '../payment/payment.module';
+import { PaymentProvidersModule } from '../payment-providers/payment-providers.module';
 import { CurrencyModule } from '../currency/currency.module';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { CartModule } from '../cart/cart.module';
@@ -49,7 +50,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     BusinessModule,      // provides BusinessService, LogisticsService + Business, BusinessEarning models
     ProductModule,       // provides ProductService + Product, Style, Fabric, Accessory, Discount models
     PaymentModule,       // provides PaymentService
-    CurrencyModule,      // provides CurrencyService
+    forwardRef(() => PaymentProvidersModule), // multi-currency charge routing
+    CurrencyModule,      // provides CurrencyService (FX quotes at checkout)
     LogisticsModule,     // provides LogisticsService
     CartModule,          // provides CartService + Cart model
     forwardRef(() => WalletsModule),  // forwardRef: avoids circular dep with PlatformModule

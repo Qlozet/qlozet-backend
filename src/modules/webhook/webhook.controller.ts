@@ -12,6 +12,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { WebhookService } from './webhook.service';
+import { StripeProvider } from '../payment-providers/stripe.provider';
 import { Public } from 'src/common/decorators/public.decorator';
 import { RolesGuard } from 'src/common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -28,7 +29,35 @@ export class WebhookController {
   constructor(
     private readonly webhookService: WebhookService,
     private readonly configService: ConfigService,
+    private readonly stripeProvider: StripeProvider,
   ) {}
+
+  @Public()
+  @Post('stripe')
+  @ApiOperation({ summary: 'Handle Stripe webhook' })
+  @ApiResponse({ status: 200, description: 'Webhook received successfully' })
+  async handleStripeWebhook(@Req() req: any) {
+    // Stripe signs the EXACT raw bytes; bootstrap captures req.rawBody.
+    const signature = req.headers['stripe-signature'];
+    if (!signature || typeof signature !== 'string') {
+      this.logger.warn('[Webhook] Missing Stripe signature header — rejecting');
+      throw new UnauthorizedException('Missing webhook signature');
+    }
+    let event;
+    try {
+      const payload: Buffer =
+        req.rawBody instanceof Buffer
+          ? req.rawBody
+          : Buffer.from(JSON.stringify(req.body));
+      event = this.stripeProvider.constructWebhookEvent(payload, signature);
+    } catch (err: any) {
+      this.logger.warn(
+        `[Webhook] Invalid Stripe signature — ${err?.message ?? 'rejecting'}`,
+      );
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+    return this.webhookService.handleStripeWebhook(event);
+  }
 
   @Public()
   @Post('paystack')

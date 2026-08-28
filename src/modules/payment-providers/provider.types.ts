@@ -23,6 +23,11 @@ export interface InitChargeInput {
   email: string;
   /** ISO currency the customer is charged in (presentment). */
   currency: string;
+  /**
+   * Charge amount in MINOR units of `currency` (cents/kobo). Required by
+   * Stripe; Paystack ignores it (it reads the ledger transaction's ₦ amount).
+   */
+  amount_minor?: number;
 }
 
 export interface InitChargeResult {

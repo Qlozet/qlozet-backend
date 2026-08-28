@@ -6,6 +6,7 @@ import {
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
 import { PaystackProvider } from './paystack.provider';
+import { StripeProvider } from './stripe.provider';
 import {
   PaymentProvider,
   PayoutProvider,
@@ -28,6 +29,7 @@ export class ProviderRouter {
     @InjectModel(PlatformSettings.name)
     private readonly settingsModel: Model<PlatformSettingsDocument>,
     private readonly paystack: PaystackProvider,
+    private readonly stripeProvider: StripeProvider,
   ) {}
 
   async processorFor(currency: string): Promise<Processor> {
@@ -54,17 +56,22 @@ export class ProviderRouter {
 
   async payoutProviderFor(currency: string): Promise<PayoutProvider> {
     const processor = await this.processorFor(currency);
-    return this.byProcessor(processor);
+    if (processor !== 'paystack') {
+      // Stripe Connect payouts are Phase 4.
+      throw new BadRequestException(
+        'International payouts are not available yet.',
+      );
+    }
+    return this.paystack;
   }
 
-  private byProcessor(processor: Processor): PaystackProvider {
+  private byProcessor(processor: Processor): PaymentProvider & Partial<PayoutProvider> {
     switch (processor) {
       case 'paystack':
         return this.paystack;
       case 'stripe':
-        // StripeProvider arrives in Phase 3; the router already speaks its name
-        // so wiring it is additive.
-        throw new BadRequestException('Stripe is not enabled yet.');
+        // Charging only for now — Connect payouts land in Phase 4.
+        return this.stripeProvider;
       default:
         throw new BadRequestException(`Unknown processor "${processor}".`);
     }
