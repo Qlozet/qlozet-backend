@@ -17,6 +17,7 @@ import { ProductModule } from '../products/products.module';
 import { OrdersModule } from '../orders/orders.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentModule } from '../payment/payment.module';
+import { PaymentProvidersModule } from '../payment-providers/payment-providers.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PaymentModule } from '../payment/payment.module';
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
     ]),
     TransactionsModule,  // provides TransactionService
+    PaymentProvidersModule, // StripeProvider (webhook signature + events)
     WalletsModule,       // provides WalletsService, PaymentService, etc.
     BusinessModule,      // provides BusinessService
     ProductModule,       // provides ProductService

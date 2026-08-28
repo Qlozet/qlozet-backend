@@ -72,6 +72,8 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
+import { ProviderRouter } from '../payment-providers/provider-router.service';
+import { CurrencyService } from '../currency/currency.service';
 import {
   CheckoutPreviewResponse,
   CheckoutPreviewDto,
@@ -142,6 +144,10 @@ export class OrderService {
     private readonly productService: ProductService,
     @InjectModel(PlatformSettings.name)
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+    // Multi-currency (plan Phase 3): routes non-NGN charges to Stripe and
+    // locks the checkout FX rate.
+    private readonly providerRouter: ProviderRouter,
+    private readonly currencyService: CurrencyService,
   ) {}
 
   async createOrder(orderData: CreateOrderDto, customer: User) {
@@ -492,6 +498,97 @@ export class OrderService {
           },
         };
       } else {
+        // --- INTERNATIONAL CARD PAYMENT (multi-currency plan Phase 3) ---
+        // Non-NGN charge: lock the FX rate (fail-closed quote + markup), stamp
+        // the order's money legs, and charge via the routed provider (Stripe).
+        // The ledger transaction stays ₦ (the settlement/base amount); the
+        // charge currency + minor-unit amount ride in its metadata.
+        const chargeCurrency = (orderData.currency ?? 'NGN').toUpperCase();
+        if (chargeCurrency !== 'NGN') {
+          const provider =
+            await this.providerRouter.paymentProviderFor(chargeCurrency);
+          const fxSettings: any = await this.platformSettingsModel
+            .findOne()
+            .lean();
+          const quote = await this.currencyService.quote(
+            'NGN',
+            chargeCurrency,
+            fxSettings?.fx_markup_percent ?? 2,
+          );
+          const amountMinor = Math.round(
+            savedOrder.total * quote.effective_rate * 100,
+          );
+          if (amountMinor < 1) {
+            throw new BadRequestException('Charge amount too small.');
+          }
+
+          savedOrder.presentment_currency = chargeCurrency;
+          savedOrder.settlement_currency = 'NGN';
+          savedOrder.fx_rate = quote.effective_rate;
+          savedOrder.fx_markup_percent = quote.markup_percent;
+          savedOrder.processor = 'stripe';
+          savedOrder.entity = 'us';
+          savedOrder.group_amount_usd =
+            chargeCurrency === 'USD' ? amountMinor : null;
+          await savedOrder.save();
+
+          const intlTransaction = await this.transactionService.create({
+            initiator: new Types.ObjectId(customer.id),
+            order: savedOrder.id,
+            type: TransactionType.DEBIT,
+            amount: savedOrder.total, // ₦ settlement amount (ledger base)
+            description: `Order payment for order ${savedOrder.reference}`,
+            channel: 'checkout',
+            metadata: {
+              order_reference: savedOrder.reference,
+              items_count: savedOrder.items.length,
+              payment_method: 'stripe',
+              charge_currency: chargeCurrency,
+              charge_amount_minor: amountMinor,
+              fx_rate: quote.effective_rate,
+              fx_markup_percent: quote.markup_percent,
+              fx_quoted_at: quote.quoted_at,
+            },
+          });
+
+          const init = await provider.initCharge({
+            reference: intlTransaction.reference,
+            email: customer.email,
+            currency: chargeCurrency,
+            amount_minor: amountMinor,
+          });
+
+          this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+            this.logger.error('Failed to send new order notifications', err),
+          );
+          this.notifyFabricTransfers(savedOrder).catch((err) =>
+            this.logger.error(
+              'Failed to send fabric transfer notifications',
+              err,
+            ),
+          );
+
+          return {
+            message: 'Order created successfully. Redirect to payment.',
+            data: {
+              order: savedOrder,
+              transaction: {
+                reference: intlTransaction.reference,
+                amount: intlTransaction.amount,
+                status: intlTransaction.status,
+                metadata: intlTransaction.metadata,
+              },
+              payment: {
+                authorization_url: init.authorization_url,
+                reference: intlTransaction.reference,
+                processor: 'stripe',
+                charge_currency: chargeCurrency,
+                charge_amount_minor: amountMinor,
+              },
+            },
+          };
+        }
+
         // --- PAYSTACK PAYMENT (default) ---
         const transaction = await this.transactionService.create({
           initiator: new Types.ObjectId(customer.id),
