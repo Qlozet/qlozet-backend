@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -22,7 +23,21 @@ import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
-export class StyleLibraryService {
+export class StyleLibraryService implements OnModuleInit {
+  /**
+   * Migrate indexes: style_code used to be GLOBALLY unique; it is now unique
+   * per tier ({ style_code, business }). syncIndexes drops the old index and
+   * builds the compound one. The collection is small, so this is cheap; a
+   * failure only logs — the app must still boot.
+   */
+  async onModuleInit() {
+    try {
+      await this.styleModel.syncIndexes();
+    } catch (e: any) {
+      this.logger.warn(`PlatformStyle index sync failed: ${e?.message}`);
+    }
+  }
+
   private readonly logger = new Logger(StyleLibraryService.name);
   private openai: OpenAI;
 
@@ -41,6 +56,7 @@ export class StyleLibraryService {
   async create(dto: CreatePlatformStyleDto): Promise<PlatformStyleDocument> {
     const existing = await this.styleModel.findOne({
       style_code: dto.style_code,
+      business: null, // codes are unique per tier, not globally
     });
     if (existing) {
       throw new ConflictException(

@@ -33,7 +33,10 @@ export class PlatformStyle {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true, unique: true })
+  // Unique PER TIER (compound index below), not globally: the vendor create
+  // path checks codes per business, and a vendor's code choice must not block
+  // the platform library (or vice versa). See the compound index at the bottom.
+  @Prop({ required: true })
   style_code: string;
 
   @Prop({ required: true, enum: StyleCategory })
@@ -72,6 +75,12 @@ export const PlatformStyleSchema =
 
 // Index for efficient filtering
 PlatformStyleSchema.index({ category: 1, type: 1, is_active: 1 });
+// Codes are unique within a tier: one namespace for the platform library
+// (business: null) and one per vendor. Replaces the old GLOBAL unique index on
+// style_code, which let any vendor's code permanently block the platform
+// library from using it (bulk imports E11000'd on it). syncIndexes() at module
+// init drops the old index and builds this one.
+PlatformStyleSchema.index({ style_code: 1, business: 1 }, { unique: true });
 // No index on style_code here: @Prop({ unique: true }) above already declares it.
 // Declaring both makes Mongoose build the same index twice and log a
 // "Duplicate schema index" warning.
