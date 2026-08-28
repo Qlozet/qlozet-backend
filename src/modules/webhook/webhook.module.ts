@@ -8,6 +8,7 @@ import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/busi
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
 import { BespokeDesign, BespokeDesignSchema } from '../bespoke/schemas/bespoke-design.schema';
 import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
+import { EventSchema } from '../recommendations/events/schemas/event.schema';
 
 // Import modules instead of directly listing their services
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -27,6 +28,7 @@ import { PaymentProvidersModule } from '../payment-providers/payment-providers.m
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
+      { name: 'Event', schema: EventSchema }, // purchase-signal emission on finalisation
     ]),
     TransactionsModule,  // provides TransactionService
     PaymentProvidersModule, // StripeProvider (webhook signature + events)

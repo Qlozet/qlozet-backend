@@ -74,6 +74,7 @@ import {
 } from '../platform/schema/platformSettings.schema';
 import { ProviderRouter } from '../payment-providers/provider-router.service';
 import { CurrencyService } from '../currency/currency.service';
+import { buildPurchaseEvents } from '../recommendations/events/purchase-events.util';
 import {
   CheckoutPreviewResponse,
   CheckoutPreviewDto,
@@ -450,6 +451,21 @@ export class OrderService {
           await this.businessService.recordBusinessEarnings(
             savedOrder._id as Types.ObjectId,
           );
+
+          // Recommender purchase signal (wallet orders never reach the webhook
+          // finalisation path, so emit here). Fire-and-forget.
+          {
+            const purchaseEvents = buildPurchaseEvents(savedOrder);
+            if (purchaseEvents.length) {
+              this.eventModel
+                .insertMany(purchaseEvents, { ordered: false })
+                .catch((e: any) =>
+                  this.logger.warn(
+                    `Failed to record purchase events: ${e?.message}`,
+                  ),
+                );
+            }
+          }
         } catch (postErr) {
           await this.walletsService
             .creditWallet(wallet._id.toString(), savedOrder.total)
