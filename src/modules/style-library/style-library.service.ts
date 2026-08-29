@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -22,7 +23,21 @@ import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
-export class StyleLibraryService {
+export class StyleLibraryService implements OnModuleInit {
+  /**
+   * Migrate indexes: style_code used to be GLOBALLY unique; it is now unique
+   * per tier ({ style_code, business }). syncIndexes drops the old index and
+   * builds the compound one. The collection is small, so this is cheap; a
+   * failure only logs — the app must still boot.
+   */
+  async onModuleInit() {
+    try {
+      await this.styleModel.syncIndexes();
+    } catch (e: any) {
+      this.logger.warn(`PlatformStyle index sync failed: ${e?.message}`);
+    }
+  }
+
   private readonly logger = new Logger(StyleLibraryService.name);
   private openai: OpenAI;
 
@@ -41,6 +56,7 @@ export class StyleLibraryService {
   async create(dto: CreatePlatformStyleDto): Promise<PlatformStyleDocument> {
     const existing = await this.styleModel.findOne({
       style_code: dto.style_code,
+      business: null, // codes are unique per tier, not globally
     });
     if (existing) {
       throw new ConflictException(
@@ -56,29 +72,92 @@ export class StyleLibraryService {
     return this.styleModel.create(dto);
   }
 
-  async findAll(query: QueryPlatformStyleDto, businessId?: string) {
-    const filter: any = { is_active: true };
+  /**
+   * Bulk-create platform styles (admin). Mirrors the taxonomy bulk import:
+   * insertMany with ordered:false so duplicate style_codes (E11000 - the code
+   * is globally unique) skip instead of aborting the batch. Images are NOT
+   * generated inline (an awaited image-generation call per row would blow the
+   * request timeout for a big batch) - run POST /style-library/
+   * regenerate-images afterwards to backfill missing images in the background.
+   */
+  async bulkCreate(items: CreatePlatformStyleDto[]) {
+    const docs = items.map((i) => ({ ...i, business: null }));
+    try {
+      const inserted = await this.styleModel.insertMany(docs, {
+        ordered: false,
+      });
+      return {
+        inserted: inserted.length,
+        skipped: items.length - inserted.length,
+        skipped_codes: [] as string[],
+      };
+    } catch (error: any) {
+      // Partial success: Mongo reports per-document write errors.
+      const writeErrors: any[] =
+        error?.writeErrors ?? error?.result?.writeErrors ?? [];
+      const insertedCount =
+        error?.result?.insertedCount ??
+        error?.insertedDocs?.length ??
+        Math.max(0, items.length - writeErrors.length);
+      const skippedCodes = writeErrors
+        .map((w: any) => w?.err?.op?.style_code ?? w?.op?.style_code)
+        .filter(Boolean);
+      if (writeErrors.length || error?.code === 11000) {
+        return {
+          inserted: insertedCount,
+          skipped: items.length - insertedCount,
+          skipped_codes: skippedCodes,
+        };
+      }
+      throw error;
+    }
+  }
 
-    if (businessId) {
+  async findAll(
+    query: QueryPlatformStyleDto,
+    businessId?: string,
+    admin?: { scope?: string; includeInactive?: boolean },
+  ) {
+    // Admins may include soft-deleted styles (to reactivate them); everyone
+    // else only ever sees active ones.
+    const filter: any = admin?.includeInactive ? {} : { is_active: true };
+
+    if (admin) {
+      // Admin browse: platform tier by default, or vendor/all for oversight.
+      if (admin.scope === 'all') {
+        // no business filter
+      } else if (admin.scope === 'vendor') {
+        filter.business = { $ne: null };
+      } else {
+        filter.business = null;
+      }
+    } else if (businessId) {
       // Vendor sees global styles AND their own custom styles
       filter.business = { $in: [null, businessId] };
     } else {
-      // Non-vendors (or Admins if businessId is omitted) only see global styles
+      // Non-vendors only see global styles
       filter.business = null;
     }
 
     if (query.category) filter.category = query.category;
     if (query.type) filter.type = query.type;
+    // gender and search both need an $or - combine them under $and so one
+    // does not silently overwrite the other.
+    const ors: any[] = [];
     if (query.gender) {
-      filter.$or = [{ gender: query.gender }, { gender: 'unisex' }];
+      ors.push({ $or: [{ gender: query.gender }, { gender: 'unisex' }] });
     }
     if (query.search) {
-      filter.$or = [
-        { name: { $regex: query.search, $options: 'i' } },
-        { aliases: { $regex: query.search, $options: 'i' } },
-        { description: { $regex: query.search, $options: 'i' } },
-      ];
+      ors.push({
+        $or: [
+          { name: { $regex: query.search, $options: 'i' } },
+          { aliases: { $regex: query.search, $options: 'i' } },
+          { description: { $regex: query.search, $options: 'i' } },
+        ],
+      });
     }
+    if (ors.length === 1) Object.assign(filter, ors[0]);
+    else if (ors.length > 1) filter.$and = ors;
 
     const styles = await this.styleModel
       .find(filter)

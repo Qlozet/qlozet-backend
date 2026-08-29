@@ -1,3 +1,4 @@
+import { EventSchema } from '../recommendations/events/schemas/event.schema';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -30,6 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     MongooseModule.forFeature([
       { name: Product.name, schema: ProductSchema },
+      { name: 'Event', schema: EventSchema }, // rate_item recommender signal
       { name: Clothing.name, schema: ClothingSchema },
       { name: Fabric.name, schema: FabricSchema },
       { name: Variant.name, schema: VariantSchema },

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { StripeProvider } from '../payment-providers/stripe.provider';
+import { buildPurchaseEvents } from '../recommendations/events/purchase-events.util';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
 import {
@@ -53,6 +54,7 @@ export class WebhookService {
     @InjectModel('BespokeDesign') private bespokeDesignModel: Model<any>,
     @InjectModel('BespokeQuote') private bespokeQuoteModel: Model<any>,
     @InjectModel('Business') private businessModel: Model<any>,
+    @InjectModel('Event') private eventModel: Model<any>,
   ) {}
 
   /**
@@ -294,6 +296,20 @@ export class WebhookService {
       { _id: orderId },
       { status: isBespoke ? 'processing' : 'in_review', payment_status: 'paid' },
     );
+
+    // Recommender purchase signal — FIRST finalisation only (webhook retries
+    // and the verify safety-net both land here; alreadyPaid dedupes them).
+    // Fire-and-forget: the signal must never block order finalisation.
+    if (!alreadyPaid) {
+      const purchaseEvents = buildPurchaseEvents(order);
+      if (purchaseEvents.length) {
+        this.eventModel
+          .insertMany(purchaseEvents, { ordered: false })
+          .catch((e: any) =>
+            this.logger.warn(`Failed to record purchase events: ${e?.message}`),
+          );
+      }
+    }
 
     await Promise.all([
       this.businessService.recordBusinessEarnings(orderId),

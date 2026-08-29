@@ -1,3 +1,4 @@
+import { EventSchema } from '../recommendations/events/schemas/event.schema';
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReturnsService } from './returns.service';
@@ -21,6 +22,7 @@ import { ProductModule } from '../products/products.module';
       { name: BusinessEarning.name, schema: BusinessEarningSchema },
       { name: Business.name, schema: BusinessSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      { name: 'Event', schema: EventSchema }, // return_item recommender signal
     ]),
     NotificationsModule,
     TransactionsModule,

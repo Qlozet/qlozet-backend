@@ -15,6 +15,7 @@ import { StyleLibraryService } from './style-library.service';
 import { UserService } from '../ums/services/users.service';
 import {
   CreatePlatformStyleDto,
+  BulkCreatePlatformStylesDto,
   UpdatePlatformStyleDto,
   QueryPlatformStyleDto,
   AddPlatformStylesDto,
@@ -59,6 +60,17 @@ export class StyleLibraryController {
   @ApiOperation({ summary: 'Deactivate a platform style (admin only)' })
   deactivate(@Param('id') id: string) {
     return this.service.deactivate(id);
+  }
+
+  @Post('bulk')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({
+    summary:
+      'Bulk-create platform styles (admin only). Duplicate style_codes are skipped; run regenerate-images afterwards to backfill missing images.',
+  })
+  bulkCreate(@Body() dto: BulkCreatePlatformStylesDto) {
+    return this.service.bulkCreate(dto.items);
   }
 
   @Post('seed')
@@ -137,6 +149,7 @@ export class StyleLibraryController {
   @ApiOperation({ summary: 'Browse platform styles (and custom styles if vendor)' })
   async findAll(@Query() query: QueryPlatformStyleDto, @Req() req: any) {
     let businessId: string | undefined = undefined;
+    let admin: { scope?: string; includeInactive?: boolean } | undefined;
     if (req.user?.id) {
       try {
         const user = await this.userService.findById(req.user.id);
@@ -144,11 +157,19 @@ export class StyleLibraryController {
           // Mongoose populate might make business an object, or it might just be the ID
           businessId = (user.business as any)._id?.toString() || user.business.toString();
         }
+        // Platform users may widen the browse: scope=vendor|all for oversight,
+        // include_inactive=true to see (and reactivate) soft-deleted styles.
+        if (user && user.type === UserType.PLATFORM) {
+          admin = {
+            scope: query.scope,
+            includeInactive: query.include_inactive === 'true',
+          };
+        }
       } catch (e) {
         // Ignore user not found error for token
       }
     }
-    return this.service.findAll(query, businessId);
+    return this.service.findAll(query, businessId, admin);
   }
 
   @Get('categories')

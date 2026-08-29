@@ -37,6 +37,8 @@ export class ReturnsService {
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(PlatformSettings.name)
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+    @InjectModel('Event')
+    private readonly recEventModel: Model<any>,
     private readonly notificationsService: NotificationsService,
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
@@ -298,6 +300,28 @@ export class ReturnsService {
     returnReq.status = ReturnStatus.REFUND_PROCESSED;
     returnReq.refunded_at = new Date();
     await returnReq.save();
+
+    // Recommender signal: a completed return is the natural negative
+    // counterpart to purchase — "bought it, sent it back". Server-side so
+    // every client is covered. Fire-and-forget.
+    {
+      const now = new Date();
+      this.recEventModel
+        .insertMany(
+          (returnReq.items || []).map((id: any) => ({
+            userId: returnReq.customer.toString(),
+            eventType: 'return_item',
+            properties: { itemId: id.toString(), reason: returnReq.reason },
+            context: { surface: 'returns' },
+            metadata: { order_reference: returnReq.order_reference },
+            timestamp: now,
+          })),
+          { ordered: false },
+        )
+        .catch((e: any) =>
+          this.logger.warn(`Failed to record return_item events: ${e?.message}`),
+        );
+    }
 
     // If every still-active item in the order has now been returned+refunded,
     // reflect that on the order itself — otherwise a fully returned order keeps
