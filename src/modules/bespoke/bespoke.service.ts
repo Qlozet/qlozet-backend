@@ -351,30 +351,33 @@ export class BespokeService {
       );
     }
 
-    // Enforce max vendor limit
-    const existingQuoteCount = await this.quoteModel.countDocuments({
-      design: design._id,
-    });
-    const totalAfterRequest = existingQuoteCount + dto.vendor_ids.length;
+    // Cap + dedupe consider only ACTIVE quotes. Expired/declined quotes free
+    // their slot so an unresponsive tailor can be replaced — and the same
+    // vendor can be re-requested after their previous quote expired/declined.
+    const activeQuotes = await this.quoteModel
+      .find({
+        design: design._id,
+        status: {
+          $nin: [BespokeQuoteStatus.EXPIRED, BespokeQuoteStatus.DECLINED],
+        },
+      })
+      .select('vendor');
 
-    if (totalAfterRequest > MAX_VENDORS_PER_DESIGN) {
-      throw new BadRequestException(
-        `Maximum ${MAX_VENDORS_PER_DESIGN} vendors per design. You already have ${existingQuoteCount} quote(s).`,
-      );
-    }
+    const existingVendorIds = activeQuotes.map((q) => q.vendor.toString());
 
-    // Validate vendor IDs and check for duplicates
-    const existingVendorIds = (
-      await this.quoteModel.find({ design: design._id }).select('vendor')
-    ).map((q) => q.vendor.toString());
-
-    const newVendorIds = dto.vendor_ids.filter(
+    const newVendorIds = [...new Set(dto.vendor_ids)].filter(
       (id) => !existingVendorIds.includes(id),
     );
 
     if (newVendorIds.length === 0) {
       throw new BadRequestException(
-        'All selected vendors already have quote requests for this design',
+        'All selected vendors already have active quote requests for this design',
+      );
+    }
+
+    if (activeQuotes.length + newVendorIds.length > MAX_VENDORS_PER_DESIGN) {
+      throw new BadRequestException(
+        `Maximum ${MAX_VENDORS_PER_DESIGN} active vendors per design. You already have ${activeQuotes.length} active quote(s).`,
       );
     }
 
@@ -481,6 +484,32 @@ export class BespokeService {
 
     const design = await this.designModel.findById(quote.design);
     if (!design) throw new NotFoundException('Design not found');
+
+    // Double-charge guard: if ANOTHER quote on this design has a checkout in
+    // flight (pending order touched recently), block a second acceptance —
+    // both payments could complete and put two tailors into production.
+    // Stale abandoned checkouts are superseded instead of blocking forever.
+    const IN_FLIGHT_WINDOW_MS = 30 * 60 * 1000;
+    const rivalPending = await this.orderModel.findOne({
+      bespoke_design: design._id,
+      bespoke_quote: { $ne: quote._id },
+      status: OrderStatus.PENDING,
+    });
+    if (rivalPending) {
+      const lastTouched = new Date(
+        (rivalPending as any).updatedAt ?? (rivalPending as any).createdAt ?? 0,
+      ).getTime();
+      if (Date.now() - lastTouched < IN_FLIGHT_WINDOW_MS) {
+        throw new BadRequestException(
+          'A payment for another quote on this design is still in progress. Complete it, or try again in a few minutes.',
+        );
+      }
+      rivalPending.status = OrderStatus.CANCELLED;
+      await rivalPending.save();
+      this.logger.log(
+        `Superseded stale pending bespoke order ${rivalPending.reference} for design ${design.reference}`,
+      );
+    }
 
     // Find an existing unpaid order for this quote (retry) or create a new one.
     // IMPORTANT: acceptance (accept quote + decline the alternatives) is
@@ -951,6 +980,13 @@ export class BespokeService {
     const previousStatus = quote.status;
     quote.status = BespokeQuoteStatus.SUBMITTED;
     quote.submitted_at = new Date();
+
+    // Restart the expiry clock from submission. expires_at was set at request
+    // time, so a day-6 submission would leave the customer ~1 day to decide;
+    // they get the full window from the moment the quote lands instead.
+    const acceptBy = new Date();
+    acceptBy.setDate(acceptBy.getDate() + QUOTE_EXPIRY_DAYS);
+    quote.expires_at = acceptBy;
 
     // If this was a revision, add to history
     if (previousStatus === BespokeQuoteStatus.REVISION_REQUESTED) {
