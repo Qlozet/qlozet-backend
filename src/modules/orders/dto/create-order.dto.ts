@@ -96,6 +96,15 @@ export class CreateOrderDto {
   address_id?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Name of the saved measurement set to snapshot onto this order (for custom items — e.g. ordering for a friend). Defaults to the active set.',
+    example: 'For Tolu',
+  })
+  @IsOptional()
+  @IsString()
+  measurement_set_name?: string;
+
+  @ApiPropertyOptional({
     description: 'Payment method to use. Defaults to paystack (card/bank). Use wallet to pay from wallet balance.',
     enum: PaymentMethod,
     default: PaymentMethod.PAYSTACK,
