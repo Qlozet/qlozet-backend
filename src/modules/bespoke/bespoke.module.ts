@@ -12,6 +12,7 @@ import {
   BespokeQuoteSchema,
 } from './schemas/bespoke-quote.schema';
 import { Address, AddressSchema } from '../ums/schemas/address.schema';
+import { User, UserSchema } from '../ums/schemas/user.schema';
 
 // Import modules for dependencies
 import { AuthModule } from '../auth/auth.module';
@@ -29,6 +30,8 @@ import { WalletsModule } from '../wallets/wallets.module';
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
       { name: Address.name, schema: AddressSchema },
+      // Read-only: measurement-set snapshot at quote acceptance.
+      { name: User.name, schema: UserSchema },
     ]),
     AuthModule,
     OrdersModule,        // provides Order model

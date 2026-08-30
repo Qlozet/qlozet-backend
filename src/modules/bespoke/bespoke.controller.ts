@@ -189,13 +189,19 @@ export class BespokeController {
   async acceptQuote(
     @Param('id') id: string,
     @Req() req: any,
-    @Body() body: { payment_method?: 'wallet' | 'paystack'; address_id?: string },
+    @Body()
+    body: {
+      payment_method?: 'wallet' | 'paystack';
+      address_id?: string;
+      measurement_set_name?: string;
+    },
   ) {
     return this.bespokeService.acceptQuote(
       id,
       req.user,
       body?.payment_method === 'wallet' ? 'wallet' : 'paystack',
       body?.address_id,
+      body?.measurement_set_name,
     );
   }
 

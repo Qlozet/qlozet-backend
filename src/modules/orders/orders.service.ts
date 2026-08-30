@@ -358,16 +358,25 @@ export class OrderService {
         measurements: Record<string, number>;
         unit: string;
         fit_preferences: string[];
+        set_name?: string | null;
       } | undefined = undefined;
       if (isBespoke && fullCustomer?.body_type_classification && fullCustomer?.measurementSets?.length) {
-        const activeSet = fullCustomer.measurementSets.find((s) => s.active);
-        if (activeSet) {
+        // The customer can order for someone else ("For Tolu") by naming one
+        // of their saved measurement sets; otherwise the active set is used.
+        const chosenSet =
+          (orderData.measurement_set_name &&
+            fullCustomer.measurementSets.find(
+              (s) => s.name === orderData.measurement_set_name,
+            )) ||
+          fullCustomer.measurementSets.find((s) => s.active);
+        if (chosenSet) {
           customer_body_profile = {
             body_type: fullCustomer.body_type_classification.bodyType,
             confidence: fullCustomer.body_type_classification.confidence,
-            measurements: activeSet.measurements,
-            unit: activeSet.unit,
+            measurements: chosenSet.measurements,
+            unit: chosenSet.unit,
             fit_preferences: fullCustomer.body_fit || [],
+            set_name: chosenSet.name || null,
           };
         }
       }
@@ -1577,7 +1586,7 @@ export class OrderService {
   ) {
     const order = await this.orderModel
       .findOne({ reference })
-      .select('customer items shipments')
+      .select('customer items shipments customer_body_profile')
       .lean();
     if (!order) throw new NotFoundException('Order not found');
 
@@ -1609,6 +1618,25 @@ export class OrderService {
       .lean();
     if (!user) throw new NotFoundException('Customer not found');
 
+    // Prefer the ORDER-TIME snapshot: the customer may have ordered with a
+    // different set (e.g. a friend's), or edited/switched sets since. Reading
+    // the live profile here risks sewing the garment to the wrong body.
+    const snapshot = (order as any).customer_body_profile;
+    if (snapshot?.measurements && Object.keys(snapshot.measurements).length) {
+      return {
+        data: {
+          full_name: (user as any).full_name,
+          name: snapshot.set_name || 'At time of order',
+          unit: snapshot.unit || 'cm',
+          active: false,
+          snapshot: true,
+          updatedAt: null,
+          measurements: snapshot.measurements,
+        },
+      };
+    }
+
+    // Legacy orders (no snapshot): fall back to the live active set.
     const sets = (user as any).measurementSets || [];
     const active = sets.find((s: any) => s.active) || sets[0] || null;
     if (!active) return { data: null };

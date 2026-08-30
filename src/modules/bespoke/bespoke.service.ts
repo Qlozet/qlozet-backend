@@ -76,6 +76,8 @@ export class BespokeService {
     private readonly productModel: Model<ProductDocument>,
     @InjectModel('Address')
     private readonly addressModel: Model<any>,
+    @InjectModel('User')
+    private readonly userModel: Model<any>,
     @InjectModel('BusinessEarning')
     private readonly businessEarningsModel: Model<any>,
     @InjectModel('PlatformSettings')
@@ -456,11 +458,42 @@ export class BespokeService {
     };
   }
 
+  /**
+   * Snapshot the customer's chosen measurement set (by name; falls back to the
+   * active set) so the tailor sews to the body the order was placed FOR — the
+   * live profile can be switched/edited at any time after acceptance.
+   */
+  private async buildBodyProfileSnapshot(
+    customerId: string,
+    setName?: string,
+  ) {
+    const user = await this.userModel
+      .findById(customerId)
+      .select('measurementSets body_type_classification body_fit')
+      .lean();
+    const sets: any[] = (user as any)?.measurementSets || [];
+    if (!sets.length) return null;
+    const chosen =
+      (setName && sets.find((s) => s.name === setName)) ||
+      sets.find((s) => s.active) ||
+      sets[0];
+    if (!chosen) return null;
+    return {
+      body_type: (user as any)?.body_type_classification?.bodyType || null,
+      confidence: (user as any)?.body_type_classification?.confidence || null,
+      measurements: chosen.measurements || {},
+      unit: chosen.unit || 'cm',
+      fit_preferences: (user as any)?.body_fit || [],
+      set_name: chosen.name || null,
+    };
+  }
+
   async acceptQuote(
     quoteId: string,
     customer: any,
     paymentMethod: 'wallet' | 'paystack' = 'paystack',
     addressId?: string,
+    measurementSetName?: string,
   ) {
     const quote = await this.quoteModel.findOne({
       _id: new Types.ObjectId(quoteId),
@@ -520,6 +553,20 @@ export class BespokeService {
       bespoke_quote: quote._id,
       status: OrderStatus.PENDING,
     });
+
+    // Measurements are frozen HERE — the tailor reads this snapshot, not the
+    // live profile the customer may edit or switch later.
+    const bodyProfile = await this.buildBodyProfileSnapshot(
+      customer.id,
+      measurementSetName,
+    );
+
+    if (order && bodyProfile) {
+      // Retry of an earlier checkout — refresh the snapshot in case the
+      // customer picked a different measurement set this time.
+      order.customer_body_profile = bodyProfile as any;
+      await order.save();
+    }
 
     if (!order) {
       // Resolve the customer's shipping address (so the tailor can fulfil).
@@ -598,6 +645,7 @@ export class BespokeService {
         shipping_fee: 0,
         total: quote.total,
         status: OrderStatus.PENDING,
+        customer_body_profile: bodyProfile,
       }).save();
     }
 

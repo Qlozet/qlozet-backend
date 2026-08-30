@@ -449,6 +449,7 @@ export class Order {
       measurements: { type: Object },
       unit: { type: String },
       fit_preferences: { type: [String], default: [] },
+      set_name: { type: String, default: null },
     },
     default: null,
   })
@@ -458,6 +459,8 @@ export class Order {
     measurements: Record<string, number>;
     unit: string;
     fit_preferences: string[];
+    /** Which measurement set was chosen at order time (e.g. "For Tolu"). */
+    set_name?: string | null;
   };
 
   @Prop({ type: Boolean, default: false })
