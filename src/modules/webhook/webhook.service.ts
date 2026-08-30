@@ -658,6 +658,21 @@ export class WebhookService {
       // Update order-level payout tracking
       order.payout_eligible_at = releaseDate;
       order.payout_status = 'eligible';
+
+      // A delivered bespoke order completes its design — otherwise My Designs
+      // shows "in production" forever after the garment has arrived.
+      if ((order as any).bespoke_design) {
+        await this.bespokeDesignModel
+          .updateOne(
+            { _id: (order as any).bespoke_design },
+            { $set: { status: 'completed' } },
+          )
+          .catch((e: any) =>
+            this.logger.error(
+              `Failed to complete bespoke design for order ${order.reference}: ${e?.message}`,
+            ),
+          );
+      }
     } else if (
       order.shipments.some(
         (s) =>
