@@ -370,10 +370,11 @@ export class OrderController {
     return this.orderService.getVendorDashboardMetrics(req.business?.id);
   }
 
-  @Roles(UserType.VENDOR)
+  @Roles(UserType.VENDOR, UserType.ADMIN)
   @Get(':reference/measurements')
   @ApiOperation({
-    summary: "Read the measurement set of this order's customer (vendor)",
+    summary:
+      "Read the measurement set of this order's customer (vendor: own orders; admin: any)",
   })
   @ApiParam({ name: 'reference', description: 'Order reference' })
   async getOrderMeasurements(
