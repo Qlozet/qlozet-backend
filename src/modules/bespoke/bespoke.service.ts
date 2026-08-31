@@ -622,6 +622,35 @@ export class BespokeService {
         deadline.getDate() + (quote.estimated_completion_days || 7),
       );
 
+      // ── Design fabric: OWNERSHIP decides the shape ──
+      // Tailor's own fabric → it rides as their catalog product with a
+      // fabric_selections entry (their fabric card reads "your fabric";
+      // the quote already prices it). Another vendor's fabric → the
+      // use-fabric shape: applied_fabric on the tailor's item, a PAID line
+      // item for the fabric vendor, and a fabric-transfer shipment so they
+      // ship the yards to the tailor. The fabric cost rides ON TOP of the
+      // quote — the quote is the tailor's price for work they control, not
+      // for another vendor's stock.
+      const fabricProduct = design.fabric
+        ? await this.productModel.findById(design.fabric).lean()
+        : null;
+      const fabricYards =
+        quote.required_fabric_yards ||
+        (fabricProduct as any)?.fabric?.min_cut ||
+        1;
+      const fabricForeign =
+        !!fabricProduct &&
+        String((fabricProduct as any).business) !== String(quote.vendor);
+      const fabricCost = fabricForeign
+        ? Math.round(
+            (((fabricProduct as any)?.fabric?.price_per_yard as number) ||
+              0) * fabricYards,
+          )
+        : 0;
+
+      const fabricTransferDeadline = new Date();
+      fabricTransferDeadline.setDate(fabricTransferDeadline.getDate() + 3);
+
       order = await new this.orderModel({
         reference: orderReference,
         customer: new Types.ObjectId(customer.id),
@@ -633,12 +662,40 @@ export class BespokeService {
           : address,
         items: [
           {
-            product: design.fabric || null,
+            product: fabricForeign ? null : design.fabric || null,
             business: quote.vendor,
             total_price: quote.total,
             note: quote.vendor_notes,
             body_profile: bodyProfile,
+            ...(fabricProduct && !fabricForeign
+              ? {
+                  fabric_selections: [
+                    {
+                      fabric_id: String(design.fabric),
+                      yardage: fabricYards,
+                      quantity: 1,
+                    },
+                  ],
+                }
+              : {}),
+            ...(fabricForeign
+              ? {
+                  applied_fabric: design.fabric,
+                  applied_fabric_yards: fabricYards,
+                }
+              : {}),
           },
+          ...(fabricForeign
+            ? [
+                {
+                  product: design.fabric,
+                  business: (fabricProduct as any).business,
+                  total_price: fabricCost,
+                  subtotal: fabricCost,
+                  note: `Fabric for bespoke ${design.reference} — ${fabricYards} yd`,
+                },
+              ]
+            : []),
         ],
         shipments: [
           {
@@ -650,10 +707,23 @@ export class BespokeService {
             fulfillment_deadline: deadline,
             shipping_fee: 0,
           },
+          ...(fabricForeign
+            ? [
+                {
+                  business: (fabricProduct as any).business,
+                  shipment_type: ShipmentType.FABRIC_TRANSFER,
+                  status: ShipmentStatus.PENDING,
+                  confirmed: true,
+                  confirmed_at: new Date(),
+                  fulfillment_deadline: fabricTransferDeadline,
+                  shipping_fee: 0,
+                },
+              ]
+            : []),
         ],
-        subtotal: quote.total,
+        subtotal: quote.total + fabricCost,
         shipping_fee: 0,
-        total: quote.total,
+        total: quote.total + fabricCost,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
       }).save();
