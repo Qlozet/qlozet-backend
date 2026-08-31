@@ -20,6 +20,22 @@ export class CustomResponseInterceptor {
       map((data) => {
         const messageFromData = data?.message || null;
 
+        // Un-nest { message, data } service envelopes WITHOUT spreading the
+        // inner value. Spreading a Mongoose document copies its internals and
+        // buries the real fields under `_doc` (clients then see no _id), and
+        // spreading an array turns it into an object with numeric keys.
+        let inner: any;
+        if (messageFromData) {
+          inner = (data as any)?.data;
+          if (inner === undefined || inner === null) {
+            inner = {}; // preserve the old {} shape for message-only returns
+          } else if (typeof inner.toObject === 'function') {
+            inner = inner.toObject(); // Mongoose document → plain fields
+          }
+        } else {
+          inner = data;
+        }
+
         return {
           statusCode,
           message: messageFromData || (statusCode >= 400 ? 'Error' : 'Success'), // Use message from data if available
@@ -27,7 +43,7 @@ export class CustomResponseInterceptor {
           timestamp: Date.now(),
           version: 'v1',
           path: request.url,
-          data: messageFromData ? { ...data.data, message: undefined } : data, // Remove message from data if it was promoted
+          data: inner,
         };
       }),
       catchError((err) => {
