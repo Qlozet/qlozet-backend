@@ -53,4 +53,13 @@ export class ProcessedOrderItemDto {
   @Min(0)
   @IsOptional()
   applied_fabric_yards?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Saved measurement-set NAME this garment is sewn to (per-item — one order can carry items for different bodies). Defaults to the order-level choice, then the active set.',
+    example: 'For Tolu',
+  })
+  @IsString()
+  @IsOptional()
+  measurement_set_name?: string;
 }

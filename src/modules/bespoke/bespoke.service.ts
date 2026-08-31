@@ -570,6 +570,10 @@ export class BespokeService {
       // Retry of an earlier checkout — refresh the snapshot in case the
       // customer picked a different measurement set this time.
       order.customer_body_profile = bodyProfile as any;
+      if (order.items?.[0]) {
+        (order.items[0] as any).body_profile = bodyProfile;
+        order.markModified('items');
+      }
       await order.save();
     }
 
@@ -633,6 +637,7 @@ export class BespokeService {
             business: quote.vendor,
             total_price: quote.total,
             note: quote.vendor_notes,
+            body_profile: bodyProfile,
           },
         ],
         shipments: [

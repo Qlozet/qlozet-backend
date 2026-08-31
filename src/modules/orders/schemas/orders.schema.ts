@@ -192,6 +192,19 @@ export class OrderItem {
 
   @Prop({ type: String })
   rejection_reason?: string;
+
+  // Order-time measurement snapshot for THIS garment. A single order can
+  // carry custom items for different bodies (e.g. asoebi/family orders) —
+  // each item freezes the set it must be sewn to.
+  @Prop({ type: Object, default: null })
+  body_profile?: {
+    body_type?: string | null;
+    confidence?: string | null;
+    measurements: Record<string, number>;
+    unit: string;
+    fit_preferences?: string[];
+    set_name?: string | null;
+  } | null;
 }
 
 
