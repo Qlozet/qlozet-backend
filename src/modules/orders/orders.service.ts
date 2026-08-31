@@ -163,10 +163,53 @@ export class OrderService {
         generateUniqueQlozetReference(this.orderModel, 'ORD'),
         this.priceCalculationService.calculateOrderTotal(processedItems),
       ]);
-      const normalizedItems = processedItems.map((item) => {
+      // Per-item measurement snapshots: one order can carry custom garments
+      // for DIFFERENT bodies (asoebi/family orders), so each item freezes the
+      // set named on its cart line; item name > order-level name > active set.
+      const rawItems: any[] = (orderData.items as any[]) || [];
+      const resolveBodyProfile = (setName?: string | null) => {
+        const sets: any[] = (fullCustomer as any)?.measurementSets || [];
+        if (!sets.length) return null;
+        const chosen =
+          (setName && sets.find((s) => s.name === setName)) ||
+          sets.find((s) => s.active);
+        if (!chosen) return null;
+        return {
+          body_type:
+            (fullCustomer as any)?.body_type_classification?.bodyType ?? null,
+          confidence:
+            (fullCustomer as any)?.body_type_classification?.confidence ??
+            null,
+          measurements: chosen.measurements || {},
+          unit: chosen.unit || 'cm',
+          fit_preferences: (fullCustomer as any)?.body_fit || [],
+          set_name: chosen.name || null,
+        };
+      };
+      const itemSetName = (idx: number, productId: any): string | undefined => {
+        // Prefer positional match (raw and processed items are same-order);
+        // fall back to product id if the pipeline ever reshapes the list.
+        const byIndex =
+          rawItems.length === processedItems.length ? rawItems[idx] : undefined;
+        if (byIndex?.measurement_set_name) return byIndex.measurement_set_name;
+        return rawItems.find(
+          (ri) =>
+            String(ri.product_id) === String(productId) &&
+            ri.measurement_set_name,
+        )?.measurement_set_name;
+      };
+
+      const normalizedItems = processedItems.map((item, itemIdx) => {
         const selections = item.selections || {};
 
         return {
+          body_profile:
+            item.clothing_type === ClothingType.CUSTOMIZE
+              ? resolveBodyProfile(
+                  itemSetName(itemIdx, item.product_id) ??
+                    orderData.measurement_set_name,
+                )
+              : null,
           product: item.product_id,
           business: item.business,
           note: item.note,
@@ -1587,6 +1630,7 @@ export class OrderService {
     const order = await this.orderModel
       .findOne({ reference })
       .select('customer items shipments customer_body_profile')
+      .populate('items.product', 'name')
       .lean();
     if (!order) throw new NotFoundException('Order not found');
 
@@ -1618,11 +1662,31 @@ export class OrderService {
       .lean();
     if (!user) throw new NotFoundException('Customer not found');
 
+    // Per-item snapshots first: one order can carry garments for DIFFERENT
+    // bodies. Vendors see only their own items' profiles; admin sees all.
+    const hasMeasurements = (p: any) =>
+      p?.measurements && Object.keys(p.measurements).length > 0;
+    const itemProfiles = (((order as any).items || []) as any[])
+      .filter(
+        (i) =>
+          hasMeasurements(i.body_profile) &&
+          !i.rejected &&
+          (!scopeBusinessId ||
+            String(i.business) === String(scopeBusinessId)),
+      )
+      .map((i) => ({
+        product_name: (i.product as any)?.name ?? null,
+        set_name: i.body_profile.set_name ?? null,
+        unit: i.body_profile.unit || 'cm',
+        snapshot: true,
+        measurements: i.body_profile.measurements,
+      }));
+
     // Prefer the ORDER-TIME snapshot: the customer may have ordered with a
     // different set (e.g. a friend's), or edited/switched sets since. Reading
     // the live profile here risks sewing the garment to the wrong body.
     const snapshot = (order as any).customer_body_profile;
-    if (snapshot?.measurements && Object.keys(snapshot.measurements).length) {
+    if (hasMeasurements(snapshot)) {
       return {
         data: {
           full_name: (user as any).full_name,
@@ -1632,6 +1696,24 @@ export class OrderService {
           snapshot: true,
           updatedAt: null,
           measurements: snapshot.measurements,
+          items: itemProfiles,
+        },
+      };
+    }
+
+    // No order-level snapshot but per-item ones exist (future-proofing).
+    if (itemProfiles.length > 0) {
+      const first = itemProfiles[0];
+      return {
+        data: {
+          full_name: (user as any).full_name,
+          name: first.set_name || 'At time of order',
+          unit: first.unit,
+          active: false,
+          snapshot: true,
+          updatedAt: null,
+          measurements: first.measurements,
+          items: itemProfiles,
         },
       };
     }

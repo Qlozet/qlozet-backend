@@ -247,7 +247,12 @@ export class BespokeService {
     status?: string,
   ) {
     const filter: any = { customer: new Types.ObjectId(customerId) };
-    if (status) filter.status = status;
+    // "Delete" in the UI cancels the design (the record backs any orders that
+    // reference it) — so cancelled designs are hidden unless explicitly asked
+    // for via ?status=cancelled.
+    filter.status = status
+      ? status
+      : { $ne: BespokeDesignStatus.CANCELLED };
 
     const [designs, total] = await Promise.all([
       this.designModel
@@ -565,6 +570,10 @@ export class BespokeService {
       // Retry of an earlier checkout — refresh the snapshot in case the
       // customer picked a different measurement set this time.
       order.customer_body_profile = bodyProfile as any;
+      if (order.items?.[0]) {
+        (order.items[0] as any).body_profile = bodyProfile;
+        order.markModified('items');
+      }
       await order.save();
     }
 
@@ -628,6 +637,7 @@ export class BespokeService {
             business: quote.vendor,
             total_price: quote.total,
             note: quote.vendor_notes,
+            body_profile: bodyProfile,
           },
         ],
         shipments: [
