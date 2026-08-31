@@ -247,7 +247,12 @@ export class BespokeService {
     status?: string,
   ) {
     const filter: any = { customer: new Types.ObjectId(customerId) };
-    if (status) filter.status = status;
+    // "Delete" in the UI cancels the design (the record backs any orders that
+    // reference it) — so cancelled designs are hidden unless explicitly asked
+    // for via ?status=cancelled.
+    filter.status = status
+      ? status
+      : { $ne: BespokeDesignStatus.CANCELLED };
 
     const [designs, total] = await Promise.all([
       this.designModel
