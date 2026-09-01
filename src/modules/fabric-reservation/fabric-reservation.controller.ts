@@ -79,6 +79,20 @@ export class FabricReservationController {
     );
   }
 
+  @Post(':id/pay-fee')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Retry the reservation fee payment (organizer)',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Returns the Paystack payment link for the outstanding fee, or already_paid.',
+  })
+  async payReservationFee(@Param('id') id: string, @Req() req: any) {
+    return this.reservationService.payReservationFee(id, req.user);
+  }
+
   @Patch(':id/cancel')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cancel a reservation (organizer)' })
