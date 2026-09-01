@@ -19,6 +19,17 @@ export class FabricClaim {
 
   @Prop({ required: true, min: 0 })
   total_amount: number;
+
+  // Set by the payment webhook once the guest's charge settles. Yards are
+  // held from the moment of claiming (so two guests can't race for the same
+  // cut), but an unpaid claim is released back by cron after a grace window.
+  @Prop({ default: false })
+  paid: boolean;
+
+  // True once an unpaid claim's yards have been released back to the
+  // reservation — prevents double-release and excludes it from progress.
+  @Prop({ default: false })
+  released: boolean;
 }
 
 export const FabricClaimSchema = SchemaFactory.createForClass(FabricClaim);

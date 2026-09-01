@@ -39,6 +39,12 @@ export class FabricReservation {
   @Prop({ type: Types.ObjectId, ref: 'Transaction', default: null })
   fee_transaction: Types.ObjectId;
 
+  // Set by the payment webhook / verify safety-net once the organizer's
+  // reservation fee actually settles. Unpaid reservations are auto-cancelled
+  // (yards released) by cron so an abandoned payment can't lock inventory.
+  @Prop({ default: false })
+  fee_paid: boolean;
+
   @Prop({ required: true })
   deadline: Date;
 

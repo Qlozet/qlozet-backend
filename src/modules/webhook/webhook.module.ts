@@ -9,6 +9,14 @@ import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/pla
 import { BespokeDesign, BespokeDesignSchema } from '../bespoke/schemas/bespoke-design.schema';
 import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
 import { EventSchema } from '../recommendations/events/schemas/event.schema';
+import {
+  FabricReservation,
+  FabricReservationSchema,
+} from '../fabric-reservation/schemas/fabric-reservation.schema';
+import {
+  FabricClaim,
+  FabricClaimSchema,
+} from '../fabric-reservation/schemas/fabric-claim.schema';
 
 // Import modules instead of directly listing their services
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -29,6 +37,9 @@ import { PaymentProvidersModule } from '../payment-providers/payment-providers.m
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
       { name: 'Event', schema: EventSchema }, // purchase-signal emission on finalisation
+      // Reservation fee settlement (fee_paid) + claim settlement (paid)
+      { name: FabricReservation.name, schema: FabricReservationSchema },
+      { name: FabricClaim.name, schema: FabricClaimSchema },
     ]),
     TransactionsModule,  // provides TransactionService
     PaymentProvidersModule, // StripeProvider (webhook signature + events)
