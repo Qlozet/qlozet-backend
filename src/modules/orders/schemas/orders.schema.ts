@@ -371,7 +371,14 @@ export class Order {
   })
   status: OrderStatus;
 
-  @Prop({ type: String, enum: ['standard', 'bespoke'], default: 'standard' })
+  // 'reservation' = an organizer's fabric-reservation FEE order (platform
+  // revenue, nothing to fulfil); 'reservation_claim' = a guest buying yards
+  // from a reservation (the fabric vendor fulfils it like a fabric sale).
+  @Prop({
+    type: String,
+    enum: ['standard', 'bespoke', 'reservation', 'reservation_claim'],
+    default: 'standard',
+  })
   type?: string;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', default: null })

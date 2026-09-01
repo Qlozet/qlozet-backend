@@ -1293,6 +1293,11 @@ export class OrderService {
           { 'items.business': business },
           { 'shipments.business': business },
         ];
+        // Reservation FEE orders reference the fabric vendor on their item but
+        // are platform revenue with nothing to fulfil — showing them to the
+        // vendor reads as an unpaid order they can never action. Claims
+        // (type 'reservation_claim') DO show: the vendor hands over those yards.
+        filter.type = { $ne: 'reservation' };
       }
       if (status && status !== 'all') {
         filter.status = status;

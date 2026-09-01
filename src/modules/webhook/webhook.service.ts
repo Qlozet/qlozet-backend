@@ -55,6 +55,9 @@ export class WebhookService {
     @InjectModel('BespokeQuote') private bespokeQuoteModel: Model<any>,
     @InjectModel('Business') private businessModel: Model<any>,
     @InjectModel('Event') private eventModel: Model<any>,
+    @InjectModel('FabricReservation')
+    private fabricReservationModel: Model<any>,
+    @InjectModel('FabricClaim') private fabricClaimModel: Model<any>,
   ) {}
 
   /**
@@ -256,7 +259,45 @@ export class WebhookService {
       );
     }
 
+    // Fabric-reservation FEE settled: activate the reservation. The fee is
+    // platform revenue — no earnings, no inventory (yards were locked at
+    // creation) — so it must NOT go through finalizeCheckoutOrder.
+    if (transaction.channel === 'reservation') {
+      await this.finalizeReservationFee(transaction).catch((error) =>
+        this.logger.error(
+          `Failed to finalize reservation fee: ${error.message}`,
+          error.stack,
+        ),
+      );
+    }
+
     return isWalletFunding;
+  }
+
+  /**
+   * Mark a fabric reservation live once its fee payment settles: flag the
+   * reservation fee_paid (guests can only claim from paid reservations, and
+   * the unpaid-holds cron cancels reservations that never pay), and close out
+   * the fee order so it doesn't linger as "pending" in the customer's history.
+   * Idempotent — safe on webhook retries.
+   */
+  private async finalizeReservationFee(transaction: TransactionDocument) {
+    const reservationId = (transaction.metadata as any)?.reservation_id;
+    if (reservationId) {
+      await this.fabricReservationModel.updateOne(
+        { _id: reservationId, fee_paid: { $ne: true } },
+        { $set: { fee_paid: true } },
+      );
+    }
+    if (transaction.order) {
+      await this.orderModel.updateOne(
+        { _id: transaction.order._id ?? transaction.order },
+        { $set: { status: 'completed', payment_status: 'paid' } },
+      );
+    }
+    this.logger.log(
+      `Reservation fee settled for reservation ${reservationId ?? '(unknown)'} — reservation activated`,
+    );
   }
 
   /**
@@ -311,9 +352,21 @@ export class WebhookService {
       }
     }
 
+    // Reservation claims: the claimed yards were deducted from the fabric when
+    // the ORGANIZER's reservation locked them — running updateInventory here
+    // would deduct the same yards a second time. Earnings still record (the
+    // fabric vendor is paid for claimed yards), and the claim itself is marked
+    // paid so the unpaid-holds cron leaves it alone.
+    const isReservationClaim = (order as any)?.type === 'reservation_claim';
+
     await Promise.all([
       this.businessService.recordBusinessEarnings(orderId),
-      this.productService.updateInventory(orderId),
+      isReservationClaim
+        ? this.fabricClaimModel.updateOne(
+            { order: orderId },
+            { $set: { paid: true } },
+          )
+        : this.productService.updateInventory(orderId),
     ]);
 
     if (!alreadyPaid && isBespoke) {
@@ -353,12 +406,40 @@ export class WebhookService {
 
     // Wallet checkout is settled at creation and never goes through Paystack —
     // report its stored status without hitting the gateway (verifying a
-    // non-Paystack reference would wrongly mark it failed).
-    if (transaction.channel !== 'checkout') {
+    // non-Paystack reference would wrongly mark it failed). Reservation fees
+    // ARE Paystack charges though, so they get the same active-verify safety
+    // net as card checkout: without it the organizer's confirmation page could
+    // only succeed if the webhook happened to land within its polling window.
+    if (
+      transaction.channel !== 'checkout' &&
+      transaction.channel !== 'reservation'
+    ) {
       return {
         success: transaction.status === TransactionStatus.SUCCESS,
         status: transaction.status,
       };
+    }
+
+    if (transaction.channel === 'reservation') {
+      if (transaction.status !== TransactionStatus.SUCCESS) {
+        await this.paymentService
+          .verifyPaystackPayment(reference)
+          .catch((e: any) =>
+            this.logger.error(
+              `[VerifyAndFinalize] Reservation-fee verify failed for ${reference}: ${e?.message}`,
+            ),
+          );
+      }
+      const settled = await this.transactionService.findByReference(reference);
+      if (settled.status === TransactionStatus.SUCCESS) {
+        await this.finalizeReservationFee(settled).catch((e: any) =>
+          this.logger.error(
+            `[VerifyAndFinalize] Reservation-fee finalize failed: ${e?.message}`,
+          ),
+        );
+        return { success: true, status: 'success' };
+      }
+      return { success: false, status: settled.status };
     }
 
     // Card checkout: confirm with the processor that charged if not settled.
