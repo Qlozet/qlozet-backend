@@ -233,6 +233,30 @@ export class OrderController {
     );
   }
 
+  @Roles(UserType.VENDOR)
+  @Get('vendor/:reference')
+  @ApiOperation({
+    summary:
+      'Get one vendor order by reference (same shape/scoping as the list) — for opening the order drawer from outside the orders list',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async findVendorOrder(
+    @Req() req,
+    @Param('reference') reference: string,
+  ) {
+    const res: any = await this.orderService.findVendorOrders(
+      1,
+      1,
+      undefined,
+      req.business?._id,
+      undefined,
+      reference,
+    );
+    const row = res?.data?.[0] ?? null;
+    if (!row) throw new NotFoundException('Order not found');
+    return { data: row };
+  }
+
   /**
    * 🚚 Vendor fulfills their portion of the order — creates Shipbubble label
    */
