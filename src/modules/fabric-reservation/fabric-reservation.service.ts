@@ -341,9 +341,15 @@ export class FabricReservationService {
       );
     }
 
-    // Validate min_cut from the fabric product
+    // Validate min_cut from the fabric product. Exception: when less than a
+    // minimum cut is all that remains, taking EXACTLY the remainder is allowed
+    // — otherwise the reservation's last few yards could never be claimed.
     const fabricProduct = await this.productModel.findById(reservation.fabric);
-    if (fabricProduct?.fabric?.min_cut && dto.yards < fabricProduct.fabric.min_cut) {
+    if (
+      fabricProduct?.fabric?.min_cut &&
+      dto.yards < fabricProduct.fabric.min_cut &&
+      dto.yards < remainingYards
+    ) {
       throw new BadRequestException(
         `Minimum claim is ${fabricProduct.fabric.min_cut} yards for this fabric`,
       );
