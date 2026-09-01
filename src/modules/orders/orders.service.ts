@@ -1268,10 +1268,16 @@ export class OrderService {
     status?: string,
     business?: Types.ObjectId,
     customer?: Types.ObjectId,
+    reference?: string,
   ) {
     try {
       const { skip, take } = await Utils.getPagination(page, size);
       const filter: any = {};
+      // Single-order lookup (vendor drawer opened from outside the orders
+      // list, e.g. a customer's order history) — same populates + scoping.
+      if (reference) {
+        filter.reference = reference;
+      }
       // Admin customer detail page: the same list, narrowed to one buyer.
       if (customer) {
         filter.customer = customer;
