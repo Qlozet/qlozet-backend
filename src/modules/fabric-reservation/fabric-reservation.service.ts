@@ -238,7 +238,63 @@ export class FabricReservationService {
       this.reservationModel.countDocuments(filter),
     ]);
 
+    // Self-heal any active-but-unflagged fees (missed webhook) so the
+    // organizer's hub doesn't show "Awaiting Payment" on a fee that cleared.
+    // Capped — there's rarely more than one in-flight reservation.
+    const unsettled = rows
+      .filter((r) => r.status === ReservationStatus.ACTIVE && !r.fee_paid)
+      .slice(0, 3);
+    for (const r of unsettled) {
+      await this.ensureFeeSettled(r).catch(() => undefined);
+    }
+
     return Utils.getPagingData({ rows, count }, page, size);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  Fee settlement self-heal
+  //  fee_paid is normally flipped by the Paystack webhook (or the
+  //  organizer's /payment/verify safety-net) — but webhooks can be missed
+  //  (local dev, downtime) and the organizer may never return to the
+  //  confirmation page. When a guest then opens the link or tries to
+  //  claim, check the fee transaction ourselves and settle it in place.
+  // ════════════════════════════════════════════════════════════════
+
+  private async ensureFeeSettled(
+    reservation: FabricReservationDocument,
+  ): Promise<boolean> {
+    if (reservation.fee_paid) return true;
+    if (!reservation.fee_transaction) return false;
+
+    const txModel = (this.transactionService as any).transactionModel;
+    let tx = await txModel.findById(reservation.fee_transaction);
+    if (!tx) return false;
+
+    // Actively confirm with Paystack when the stored status isn't success —
+    // but give an in-progress checkout a 2-minute head start so we don't
+    // race the organizer while they're still typing their card.
+    const ageMs = Date.now() - new Date(tx.createdAt ?? 0).getTime();
+    if (tx.status !== 'success' && ageMs > 2 * 60 * 1000) {
+      await this.paymentService
+        .verifyPaystackPayment(tx.reference)
+        .catch(() => undefined);
+      tx = await txModel.findById(reservation.fee_transaction);
+    }
+
+    if (tx?.status !== 'success') return false;
+
+    reservation.fee_paid = true;
+    await reservation.save();
+    if (tx.order) {
+      await this.orderModel.updateOne(
+        { _id: tx.order._id ?? tx.order },
+        { $set: { status: 'completed', payment_status: 'paid' } },
+      );
+    }
+    this.logger.log(
+      `Self-healed fee settlement for reservation ${reservation.reference}`,
+    );
+    return true;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -256,6 +312,15 @@ export class FabricReservationService {
 
     if (!reservation) {
       throw new NotFoundException('Reservation not found');
+    }
+
+    // Settle a paid-but-unflagged fee on the spot (missed webhook), so the
+    // guest page never shows "awaiting activation" for a fee that cleared.
+    if (
+      !reservation.fee_paid &&
+      reservation.status === ReservationStatus.ACTIVE
+    ) {
+      await this.ensureFeeSettled(reservation).catch(() => undefined);
     }
 
     const remainingYards = reservation.total_yards - reservation.claimed_yards;
@@ -292,6 +357,11 @@ export class FabricReservationService {
           reservation.status === ReservationStatus.EXPIRED,
         is_sold_out: remainingYards <= 0,
         is_cancelled: reservation.status === ReservationStatus.CANCELLED,
+        // Fee not yet settled — claims are blocked until it is (or the
+        // unpaid-holds cron cancels the reservation).
+        is_pending_activation:
+          reservation.status === ReservationStatus.ACTIVE &&
+          !reservation.fee_paid,
       },
     };
   }
@@ -319,11 +389,18 @@ export class FabricReservationService {
 
     // The organizer must have paid the reservation fee before guests can buy
     // in — otherwise a guessed link could sell yards on a reservation that is
-    // about to be auto-cancelled for non-payment.
+    // about to be auto-cancelled for non-payment. Self-heal first: if the fee
+    // actually cleared but the webhook was missed, settle it now instead of
+    // turning a paying guest away.
     if (!reservation.fee_paid) {
-      throw new BadRequestException(
-        'This reservation is awaiting activation by its organizer. Please try again shortly.',
+      const settled = await this.ensureFeeSettled(reservation).catch(
+        () => false,
       );
+      if (!settled) {
+        throw new BadRequestException(
+          'This reservation is awaiting activation by its organizer. Please try again shortly.',
+        );
+      }
     }
 
     // Validate deadline
