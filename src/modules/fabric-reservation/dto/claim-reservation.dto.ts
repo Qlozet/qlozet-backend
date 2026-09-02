@@ -53,6 +53,15 @@ export class ClaimReservationDto {
   @ValidateNested()
   @Type(() => ClaimCourierSelectionDto)
   courier?: ClaimCourierSelectionDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Charge currency — non-NGN routes to Stripe when available (falls back to ₦/Paystack).',
+    example: 'USD',
+  })
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }
 
 export class ClaimShippingPreviewDto {

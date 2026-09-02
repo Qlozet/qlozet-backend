@@ -422,13 +422,31 @@ export class WebhookService {
 
     if (transaction.channel === 'reservation') {
       if (transaction.status !== TransactionStatus.SUCCESS) {
-        await this.paymentService
-          .verifyPaystackPayment(reference)
-          .catch((e: any) =>
-            this.logger.error(
-              `[VerifyAndFinalize] Reservation-fee verify failed for ${reference}: ${e?.message}`,
-            ),
-          );
+        // Verify with the processor that actually charged — a Stripe fee
+        // verified via Paystack would be wrongly marked failed.
+        const isStripeFee =
+          (transaction.metadata as any)?.payment_method === 'stripe';
+        if (isStripeFee) {
+          const check = await this.stripeProvider
+            .verifyCharge(reference)
+            .catch((e: any) => {
+              this.logger.error(
+                `[VerifyAndFinalize] Reservation-fee Stripe verify failed for ${reference}: ${e?.message}`,
+              );
+              return null;
+            });
+          if (check?.paid) {
+            await this.transactionService.markSuccess(reference);
+          }
+        } else {
+          await this.paymentService
+            .verifyPaystackPayment(reference)
+            .catch((e: any) =>
+              this.logger.error(
+                `[VerifyAndFinalize] Reservation-fee verify failed for ${reference}: ${e?.message}`,
+              ),
+            );
+        }
       }
       const settled = await this.transactionService.findByReference(reference);
       if (settled.status === TransactionStatus.SUCCESS) {

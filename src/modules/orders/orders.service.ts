@@ -1392,6 +1392,100 @@ export class OrderService {
     };
   }
 
+  /**
+   * Initialize a card charge for an arbitrary ₦ amount, routing by currency
+   * exactly like checkout: non-NGN → FX quote (fail-closed + markup) and the
+   * routed provider (Stripe), NGN → Paystack. Falls back to a ₦ Paystack
+   * charge if international charging isn't available, so callers never dead-
+   * end. Used by fabric reservations (fee + guest claims); the ledger
+   * transaction is always the ₦ amount with the charge details in metadata.
+   */
+  async initFlexibleCharge(opts: {
+    customerId: string;
+    email: string;
+    orderId: Types.ObjectId;
+    amountNaira: number;
+    description: string;
+    channel: string;
+    metadata?: Record<string, any>;
+    currency?: string;
+  }) {
+    const chargeCurrency = (opts.currency ?? 'NGN').toUpperCase();
+
+    if (chargeCurrency !== 'NGN') {
+      try {
+        const provider =
+          await this.providerRouter.paymentProviderFor(chargeCurrency);
+        const fxSettings: any = await this.platformSettingsModel
+          .findOne()
+          .lean();
+        const quote = await this.currencyService.quote(
+          'NGN',
+          chargeCurrency,
+          fxSettings?.fx_markup_percent ?? 2,
+        );
+        const amountMinor = Math.round(
+          opts.amountNaira * quote.effective_rate * 100,
+        );
+        if (amountMinor >= 1) {
+          const tx = await this.transactionService.create({
+            initiator: new Types.ObjectId(opts.customerId),
+            order: opts.orderId,
+            type: TransactionType.DEBIT,
+            amount: opts.amountNaira, // ₦ settlement amount (ledger base)
+            description: opts.description,
+            channel: opts.channel,
+            metadata: {
+              ...(opts.metadata ?? {}),
+              payment_method: 'stripe',
+              charge_currency: chargeCurrency,
+              charge_amount_minor: amountMinor,
+              fx_rate: quote.effective_rate,
+              fx_markup_percent: quote.markup_percent,
+              fx_quoted_at: quote.quoted_at,
+            },
+          });
+          const init = await provider.initCharge({
+            reference: tx.reference,
+            email: opts.email,
+            currency: chargeCurrency,
+            amount_minor: amountMinor,
+          });
+          return {
+            transaction: tx,
+            payment: {
+              paymentUrl: init.authorization_url,
+              authorization_url: init.authorization_url,
+              reference: tx.reference,
+              processor: 'stripe',
+              charge_currency: chargeCurrency,
+              charge_amount_minor: amountMinor,
+            },
+          };
+        }
+      } catch (error) {
+        this.logger.warn(
+          `International charge in ${chargeCurrency} unavailable (${error.message}) — falling back to ₦/Paystack`,
+        );
+      }
+    }
+
+    const tx = await this.transactionService.create({
+      initiator: new Types.ObjectId(opts.customerId),
+      order: opts.orderId,
+      type: TransactionType.DEBIT,
+      amount: opts.amountNaira,
+      description: opts.description,
+      channel: opts.channel,
+      metadata: { ...(opts.metadata ?? {}), payment_method: 'paystack' },
+    });
+    const paymentInit = await this.paymentService.initializePaystackPayment(
+      tx.reference,
+      opts.email,
+    );
+    return { transaction: tx, payment: paymentInit.data };
+  }
+
   private sanitizeDiscountSnapshot(discount: any): any {
     const { __v, createdAt, updatedAt, ...sanitized } = discount.toObject
       ? discount.toObject()
