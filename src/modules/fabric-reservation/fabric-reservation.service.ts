@@ -629,7 +629,11 @@ export class FabricReservationService {
   //  without cancelling and re-creating the whole reservation.
   // ════════════════════════════════════════════════════════════════
 
-  async payReservationFee(reservationId: string, organizer: any) {
+  async payReservationFee(
+    reservationId: string,
+    organizer: any,
+    currency?: string,
+  ) {
     const reservation = await this.reservationModel.findById(reservationId);
     if (!reservation) {
       throw new NotFoundException('Reservation not found');
@@ -667,12 +671,25 @@ export class FabricReservationService {
       );
     }
 
+    // The retry charges in the caller's CURRENT display currency (an escape
+    // hatch: if Stripe misbehaves for this user, switching the shop to ₦ and
+    // retrying pays via Paystack instead), falling back to the original
+    // charge currency when none is given.
+    const retryCurrency =
+      (currency ?? (tx.metadata as any)?.charge_currency ?? 'NGN').toUpperCase();
+
     // A still-PENDING Paystack charge can reuse its stored authorization URL
     // (Paystack rejects re-initializing an existing reference, and the hosted
-    // page allows retrying until the transaction settles).
+    // page allows retrying until the transaction settles) — but only when the
+    // retry is staying in ₦; a currency switch needs a fresh charge.
     const stored = (tx.metadata as any)?.paystack;
     const isStripe = (tx.metadata as any)?.payment_method === 'stripe';
-    if (tx.status === 'pending' && !isStripe && stored?.authorization_url) {
+    if (
+      tx.status === 'pending' &&
+      !isStripe &&
+      retryCurrency === 'NGN' &&
+      stored?.authorization_url
+    ) {
       return {
         message: 'Complete your reservation fee payment.',
         data: {
@@ -705,7 +722,7 @@ export class FabricReservationService {
           reservation_id: (reservation._id as Types.ObjectId).toString(),
           retry_of: tx.reference,
         },
-        currency: (tx.metadata as any)?.charge_currency,
+        currency: retryCurrency,
       });
     reservation.fee_transaction = freshTx._id as Types.ObjectId;
     await reservation.save();

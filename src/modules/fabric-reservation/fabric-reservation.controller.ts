@@ -92,8 +92,16 @@ export class FabricReservationController {
     description:
       'Returns the Paystack payment link for the outstanding fee, or already_paid.',
   })
-  async payReservationFee(@Param('id') id: string, @Req() req: any) {
-    return this.reservationService.payReservationFee(id, req.user);
+  async payReservationFee(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body?: { currency?: string },
+  ) {
+    return this.reservationService.payReservationFee(
+      id,
+      req.user,
+      body?.currency,
+    );
   }
 
   @Patch(':id/cancel')

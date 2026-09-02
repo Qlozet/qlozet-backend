@@ -50,7 +50,11 @@ export class CurrencyService {
     try {
       const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbols.join(',')}`;
 
-      const { data } = await firstValueFrom(this.http.get(url));
+      // Bounded: axios defaults to NO timeout, so a hanging rate API would
+      // freeze every request that needs FX (checkout, reservation fees…).
+      const { data } = await firstValueFrom(
+        this.http.get(url, { timeout: 8000 }),
+      );
 
       // UniRate IGNORES the `base` query param — it always answers with a
       // USD-based table of every currency. Derive the rates the caller
@@ -234,7 +238,11 @@ export class CurrencyService {
     }
 
     const url = `${this.API_URL}?api_key=${this.API_KEY}&base=${base}&symbols=${symbol}`;
-    const { data } = await firstValueFrom(this.http.get(url));
+    // Bounded (see getRates) — the charge path falls back to the DB last-good
+    // rate rather than hanging the create request.
+    const { data } = await firstValueFrom(
+      this.http.get(url, { timeout: 8000 }),
+    );
     // Same base-normalization as getRates — UniRate answers USD-based
     // regardless of the requested base.
     const normalized = this.normalizeRates(data, base, [symbol]);
