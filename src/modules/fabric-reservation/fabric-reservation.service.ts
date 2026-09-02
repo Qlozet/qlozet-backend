@@ -19,7 +19,11 @@ import {
   FabricClaimDocument,
 } from './schemas/fabric-claim.schema';
 import { CreateReservationDto } from './dto/create-reservation.dto';
-import { ClaimReservationDto } from './dto/claim-reservation.dto';
+import {
+  ClaimReservationDto,
+  ClaimShippingPreviewDto,
+} from './dto/claim-reservation.dto';
+import { OrderService } from '../orders/orders.service';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
@@ -48,6 +52,7 @@ export class FabricReservationService {
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
     private readonly platformService: PlatformService,
+    private readonly orderService: OrderService,
   ) {}
 
   // ════════════════════════════════════════════════════════════════
@@ -381,6 +386,40 @@ export class FabricReservationService {
   }
 
   // ════════════════════════════════════════════════════════════════
+  //  GUEST — Delivery quote for a claim
+  //  Most guests want their yards delivered rather than collected at the
+  //  event. This quotes couriers for the single fabric parcel (vendor →
+  //  guest address) via the standard checkout logistics pipeline; the
+  //  returned request_token is what the claim call echoes back.
+  // ════════════════════════════════════════════════════════════════
+
+  async previewClaimShipping(
+    reservationId: string,
+    dto: ClaimShippingPreviewDto,
+    guest: any,
+  ) {
+    const reservation = await this.reservationModel.findById(reservationId);
+    if (!reservation) throw new NotFoundException('Reservation not found');
+    if (reservation.status !== ReservationStatus.ACTIVE) {
+      throw new BadRequestException(
+        `This reservation is ${reservation.status}.`,
+      );
+    }
+    const fabricProduct = await this.productModel.findById(reservation.fabric);
+    if (!fabricProduct) {
+      throw new BadRequestException('Fabric no longer exists');
+    }
+
+    const quote = await this.orderService.quoteFabricClaimShipping(
+      guest,
+      fabricProduct,
+      dto.yards,
+      dto.address_id,
+    );
+    return { message: 'Delivery options', data: quote };
+  }
+
+  // ════════════════════════════════════════════════════════════════
   //  GUEST — Claim From Reservation
   // ════════════════════════════════════════════════════════════════
 
@@ -449,6 +488,33 @@ export class FabricReservationService {
     // Calculate total
     const totalAmount = dto.yards * reservation.price_per_yard;
 
+    // ── Optional delivery: verify the quoted courier server-side and attach a
+    // real shipment + address, so the vendor's normal confirm→fulfill→courier
+    // pipeline applies. Without it the claim is an event-pickup handover.
+    let claimShipment: any = null;
+    let shippingFee = 0;
+    let deliveryAddress: any = null;
+    if (dto.courier) {
+      const businessId = fabricProduct?.business?.toString();
+      if (!businessId) {
+        throw new BadRequestException(
+          'This fabric has no vendor — delivery is unavailable',
+        );
+      }
+      deliveryAddress = await this.orderService.getCustomerShippingAddress(
+        guest.id,
+        dto.address_id,
+      );
+      const built = await this.orderService.buildClaimShipment(
+        guest.id,
+        businessId,
+        dto.courier,
+      );
+      claimShipment = built.shipment;
+      shippingFee = built.fee;
+    }
+    const grandTotal = totalAmount + shippingFee;
+
     // Create an order for this claim
     const orderReference = await generateUniqueQlozetReference(
       this.orderModel,
@@ -458,6 +524,8 @@ export class FabricReservationService {
     const order = await this.orderModel.create({
       reference: orderReference,
       customer: guest ? new Types.ObjectId(guest.id) : null,
+      address: deliveryAddress ?? undefined,
+      shipments: claimShipment ? [claimShipment] : [],
       items: [
         {
           product: reservation.fabric,
@@ -478,8 +546,8 @@ export class FabricReservationService {
         },
       ],
       subtotal: totalAmount,
-      shipping_fee: 0,
-      total: totalAmount,
+      shipping_fee: shippingFee,
+      total: grandTotal,
       status: 'pending',
       type: 'reservation_claim',
     });
@@ -503,12 +571,12 @@ export class FabricReservationService {
 
     await reservation.save();
 
-    // Create transaction
+    // Create transaction — charged amount includes delivery when chosen.
     const transaction = await this.transactionService.create({
       initiator: guest ? new Types.ObjectId(guest.id) : undefined,
       order: order._id as Types.ObjectId,
       type: TransactionType.DEBIT,
-      amount: totalAmount,
+      amount: grandTotal,
       description: `Fabric claim from reservation ${reservation.reference}`,
       channel: 'checkout',
       metadata: {
