@@ -310,6 +310,27 @@ export class OrderController {
   }
 
   /**
+   * 🤝 Vendor marks an event fabric CLAIM as handed over.
+   * Reservation-claim orders have no shipment (the guest collects their yards
+   * at/for the event), so the normal confirm→fulfill flow doesn't apply —
+   * this completes the order and schedules the vendor's earnings release.
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT)
+  @Post(':reference/handover')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Vendor marks a reservation fabric claim as handed over',
+    description:
+      'Claim orders (event fabric reservations) ship nothing — the guest collects. Completes the order and schedules earnings release.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference (e.g. ORD-XXXX)' })
+  @ApiResponse({ status: 200, description: 'Claim marked handed over' })
+  async handoverClaim(@Param('reference') reference: string, @Req() req) {
+    return this.orderService.completeClaimHandover(reference, req.business);
+  }
+
+  /**
    * ❌ Vendor rejects their portion of the order (partial refund)
    */
   @Roles(UserType.VENDOR)

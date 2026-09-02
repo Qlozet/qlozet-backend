@@ -2553,6 +2553,77 @@ export class OrderService {
    * Vendor confirms their portion of the order.
    * Only when ALL vendors confirm → order moves to "processing".
    */
+  /**
+   * Complete a reservation-claim order by handover. Claim orders (guests
+   * buying yards from an event fabric reservation) carry no shipment — no
+   * address is collected and the guest collects their cut — so the normal
+   * confirm → fulfill → courier-delivery pipeline never applies to them.
+   * This is their entire fulfilment: mark the order completed and schedule
+   * the vendor's earnings release with the standard payout delay (the step
+   * courier delivery would otherwise have triggered).
+   */
+  async completeClaimHandover(
+    orderReference: string,
+    business: Business | BusinessDocument,
+  ) {
+    const businessId = (business._id || (business as any).id).toString();
+
+    const order = await this.orderModel.findOne({ reference: orderReference });
+    if (!order) throw new BadRequestException('Order not found');
+
+    if ((order as any).type !== 'reservation_claim') {
+      throw new BadRequestException(
+        'Only reservation fabric claims can be completed by handover',
+      );
+    }
+    const ownsItem = order.items.some(
+      (i) => i.business?.toString() === businessId,
+    );
+    if (!ownsItem) {
+      throw new BadRequestException('This claim does not belong to your store');
+    }
+    if ((order as any).payment_status !== 'paid') {
+      throw new BadRequestException(
+        'This claim has not been paid for yet — it cannot be handed over',
+      );
+    }
+    if (order.status === OrderStatus.COMPLETED) {
+      throw new BadRequestException('This claim is already handed over');
+    }
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException('This claim was cancelled');
+    }
+
+    order.status = OrderStatus.COMPLETED;
+    await order.save();
+
+    // Schedule the earnings release that courier delivery would normally
+    // trigger — same payout-delay window as delivered shipments.
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+    const releaseDate = new Date(
+      Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
+    );
+    const res = await this.businessEarningsModel.updateMany(
+      {
+        order: order._id,
+        business: new Types.ObjectId(businessId),
+        released: false,
+        release_date: null,
+      },
+      { $set: { release_date: releaseDate } },
+    );
+    this.logger.log(
+      `[Handover] Claim ${orderReference} handed over by vendor ${businessId} — scheduled ${res.modifiedCount} earning(s) for ${releaseDate.toISOString()}`,
+    );
+
+    return {
+      message:
+        'Claim marked as handed over. Your earnings are scheduled for release.',
+      data: order,
+    };
+  }
+
   async confirmVendorShipment(
     orderReference: string,
     business: Business | BusinessDocument,
