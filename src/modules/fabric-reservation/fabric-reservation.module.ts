@@ -17,6 +17,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { PaymentModule } from '../payment/payment.module';
 import { PlatformModule } from '../platform/platform.module';
 import { ProductModule } from '../products/products.module';
+import { PaymentProvidersModule } from '../payment-providers/payment-providers.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ProductModule } from '../products/products.module';
     PaymentModule,       // provides PaymentService
     PlatformModule,      // provides PlatformService
     ProductModule,       // provides Product model
+    PaymentProvidersModule, // StripeProvider (verify international fee charges)
   ],
   controllers: [FabricReservationController],
   providers: [FabricReservationService],

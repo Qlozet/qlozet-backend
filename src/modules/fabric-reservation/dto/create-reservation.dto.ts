@@ -1,5 +1,12 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsString, IsDateString, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsDateString,
+  Min,
+} from 'class-validator';
 
 export class CreateReservationDto {
   @ApiProperty({
@@ -34,4 +41,13 @@ export class CreateReservationDto {
   @IsNotEmpty()
   @IsDateString()
   deadline: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Charge currency for the fee — non-NGN routes to Stripe when available (falls back to ₦/Paystack). Ledger stays ₦.",
+    example: 'USD',
+  })
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }

@@ -24,6 +24,7 @@ import {
   ClaimShippingPreviewDto,
 } from './dto/claim-reservation.dto';
 import { OrderService } from '../orders/orders.service';
+import { StripeProvider } from '../payment-providers/stripe.provider';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
@@ -53,6 +54,7 @@ export class FabricReservationService {
     private readonly paymentService: PaymentService,
     private readonly platformService: PlatformService,
     private readonly orderService: OrderService,
+    private readonly stripeProvider: StripeProvider,
   ) {}
 
   // ════════════════════════════════════════════════════════════════
@@ -162,31 +164,28 @@ export class FabricReservationService {
         type: 'reservation',
       });
 
-      const transaction = await this.transactionService.create({
-        initiator: new Types.ObjectId(organizer.id),
-        order: order._id as Types.ObjectId,
-        type: TransactionType.DEBIT,
-        amount: reservationFee,
-        description: `Reservation fee for ${dto.eventName} (${reference})`,
-        channel: 'reservation',
-        metadata: {
-          reservation_reference: reference,
-          reservation_id: (reservation._id as Types.ObjectId).toString(),
-          fabric_id: (fabricProduct._id as Types.ObjectId).toString(),
-          total_yards: dto.totalYards,
-          fee_percent: feePercent,
-        },
-      });
+      // 9–10. Charge the fee — routed by currency exactly like checkout
+      // (non-NGN → Stripe when available, else ₦/Paystack fallback).
+      const { transaction, payment } =
+        await this.orderService.initFlexibleCharge({
+          customerId: organizer.id,
+          email: organizer.email,
+          orderId: order._id as Types.ObjectId,
+          amountNaira: reservationFee,
+          description: `Reservation fee for ${dto.eventName} (${reference})`,
+          channel: 'reservation',
+          metadata: {
+            reservation_reference: reference,
+            reservation_id: (reservation._id as Types.ObjectId).toString(),
+            fabric_id: (fabricProduct._id as Types.ObjectId).toString(),
+            total_yards: dto.totalYards,
+            fee_percent: feePercent,
+          },
+          currency: dto.currency,
+        });
 
-      // 9. Save transaction ref to reservation
       reservation.fee_transaction = transaction._id as Types.ObjectId;
       await reservation.save();
-
-      // 10. Initialize Paystack payment for the fee
-      const paymentInit = await this.paymentService.initializePaystackPayment(
-        transaction.reference,
-        organizer.email,
-      );
 
       this.logger.log(
         `Reservation created: ${reference} by organizer ${organizer.id} — ${dto.totalYards} yards locked`,
@@ -201,7 +200,7 @@ export class FabricReservationService {
             amount: transaction.amount,
             status: transaction.status,
           },
-          payment: paymentInit.data,
+          payment,
         },
       };
     } catch (error) {
@@ -275,14 +274,26 @@ export class FabricReservationService {
     let tx = await txModel.findById(reservation.fee_transaction);
     if (!tx) return false;
 
-    // Actively confirm with Paystack when the stored status isn't success —
-    // but give an in-progress checkout a 2-minute head start so we don't
-    // race the organizer while they're still typing their card.
+    // Actively confirm with the processor that charged when the stored status
+    // isn't success — but give an in-progress checkout a 2-minute head start
+    // so we don't race the organizer while they're still typing their card.
+    // Stripe fees must NOT be verified via Paystack (that would wrongly mark
+    // them failed).
     const ageMs = Date.now() - new Date(tx.createdAt ?? 0).getTime();
     if (tx.status !== 'success' && ageMs > 2 * 60 * 1000) {
-      await this.paymentService
-        .verifyPaystackPayment(tx.reference)
-        .catch(() => undefined);
+      const isStripe = (tx.metadata as any)?.payment_method === 'stripe';
+      if (isStripe) {
+        const check = await this.stripeProvider
+          .verifyCharge(tx.reference)
+          .catch(() => null);
+        if (check?.paid) {
+          await this.transactionService.markSuccess(tx.reference);
+        }
+      } else {
+        await this.paymentService
+          .verifyPaystackPayment(tx.reference)
+          .catch(() => undefined);
+      }
       tx = await txModel.findById(reservation.fee_transaction);
     }
 
@@ -571,26 +582,24 @@ export class FabricReservationService {
 
     await reservation.save();
 
-    // Create transaction — charged amount includes delivery when chosen.
-    const transaction = await this.transactionService.create({
-      initiator: guest ? new Types.ObjectId(guest.id) : undefined,
-      order: order._id as Types.ObjectId,
-      type: TransactionType.DEBIT,
-      amount: grandTotal,
-      description: `Fabric claim from reservation ${reservation.reference}`,
-      channel: 'checkout',
-      metadata: {
-        reservation_reference: reservation.reference,
-        reservation_id: (reservation._id as Types.ObjectId).toString(),
-        claim_id: (claim._id as Types.ObjectId).toString(),
-        yards_claimed: dto.yards,
+    // Charge the guest — routed by currency like checkout (non-NGN → Stripe
+    // when available, else ₦/Paystack). Amount includes delivery when chosen.
+    const { transaction, payment } = await this.orderService.initFlexibleCharge(
+      {
+        customerId: guest.id,
+        email: guest?.email || 'guest@qlozet.app',
+        orderId: order._id as Types.ObjectId,
+        amountNaira: grandTotal,
+        description: `Fabric claim from reservation ${reservation.reference}`,
+        channel: 'checkout',
+        metadata: {
+          reservation_reference: reservation.reference,
+          reservation_id: (reservation._id as Types.ObjectId).toString(),
+          claim_id: (claim._id as Types.ObjectId).toString(),
+          yards_claimed: dto.yards,
+        },
+        currency: dto.currency,
       },
-    });
-
-    // Initialize Paystack payment
-    const paymentInit = await this.paymentService.initializePaystackPayment(
-      transaction.reference,
-      guest?.email || 'guest@qlozet.app',
     );
 
     this.logger.log(
@@ -607,7 +616,7 @@ export class FabricReservationService {
           amount: transaction.amount,
           status: transaction.status,
         },
-        payment: paymentInit.data,
+        payment,
       },
     };
   }
@@ -658,10 +667,12 @@ export class FabricReservationService {
       );
     }
 
-    // Prefer the authorization URL stored when the fee was first initialized
-    // (Paystack rejects re-initializing an existing reference).
+    // A still-PENDING Paystack charge can reuse its stored authorization URL
+    // (Paystack rejects re-initializing an existing reference, and the hosted
+    // page allows retrying until the transaction settles).
     const stored = (tx.metadata as any)?.paystack;
-    if (stored?.authorization_url) {
+    const isStripe = (tx.metadata as any)?.payment_method === 'stripe';
+    if (tx.status === 'pending' && !isStripe && stored?.authorization_url) {
       return {
         message: 'Complete your reservation fee payment.',
         data: {
@@ -677,17 +688,34 @@ export class FabricReservationService {
       };
     }
 
-    // Never initialized — do it now.
-    const paymentInit = await this.paymentService.initializePaystackPayment(
-      tx.reference,
-      organizer.email,
-    );
+    // FAILED/reversed references can't be recharged, and Stripe checkout
+    // sessions expire — mint a FRESH fee charge (same ₦ amount and, for
+    // international fees, the same charge currency) and point the
+    // reservation at it. The old transaction stays as an audit record.
+    const { transaction: freshTx, payment } =
+      await this.orderService.initFlexibleCharge({
+        customerId: organizer.id,
+        email: organizer.email,
+        orderId: (tx.order?._id ?? tx.order) as Types.ObjectId,
+        amountNaira: tx.amount,
+        description: `Reservation fee for ${reservation.event_name} (${reservation.reference})`,
+        channel: 'reservation',
+        metadata: {
+          reservation_reference: reservation.reference,
+          reservation_id: (reservation._id as Types.ObjectId).toString(),
+          retry_of: tx.reference,
+        },
+        currency: (tx.metadata as any)?.charge_currency,
+      });
+    reservation.fee_transaction = freshTx._id as Types.ObjectId;
+    await reservation.save();
+
     return {
       message: 'Complete your reservation fee payment.',
       data: {
         reservation,
-        transaction: { reference: tx.reference, amount: tx.amount },
-        payment: paymentInit.data,
+        transaction: { reference: freshTx.reference, amount: freshTx.amount },
+        payment,
       },
     };
   }
