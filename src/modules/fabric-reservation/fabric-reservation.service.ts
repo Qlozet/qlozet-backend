@@ -281,7 +281,12 @@ export class FabricReservationService {
       tx = await txModel.findById(reservation.fee_transaction);
     }
 
-    if (tx?.status !== 'success') return false;
+    if (tx?.status !== 'success') {
+      this.logger.warn(
+        `Fee not settled for reservation ${reservation.reference}: transaction ${tx?.reference ?? '(missing)'} status=${tx?.status ?? 'unknown'}`,
+      );
+      return false;
+    }
 
     reservation.fee_paid = true;
     await reservation.save();
@@ -356,12 +361,21 @@ export class FabricReservationService {
           reservation.deadline < new Date() ||
           reservation.status === ReservationStatus.EXPIRED,
         is_sold_out: remainingYards <= 0,
-        is_cancelled: reservation.status === ReservationStatus.CANCELLED,
         // Fee not yet settled — claims are blocked until it is (or the
-        // unpaid-holds cron cancels the reservation).
+        // unpaid-holds cron cancels the reservation). Only meaningful when a
+        // fee transaction actually exists; a reservation WITHOUT one (orphaned
+        // by a failed create — the fee was never payable) is defunct and is
+        // reported as cancelled so guests aren't told to "check back shortly"
+        // for an activation that can never happen.
         is_pending_activation:
           reservation.status === ReservationStatus.ACTIVE &&
-          !reservation.fee_paid,
+          !reservation.fee_paid &&
+          !!reservation.fee_transaction,
+        is_cancelled:
+          reservation.status === ReservationStatus.CANCELLED ||
+          (reservation.status === ReservationStatus.ACTIVE &&
+            !reservation.fee_paid &&
+            !reservation.fee_transaction),
       },
     };
   }
@@ -525,6 +539,86 @@ export class FabricReservationService {
           amount: transaction.amount,
           status: transaction.status,
         },
+        payment: paymentInit.data,
+      },
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  ORGANIZER — Retry the fee payment
+  //  Recovery path for a reservation stuck "awaiting activation": returns
+  //  the fee's Paystack link again (the one stored at initialization, or a
+  //  fresh initialization if none was stored) so the organizer can pay
+  //  without cancelling and re-creating the whole reservation.
+  // ════════════════════════════════════════════════════════════════
+
+  async payReservationFee(reservationId: string, organizer: any) {
+    const reservation = await this.reservationModel.findById(reservationId);
+    if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+    if (reservation.organizer.toString() !== organizer.id) {
+      throw new ForbiddenException(
+        'You are not the organizer of this reservation',
+      );
+    }
+    if (reservation.status !== ReservationStatus.ACTIVE) {
+      throw new BadRequestException(
+        `This reservation is ${reservation.status} — the fee can no longer be paid.`,
+      );
+    }
+
+    // Maybe it already settled (missed webhook) — then there's nothing to pay.
+    if (await this.ensureFeeSettled(reservation).catch(() => false)) {
+      return {
+        message: 'Reservation fee is already paid.',
+        data: { already_paid: true, reservation },
+      };
+    }
+
+    if (!reservation.fee_transaction) {
+      throw new BadRequestException(
+        'This reservation has no payable fee — please cancel it and create a new one.',
+      );
+    }
+
+    const txModel = (this.transactionService as any).transactionModel;
+    const tx = await txModel.findById(reservation.fee_transaction);
+    if (!tx) {
+      throw new BadRequestException(
+        'Fee transaction is missing — please cancel and create a new reservation.',
+      );
+    }
+
+    // Prefer the authorization URL stored when the fee was first initialized
+    // (Paystack rejects re-initializing an existing reference).
+    const stored = (tx.metadata as any)?.paystack;
+    if (stored?.authorization_url) {
+      return {
+        message: 'Complete your reservation fee payment.',
+        data: {
+          reservation,
+          transaction: { reference: tx.reference, amount: tx.amount },
+          payment: {
+            paymentUrl: stored.authorization_url,
+            reference: stored.reference ?? tx.reference,
+            access_code: stored.access_code,
+            amount: tx.amount,
+          },
+        },
+      };
+    }
+
+    // Never initialized — do it now.
+    const paymentInit = await this.paymentService.initializePaystackPayment(
+      tx.reference,
+      organizer.email,
+    );
+    return {
+      message: 'Complete your reservation fee payment.',
+      data: {
+        reservation,
+        transaction: { reference: tx.reference, amount: tx.amount },
         payment: paymentInit.data,
       },
     };
@@ -696,11 +790,18 @@ export class FabricReservationService {
     }
 
     // ── 2. Reservations whose fee was never paid ──
+    // With a fee transaction: 2h to finish paying. Without one (orphaned by a
+    // failed create — the fee was never even payable): 30 min, since no
+    // payment can ever arrive for them.
     const feeCutoff = new Date(now - 2 * 60 * 60 * 1000);
+    const orphanCutoff = new Date(now - 30 * 60 * 1000);
     const unpaidReservations = await this.reservationModel.find({
       status: ReservationStatus.ACTIVE,
       fee_paid: { $ne: true },
-      createdAt: { $lt: feeCutoff },
+      $or: [
+        { createdAt: { $lt: feeCutoff } },
+        { fee_transaction: null, createdAt: { $lt: orphanCutoff } },
+      ],
     });
 
     for (const reservation of unpaidReservations) {
