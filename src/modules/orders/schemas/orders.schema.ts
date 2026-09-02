@@ -381,6 +381,12 @@ export class Order {
   })
   type?: string;
 
+  // Set when a PAID order's inventory deduction failed at finalisation (stock
+  // moved between checkout and settlement). The order proceeds — the money is
+  // already taken — and the vendor reconciles the stock counter manually.
+  @Prop({ type: Boolean, default: false })
+  inventory_deduction_failed?: boolean;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', default: null })
   bespoke_design?: Types.ObjectId;
 

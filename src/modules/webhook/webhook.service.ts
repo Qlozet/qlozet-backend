@@ -359,14 +359,37 @@ export class WebhookService {
     // paid so the unpaid-holds cron leaves it alone.
     const isReservationClaim = (order as any)?.type === 'reservation_claim';
 
+    // Post-payment side effects must NEVER fail the finalisation: the money is
+    // already taken, so an inventory deficit (stock moved between checkout and
+    // settlement — e.g. a reservation locked the yards, or counter drift) is a
+    // reconciliation problem for the vendor, not a reason to strand a paid
+    // customer on an endless "Payment not confirmed" loop. Log loudly and flag
+    // the order instead.
     await Promise.all([
-      this.businessService.recordBusinessEarnings(orderId),
-      isReservationClaim
+      this.businessService
+        .recordBusinessEarnings(orderId)
+        .catch((error: any) =>
+          this.logger.error(
+            `[Finalize] recordBusinessEarnings failed for order ${orderId}: ${error?.message}`,
+          ),
+        ),
+      (isReservationClaim
         ? this.fabricClaimModel.updateOne(
             { order: orderId },
             { $set: { paid: true } },
           )
-        : this.productService.updateInventory(orderId),
+        : this.productService.updateInventory(orderId)
+      ).catch(async (error: any) => {
+        this.logger.error(
+          `[Finalize] Inventory/claim settlement failed for PAID order ${orderId}: ${error?.message} — order stays paid; flagging for reconciliation.`,
+        );
+        await this.orderModel
+          .updateOne(
+            { _id: orderId },
+            { $set: { inventory_deduction_failed: true } },
+          )
+          .catch(() => undefined);
+      }),
     ]);
 
     if (!alreadyPaid && isBespoke) {
@@ -490,7 +513,15 @@ export class WebhookService {
 
     const fresh = await this.transactionService.findByReference(reference);
     if (fresh.status === TransactionStatus.SUCCESS) {
-      await this.finalizeCheckoutOrder(fresh);
+      // The charge settled — that is what "verified" means to the customer.
+      // A finalisation hiccup (e.g. inventory deficit) must not turn into a
+      // 4xx that loops the confirmation page forever; it is logged/flagged
+      // inside finalizeCheckoutOrder and reconciled by the vendor.
+      await this.finalizeCheckoutOrder(fresh).catch((error: any) =>
+        this.logger.error(
+          `[VerifyAndFinalize] Finalisation failed for PAID ${reference}: ${error?.message}`,
+        ),
+      );
       return { success: true, status: 'success' };
     }
     return { success: false, status: fresh.status };
