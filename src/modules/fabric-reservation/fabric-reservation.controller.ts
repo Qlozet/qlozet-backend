@@ -17,7 +17,10 @@ import {
 } from '@nestjs/swagger';
 import { FabricReservationService } from './fabric-reservation.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
-import { ClaimReservationDto } from './dto/claim-reservation.dto';
+import {
+  ClaimReservationDto,
+  ClaimShippingPreviewDto,
+} from './dto/claim-reservation.dto';
 import { Public } from 'src/common/decorators/public.decorator';
 
 @ApiTags('Fabric Reservations')
@@ -117,6 +120,21 @@ export class FabricReservationController {
   })
   async getReservationDetails(@Param('id') id: string) {
     return this.reservationService.getReservationDetails(id);
+  }
+
+  @Post(':id/claim-preview')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Quote delivery couriers for a claim (guest)',
+    description:
+      'Rates for shipping the claimed yards from the fabric vendor to the guest. Echo the returned request_token + chosen courier back on the claim.',
+  })
+  async previewClaimShipping(
+    @Param('id') id: string,
+    @Body() dto: ClaimShippingPreviewDto,
+    @Req() req: any,
+  ) {
+    return this.reservationService.previewClaimShipping(id, dto, req.user);
   }
 
   @Post(':id/claim')

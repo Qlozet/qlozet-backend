@@ -1255,6 +1255,143 @@ export class OrderService {
 
     return address;
   }
+
+  /** Public wrapper so other modules (fabric reservations) can resolve a
+   *  customer's shipping address with the same scoping/fallback rules. */
+  async getCustomerShippingAddress(customerId: string, addressId?: string) {
+    return this.resolveShippingAddress(customerId, addressId);
+  }
+
+  /**
+   * Quote courier rates for ONE fabric parcel — used by reservation claims
+   * where a guest wants their yards delivered instead of collected at the
+   * event. Reuses the exact checkout pipeline (manifest → Shipbubble rates →
+   * server-side rate cache), so claim creation can verify the chosen courier
+   * with the same request_token flow as normal orders — and vendor
+   * fulfilment (which books the label off the cached token) just works.
+   */
+  async quoteFabricClaimShipping(
+    customer: any,
+    fabricProduct: ProductDocument,
+    yards: number,
+    addressId?: string,
+  ) {
+    const customerId = customer.id || customer._id;
+    const address = await this.resolveShippingAddress(customerId, addressId);
+    if (!address?.address_code) {
+      throw new BadRequestException(
+        'Please add and validate a delivery address first',
+      );
+    }
+
+    const business = await this.businessModel.findById(fabricProduct.business);
+    if (!business?.address_code) {
+      throw new BadRequestException(
+        'This vendor has no validated pickup address — delivery is unavailable for this fabric',
+      );
+    }
+
+    const { name } = await this.getProductDetails(fabricProduct);
+    const perYard = fabricProduct.fabric?.price_per_yard || 0;
+    const pkg = this.buildManifestItem({
+      name,
+      kind: 'fabric',
+      unitAmount: perYard * yards,
+      quantity: 1,
+      fabricYards: yards,
+      baseWeightKg: estimateProductWeightKg(fabricProduct),
+    });
+
+    const rateResponse = await this.logisticService.fetchRates([], {
+      sender_address_code: business.address_code,
+      reciever_address_code: address.address_code,
+      pickup_date: new Date().toISOString().split('T')[0],
+      package_items: [pkg],
+      service_type: 'pickup',
+      category_id: 74794423, // "Fashion wears"
+      package_dimension: { length: 12, width: 10, height: 10 },
+    });
+
+    const rates = (rateResponse.couriers || []).map((c) => ({
+      courier_id: String(c.courier_id),
+      courier_name: c.courier_name,
+      courier_image: c.courier_image,
+      service_code: c.service_code,
+      rate_amount: c.total,
+      delivery_eta: c.delivery_eta,
+      delivery_eta_time: c.delivery_eta_time,
+    }));
+
+    // Cache synchronously — the claim call verifies against this entry, and it
+    // can arrive seconds later (unlike checkout, where the cache write racing
+    // the response is acceptable).
+    await this.rateCacheModel.insertMany([
+      {
+        customer: new Types.ObjectId(customerId),
+        request_token: rateResponse.request_token,
+        business_id: String(business._id),
+        rates: rates.map((r) => ({
+          courier_id: r.courier_id,
+          service_code: r.service_code,
+          courier_name: r.courier_name,
+          rate_amount: r.rate_amount,
+        })),
+      },
+    ]);
+
+    return {
+      business_id: String(business._id),
+      business_name: business.business_name,
+      request_token: rateResponse.request_token,
+      rates,
+    };
+  }
+
+  /**
+   * Verify a claim's chosen courier against the server-side rate cache and
+   * return the shipment entry to store on the order (fee from the cache,
+   * never from the client).
+   */
+  async buildClaimShipment(
+    customerId: string,
+    businessId: string,
+    selection: { request_token: string; courier_id: string; service_code: string },
+  ) {
+    const cachedEntry = await this.rateCacheModel.findOne({
+      customer: new Types.ObjectId(customerId),
+      request_token: selection.request_token,
+      business_id: businessId,
+    });
+    if (!cachedEntry) {
+      throw new BadRequestException(
+        'Your delivery quote expired — please refresh the delivery options',
+      );
+    }
+    const matched = cachedEntry.rates.find(
+      (r) =>
+        r.courier_id === selection.courier_id &&
+        r.service_code === selection.service_code,
+    );
+    if (!matched) {
+      throw new BadRequestException(
+        'Selected courier not found in the quoted rates — please refresh the delivery options',
+      );
+    }
+    return {
+      fee: matched.rate_amount,
+      shipment: {
+        business: new Types.ObjectId(businessId),
+        request_token: selection.request_token,
+        service_code: selection.service_code,
+        courier_id: selection.courier_id,
+        courier_name: matched.courier_name,
+        shipping_fee: matched.rate_amount,
+        status: 'pending',
+        rate_fetched_at: (cachedEntry as any).createdAt,
+      },
+    };
+  }
+
   private sanitizeDiscountSnapshot(discount: any): any {
     const { __v, createdAt, updatedAt, ...sanitized } = discount.toObject
       ? discount.toObject()
@@ -2592,6 +2729,13 @@ export class OrderService {
     }
     if (order.status === OrderStatus.CANCELLED) {
       throw new BadRequestException('This claim was cancelled');
+    }
+    // Delivery claims carry a real shipment — they complete via the normal
+    // confirm → fulfill → courier-delivery pipeline, not by handover.
+    if (order.shipments?.length) {
+      throw new BadRequestException(
+        'This claim ships by courier — confirm and fulfil it like a normal order',
+      );
     }
 
     order.status = OrderStatus.COMPLETED;
