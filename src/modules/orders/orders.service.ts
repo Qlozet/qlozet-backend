@@ -1411,6 +1411,7 @@ export class OrderService {
     currency?: string;
   }) {
     const chargeCurrency = (opts.currency ?? 'NGN').toUpperCase();
+    const t0 = Date.now();
 
     if (chargeCurrency !== 'NGN') {
       try {
@@ -1419,11 +1420,13 @@ export class OrderService {
         const fxSettings: any = await this.platformSettingsModel
           .findOne()
           .lean();
+        const tQuote = Date.now();
         const quote = await this.currencyService.quote(
           'NGN',
           chargeCurrency,
           fxSettings?.fx_markup_percent ?? 2,
         );
+        const quoteMs = Date.now() - tQuote;
         const amountMinor = Math.round(
           opts.amountNaira * quote.effective_rate * 100,
         );
@@ -1445,12 +1448,16 @@ export class OrderService {
               fx_quoted_at: quote.quoted_at,
             },
           });
+          const tInit = Date.now();
           const init = await provider.initCharge({
             reference: tx.reference,
             email: opts.email,
             currency: chargeCurrency,
             amount_minor: amountMinor,
           });
+          this.logger.log(
+            `[Charge] ${opts.channel} ${tx.reference} via stripe in ${Date.now() - t0}ms (fx=${quoteMs}ms, init=${Date.now() - tInit}ms)`,
+          );
           return {
             transaction: tx,
             payment: {
@@ -1482,6 +1489,9 @@ export class OrderService {
     const paymentInit = await this.paymentService.initializePaystackPayment(
       tx.reference,
       opts.email,
+    );
+    this.logger.log(
+      `[Charge] ${opts.channel} ${tx.reference} via paystack in ${Date.now() - t0}ms`,
     );
     return { transaction: tx, payment: paymentInit.data };
   }
