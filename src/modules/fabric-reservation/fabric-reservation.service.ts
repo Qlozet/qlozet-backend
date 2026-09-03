@@ -244,12 +244,16 @@ export class FabricReservationService {
 
     // Self-heal any active-but-unflagged fees (missed webhook) so the
     // organizer's hub doesn't show "Awaiting Payment" on a fee that cleared.
-    // Capped — there's rarely more than one in-flight reservation.
+    // Capped and PARALLEL — each check can cost a slow processor round-trip
+    // (Stripe search), and running them sequentially made the hub take
+    // seconds to open with a few unpaid rows.
     const unsettled = rows
       .filter((r) => r.status === ReservationStatus.ACTIVE && !r.fee_paid)
       .slice(0, 3);
-    for (const r of unsettled) {
-      await this.ensureFeeSettled(r).catch(() => undefined);
+    if (unsettled.length > 0) {
+      await Promise.allSettled(
+        unsettled.map((r) => this.ensureFeeSettled(r)),
+      );
     }
 
     return Utils.getPagingData({ rows, count }, page, size);
@@ -266,7 +270,9 @@ export class FabricReservationService {
 
   private async ensureFeeSettled(
     reservation: FabricReservationDocument,
+    opts: { activeVerify?: boolean } = {},
   ): Promise<boolean> {
+    const activeVerify = opts.activeVerify !== false;
     if (reservation.fee_paid) return true;
     if (!reservation.fee_transaction) return false;
 
@@ -278,9 +284,12 @@ export class FabricReservationService {
     // isn't success — but give an in-progress checkout a 2-minute head start
     // so we don't race the organizer while they're still typing their card.
     // Stripe fees must NOT be verified via Paystack (that would wrongly mark
-    // them failed).
+    // them failed). Callers on a latency-sensitive path (Pay Fee) pass
+    // activeVerify:false to check the STORED status only — the processor
+    // round-trip (Stripe search is slow) otherwise delays the retry by
+    // seconds for a fee that is almost certainly just unpaid.
     const ageMs = Date.now() - new Date(tx.createdAt ?? 0).getTime();
-    if (tx.status !== 'success' && ageMs > 2 * 60 * 1000) {
+    if (tx.status !== 'success' && activeVerify && ageMs > 2 * 60 * 1000) {
       const isStripe = (tx.metadata as any)?.payment_method === 'stripe';
       if (isStripe) {
         const check = await this.stripeProvider
@@ -650,7 +659,15 @@ export class FabricReservationService {
     }
 
     // Maybe it already settled (missed webhook) — then there's nothing to pay.
-    if (await this.ensureFeeSettled(reservation).catch(() => false)) {
+    // STORED status only: no processor round-trip here. The organizer clicked
+    // "Pay Fee" because it reads unpaid; a slow Stripe-search verify would add
+    // seconds before their payment page opens, and the view paths (guest link,
+    // hub listing) already actively self-heal a settled-but-unflagged fee.
+    if (
+      await this.ensureFeeSettled(reservation, { activeVerify: false }).catch(
+        () => false,
+      )
+    ) {
       return {
         message: 'Reservation fee is already paid.',
         data: { already_paid: true, reservation },
