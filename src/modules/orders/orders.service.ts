@@ -1881,10 +1881,26 @@ export class OrderService {
   ) {
     const order = await this.orderModel
       .findOne({ reference })
-      .select('customer items shipments customer_body_profile')
+      .select('customer items shipments customer_body_profile type')
       .populate('items.product', 'name')
       .lean();
     if (!order) throw new NotFoundException('Order not found');
+
+    // Measurements are only meaningful for TAILORED work — bespoke orders and
+    // custom (customize) garments, or any order that carries a measurement
+    // snapshot. Without this gate the legacy live-set fallback below leaked
+    // the customer's body measurements onto fabric/accessory orders, where
+    // nothing is sewn to size.
+    const profileHasData = (p: any) =>
+      p?.measurements && Object.keys(p.measurements).length > 0;
+    const isTailored =
+      (order as any).type === 'bespoke' ||
+      ((order as any).items || []).some(
+        (i: any) =>
+          i.clothing_type === 'customize' || profileHasData(i.body_profile),
+      ) ||
+      profileHasData((order as any).customer_body_profile);
+    if (!isTailored) return { data: null };
 
     if (scopeBusinessId) {
       const bid = String(scopeBusinessId);
