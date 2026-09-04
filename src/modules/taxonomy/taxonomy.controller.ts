@@ -91,6 +91,19 @@ export class TaxonomyController {
     return this.taxonomyService.getTags({ assignable_by, kind });
   }
 
+  @Get('admin/overview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserType.PLATFORM)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Full taxonomy for management (Admin only)',
+    description:
+      'All categories and tags including inactive, plus product usage counts per product_type and tag.',
+  })
+  adminOverview() {
+    return this.taxonomyService.adminOverview();
+  }
+
   // ─────────────────────────────────────────────────────────
   // ADMIN ENDPOINTS — Category Management
   // ─────────────────────────────────────────────────────────

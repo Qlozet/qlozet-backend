@@ -26,7 +26,73 @@ export class TaxonomyService {
     private readonly categoryModel: Model<SystemCategoryDocument>,
     @InjectModel(SystemTag.name)
     private readonly tagModel: Model<SystemTagDocument>,
+    @InjectModel('Product')
+    private readonly productModel: Model<any>,
   ) {}
+
+  // ─────────────────────────────────────────────────────────
+  // ADMIN — Management overview
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Everything the admin taxonomy page needs in one call: ALL category and
+   * tag rows (inactive included — the public endpoints filter those out),
+   * plus live usage counts so the UI can warn before renaming an in-use
+   * product_type (products reference taxonomy BY NAME, so renames don't
+   * cascade) and block deleting anything still referenced.
+   */
+  async adminOverview() {
+    const [categories, tags, typeUsage, tagUsage] = await Promise.all([
+      this.categoryModel
+        .find()
+        .sort({ kind: 1, sort_order: 1, product_type: 1 })
+        .lean(),
+      this.tagModel.find().sort({ sort_order: 1, name: 1 }).lean(),
+      // Products store the product_type inside their kind sub-doc.
+      this.productModel.aggregate([
+        {
+          $project: {
+            kind: 1,
+            pt: {
+              $ifNull: [
+                '$clothing.taxonomy.product_type',
+                {
+                  $ifNull: [
+                    '$fabric.product_type',
+                    '$accessory.taxonomy.product_type',
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        { $match: { pt: { $type: 'string', $ne: '' } } },
+        { $group: { _id: { kind: '$kind', pt: '$pt' }, count: { $sum: 1 } } },
+      ]),
+      this.productModel.aggregate([
+        { $unwind: '$tags' },
+        { $match: { 'tags.slug': { $type: 'string' } } },
+        { $group: { _id: '$tags.slug', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    return {
+      message: 'Taxonomy overview',
+      data: {
+        categories,
+        tags,
+        type_usage: typeUsage.map((r: any) => ({
+          kind: r._id.kind,
+          product_type: r._id.pt,
+          count: r.count,
+        })),
+        tag_usage: tagUsage.map((r: any) => ({
+          slug: r._id,
+          count: r.count,
+        })),
+      },
+    };
+  }
 
   // ─────────────────────────────────────────────────────────
   // CATEGORIES — Public Queries
