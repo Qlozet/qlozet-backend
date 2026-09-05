@@ -16,6 +16,10 @@ import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import {
+  PlatformSettings,
+  PlatformSettingsSchema,
+} from '../platform/schema/platformSettings.schema';
+import {
   FabricReservation,
   FabricReservationSchema,
 } from '../fabric-reservation/schemas/fabric-reservation.schema';
@@ -51,6 +55,8 @@ import { SizeGuideModule } from '../size-guide/size-guide.module';
       // ratings and organised fabric reservations for the admin console.
       { name: Product.name, schema: ProductSchema },
       { name: FabricReservation.name, schema: FabricReservationSchema },
+      // Signup token reward amount is an admin-tunable platform setting.
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
     PassportModule,
     JwtModule.registerAsync({

@@ -37,6 +37,10 @@ import {
 } from '../business/schemas/business.schema';
 import { Token, TokenDocument } from '../wallets/schema/token.schema';
 import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
+import {
   createHash,
   generateOtp,
 } from 'src/common/utils/generateString';
@@ -60,6 +64,8 @@ export class AuthService {
     private readonly walletModel: Model<WalletDocument>,
     @InjectModel(TeamMember.name)
     private readonly teamMemberModel: Model<TeamMemberDocument>,
+    @InjectModel(PlatformSettings.name)
+    private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
@@ -207,11 +213,14 @@ export class AuthService {
         { session },
       );
 
+      // Wallet starts empty — the vendor signup token reward (admin-tunable)
+      // is granted once, when the business is approved, so throwaway
+      // registrations can't farm tokens.
       await this.tokenModel.create(
         [
           {
             business: business._id,
-            tokens: 250,
+            tokens: 0,
           },
         ],
         { session },
@@ -314,11 +323,18 @@ export class AuthService {
         { session },
       );
 
+      // Signup token reward — admin-tunable (0 = off). The wallet is keyed by
+      // `customer` (there is no `user` field on the Token schema; the old code
+      // wrote one and orphaned every signup grant).
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const signupTokens = settings?.customer_signup_token_reward ?? 100;
       await this.tokenModel.create(
         [
           {
-            user: newUser._id,
-            tokens: 100,
+            customer: newUser._id,
+            tokens: signupTokens,
+            lifetimeEarned: signupTokens,
+            signup_reward_granted: signupTokens > 0,
           },
         ],
         { session },

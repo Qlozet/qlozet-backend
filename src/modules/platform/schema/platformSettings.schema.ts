@@ -75,6 +75,21 @@ export class PlatformSettings extends Document {
   @Prop({ type: Boolean, default: false })
   ai_ask_requires_auth: boolean;
 
+  // ── Token rewards (0 = reward off) ──
+  // Registration previously hardcoded 100 tokens; the default preserves that.
+  @Prop({ type: Number, default: 100 })
+  customer_signup_token_reward: number;
+
+  // Granted once, when the business is first approved (not at raw signup,
+  // so throwaway registrations can't farm tokens). Registration previously
+  // hardcoded 250 at signup; the default preserves that amount.
+  @Prop({ type: Number, default: 250 })
+  vendor_signup_token_reward: number;
+
+  // Granted to the customer each time an order settles as paid.
+  @Prop({ type: Number, default: 0 })
+  order_payment_token_reward: number;
+
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
 

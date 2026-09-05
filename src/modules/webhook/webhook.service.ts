@@ -3,6 +3,7 @@ import { StripeProvider } from '../payment-providers/stripe.provider';
 import { buildPurchaseEvents } from '../recommendations/events/purchase-events.util';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { TokenService } from '../wallets/token.service';
 import {
   TransactionDocument,
   TransactionStatus,
@@ -40,6 +41,7 @@ export class WebhookService {
   constructor(
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
+    private readonly tokenService: TokenService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
     private readonly paymentService: PaymentService,
@@ -350,6 +352,15 @@ export class WebhookService {
             this.logger.warn(`Failed to record purchase events: ${e?.message}`),
           );
       }
+
+      // Order-payment token reward (admin-tunable, 0 = off) — first
+      // finalisation only, so webhook retries and the verify safety-net can't
+      // double-credit. Fire-and-forget: never blocks finalisation.
+      this.grantOrderPaymentReward(order).catch((e: any) =>
+        this.logger.warn(
+          `Order token reward failed for ${(order as any)?.reference}: ${e?.message}`,
+        ),
+      );
     }
 
     // Reservation claims: the claimed yards were deducted from the fabric when
@@ -411,6 +422,28 @@ export class WebhookService {
           );
       }
     }
+  }
+
+  /**
+   * Order-payment token reward: a flat, admin-tunable token credit to the
+   * customer each time an order settles as paid. Called only on the FIRST
+   * finalisation (the `alreadyPaid` guard upstream dedupes webhook retries and
+   * the verify safety-net).
+   */
+  private async grantOrderPaymentReward(order: any) {
+    const customerId = order?.customer?.toString();
+    if (!customerId) return;
+
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const reward = (settings as any)?.order_payment_token_reward ?? 0;
+    if (!reward || reward <= 0) return;
+
+    await this.tokenService.grant({ customer: customerId }, reward, 'reward:order_payment', {
+      order: order?.reference,
+    });
+    this.logger.log(
+      `Granted ${reward} order-payment tokens to customer ${customerId} for ${order?.reference}`,
+    );
   }
 
   /**

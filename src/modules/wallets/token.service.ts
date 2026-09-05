@@ -31,9 +31,12 @@ export class TokenService {
     private tokenTransactionModel: Model<TokenTransactionDocument>,
   ) { }
 
-  async findOrCreate(user?: string, business?: string) {
+  // Token wallets are keyed by `customer` or `business` — there is no `user`
+  // field on the schema. (Earlier code queried `user`, silently matching
+  // nothing and orphaning wallets.)
+  async findOrCreate(customer?: string, business?: string) {
     const query: any = {};
-    if (user) query.user = new Types.ObjectId(user);
+    if (customer) query.customer = new Types.ObjectId(customer);
     if (business) query.business = new Types.ObjectId(business);
 
     let wallet = await this.tokenModel.findOne(query);
@@ -43,7 +46,7 @@ export class TokenService {
 
   async get(userId: string) {
     const wallet = await this.tokenModel.findOne({
-      user: new Types.ObjectId(userId),
+      customer: new Types.ObjectId(userId),
     });
     if (!wallet) throw new NotFoundException('Token wallet not found');
     return wallet;
@@ -66,16 +69,36 @@ export class TokenService {
 
   async earn(userId: string, amount: number, feature?: string, metadata?: any) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
+    return this.grant({ customer: userId }, amount, feature, metadata);
+  }
+
+  /**
+   * Credit free tokens to a customer or business wallet (rewards, promos).
+   * Upserts the wallet, so it works even before the first purchase.
+   */
+  async grant(
+    target: { customer?: string; business?: string },
+    amount: number,
+    feature?: string,
+    metadata?: any,
+  ) {
+    if (amount <= 0) throw new BadRequestException('Invalid amount');
+
+    const filter: any = {};
+    if (target.customer) filter.customer = new Types.ObjectId(target.customer);
+    if (target.business) filter.business = new Types.ObjectId(target.business);
+    if (!Object.keys(filter).length)
+      throw new BadRequestException('Grant target required');
 
     const wallet = await this.tokenModel.findOneAndUpdate(
-      { user: new Types.ObjectId(userId) },
+      filter,
       { $inc: { tokens: amount, lifetimeEarned: amount } },
       { new: true, upsert: true },
     );
 
     // Record transaction (non-critical)
     await this.tokenTransactionModel.create({
-      wallet: wallet._id,
+      token: wallet._id,
       type: TokenTransactionType.EARN,
       amount,
       feature,
@@ -83,6 +106,43 @@ export class TokenService {
     });
 
     return wallet;
+  }
+
+  /**
+   * One-time signup reward: pays only while the wallet's
+   * `signup_reward_granted` flag is unset, then sets it — so webhook retries
+   * or approve/reject/approve cycles can't pay twice. Returns null when the
+   * reward was already granted.
+   */
+  async grantSignupReward(
+    target: { customer?: string; business?: string },
+    amount: number,
+    feature: string,
+  ) {
+    if (amount <= 0) return null;
+
+    // Ensure the wallet exists first — the guarded update below must never
+    // upsert, or a second call would insert a duplicate wallet.
+    const wallet = await this.findOrCreate(target.customer, target.business);
+
+    const granted = await this.tokenModel.findOneAndUpdate(
+      { _id: wallet._id, signup_reward_granted: { $ne: true } },
+      {
+        $inc: { tokens: amount, lifetimeEarned: amount },
+        $set: { signup_reward_granted: true },
+      },
+      { new: true },
+    );
+    if (!granted) return null;
+
+    await this.tokenTransactionModel.create({
+      token: granted._id,
+      type: TokenTransactionType.EARN,
+      amount,
+      feature,
+    });
+
+    return granted;
   }
 
   async spend(
@@ -245,21 +305,21 @@ export class TokenService {
 
   async history(userId: string, page = 1, size = 20) {
     const wallet = await this.tokenModel.findOne({
-      user: new Types.ObjectId(userId),
+      customer: new Types.ObjectId(userId),
     });
     if (!wallet) throw new NotFoundException('Token wallet not found');
 
     const skip = (page - 1) * size;
 
     const items = await this.tokenTransactionModel
-      .find({ wallet: wallet._id })
+      .find({ token: wallet._id })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(size)
       .lean();
 
     const total = await this.tokenTransactionModel.countDocuments({
-      wallet: wallet._id,
+      token: wallet._id,
     });
 
     return { total, page, size, items };
@@ -295,7 +355,7 @@ export class TokenService {
 
     // Record transaction (non-critical)
     await this.tokenTransactionModel.create({
-      wallet: wallet._id,
+      token: wallet._id,
       type,
       amount,
       feature,
