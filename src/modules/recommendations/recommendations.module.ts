@@ -18,6 +18,10 @@ import { BusinessModule } from '../business/business.module';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
+import {
+  PlatformSettings,
+  PlatformSettingsSchema,
+} from '../platform/schema/platformSettings.schema';
 
 @Module({
   imports: [
@@ -25,6 +29,8 @@ import { User, UserSchema } from '../ums/schemas/user.schema';
       { name: Order.name, schema: OrderSchema },
       { name: Product.name, schema: ProductSchema },
       { name: User.name, schema: UserSchema },
+      // Stock thresholds for the availability attached to hydrated products.
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
     ]),
     EventsModule,
     CatalogModule,

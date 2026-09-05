@@ -17,6 +17,14 @@ import { FeedItemDto } from './dto/feed-response.dto';
 import { v4 as uuid } from 'uuid';
 import { CatalogService } from './catalog/catalog.service';
 import { Order, OrderDocument } from '../orders/schemas/orders.schema';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
+import {
+  computeAvailability,
+  type StockThresholds,
+} from '../products/product-availability';
 
 @Injectable()
 export class RecommendationsService {
@@ -33,6 +41,8 @@ export class RecommendationsService {
     private catalogService: CatalogService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
+    @InjectModel(PlatformSettings.name)
+    private platformSettingsModel: Model<PlatformSettingsDocument>,
   ) {}
 
   async getHomeFeed(options: {
@@ -760,6 +770,18 @@ export class RecommendationsService {
       products.map((p: any) => [String(p._id), p]),
     );
 
+    // Stock thresholds (admin-set) for the availability computed per product —
+    // same rules as the listing endpoint, so rec-feed cards can badge
+    // low-stock / sold-out items exactly like listing cards do.
+    const thresholds: StockThresholds = await this.platformSettingsModel
+      .findOne()
+      .lean()
+      .then((s: any) => ({
+        lowStock: s?.low_stock_threshold ?? 5,
+        lowFabricYards: s?.low_fabric_yards ?? 0,
+      }))
+      .catch(() => ({ lowStock: 5, lowFabricYards: 0 }));
+
     // Merge product data into feed items, dropping items without an active product
     return items
       .map((item) => {
@@ -791,6 +813,7 @@ export class RecommendationsService {
             total_ratings: product.total_ratings,
             slug: product.slug,
             status: product.status,
+            availability: computeAvailability(product, thresholds),
           },
         };
       })
