@@ -760,7 +760,8 @@ export class RecommendationsService {
         select: 'business_name business_logo_url accepts_external_fabric',
       })
       .select(
-        'name kind base_price business clothing fabric accessory status ' +
+        'name kind base_price discounted_price discount_percentage ' +
+        'business clothing fabric accessory status ' +
         'average_rating total_ratings slug',
       )
       .lean();
@@ -805,6 +806,9 @@ export class RecommendationsService {
             name: product.name,
             kind: product.kind,
             base_price: product.base_price,
+            // Slash pricing on cards: hasDiscount() compares these two.
+            discounted_price: product.discounted_price,
+            discount_percentage: product.discount_percentage,
             business: product.business,
             clothing: product.clothing,
             fabric: product.fabric,
