@@ -15,6 +15,12 @@ import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import {
+  Token,
+  TokenSchema,
+  TokenTransaction,
+  TokenTransactionSchema,
+} from '../wallets/schema/token.schema';
+import {
   Transaction,
   TransactionSchema,
 } from '../transactions/schema/transaction.schema';
@@ -38,6 +44,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Order.name, schema: OrderSchema },
       { name: Wallet.name, schema: WalletSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      // Vendor signup token reward, granted on first approval.
+      { name: Token.name, schema: TokenSchema },
+      { name: TokenTransaction.name, schema: TokenTransactionSchema },
     ]),
     LogisticsModule,   // provides LogisticsService
     ProductModule,     // provides ProductService

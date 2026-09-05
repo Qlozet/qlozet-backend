@@ -40,6 +40,13 @@ import {
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
 import { sanitizeBusiness } from 'src/common/utils/sanitization';
+import {
+  Token,
+  TokenDocument,
+  TokenTransaction,
+  TokenTransactionDocument,
+  TokenTransactionType,
+} from '../wallets/schema/token.schema';
 
 @Injectable()
 export class BusinessService {
@@ -62,6 +69,10 @@ export class BusinessService {
     private walletModel: Model<WalletDocument>,
     @InjectModel(Transaction.name)
     private transactionModel: Model<TransactionDocument>,
+    @InjectModel(Token.name)
+    private tokenModel: Model<TokenDocument>,
+    @InjectModel(TokenTransaction.name)
+    private tokenTransactionModel: Model<TokenTransactionDocument>,
   ) {}
 
   // The legacy non-sparse unique index migration that used to live here as
@@ -945,13 +956,67 @@ export class BusinessService {
     const business = await this.businessModel.findById(businessId);
     if (!business) throw new NotFoundException('Business not found');
 
+    const wasLive = ['approved', 'verified'].includes(business.status);
     business.status = status;
     await business.save();
+
+    // Vendor signup token reward — paid once, on the first transition into an
+    // approved state. Fire-and-forget: a reward hiccup must never fail the
+    // approval itself.
+    const isLive = ['approved', 'verified'].includes(status);
+    if (isLive && !wasLive) {
+      this.grantVendorSignupReward(businessId).catch((e: any) =>
+        this.logger.error(
+          `Vendor signup token reward failed for business ${businessId}: ${e?.message}`,
+        ),
+      );
+    }
 
     return {
       message: `Business ${status} successfully`,
       data: business,
     };
+  }
+
+  /**
+   * Grant the admin-configured signup token reward to a newly approved
+   * business. Idempotent: the wallet's `signup_reward_granted` flag is flipped
+   * atomically with the credit, so approve → reject → approve pays only once.
+   */
+  private async grantVendorSignupReward(businessId: string) {
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const reward = (settings as any)?.vendor_signup_token_reward ?? 0;
+    if (!reward || reward <= 0) return;
+
+    const businessObjectId = new Types.ObjectId(businessId);
+
+    // Ensure the wallet exists (registration creates it, but old businesses
+    // may predate that) — then apply the guarded, one-time credit.
+    await this.tokenModel.updateOne(
+      { business: businessObjectId },
+      { $setOnInsert: { business: businessObjectId, tokens: 0 } },
+      { upsert: true },
+    );
+
+    const granted = await this.tokenModel.findOneAndUpdate(
+      { business: businessObjectId, signup_reward_granted: { $ne: true } },
+      {
+        $inc: { tokens: reward, lifetimeEarned: reward },
+        $set: { signup_reward_granted: true },
+      },
+      { new: true },
+    );
+    if (!granted) return; // already rewarded on an earlier approval
+
+    await this.tokenTransactionModel.create({
+      token: granted._id,
+      type: TokenTransactionType.EARN,
+      amount: reward,
+      feature: 'reward:vendor_signup',
+    });
+    this.logger.log(
+      `Granted ${reward} signup tokens to business ${businessId} on approval`,
+    );
   }
   async approveBusiness(businessId: string) {
     return this.updateBusinessStatus(businessId, 'approved');

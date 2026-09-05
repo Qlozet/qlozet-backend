@@ -54,6 +54,11 @@ export class Token {
   @Prop()
   expiresAt?: Date;
 
+  // One-time signup reward marker — the grant is guarded on this flag being
+  // unset, so a re-approval cycle (approve → reject → approve) can't pay twice.
+  @Prop({ type: Boolean, default: false })
+  signup_reward_granted?: boolean;
+
   @Prop({
     type: [
       {

@@ -276,6 +276,36 @@ export class UpdatePlatformSettingsDto {
   @IsBoolean()
   ai_ask_requires_auth?: boolean;
 
+  // ── Token rewards (0 = reward off) ──
+  @ApiPropertyOptional({
+    description: 'Tokens granted to a customer on signup (0 = off)',
+    example: 100,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  customer_signup_token_reward?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Tokens granted to a vendor business when it is first approved (0 = off)',
+    example: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  vendor_signup_token_reward?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Tokens granted to the customer each time an order settles as paid (0 = off)',
+    example: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  order_payment_token_reward?: number;
+
   // ── Token price (FX) ──
   @ApiPropertyOptional({
     type: TokenPriceDto,
