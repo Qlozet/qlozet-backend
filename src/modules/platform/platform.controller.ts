@@ -51,7 +51,11 @@ import { OrderService } from '../orders/orders.service';
 import { FetchCustomersDto } from '../ums/dto/fetch-customer.dto';
 import { UpdateCustomerStatusDto } from '../ums/dto/customer-status.dto';
 import { UserType } from '../ums/schemas';
-import { AssignTicketDto, TicketFilterDto } from '../ticket/dto/ticket.dto';
+import {
+  AssignTicketDto,
+  TicketFilterDto,
+  UpdateTicketDto,
+} from '../ticket/dto/ticket.dto';
 import {
   CreateTicketReplyDto,
   TicketReplyResponseDto,
@@ -846,10 +850,74 @@ export class PlatformController {
     return this.ticketService.findAssignedTickets(team_id, query, page, size);
   }
 
+  // Admin read of a single ticket. The console previously read GET /tickets/:id
+  // (vendor-gated) and fell back to scanning the whole list for reply bodies.
+  @Roles(UserType.PLATFORM)
+  @Get('tickets/:id')
+  @ApiOperation({ summary: 'Get a single ticket (admin)' })
+  async getTicketById(@Param('id') id: string) {
+    return this.ticketService.findOne(id);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('tickets/:id/replies')
+  @ApiOperation({ summary: 'Paginated replies for a ticket (admin)' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'size', required: false, example: 50 })
+  async getTicketReplies(
+    @Param('id') id: string,
+    @Query('page') page = 1,
+    @Query('size') size = 50,
+  ) {
+    return this.ticketService.getTicketReplies(id, Number(page), Number(size));
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('tickets/:id/activities')
+  @ApiOperation({
+    summary: 'Ticket activity timeline (admin)',
+    description:
+      'Stored audit rows plus a synthesized baseline (creation, pre-log replies) for tickets that predate the log. Oldest first.',
+  })
+  async getTicketActivities(@Param('id') id: string) {
+    return this.ticketService.getActivities(id);
+  }
+
+  // Admin edit/resolve. PATCH /tickets/:id is vendor-gated, which the console
+  // was riding through before.
+  @Roles(UserType.PLATFORM)
+  @Patch('tickets/:id')
+  @ApiOperation({ summary: 'Update a ticket (admin) — status, issue, description' })
+  async updateTicket(
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: UpdateTicketDto,
+  ) {
+    return this.ticketService.update(id, dto, req.user?.id);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Post('tickets/:id/notes')
+  @ApiOperation({
+    summary: 'Add an internal note to a ticket (admin)',
+    description:
+      'Notes live in the activity timeline only — never shown to the vendor.',
+  })
+  async addTicketNote(
+    @Param('id') id: string,
+    @Req() req,
+    @Body() dto: { body: string },
+  ) {
+    if (!dto?.body?.trim()) {
+      throw new BadRequestException('Note body is required');
+    }
+    return this.ticketService.addNote(id, req.user.id, dto.body.trim());
+  }
+
   @Patch(':id/assign')
   @ApiOperation({ summary: 'Assign ticket to a support team' })
-  assign(@Param('id') id: string, @Body() dto: AssignTicketDto) {
-    return this.ticketService.assign(id, dto);
+  assign(@Param('id') id: string, @Req() req, @Body() dto: AssignTicketDto) {
+    return this.ticketService.assign(id, dto, req.user?.id);
   }
   @Post(':ticket_id/reply')
   @ApiOperation({ summary: 'Reply to a ticket (vendor/admin/support)' })
