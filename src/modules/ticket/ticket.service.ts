@@ -370,7 +370,12 @@ export class TicketService {
     const updated = await this.ticketModel
       .findByIdAndUpdate(
         id,
-        { assigned_to: dto.support_team_id, status: 'in_progress' },
+        {
+          // Explicit ObjectId — never trust implicit casting for ref writes;
+          // string-stored refs silently break every ObjectId-filtered count.
+          assigned_to: new Types.ObjectId(dto.support_team_id),
+          status: 'in_progress',
+        },
         { new: true },
       )
       .populate('assigned_to', 'full_name email');
