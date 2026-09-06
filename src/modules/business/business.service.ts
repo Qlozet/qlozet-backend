@@ -949,6 +949,99 @@ export class BusinessService {
     return business;
   }
 
+  /**
+   * A vendor's top-selling products, aggregated from order items (products
+   * carry no sold counter, so sales rank has to come from orders). Revenue
+   * statuses only — cancelled/rejected orders don't count as sales.
+   */
+  async getBusinessTopProducts(businessId: string, limit = 10) {
+    const bid = new Types.ObjectId(businessId);
+    const capped = Math.min(Math.max(Number(limit) || 10, 1), 50);
+    const REVENUE_STATUSES = [
+      'in_review',
+      'processing',
+      'in_transit',
+      'completed',
+    ];
+
+    const rows = await this.orderModel.aggregate([
+      { $match: { status: { $in: REVENUE_STATUSES } } },
+      { $unwind: '$items' },
+      { $match: { 'items.business': bid, 'items.product': { $ne: null } } },
+      {
+        $group: {
+          _id: '$items.product',
+          // Units live inside the selection arrays; each is summed on its own
+          // ($sum over array-valued expressions yields 0). An item whose
+          // selections carry no quantities (bespoke, claims) counts as 1 unit.
+          units_sold: {
+            $sum: {
+              $max: [
+                {
+                  $add: [
+                    { $sum: '$items.color_variant_selections.quantity' },
+                    { $sum: '$items.fabric_selections.quantity' },
+                    { $sum: '$items.accessory_selections.quantity' },
+                  ],
+                },
+                1,
+              ],
+            },
+          },
+          revenue: { $sum: { $ifNull: ['$items.total_price', 0] } },
+          orders: { $sum: 1 },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: capped },
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'p',
+        },
+      },
+      { $unwind: { path: '$p', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          units_sold: 1,
+          revenue: 1,
+          orders: 1,
+          kind: '$p.kind',
+          status: '$p.status',
+          base_price: '$p.base_price',
+          discounted_price: '$p.discounted_price',
+          name: {
+            $ifNull: [
+              '$p.clothing.name',
+              {
+                $ifNull: [
+                  '$p.fabric.name',
+                  { $ifNull: ['$p.accessory.name', '$p.name'] },
+                ],
+              },
+            ],
+          },
+          image: {
+            $ifNull: [
+              { $arrayElemAt: ['$p.clothing.images.url', 0] },
+              {
+                $ifNull: [
+                  { $arrayElemAt: ['$p.fabric.images.url', 0] },
+                  { $arrayElemAt: ['$p.accessory.images.url', 0] },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ]);
+
+    return { message: 'Top products', data: rows };
+  }
+
   async updateBusinessStatus(
     businessId: string,
     status: 'in-review' | 'approved' | 'verified' | 'rejected' | 'unverified',
