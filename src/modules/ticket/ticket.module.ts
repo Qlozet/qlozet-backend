@@ -9,9 +9,13 @@ import {
   TicketActivitySchema,
 } from './schema/ticket-activity.schema';
 import { JwtService } from '@nestjs/jwt';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
+    // Assignment pings: the assignee gets an in-app notification (+ realtime
+    // socket push) the moment a ticket lands on them.
+    NotificationsModule,
     MongooseModule.forFeature([
       { name: Ticket.name, schema: TicketSchema },
       { name: TicketReply.name, schema: TicketReplySchema },

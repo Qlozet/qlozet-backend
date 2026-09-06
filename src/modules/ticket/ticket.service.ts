@@ -15,6 +15,11 @@ import {
   TicketActivity,
   TicketActivityType,
 } from './schema/ticket-activity.schema';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationCategory,
+  NotificationType,
+} from '../notifications/schemas/notification.schema';
 
 @Injectable()
 export class TicketService {
@@ -25,6 +30,7 @@ export class TicketService {
     @InjectModel(TicketReply.name) private ticketReplyModel: Model<TicketReply>,
     @InjectModel(TicketActivity.name)
     private ticketActivityModel: Model<TicketActivity>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -382,6 +388,24 @@ export class TicketService {
         metadata: { assignee: dto.support_team_id, assignee_name: assigneeName },
       },
     );
+
+    // Tell the assignee — in-app notification + realtime socket push.
+    // Fire-and-forget: a notification hiccup must never fail the assignment.
+    const idTail = String(updated._id).slice(-8).toUpperCase();
+    this.notificationsService
+      .create({
+        recipient: dto.support_team_id,
+        category: NotificationCategory.SYSTEM,
+        type: NotificationType.TICKET_ASSIGNED,
+        title: 'Ticket assigned to you 🎫',
+        body: `You've been assigned ticket #${idTail}: "${updated.issue_type}".`,
+        metadata: { ticket_id: String(updated._id) },
+      })
+      .catch((e: any) =>
+        this.logger.error(
+          `Failed to notify assignee for ticket ${updated._id}: ${e?.message}`,
+        ),
+      );
     return updated;
   }
 }

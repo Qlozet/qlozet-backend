@@ -52,6 +52,8 @@ export enum NotificationType {
   // System
   WELCOME = 'welcome',
   ANNOUNCEMENT = 'announcement',
+  // Support — an admin/support user was assigned a ticket
+  TICKET_ASSIGNED = 'ticket_assigned',
 }
 
 // ==================== SCHEMA ====================
