@@ -5511,7 +5511,15 @@ export class OrderService {
     if (!Types.ObjectId.isValid(adminId)) {
       throw new BadRequestException('Invalid admin id');
     }
-    const admin = new Types.ObjectId(adminId);
+    // Match BOTH id forms. Some ticket docs carry `assigned_to` as a raw
+    // string rather than an ObjectId (the same stored-as-string disease the
+    // customer address refs had) — populate() still works with strings
+    // because it casts, but an ObjectId-only filter silently returns 0 and
+    // every per-admin figure reads as zero. A find()/countDocuments $in is
+    // schema-cast (both forms collapse to ObjectId), so the per-admin queries
+    // below run as AGGREGATIONS, which mongoose does not cast.
+    const adminForms: any[] = [new Types.ObjectId(adminId), adminId];
+    const assignedToMe = { assigned_to: { $in: adminForms } };
 
     const since = new Date();
     since.setDate(since.getDate() - OrderService.TASK_WINDOW_DAYS);
@@ -5537,57 +5545,90 @@ export class OrderService {
       // never disagree.
       this.getAdminDashboardMetrics(),
       this.ticketModel.countDocuments({ status: done }),
-      this.ticketModel.countDocuments({ assigned_to: admin, status: done }),
+      this.ticketModel
+        .aggregate([
+          { $match: { ...assignedToMe, status: done } },
+          { $count: 'n' },
+        ])
+        .then((r) => r[0]?.n ?? 0),
       // Deliberately a narrower figure than ticketsResolved: the drawer shows
       // both, and two identical numbers under different labels would look like
       // a bug.
-      this.ticketModel.countDocuments({
-        assigned_to: admin,
-        status: done,
-        updatedAt: { $gte: since },
-      }),
+      this.ticketModel
+        .aggregate([
+          {
+            $match: { ...assignedToMe, status: done, updatedAt: { $gte: since } },
+          },
+          { $count: 'n' },
+        ])
+        .then((r) => r[0]?.n ?? 0),
       // Live workload — assigned to me and still open, however old.
-      this.ticketModel.countDocuments({ assigned_to: admin, status: active }),
+      this.ticketModel
+        .aggregate([
+          { $match: { ...assignedToMe, status: active } },
+          { $count: 'n' },
+        ])
+        .then((r) => r[0]?.n ?? 0),
       // "Vendors managed" — no business carries an assigned admin, so this is
       // the vendors this admin has actually handled a ticket for.
       this.ticketModel
-        .distinct('business', { assigned_to: admin })
-        .then((ids) => ids.filter(Boolean).length),
+        .aggregate([
+          { $match: assignedToMe },
+          { $group: { _id: '$business' } },
+          { $match: { _id: { $ne: null } } },
+          { $count: 'n' },
+        ])
+        .then((r) => r[0]?.n ?? 0),
       // The task list is my CURRENT assigned work: every still-open ticket
       // (no time window — an open ticket from 45 days ago is still my job),
-      // plus what I finished inside the window. `timestamps: true` adds
-      // createdAt but the Ticket class does not declare it, so the lean
-      // results are typed explicitly rather than cast at the use site.
-      this.ticketModel
-        .find({ assigned_to: admin, status: active })
-        .select('issue_type status business createdAt')
-        .populate('business', 'business_name')
-        .sort({ createdAt: -1 })
-        .limit(OrderService.TASK_LIMIT)
-        .lean<
-          {
-            _id: Types.ObjectId;
-            issue_type: string;
-            status: TicketStatus;
-            business?: { business_name?: string } | null;
-            createdAt: Date;
-          }[]
-        >(),
-      this.ticketModel
-        .find({ assigned_to: admin, status: done, updatedAt: { $gte: since } })
-        .select('issue_type status business createdAt')
-        .populate('business', 'business_name')
-        .sort({ updatedAt: -1 })
-        .limit(OrderService.TASK_LIMIT)
-        .lean<
-          {
-            _id: Types.ObjectId;
-            issue_type: string;
-            status: TicketStatus;
-            business?: { business_name?: string } | null;
-            createdAt: Date;
-          }[]
-        >(),
+      // plus what I finished inside the window. Business name via $lookup —
+      // populate() is unavailable in aggregation, and the string-form
+      // `business` refs get the same tolerant treatment nowhere: business is
+      // written by ticket creation (schema-cast), so a plain lookup suffices.
+      this.ticketModel.aggregate([
+        { $match: { ...assignedToMe, status: active } },
+        { $sort: { createdAt: -1 } },
+        { $limit: OrderService.TASK_LIMIT },
+        {
+          $lookup: {
+            from: 'businesses',
+            localField: 'business',
+            foreignField: '_id',
+            as: 'biz',
+          },
+        },
+        {
+          $project: {
+            issue_type: 1,
+            status: 1,
+            createdAt: 1,
+            business: { business_name: { $arrayElemAt: ['$biz.business_name', 0] } },
+          },
+        },
+      ]),
+      this.ticketModel.aggregate([
+        {
+          $match: { ...assignedToMe, status: done, updatedAt: { $gte: since } },
+        },
+        { $sort: { updatedAt: -1 } },
+        { $limit: OrderService.TASK_LIMIT },
+        {
+          $lookup: {
+            from: 'businesses',
+            localField: 'business',
+            foreignField: '_id',
+            as: 'biz',
+          },
+        },
+        {
+          $project: {
+            issue_type: 1,
+            status: 1,
+            createdAt: 1,
+            business: { business_name: { $arrayElemAt: ['$biz.business_name', 0] } },
+          },
+        },
+      ]),
     ]);
 
     const tasks = [...activeTasks, ...completedTasks].sort(
