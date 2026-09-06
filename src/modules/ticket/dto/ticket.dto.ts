@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, IsArray } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsArray,
+  IsIn,
+} from 'class-validator';
 
 export class CreateTicketDto {
   @ApiProperty({ example: 'Delivery Delay', description: 'Type of issue' })
@@ -23,9 +29,25 @@ export class CreateTicketDto {
   @IsArray()
   @IsOptional()
   images?: string[];
+
+  // The schema field is `attachments`; `images` above is kept for clients
+  // already sending it (create() maps images → attachments — before that,
+  // uploaded ticket images were silently dropped on the floor).
+  @ApiPropertyOptional({ type: [String], description: 'Attachment URLs' })
+  @IsArray()
+  @IsOptional()
+  attachments?: string[];
 }
 
-export class UpdateTicketDto extends PartialType(CreateTicketDto) {}
+export class UpdateTicketDto extends PartialType(CreateTicketDto) {
+  @ApiPropertyOptional({
+    description: 'Ticket status',
+    enum: ['open', 'in_progress', 'resolved', 'closed'],
+  })
+  @IsOptional()
+  @IsIn(['open', 'in_progress', 'resolved', 'closed'])
+  status?: string;
+}
 
 export class AssignTicketDto {
   @ApiProperty({ description: 'Support team ID to assign ticket to' })
