@@ -5518,13 +5518,19 @@ export class OrderService {
 
     const done = { $in: OrderService.DONE_TICKET_STATUSES };
 
+    const active = {
+      $in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS],
+    };
+
     const [
       dashboard,
       ticketsClosed,
       ticketsResolvedByMe,
       tasksCompletedThisMonth,
+      activeTickets,
       vendorsManaged,
-      tasks,
+      activeTasks,
+      completedTasks,
     ] = await Promise.all([
       // Reuses the dashboard roll-up rather than re-counting customers,
       // vendors and gross sales — the drawer and the dashboard cards can then
@@ -5540,16 +5546,20 @@ export class OrderService {
         status: done,
         updatedAt: { $gte: since },
       }),
+      // Live workload — assigned to me and still open, however old.
+      this.ticketModel.countDocuments({ assigned_to: admin, status: active }),
       // "Vendors managed" — no business carries an assigned admin, so this is
       // the vendors this admin has actually handled a ticket for.
       this.ticketModel
         .distinct('business', { assigned_to: admin })
         .then((ids) => ids.filter(Boolean).length),
-      // `timestamps: true` adds createdAt but the Ticket class does not declare
-      // it, so the lean result is typed explicitly rather than cast at the use
-      // site.
+      // The task list is my CURRENT assigned work: every still-open ticket
+      // (no time window — an open ticket from 45 days ago is still my job),
+      // plus what I finished inside the window. `timestamps: true` adds
+      // createdAt but the Ticket class does not declare it, so the lean
+      // results are typed explicitly rather than cast at the use site.
       this.ticketModel
-        .find({ assigned_to: admin, createdAt: { $gte: since } })
+        .find({ assigned_to: admin, status: active })
         .select('issue_type status business createdAt')
         .populate('business', 'business_name')
         .sort({ createdAt: -1 })
@@ -5563,7 +5573,27 @@ export class OrderService {
             createdAt: Date;
           }[]
         >(),
+      this.ticketModel
+        .find({ assigned_to: admin, status: done, updatedAt: { $gte: since } })
+        .select('issue_type status business createdAt')
+        .populate('business', 'business_name')
+        .sort({ updatedAt: -1 })
+        .limit(OrderService.TASK_LIMIT)
+        .lean<
+          {
+            _id: Types.ObjectId;
+            issue_type: string;
+            status: TicketStatus;
+            business?: { business_name?: string } | null;
+            createdAt: Date;
+          }[]
+        >(),
     ]);
+
+    const tasks = [...activeTasks, ...completedTasks].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
 
     return {
       currency: 'NGN',
@@ -5573,6 +5603,7 @@ export class OrderService {
         vendors: dashboard.total_vendors,
         tasksCompleted: tasksCompletedThisMonth,
         ticketsClosed,
+        activeTickets,
       },
       metrics: {
         vendorsManaged,

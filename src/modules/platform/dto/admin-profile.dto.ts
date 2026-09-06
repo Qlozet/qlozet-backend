@@ -28,6 +28,13 @@ export class AdminProfileStatsDto {
       "Platform-wide tickets in 'resolved' or 'closed', all-time and across every admin",
   })
   ticketsClosed: number;
+
+  @ApiProperty({
+    example: 4,
+    description:
+      "Tickets assigned to THIS admin currently 'open' or 'in_progress' — their live workload, no time window.",
+  })
+  activeTickets: number;
 }
 
 export class AdminProfileMetricsDto {
