@@ -209,6 +209,24 @@ export class PlatformController {
     });
   }
 
+  @Get('businesses/:id/top-products')
+  @ApiOperation({
+    summary: "A vendor's top-selling products (admin)",
+    description:
+      'Aggregated from order items across revenue statuses: units sold, order count and revenue per product, best sellers first. The public /products listing cannot rank by sales — products carry no sold counter.',
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  async getBusinessTopProducts(
+    @Param('id') id: string,
+    @Query('limit') limit = 10,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid business id');
+    }
+    return this.businessService.getBusinessTopProducts(id, Number(limit));
+  }
+
   // ------------------------------------------------------
   // VENDOR NOTES, FLAGS AND ESCALATION (admin)
   // ------------------------------------------------------
