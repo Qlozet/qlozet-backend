@@ -155,12 +155,13 @@ export class MeasurementService {
 
       this.logger.log('Prediction completed successfully');
 
-      // The Space returns one entry per output component, and the rich
-      // { cm, in, derived } JSON is not necessarily the FIRST output (the
-      // Space keeps its display DataFrame too). Find the output that carries
-      // the measurement payload rather than blindly taking data[0] — which
-      // silently dropped the derived tailoring measurements.
+      // //run_predict returns [DataFrame, File]: the rich { cm, in, derived }
+      // payload arrives as a DOWNLOADABLE FILE component (a {path, url} ref),
+      // not an inline object — so it must be fetched and parsed here, or the
+      // derived tailoring measurements never leave the Space.
       const outputs: any[] = Array.isArray(result?.data) ? result.data : [];
+
+      // Direct object, in case the Space ever switches to a JSON component.
       const rich = outputs.find(
         (o) =>
           o &&
@@ -168,16 +169,45 @@ export class MeasurementService {
           !Array.isArray(o) &&
           ((o as any).cm || (o as any).derived),
       );
-      if (rich) {
-        this.logger.log(
-          `Returning rich prediction output (cm=${!!(rich as any).cm}, derived=${
-            Array.isArray((rich as any).derived)
-              ? (rich as any).derived.length
-              : 0
-          })`,
-        );
-        return rich;
+      if (rich) return rich;
+
+      // File component → fetch the JSON it points at (private Space: auth).
+      const fileRef = outputs.find(
+        (o) =>
+          o &&
+          typeof o === 'object' &&
+          typeof (o as any).url === 'string' &&
+          (o as any).url.startsWith('http'),
+      );
+      if (fileRef) {
+        try {
+          const resp = await fetch((fileRef as any).url, {
+            headers: {
+              Authorization: `Bearer hf_${process.env.HUGGING_FACE_TOKEN}`,
+            },
+          });
+          if (resp.ok) {
+            const json: any = await resp.json();
+            if (json && (json.cm || json.derived)) {
+              this.logger.log(
+                `Parsed predictions JSON file (derived=${
+                  Array.isArray(json.derived) ? json.derived.length : 0
+                })`,
+              );
+              return json;
+            }
+          } else {
+            this.logger.warn(
+              `Predictions JSON fetch returned ${resp.status} — falling back to the DataFrame output.`,
+            );
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `Failed to fetch predictions JSON file: ${e?.message} — falling back to the DataFrame output.`,
+          );
+        }
       }
+
       return outputs[0];
     } catch (error) {
       // Re-throw known NestJS exceptions with correct HTTP status
