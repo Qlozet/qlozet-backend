@@ -184,6 +184,9 @@ export class OrderService {
           unit: chosen.unit || 'cm',
           fit_preferences: (fullCustomer as any)?.body_fit || [],
           set_name: chosen.name || null,
+          // Per-measurement { tier, mae_cm, method } — lets the vendor's grid
+          // flag rough values ("verify with customer") on the frozen snapshot.
+          tailoring_meta: (chosen as any).tailoring_meta ?? null,
         };
       };
       const itemSetName = (idx: number, productId: any): string | undefined => {

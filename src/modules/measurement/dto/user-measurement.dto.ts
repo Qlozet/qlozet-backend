@@ -113,6 +113,21 @@ export class AddMeasurementSetDto {
   @ValidateNested()
   @Type(() => MeasurementInputDto)
   measurements: MeasurementInputDto;
+
+  // Prediction provenance (schema v2 payload `inputs`): height/weight/gender/
+  // variant/mask_method — re-prediction and audit.
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  inputs?: Record<string, any>;
+
+  // Per-measurement { tier, mae_cm, method } keyed by name — drives the
+  // tailor's grid badges (rough → "verify with customer").
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  tailoring_meta?: Record<
+    string,
+    { tier?: string; mae_cm?: number | null; method?: string }
+  >;
 }
 
 export class UpdateMeasurementSetDto {
@@ -126,4 +141,15 @@ export class UpdateMeasurementSetDto {
   @ValidateNested()
   @Type(() => MeasurementInputDto)
   measurements?: MeasurementInputDto;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  inputs?: Record<string, any>;
+
+  @ApiPropertyOptional({ type: Object })
+  @IsOptional()
+  tailoring_meta?: Record<
+    string,
+    { tier?: string; mae_cm?: number | null; method?: string }
+  >;
 }

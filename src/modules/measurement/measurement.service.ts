@@ -184,13 +184,18 @@ export class MeasurementService {
   ): Promise<any> {
     const outputs: any[] = Array.isArray(data) ? data : [];
 
-    // Direct object, in case the Space ever switches to a JSON component.
+    // Direct payload object — schema v2 arrives as a gr.JSON output (third
+    // element). Match v1 (cm/derived) and v2+ (measurements/schema_version) —
+    // v3 will drop the cm/in maps, so don't key on those alone.
     const rich = outputs.find(
       (o) =>
         o &&
         typeof o === 'object' &&
         !Array.isArray(o) &&
-        ((o as any).cm || (o as any).derived),
+        ((o as any).schema_version ||
+          Array.isArray((o as any).measurements) ||
+          (o as any).cm ||
+          (o as any).derived),
     );
     if (rich) return rich;
 
