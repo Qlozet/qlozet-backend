@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsNumber,
   IsPositive,
@@ -77,6 +77,26 @@ export class MeasurementInputDto {
   @ApiProperty({ example: 15.69 }) @IsNumber() @IsPositive() wrist: number;
   @ApiProperty({ example: 21.81 }) @IsNumber() @IsPositive() ankle: number;
   @ApiProperty({ example: 40.65 }) @IsNumber() @IsPositive() arm_length: number;
+
+  // ── Tailoring measurements (optional) ──
+  // Derived by the prediction service (silhouette rows + ANSUR II fits) and
+  // editable by the customer. Stored in the same open measurements map; the
+  // order snapshot copies them wholesale so vendors sew from real numbers.
+  @ApiPropertyOptional({ example: 70.9 }) @IsOptional() @IsNumber() @IsPositive() inseam?: number;
+  @ApiPropertyOptional({ example: 112.3 }) @IsOptional() @IsNumber() @IsPositive() outseam?: number;
+  @ApiPropertyOptional({ example: 82.1 }) @IsOptional() @IsNumber() @IsPositive() sleeve_length?: number;
+  @ApiPropertyOptional({ example: 39.7 }) @IsOptional() @IsNumber() @IsPositive() nape_to_waist?: number;
+  @ApiPropertyOptional({ example: 47.4 }) @IsOptional() @IsNumber() @IsPositive() neck?: number;
+  @ApiPropertyOptional({ example: 52.4 }) @IsOptional() @IsNumber() @IsPositive() neck_base?: number;
+  @ApiPropertyOptional({ example: 44.4 }) @IsOptional() @IsNumber() @IsPositive() knee?: number;
+  @ApiPropertyOptional({ example: 59.0 }) @IsOptional() @IsNumber() @IsPositive() mid_thigh?: number;
+  @ApiPropertyOptional({ example: 52.1 }) @IsOptional() @IsNumber() @IsPositive() lower_thigh?: number;
+  @ApiPropertyOptional({ example: 127.9 }) @IsOptional() @IsNumber() @IsPositive() belly_waist?: number;
+  @ApiPropertyOptional({ example: 129.3 }) @IsOptional() @IsNumber() @IsPositive() top_hip?: number;
+  @ApiPropertyOptional({ example: 119.8 }) @IsOptional() @IsNumber() @IsPositive() under_bust?: number;
+  @ApiPropertyOptional({ example: 120.6 }) @IsOptional() @IsNumber() @IsPositive() waist_height?: number;
+  @ApiPropertyOptional({ example: 7.5 }) @IsOptional() @IsNumber() @IsPositive() ankle_height?: number;
+  @ApiPropertyOptional({ example: 160.3 }) @IsOptional() @IsNumber() @IsPositive() neck_height?: number;
 }
 
 export class AddMeasurementSetDto {
