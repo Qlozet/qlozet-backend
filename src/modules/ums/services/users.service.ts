@@ -1530,6 +1530,8 @@ export class UserService {
       active: isFirstSet,
       unit: dto.unit,
       measurements: { ...dto.measurements },
+      inputs: dto.inputs ?? null,
+      tailoring_meta: dto.tailoring_meta ?? null,
     };
 
     user.measurementSets = user.measurementSets || [];
@@ -1571,6 +1573,14 @@ export class UserService {
       for (const [key, value] of Object.entries(dto.measurements)) {
         (set.measurements as any).set(key, value);
       }
+    }
+    if (dto.inputs) set.inputs = dto.inputs;
+    if (dto.tailoring_meta) {
+      set.tailoring_meta = {
+        ...(set.tailoring_meta ?? {}),
+        ...dto.tailoring_meta,
+      };
+      user.markModified('measurementSets');
     }
 
     // Re-classify body type if this is the active set

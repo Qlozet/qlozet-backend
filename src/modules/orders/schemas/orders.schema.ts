@@ -204,6 +204,11 @@ export class OrderItem {
     unit: string;
     fit_preferences?: string[];
     set_name?: string | null;
+    /** Per-measurement { tier, mae_cm, method } from the prediction payload. */
+    tailoring_meta?: Record<
+      string,
+      { tier?: string; mae_cm?: number | null; method?: string }
+    > | null;
   } | null;
 }
 

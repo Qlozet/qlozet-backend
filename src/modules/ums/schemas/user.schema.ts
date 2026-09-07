@@ -136,6 +136,13 @@ export class User extends Document {
           of: Number,
           default: {},
         },
+        // Prediction provenance (schema v2): what produced this set — height,
+        // weight_kg, gender, model variant, mask method. Re-prediction + audit.
+        inputs: { type: Object, default: null },
+        // Per-measurement { tier, mae_cm, method } keyed by measurement name,
+        // so the vendor's grid can badge rough values ("verify with customer")
+        // and show expected error.
+        tailoring_meta: { type: Object, default: null },
       },
     ],
     default: [],
@@ -146,6 +153,11 @@ export class User extends Document {
     active: boolean;
     unit: 'cm' | 'inch';
     measurements: Record<string, number>;
+    inputs?: Record<string, any> | null;
+    tailoring_meta?: Record<
+      string,
+      { tier?: string; mae_cm?: number | null; method?: string }
+    > | null;
   }[];
 
   @Prop({

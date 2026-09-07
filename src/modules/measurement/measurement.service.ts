@@ -155,30 +155,10 @@ export class MeasurementService {
 
       this.logger.log('Prediction completed successfully');
 
-      // The Space returns one entry per output component, and the rich
-      // { cm, in, derived } JSON is not necessarily the FIRST output (the
-      // Space keeps its display DataFrame too). Find the output that carries
-      // the measurement payload rather than blindly taking data[0] — which
-      // silently dropped the derived tailoring measurements.
-      const outputs: any[] = Array.isArray(result?.data) ? result.data : [];
-      const rich = outputs.find(
-        (o) =>
-          o &&
-          typeof o === 'object' &&
-          !Array.isArray(o) &&
-          ((o as any).cm || (o as any).derived),
-      );
-      if (rich) {
-        this.logger.log(
-          `Returning rich prediction output (cm=${!!(rich as any).cm}, derived=${
-            Array.isArray((rich as any).derived)
-              ? (rich as any).derived.length
-              : 0
-          })`,
-        );
-        return rich;
-      }
-      return outputs[0];
+      // //run_predict returns [DataFrame, File]: the rich { cm, in, derived }
+      // payload arrives as a DOWNLOADABLE FILE component — fetch and parse it,
+      // falling back to the DataFrame output.
+      return this.extractPrediction(result?.data, 0);
     } catch (error) {
       // Re-throw known NestJS exceptions with correct HTTP status
       if (error instanceof BadRequestException) throw error;
@@ -190,6 +170,79 @@ export class MeasurementService {
       this.logger.error(`Prediction failed: ${errMsg}`, error?.stack);
       throw new Error(`Prediction Error: ${errMsg}`);
     }
+  }
+
+  /**
+   * Resolve a Gradio prediction result to the rich { cm, in, derived } JSON.
+   * The Space returns it as a downloadable FILE component ({path, url}), not
+   * an inline object — so it has to be fetched (with auth: private Space) and
+   * parsed. Falls back to the output at `fallbackIndex` (the DataFrame).
+   */
+  private async extractPrediction(
+    data: any,
+    fallbackIndex: number,
+  ): Promise<any> {
+    const outputs: any[] = Array.isArray(data) ? data : [];
+
+    // Direct payload object — schema v2 arrives as a gr.JSON output (third
+    // element). Match v1 (cm/derived) and v2+ (measurements/schema_version) —
+    // v3 will drop the cm/in maps, so don't key on those alone.
+    const rich = outputs.find(
+      (o) =>
+        o &&
+        typeof o === 'object' &&
+        !Array.isArray(o) &&
+        ((o as any).schema_version ||
+          Array.isArray((o as any).measurements) ||
+          (o as any).cm ||
+          (o as any).derived),
+    );
+    if (rich) return rich;
+
+    // Specifically the JSON file — mask/image outputs are FileData with URLs
+    // too, so match on extension/mime, not merely "has a URL".
+    const looksJson = (o: any) =>
+      /\.json($|\?)/i.test(o.url ?? '') ||
+      /\.json$/i.test(o.orig_name ?? '') ||
+      /json/i.test(o.mime_type ?? '');
+    const fileRef = outputs.find(
+      (o) =>
+        o &&
+        typeof o === 'object' &&
+        typeof (o as any).url === 'string' &&
+        (o as any).url.startsWith('http') &&
+        looksJson(o),
+    );
+    if (fileRef) {
+      try {
+        const resp = await fetch((fileRef as any).url, {
+          headers: {
+            Authorization: `Bearer hf_${process.env.HUGGING_FACE_TOKEN}`,
+          },
+        });
+        if (resp.ok) {
+          const json: any = await resp.json();
+          if (json && (json.cm || json.derived)) {
+            this.logger.log(
+              `Parsed predictions JSON file (derived=${
+                Array.isArray(json.derived) ? json.derived.length : 0
+              })`,
+            );
+            return json;
+          }
+        } else {
+          this.logger.warn(
+            `Predictions JSON fetch returned ${resp.status} — falling back to the DataFrame output.`,
+          );
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `Failed to fetch predictions JSON file: ${e?.message} — falling back to the DataFrame output.`,
+        );
+      }
+    }
+
+    return outputs[fallbackIndex];
   }
 
   async autoMaskPredict(params: AutoMaskSwaggerDto) {
@@ -237,7 +290,10 @@ export class MeasurementService {
           }),
       );
 
-      return result?.data[2];
+      // [0] front mask, [1] side mask, [2] DataFrame, [3] predictions JSON
+      // file — same treatment as run-prediction so the photo-scan path also
+      // carries the derived tailoring measurements.
+      return this.extractPrediction(result?.data, 2);
     } catch (error) {
       // Expected and safe errors
       if (
