@@ -154,7 +154,31 @@ export class MeasurementService {
       );
 
       this.logger.log('Prediction completed successfully');
-      return result.data[0];
+
+      // The Space returns one entry per output component, and the rich
+      // { cm, in, derived } JSON is not necessarily the FIRST output (the
+      // Space keeps its display DataFrame too). Find the output that carries
+      // the measurement payload rather than blindly taking data[0] — which
+      // silently dropped the derived tailoring measurements.
+      const outputs: any[] = Array.isArray(result?.data) ? result.data : [];
+      const rich = outputs.find(
+        (o) =>
+          o &&
+          typeof o === 'object' &&
+          !Array.isArray(o) &&
+          ((o as any).cm || (o as any).derived),
+      );
+      if (rich) {
+        this.logger.log(
+          `Returning rich prediction output (cm=${!!(rich as any).cm}, derived=${
+            Array.isArray((rich as any).derived)
+              ? (rich as any).derived.length
+              : 0
+          })`,
+        );
+        return rich;
+      }
+      return outputs[0];
     } catch (error) {
       // Re-throw known NestJS exceptions with correct HTTP status
       if (error instanceof BadRequestException) throw error;
