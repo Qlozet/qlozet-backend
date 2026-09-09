@@ -90,6 +90,16 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 0 })
   order_payment_token_reward: number;
 
+  // ── Delivery estimate (PDP display) ──
+  // Courier transit buffer added on top of a product's turnaround_days to
+  // form the "Estimated delivery: 19 – 22 Sep" range shown on product pages.
+  // Display-only — the On-Time Promise machinery is separate.
+  @Prop({ type: Number, default: 2 })
+  delivery_transit_min_days: number;
+
+  @Prop({ type: Number, default: 5 })
+  delivery_transit_max_days: number;
+
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
 
