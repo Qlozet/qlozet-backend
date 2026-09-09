@@ -325,6 +325,16 @@ export class UpdatePlatformSettingsDto {
   @Min(0)
   delivery_transit_max_days?: number;
 
+  // ── Bespoke quotes ──
+  @ApiPropertyOptional({
+    description: 'Max vendors with an active quote request per design',
+    example: 5,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  max_quote_vendors_per_design?: number;
+
   // ── Token price (FX) ──
   @ApiPropertyOptional({
     type: TokenPriceDto,
