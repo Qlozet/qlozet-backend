@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { PlatformController } from './platform.controller';
+import { PublicConfigController } from './public-config.controller';
 import { PlatformService } from './platform.service';
 import { PlatformSettings, PlatformSettingsSchema } from './schema/platformSettings.schema';
 
@@ -27,7 +28,7 @@ import { ProductModule } from '../products/products.module';
     TransactionsModule,  // provides TransactionService (vendor ledger for the admin console)
     ProductModule,      // provides ProductService (product notes / escalation resolve the vendor)
   ],
-  controllers: [PlatformController],
+  controllers: [PlatformController, PublicConfigController],
   providers: [PlatformService, JwtService],
   exports: [PlatformService, MongooseModule],
 })

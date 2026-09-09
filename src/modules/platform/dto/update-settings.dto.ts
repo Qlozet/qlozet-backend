@@ -306,6 +306,25 @@ export class UpdatePlatformSettingsDto {
   @Min(0)
   order_payment_token_reward?: number;
 
+  // ── Delivery estimate (PDP display) ──
+  @ApiPropertyOptional({
+    description: 'Courier transit buffer, optimistic end (days)',
+    example: 2,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  delivery_transit_min_days?: number;
+
+  @ApiPropertyOptional({
+    description: 'Courier transit buffer, conservative end (days)',
+    example: 5,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  delivery_transit_max_days?: number;
+
   // ── Token price (FX) ──
   @ApiPropertyOptional({
     type: TokenPriceDto,
