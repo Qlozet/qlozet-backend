@@ -87,6 +87,22 @@ export class TicketService {
         { metadata: { attachments } },
       );
     }
+
+    // Unassigned tickets are a shared work queue — ping every admin; the
+    // TICKET_ASSIGNED notification takes over once someone picks it up.
+    this.notificationsService
+      .notifyPlatformAdmins({
+        category: NotificationCategory.SYSTEM,
+        type: NotificationType.TICKET_CREATED,
+        title: 'New Support Ticket',
+        body: `A vendor submitted a ticket: "${dto.issue_type}".`,
+        metadata: { ticket_id: ticket._id, business_id: business },
+        action_url: '/support',
+      })
+      .catch((err) =>
+        this.logger.error(`Failed to notify admins of new ticket: ${err?.message}`),
+      );
+
     return ticket;
   }
 
@@ -112,6 +128,30 @@ export class TicketService {
         ? { attachments: dto.attachments }
         : {},
     });
+
+    // Tell the assignee the conversation moved — unless they wrote the reply.
+    // assigned_to may be stored as a string on old tickets, so compare as text.
+    this.ticketModel
+      .findById(ticket_id)
+      .select('assigned_to')
+      .lean()
+      .then((t: any) => {
+        const assignee = t?.assigned_to ? String(t.assigned_to) : null;
+        if (!assignee || assignee === String(sender)) return;
+        return this.notificationsService.create({
+          recipient: assignee,
+          category: NotificationCategory.SYSTEM,
+          type: NotificationType.TICKET_REPLY,
+          title: 'New Reply on Your Ticket',
+          body: `A ticket assigned to you has a new reply: "${dto.message.slice(0, 120)}"`,
+          metadata: { ticket_id },
+          action_url: '/support',
+        });
+      })
+      .catch((err) =>
+        this.logger.error(`Failed to notify assignee of reply: ${err?.message}`),
+      );
+
     return saved;
   }
 

@@ -240,6 +240,21 @@ export class AuthService {
 
       await this.sendVerificationEmail(vendorUser, otp);
 
+      // Admin work queue: a new business is waiting for approval. After the
+      // commit and fire-and-forget — registration must not fail on this.
+      this.notificationsService.notifyPlatformAdmins({
+        category: NotificationCategory.SYSTEM,
+        type: NotificationType.VENDOR_APPLICATION,
+        title: 'New Vendor Application',
+        body: `${business_name} registered and is awaiting approval.`,
+        metadata: {
+          business_id: business._id,
+          business_name,
+          business_email,
+        },
+        action_url: `/vendors/${business._id}`,
+      });
+
       return {
         data: {
           user: sanitizeUser(vendorUser),

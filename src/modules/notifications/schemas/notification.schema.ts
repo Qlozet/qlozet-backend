@@ -54,6 +54,14 @@ export enum NotificationType {
   ANNOUNCEMENT = 'announcement',
   // Support — an admin/support user was assigned a ticket
   TICKET_ASSIGNED = 'ticket_assigned',
+
+  // Admin work queues — platform-wide events that demand admin action.
+  DISPUTE_OPENED = 'dispute_opened',
+  VENDOR_APPLICATION = 'vendor_application',
+  PRODUCT_PENDING_REVIEW = 'product_pending_review',
+  TICKET_CREATED = 'ticket_created',
+  // Someone replied on a ticket — routed to its assignee only.
+  TICKET_REPLY = 'ticket_reply',
 }
 
 // ==================== SCHEMA ====================
