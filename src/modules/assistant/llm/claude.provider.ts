@@ -1,7 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { AnthropicAuthService } from './anthropic-auth.service';
 import {
   LlmMessage,
   LlmProvider,
@@ -24,25 +24,15 @@ export class ClaudeProvider implements LlmProvider {
 
   constructor(
     private readonly httpService: HttpService,
-    private readonly configService: ConfigService,
+    private readonly auth: AnthropicAuthService,
   ) {}
-
-  private get apiKey(): string {
-    const key = this.configService.get<string>('ANTHROPIC_API_KEY');
-    if (!key) {
-      throw new ServiceUnavailableException(
-        'The assistant is not configured (missing ANTHROPIC_API_KEY).',
-      );
-    }
-    return key;
-  }
 
   private async postMessages(body: Record<string, any>): Promise<any> {
     try {
       const resp = await firstValueFrom(
         this.httpService.post(ANTHROPIC_URL, body, {
           headers: {
-            'x-api-key': this.apiKey,
+            ...(await this.auth.headers()),
             'anthropic-version': ANTHROPIC_VERSION,
             'content-type': 'application/json',
           },
@@ -164,7 +154,7 @@ export class ClaudeProvider implements LlmProvider {
         { ...body, stream: true },
         {
           headers: {
-            'x-api-key': this.apiKey,
+            ...(await this.auth.headers()),
             'anthropic-version': ANTHROPIC_VERSION,
             'content-type': 'application/json',
           },

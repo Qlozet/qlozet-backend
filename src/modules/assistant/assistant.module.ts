@@ -29,6 +29,7 @@ import { AnalyticsToolsService } from './tools/analytics-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { AssistantDigestCron } from './assistant-digest.cron';
 import { ClaudeProvider } from './llm/claude.provider';
+import { AnthropicAuthService } from './llm/anthropic-auth.service';
 import { LLM_PROVIDER } from './llm/llm-provider.interface';
 
 @Module({
@@ -53,6 +54,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     AssistantDigestCron,
     JwtService,
     // Swappable LLM binding — everything depends on LLM_PROVIDER, not Claude.
+    AnthropicAuthService,
     { provide: LLM_PROVIDER, useClass: ClaudeProvider },
   ],
   exports: [AssistantService, AssistantDigestService],
