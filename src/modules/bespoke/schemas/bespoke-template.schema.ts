@@ -23,6 +23,11 @@ export class BespokeTemplate {
   @Prop({ type: [String], default: [] })
   design_images: string[];
 
+  // Admin-uploaded inspiration photos — seeded into the customer's studio
+  // Photo & Notes alongside the prompt.
+  @Prop({ type: [String], default: [] })
+  reference_images: string[];
+
   // Same JSON contract as BespokeDesign.description:
   // { notes, selections: { neckline, sleeve, silhouette, collar, color, … }, userPrompt }
   @Prop({ type: String, default: null })
