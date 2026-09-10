@@ -114,6 +114,22 @@ export class DisputesService {
       );
     }
 
+    // Admins arbitrate disputes — every platform user gets the work-queue ping.
+    this.notificationsService.notifyPlatformAdmins({
+      category: NotificationCategory.ORDER,
+      type: NotificationType.DISPUTE_OPENED,
+      title: 'New Dispute Opened',
+      body: `A customer filed a dispute on order #${order.reference} against ${business?.business_name ?? 'a vendor'}. Reason: ${dto.reason}.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        dispute_id: dispute._id,
+        business_id: dto.business_id,
+        reason: dto.reason,
+      },
+      action_url: '/disputes',
+    });
+
     return { message: 'Dispute filed successfully. Vendor payout has been frozen.', data: dispute };
   }
 

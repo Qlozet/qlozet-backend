@@ -27,8 +27,39 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private notificationModel: Model<NotificationDocument>,
+    @InjectModel('User')
+    private readonly userModel: Model<any>,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Fan one notification out to every platform admin — the admin work-queue
+   * events (new dispute, vendor application, product review, new ticket).
+   * Fire-and-forget per recipient: one failed insert must not stop the rest.
+   */
+  async notifyPlatformAdmins(
+    data: Omit<CreateNotificationDto, 'recipient'>,
+  ): Promise<void> {
+    try {
+      const admins = await this.userModel
+        .find({ type: 'platform' })
+        .select('_id')
+        .lean();
+      await Promise.all(
+        admins.map((admin: any) =>
+          this.create({ ...data, recipient: admin._id }).catch((err) =>
+            this.logger.error(
+              `Failed to notify admin ${admin._id} [${data.type}]: ${err?.message}`,
+            ),
+          ),
+        ),
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to fan out admin notification [${data.type}]: ${(err as any)?.message}`,
+      );
+    }
+  }
 
   /**
    * Create a single notification for a user

@@ -350,6 +350,21 @@ export class ProductService {
     // Sync to recommendation catalog
     this.eventEmitter.emit('product.upserted', created.toObject());
 
+    // New products land pending moderation (absent moderation reads as
+    // pending) — put them in the admin review queue.
+    this.notificationsService.notifyPlatformAdmins({
+      category: NotificationCategory.PRODUCT,
+      type: NotificationType.PRODUCT_PENDING_REVIEW,
+      title: 'Product Awaiting Review',
+      body: `"${ProductService.productName(created)}" was submitted and is pending review.`,
+      metadata: {
+        product_id: created._id,
+        business_id: business,
+        kind,
+      },
+      action_url: '/collections',
+    });
+
     return {
       data: created.toObject(),
       message: 'Product created successfully',
