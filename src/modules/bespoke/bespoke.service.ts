@@ -1233,6 +1233,7 @@ export class BespokeService {
       category: dto.category,
       gender: dto.gender,
       design_images: dto.design_images ?? [],
+      reference_images: dto.reference_images ?? [],
       description: dto.description ?? null,
       status: dto.status === 'active' ? 'active' : 'inactive',
       created_by: adminId ? new Types.ObjectId(adminId) : null,
@@ -1247,6 +1248,7 @@ export class BespokeService {
       'category',
       'gender',
       'design_images',
+      'reference_images',
       'description',
       'status',
     ]) {
