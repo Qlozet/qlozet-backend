@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { Public } from 'src/common/decorators/public.decorator';
 import { UserType } from '../ums/schemas';
 
 import { BespokeService } from './bespoke.service';
@@ -37,6 +38,27 @@ import { RevisionRequestDto } from './dto/revision-request.dto';
 @UsePipes(new ValidationPipe({ transform: true }))
 export class BespokeController {
   constructor(private readonly bespokeService: BespokeService) {}
+
+  // ════════════════════════════════════════════════════════════════
+  //  TEMPLATES — public, browsable before sign-in
+  // ════════════════════════════════════════════════════════════════
+
+  @Public()
+  @Get('templates')
+  @ApiOperation({ summary: 'Active platform design templates' })
+  async listTemplates() {
+    return this.bespokeService.listTemplates();
+  }
+
+  @Public()
+  @Post('templates/:id/use')
+  @ApiOperation({
+    summary: 'Open a template into the studio (returns it and counts the use)',
+  })
+  @ApiParam({ name: 'id', description: 'Template id' })
+  async useTemplate(@Param('id') id: string) {
+    return this.bespokeService.useTemplate(id);
+  }
 
   // ════════════════════════════════════════════════════════════════
   //  CUSTOMER — Design Endpoints

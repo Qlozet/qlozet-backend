@@ -179,7 +179,8 @@ export class MeasurementController {
     }
   }
 
-  @Roles(UserType.CUSTOMER)
+  // PLATFORM: admins generate for design templates — no token wallet, no charge.
+  @Roles(UserType.CUSTOMER, UserType.PLATFORM)
   @Post('generate-outfit')
   @ApiBody({
     description: 'Generate outfit using image URLs',
@@ -242,18 +243,26 @@ export class MeasurementController {
   ) {
     const business = req.business?.id;
     const customer = req.user?.id;
-    const [settings, tokenBalance] = await Promise.all([
-      this.platformService.getSettings(),
-      this.tokenService.balance(business, customer),
-    ]);
-    if (tokenBalance < settings.outfit_generation_token_price) {
-      throw new BadRequestException(
-        'Insufficient tokens, please fund your wallet',
-      );
-    }
 
-    // Pre-deduct tokens before queuing
-    await this.tokenService.spend('outfit', business, customer);
+    // Platform admins generate template imagery for the whole marketplace —
+    // they have no token wallet and are not billed.
+    const actor = customer ? await this.userService.findById(customer) : null;
+    const isPlatformAdmin = actor?.type === UserType.PLATFORM;
+
+    if (!isPlatformAdmin) {
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
+      if (tokenBalance < settings.outfit_generation_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
+      }
+
+      // Pre-deduct tokens before queuing
+      await this.tokenService.spend('outfit', business, customer);
+    }
 
     const payload: GenerateOutfitRequestDto = {
       config,
