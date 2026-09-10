@@ -382,9 +382,14 @@ export class BespokeService {
       );
     }
 
-    if (activeQuotes.length + newVendorIds.length > MAX_VENDORS_PER_DESIGN) {
+    const quoteSettings = await this.platformSettingsModel.findOne().lean();
+    const maxVendors =
+      Number((quoteSettings as any)?.max_quote_vendors_per_design) ||
+      MAX_VENDORS_PER_DESIGN;
+
+    if (activeQuotes.length + newVendorIds.length > maxVendors) {
       throw new BadRequestException(
-        `Maximum ${MAX_VENDORS_PER_DESIGN} active vendors per design. You already have ${activeQuotes.length} active quote(s).`,
+        `Maximum ${maxVendors} active vendors per design. You already have ${activeQuotes.length} active quote(s).`,
       );
     }
 

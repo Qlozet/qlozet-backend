@@ -27,6 +27,7 @@ export class PublicConfigController {
       data: {
         delivery_transit_min_days: s?.delivery_transit_min_days ?? 2,
         delivery_transit_max_days: s?.delivery_transit_max_days ?? 5,
+        max_quote_vendors_per_design: s?.max_quote_vendors_per_design ?? 5,
       },
     };
   }

@@ -100,6 +100,12 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 5 })
   delivery_transit_max_days: number;
 
+  // ── Bespoke quotes ──
+  // How many vendors may hold an ACTIVE quote request on one design at a
+  // time (expired/declined quotes free their slot).
+  @Prop({ type: Number, default: 5 })
+  max_quote_vendors_per_design: number;
+
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
 
