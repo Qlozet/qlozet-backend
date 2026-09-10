@@ -278,7 +278,8 @@ export class MeasurementController {
     });
   }
 
-  @Roles(UserType.CUSTOMER)
+  // PLATFORM: admins analyze references while building templates — free.
+  @Roles(UserType.CUSTOMER, UserType.PLATFORM)
   @Post('analyze-reference')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data', 'application/json')
@@ -327,23 +328,28 @@ export class MeasurementController {
       throw new BadRequestException('Provide either a file upload or image_url');
     }
 
-    // Token check
+    // Token check — platform admins analyze for template curation, unbilled.
     const business = req?.business?.id;
     const customer = req?.user?.id;
-    const [settings, tokenBalance] = await Promise.all([
-      this.platformService.getSettings(),
-      this.tokenService.balance(business, customer),
-    ]);
+    const analyzeActor = customer
+      ? await this.userService.findById(customer)
+      : null;
+    if (analyzeActor?.type !== UserType.PLATFORM) {
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
 
-    const price = (settings as any).analyze_reference_token_price ?? 10;
-    if (tokenBalance < price) {
-      throw new BadRequestException(
-        'Insufficient tokens, please fund your wallet',
-      );
+      const price = (settings as any).analyze_reference_token_price ?? 10;
+      if (tokenBalance < price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
+      }
+
+      // Pre-deduct tokens before queuing
+      await this.tokenService.spend('analyze', business, customer);
     }
-
-    // Pre-deduct tokens before queuing
-    await this.tokenService.spend('analyze', business, customer);
 
     // If file uploaded, upload to Cloudinary first to get a stable URL
     let finalImageUrl = imageUrl;
