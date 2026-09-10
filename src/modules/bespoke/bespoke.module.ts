@@ -8,6 +8,10 @@ import {
   BespokeDesignSchema,
 } from './schemas/bespoke-design.schema';
 import {
+  BespokeTemplate,
+  BespokeTemplateSchema,
+} from './schemas/bespoke-template.schema';
+import {
   BespokeQuote,
   BespokeQuoteSchema,
 } from './schemas/bespoke-quote.schema';
@@ -29,6 +33,7 @@ import { WalletsModule } from '../wallets/wallets.module';
     MongooseModule.forFeature([
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
+      { name: BespokeTemplate.name, schema: BespokeTemplateSchema },
       { name: Address.name, schema: AddressSchema },
       // Read-only: measurement-set snapshot at quote acceptance.
       { name: User.name, schema: UserSchema },

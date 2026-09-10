@@ -1,8 +1,13 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
+  Post,
   Query,
+  Req,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -20,8 +25,9 @@ import { UserType } from '../ums/schemas';
 
 import { BespokeService } from './bespoke.service';
 
-// Read-only admin surface over bespoke (dispute arbitration). No write access —
-// pricing/acceptance stay the vendor's/customer's decision.
+// Admin surface over bespoke: read-only for quotes/designs (dispute
+// arbitration — pricing/acceptance stay the vendor's/customer's decision),
+// plus full CRUD on platform design templates.
 @Controller('admin/bespoke')
 @ApiTags('Admin — Bespoke')
 @ApiBearerAuth('access-token')
@@ -70,5 +76,47 @@ export class AdminBespokeController {
   @ApiParam({ name: 'id', description: 'Design ID' })
   async getDesign(@Param('id') id: string) {
     return this.bespokeService.adminGetDesign(id);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  TEMPLATES — platform-curated studio starting points
+  // ════════════════════════════════════════════════════════════════
+
+  @Get('templates')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'List all design templates (active + inactive)' })
+  async listTemplates() {
+    return this.bespokeService.adminListTemplates();
+  }
+
+  @Get('templates/:id')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Get one design template' })
+  @ApiParam({ name: 'id', description: 'Template ID' })
+  async getTemplate(@Param('id') id: string) {
+    return this.bespokeService.adminGetTemplate(id);
+  }
+
+  @Post('templates')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Create a design template' })
+  async createTemplate(@Body() dto: any, @Req() req: any) {
+    return this.bespokeService.adminCreateTemplate(dto, req.user?.id);
+  }
+
+  @Patch('templates/:id')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Update a design template (fields or status)' })
+  @ApiParam({ name: 'id', description: 'Template ID' })
+  async updateTemplate(@Param('id') id: string, @Body() dto: any) {
+    return this.bespokeService.adminUpdateTemplate(id, dto);
+  }
+
+  @Delete('templates/:id')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Delete a design template' })
+  @ApiParam({ name: 'id', description: 'Template ID' })
+  async deleteTemplate(@Param('id') id: string) {
+    return this.bespokeService.adminDeleteTemplate(id);
   }
 }

@@ -15,6 +15,10 @@ import {
   BespokeDesignStatus,
 } from './schemas/bespoke-design.schema';
 import {
+  BespokeTemplate,
+  BespokeTemplateDocument,
+} from './schemas/bespoke-template.schema';
+import {
   BespokeQuote,
   BespokeQuoteDocument,
   BespokeQuoteStatus,
@@ -68,6 +72,8 @@ export class BespokeService {
     private readonly designModel: Model<BespokeDesignDocument>,
     @InjectModel(BespokeQuote.name)
     private readonly quoteModel: Model<BespokeQuoteDocument>,
+    @InjectModel(BespokeTemplate.name)
+    private readonly templateModel: Model<BespokeTemplateDocument>,
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Business.name)
@@ -1174,6 +1180,89 @@ export class BespokeService {
     );
 
     return { message: 'Quote submitted successfully', data: quote };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  TEMPLATES — platform-curated studio starting points
+  // ════════════════════════════════════════════════════════════════
+
+  /** Shop-facing: only active templates, newest first. */
+  async listTemplates() {
+    const templates = await this.templateModel
+      .find({ status: 'active' })
+      .sort({ createdAt: -1 })
+      .lean();
+    return { message: 'Templates', data: templates };
+  }
+
+  /**
+   * Shop-facing: fetch one template to seed a studio session and count the
+   * use. Incrementing here (not on list render) keeps `uses` an honest
+   * "opened into the studio" number.
+   */
+  async useTemplate(id: string) {
+    const template = await this.templateModel.findOneAndUpdate(
+      { _id: new Types.ObjectId(id), status: 'active' },
+      { $inc: { uses: 1 } },
+      { new: true },
+    );
+    if (!template) throw new NotFoundException('Template not found');
+    return { message: 'Template', data: template };
+  }
+
+  // ── Admin CRUD ──
+
+  async adminListTemplates() {
+    const templates = await this.templateModel
+      .find()
+      .sort({ createdAt: -1 })
+      .populate('created_by', 'full_name email')
+      .lean();
+    return { message: 'Templates', data: templates };
+  }
+
+  async adminGetTemplate(id: string) {
+    const template = await this.templateModel.findById(id).lean();
+    if (!template) throw new NotFoundException('Template not found');
+    return { message: 'Template', data: template };
+  }
+
+  async adminCreateTemplate(dto: any, adminId: string) {
+    const template = await this.templateModel.create({
+      name: dto.name,
+      category: dto.category,
+      gender: dto.gender,
+      design_images: dto.design_images ?? [],
+      description: dto.description ?? null,
+      status: dto.status === 'active' ? 'active' : 'inactive',
+      created_by: adminId ? new Types.ObjectId(adminId) : null,
+    });
+    return { message: 'Template created', data: template };
+  }
+
+  async adminUpdateTemplate(id: string, dto: any) {
+    const update: Record<string, any> = {};
+    for (const key of [
+      'name',
+      'category',
+      'gender',
+      'design_images',
+      'description',
+      'status',
+    ]) {
+      if (dto[key] !== undefined) update[key] = dto[key];
+    }
+    const template = await this.templateModel.findByIdAndUpdate(id, update, {
+      new: true,
+    });
+    if (!template) throw new NotFoundException('Template not found');
+    return { message: 'Template updated', data: template };
+  }
+
+  async adminDeleteTemplate(id: string) {
+    const res = await this.templateModel.findByIdAndDelete(id);
+    if (!res) throw new NotFoundException('Template not found');
+    return { message: 'Template deleted', data: { _id: id } };
   }
 
   // ════════════════════════════════════════════════════════════════
