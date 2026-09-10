@@ -362,7 +362,7 @@ export class ProductService {
         business_id: business,
         kind,
       },
-      action_url: '/collections',
+      action_url: '/products',
     });
 
     return {
