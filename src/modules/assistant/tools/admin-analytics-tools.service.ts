@@ -410,7 +410,7 @@ export class AdminAnalyticsToolsService {
       {
         $group: {
           _id: '$items.business',
-          revenue: { $sum: { $ifNull: ['$items.total_amount', 0] } },
+          revenue: { $sum: { $ifNull: ['$items.total_price', 0] } },
           orders: { $addToSet: '$_id' },
         },
       },
@@ -463,7 +463,7 @@ export class AdminAnalyticsToolsService {
         {
           $group: {
             _id: null,
-            revenue: { $sum: { $ifNull: ['$items.total_amount', 0] } },
+            revenue: { $sum: { $ifNull: ['$items.total_price', 0] } },
             orders: { $addToSet: '$_id' },
           },
         },
