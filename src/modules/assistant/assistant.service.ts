@@ -19,7 +19,11 @@ import {
   RunToolLoopResult,
 } from './llm/llm-provider.interface';
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
-import { buildSystemPrompt } from './assistant.prompt';
+import {
+  AdminAnalyticsToolsService,
+  allowedToolNames,
+} from './tools/admin-analytics-tools.service';
+import { buildSystemPrompt, buildAdminSystemPrompt } from './assistant.prompt';
 import { TokenService } from '../wallets/token.service';
 import type { Response } from 'express';
 
@@ -36,6 +40,8 @@ export class AssistantService {
     private readonly conversationModel: Model<AssistantConversation>,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
     private readonly tools: AnalyticsToolsService,
+    private readonly adminTools: AdminAnalyticsToolsService,
+    @InjectModel('User') private readonly userModel: Model<any>,
     private readonly tokenService: TokenService,
     private readonly config: ConfigService,
   ) {}
@@ -403,5 +409,330 @@ export class AssistantService {
       .lean();
     if (!convo) throw new NotFoundException('Conversation not found.');
     return convo;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  PLATFORM ADMIN — marketplace-wide analyst
+  // ════════════════════════════════════════════════════════════════
+
+  /** Friendly labels per permission module, for the system prompt. */
+  private static readonly MODULE_AREAS: Record<string, string> = {
+    analytics: 'platform topline & growth',
+    order_management: 'orders pipeline',
+    financial_management: 'revenue, payouts & the token economy',
+    vendor_management: 'vendor performance & moderation',
+    product_management: 'product moderation',
+    support_management: 'support tickets & disputes',
+  };
+
+  /**
+   * Resolve the admin's identity + role gates. No role assigned → super
+   * admin (all tools). With a role, tool access follows the role's
+   * permission MODULES (ums Permission.module).
+   */
+  private async loadAdminContext(adminId: string): Promise<{
+    name?: string;
+    roleName: string | null;
+    allowed: Set<string> | null;
+    allowedAreas: string[];
+    restrictedAreas: string[];
+  }> {
+    const user: any = await this.userModel
+      .findById(adminId)
+      .select('full_name role')
+      .populate({
+        path: 'role',
+        select: 'name permissions',
+        populate: { path: 'permissions', select: 'module is_active' },
+      })
+      .lean();
+
+    const name = user?.full_name;
+    const role: any = user?.role;
+    if (!role || !Array.isArray(role.permissions)) {
+      return {
+        name,
+        roleName: role?.name ?? null,
+        allowed: null,
+        allowedAreas: Object.values(AssistantService.MODULE_AREAS),
+        restrictedAreas: [],
+      };
+    }
+
+    const modules = new Set<string>(
+      role.permissions
+        .filter((p: any) => p && p.is_active !== false && p.module)
+        .map((p: any) => String(p.module)),
+    );
+    const allowed = allowedToolNames(modules);
+    const allowedAreas = ['platform topline & growth'];
+    const restrictedAreas: string[] = [];
+    for (const [mod, label] of Object.entries(AssistantService.MODULE_AREAS)) {
+      if (mod === 'analytics') continue;
+      if (modules.has(mod) || modules.has('analytics')) {
+        if (!allowedAreas.includes(label)) allowedAreas.push(label);
+      } else if (!restrictedAreas.includes(label)) {
+        restrictedAreas.push(label);
+      }
+    }
+    return {
+      name,
+      roleName: role?.name ?? null,
+      allowed,
+      allowedAreas,
+      restrictedAreas,
+    };
+  }
+
+  private async getOrCreateAdminConversation(
+    adminId: Types.ObjectId,
+    conversationId?: string,
+  ): Promise<AssistantConversation> {
+    if (conversationId) {
+      const existing = await this.conversationModel.findOne({
+        _id: conversationId,
+        admin_user: adminId, // personal to the admin who asked
+      });
+      if (!existing) throw new NotFoundException('Conversation not found.');
+      return existing;
+    }
+    return this.conversationModel.create({
+      business: null,
+      admin_user: adminId,
+      messages: [],
+    });
+  }
+
+  /** Platform-admin chat: marketplace-wide tools, role-gated, unmetered. */
+  async adminChat(adminId: string, message: string, conversationId?: string) {
+    const text = (message ?? '').trim();
+    if (!adminId) throw new BadRequestException('Missing admin context.');
+    if (!text) throw new BadRequestException('Message is required.');
+    const aid = new Types.ObjectId(adminId);
+
+    const ctx = await this.loadAdminContext(adminId);
+    const conversation = await this.getOrCreateAdminConversation(
+      aid,
+      conversationId,
+    );
+
+    const history: LlmMessage[] = conversation.messages
+      .slice(-HISTORY_TURNS)
+      .filter((m) => m.content && m.content.trim().length > 0)
+      .map((m) => ({ role: m.role, content: m.content }));
+    history.push({ role: 'user', content: text });
+
+    const charts: Record<string, any>[] = [];
+
+    const result = await this.llm.runToolLoop({
+      system: buildAdminSystemPrompt({
+        adminName: ctx.name,
+        roleName: ctx.roleName,
+        allowedAreas: ctx.allowedAreas,
+        restrictedAreas: ctx.restrictedAreas,
+      }),
+      messages: history,
+      tools: this.adminTools.getToolDefs(ctx.allowed),
+      onToolCall: (name, input) => {
+        if (name === 'render_chart') {
+          charts.push(this.sanitizeChart(input));
+          return Promise.resolve({ ok: true, note: 'Chart shown.' });
+        }
+        return this.adminTools.execute(name, input, ctx.allowed);
+      },
+      model: this.smartModel,
+      maxTokens: 1024,
+      maxTurns: 6,
+    });
+
+    const answer =
+      result.text || "I couldn't find anything to answer that. Try rephrasing.";
+
+    conversation.messages.push({
+      role: 'user',
+      content: text,
+      tools_used: [],
+      charts: [],
+      createdAt: new Date(),
+    } as AssistantMessage);
+    conversation.messages.push({
+      role: 'assistant',
+      content: answer,
+      tools_used: result.toolsUsed,
+      charts,
+      createdAt: new Date(),
+    } as AssistantMessage);
+    conversation.last_message_at = new Date();
+    if (conversation.title === 'New conversation') {
+      conversation.title = text.slice(0, 60);
+    }
+    await conversation.save();
+
+    return {
+      conversation_id: (conversation._id as any).toString(),
+      answer,
+      charts,
+      tools_used: result.toolsUsed,
+    };
+  }
+
+  /** Streaming variant for the admin console. Same SSE contract as vendors. */
+  async adminChatStream(
+    res: Response,
+    adminId: string,
+    message: string,
+    conversationId?: string,
+  ) {
+    const text = (message ?? '').trim();
+    if (!adminId || !text) {
+      res.status(400).json({ success: false, message: 'Message is required.' });
+      return;
+    }
+    const aid = new Types.ObjectId(adminId);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    (res as any).flushHeaders?.();
+    const send = (obj: any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+    const charts: Record<string, any>[] = [];
+
+    try {
+      const ctx = await this.loadAdminContext(adminId);
+      const conversation = await this.getOrCreateAdminConversation(
+        aid,
+        conversationId,
+      );
+      const history: LlmMessage[] = conversation.messages
+        .slice(-HISTORY_TURNS)
+        .filter((m) => m.content && m.content.trim().length > 0)
+        .map((m) => ({ role: m.role, content: m.content }));
+      history.push({ role: 'user', content: text });
+
+      const onToolCall = (name: string, input: any) => {
+        if (name === 'render_chart') {
+          const spec = this.sanitizeChart(input);
+          charts.push(spec);
+          send({ type: 'chart', chart: spec });
+          return Promise.resolve({ ok: true, note: 'Chart shown.' });
+        }
+        return this.adminTools.execute(name, input, ctx.allowed);
+      };
+
+      const common = {
+        system: buildAdminSystemPrompt({
+          adminName: ctx.name,
+          roleName: ctx.roleName,
+          allowedAreas: ctx.allowedAreas,
+          restrictedAreas: ctx.restrictedAreas,
+        }),
+        messages: history,
+        tools: this.adminTools.getToolDefs(ctx.allowed),
+        onToolCall,
+        model: this.smartModel,
+        maxTokens: 1024,
+        maxTurns: 6,
+      };
+
+      let result: RunToolLoopResult;
+      try {
+        result = await this.llm.runToolLoopStream({
+          ...common,
+          onDelta: (delta) => send({ type: 'delta', text: delta }),
+        });
+      } catch (streamErr: any) {
+        this.logger.warn(
+          `Admin stream failed; falling back: ${streamErr?.message}`,
+        );
+        result = await this.llm.runToolLoop(common);
+        if (result.text) send({ type: 'delta', text: result.text });
+      }
+
+      const answer =
+        result.text ||
+        "I couldn't find anything to answer that. Try rephrasing.";
+
+      conversation.messages.push({
+        role: 'user',
+        content: text,
+        tools_used: [],
+        charts: [],
+        createdAt: new Date(),
+      } as AssistantMessage);
+      conversation.messages.push({
+        role: 'assistant',
+        content: answer,
+        tools_used: result.toolsUsed,
+        charts,
+        createdAt: new Date(),
+      } as AssistantMessage);
+      conversation.last_message_at = new Date();
+      if (conversation.title === 'New conversation') {
+        conversation.title = text.slice(0, 60);
+      }
+      await conversation.save();
+
+      send({
+        type: 'done',
+        conversation_id: (conversation._id as any).toString(),
+        tools_used: result.toolsUsed,
+      });
+      res.end();
+    } catch (err: any) {
+      try {
+        send({
+          type: 'error',
+          message: err?.message ?? 'Something went wrong.',
+        });
+      } catch {
+        /* stream may already be closed */
+      }
+      res.end();
+    }
+  }
+
+  async adminListConversations(adminId: string, page = 1, size = 20) {
+    const aid = new Types.ObjectId(adminId);
+    const skip = (page - 1) * size;
+    const [items, total] = await Promise.all([
+      this.conversationModel
+        .find({ admin_user: aid })
+        .select('title last_message_at createdAt')
+        .sort({ last_message_at: -1 })
+        .skip(skip)
+        .limit(size)
+        .lean(),
+      this.conversationModel.countDocuments({ admin_user: aid }),
+    ]);
+    return { total, page, size, items };
+  }
+
+  async adminGetConversation(adminId: string, conversationId: string) {
+    const convo = await this.conversationModel
+      .findOne({
+        _id: conversationId,
+        admin_user: new Types.ObjectId(adminId),
+      })
+      .lean();
+    if (!convo) throw new NotFoundException('Conversation not found.');
+    return convo;
+  }
+
+  /** Clamp a model-supplied chart spec to the UI contract. */
+  private sanitizeChart(input: any) {
+    return {
+      type: ['bar', 'line', 'pie'].includes(input?.type) ? input.type : 'bar',
+      title: String(input?.title ?? '').slice(0, 120),
+      data: Array.isArray(input?.data)
+        ? input.data
+            .filter((d: any) => d && typeof d.value === 'number')
+            .slice(0, 12)
+            .map((d: any) => ({
+              label: String(d.label ?? ''),
+              value: d.value,
+            }))
+        : [],
+    };
   }
 }

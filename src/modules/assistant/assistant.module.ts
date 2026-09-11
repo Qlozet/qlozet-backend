@@ -14,6 +14,14 @@ import {
   TransactionSchema,
 } from '../transactions/schema/transaction.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
+import { User, UserSchema } from '../ums/schemas/user.schema';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import { Ticket, TicketSchema } from '../ticket/schema/ticket.schema';
+import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
+import {
+  TokenTransaction,
+  TokenTransactionSchema,
+} from '../wallets/schema/token.schema';
 import {
   AssistantConversation,
   AssistantConversationSchema,
@@ -26,6 +34,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
+import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { AssistantDigestCron } from './assistant-digest.cron';
 import { ClaudeProvider } from './llm/claude.provider';
@@ -40,6 +49,11 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: Wallet.name, schema: WalletSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: Product.name, schema: ProductSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Business.name, schema: BusinessSchema },
+      { name: Ticket.name, schema: TicketSchema },
+      { name: Dispute.name, schema: DisputeSchema },
+      { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
     ]),
@@ -50,6 +64,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
   providers: [
     AssistantService,
     AnalyticsToolsService,
+    AdminAnalyticsToolsService,
     AssistantDigestService,
     AssistantDigestCron,
     JwtService,

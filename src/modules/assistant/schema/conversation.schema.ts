@@ -32,9 +32,14 @@ export const AssistantMessageSchema =
 
 @Schema({ timestamps: true, collection: 'assistant_conversations' })
 export class AssistantConversation extends Document {
-  // Scoped to the vendor's business. Every read filters on this.
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true, index: true })
-  business: Types.ObjectId;
+  // Scoped to the vendor's business. Every vendor read filters on this.
+  // Null for platform-admin conversations (scoped by admin_user instead).
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  business: Types.ObjectId | null;
+
+  // Platform-admin conversations are personal to the admin who asked.
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  admin_user: Types.ObjectId | null;
 
   @Prop({ type: String, default: 'New conversation' })
   title: string;
