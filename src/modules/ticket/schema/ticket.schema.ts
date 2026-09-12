@@ -11,8 +11,13 @@ export enum TicketStatus {
 
 @Schema({ timestamps: true })
 export class Ticket extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
-  business: Types.ObjectId;
+  // Exactly one originator is set: vendors raise tickets against their
+  // business, customers raise them personally.
+  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  business: Types.ObjectId | null;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  customer: Types.ObjectId | null;
 
   @Prop({ required: true })
   issue_type: string;

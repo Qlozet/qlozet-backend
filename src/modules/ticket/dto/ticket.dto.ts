@@ -74,6 +74,14 @@ export class TicketFilterDto {
   @IsString()
   assigned_to?: string;
 
+  @ApiPropertyOptional({
+    description: 'Originator filter: customer | vendor',
+    enum: ['customer', 'vendor'],
+  })
+  @IsOptional()
+  @IsIn(['customer', 'vendor'])
+  origin?: string;
+
   @ApiPropertyOptional({ description: 'Start date (ISO)' })
   @IsOptional()
   @IsString()

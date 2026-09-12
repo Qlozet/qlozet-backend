@@ -106,6 +106,114 @@ export class TicketService {
     return ticket;
   }
 
+  /** Customer-raised ticket — personal, no business attached. */
+  async createForCustomer(customerId: string, dto: CreateTicketDto) {
+    const attachments = dto.attachments ?? dto.images ?? [];
+    const ticket = await this.ticketModel.create({
+      customer: new Types.ObjectId(customerId),
+      business: null,
+      ...dto,
+      attachments,
+    });
+    this.logActivity(
+      ticket._id as Types.ObjectId,
+      TicketActivityType.CREATED,
+      `Submitted ticket: "${dto.issue_type}"`,
+      { actor: customerId },
+    );
+    if (attachments.length) {
+      this.logActivity(
+        ticket._id as Types.ObjectId,
+        TicketActivityType.ATTACHMENT_ADDED,
+        `Uploaded ${attachments.length} attachment${
+          attachments.length === 1 ? '' : 's'
+        }`,
+        { actor: customerId, metadata: { attachments } },
+      );
+    }
+
+    this.notificationsService
+      .notifyPlatformAdmins({
+        category: NotificationCategory.SYSTEM,
+        type: NotificationType.TICKET_CREATED,
+        title: 'New Support Ticket',
+        body: `A customer submitted a ticket: "${dto.issue_type}".`,
+        metadata: { ticket_id: ticket._id, customer_id: customerId },
+        action_url: '/support',
+      })
+      .catch((err) =>
+        this.logger.error(`Failed to notify admins of new ticket: ${err?.message}`),
+      );
+
+    return ticket;
+  }
+
+  /** A customer's own tickets, newest first, replies included. */
+  async customerTickets(customerId: string, page = 1, size = 20) {
+    const { take, skip } = await Utils.getPagination(page, size);
+    const filter = { customer: new Types.ObjectId(customerId) };
+    const [count, rows] = await Promise.all([
+      this.ticketModel.countDocuments(filter),
+      this.ticketModel
+        .find(filter)
+        .skip(skip)
+        .limit(take)
+        .sort({ createdAt: -1 })
+        .populate({
+          path: 'replies',
+          model: 'TicketReply',
+          options: { sort: { createdAt: 1 } },
+          populate: { path: 'sender', select: 'full_name type' },
+        })
+        .lean(),
+    ]);
+    return Utils.getPagingData({ count, rows }, page, size);
+  }
+
+  /** One ticket, only if this customer owns it. */
+  async customerTicket(id: string, customerId: string) {
+    const ticket = await this.ticketModel
+      .findOne({ _id: id, customer: new Types.ObjectId(customerId) })
+      .populate({
+        path: 'replies',
+        model: 'TicketReply',
+        options: { sort: { createdAt: 1 } },
+        populate: { path: 'sender', select: 'full_name type' },
+      })
+      .lean();
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    return ticket;
+  }
+
+  /** Reply guarded to the ticket's own originator (customer or vendor). */
+  async ownerReply(
+    ticketId: string,
+    senderUserId: string,
+    dto: CreateTicketReplyDto,
+    scope: { customerId?: string; businessId?: string },
+  ) {
+    const ticket = await this.ticketModel
+      .findById(ticketId)
+      .select('customer business');
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    const ownsAsCustomer =
+      scope.customerId &&
+      ticket.customer &&
+      String(ticket.customer) === String(scope.customerId);
+    const ownsAsVendor =
+      scope.businessId &&
+      ticket.business &&
+      String(ticket.business) === String(scope.businessId);
+    if (!ownsAsCustomer && !ownsAsVendor) {
+      throw new NotFoundException('Ticket not found');
+    }
+    return this.createReply(
+      ticket._id as Types.ObjectId,
+      new Types.ObjectId(senderUserId),
+      dto,
+    );
+  }
+
   async createReply(
     ticket_id: Types.ObjectId,
     sender: Types.ObjectId,
@@ -131,25 +239,45 @@ export class TicketService {
 
     // Tell the assignee the conversation moved — unless they wrote the reply.
     // assigned_to may be stored as a string on old tickets, so compare as text.
+    // A customer originator gets the mirror notification when support replies.
     this.ticketModel
       .findById(ticket_id)
-      .select('assigned_to')
+      .select('assigned_to customer')
       .lean()
       .then((t: any) => {
+        const jobs: Promise<any>[] = [];
         const assignee = t?.assigned_to ? String(t.assigned_to) : null;
-        if (!assignee || assignee === String(sender)) return;
-        return this.notificationsService.create({
-          recipient: assignee,
-          category: NotificationCategory.SYSTEM,
-          type: NotificationType.TICKET_REPLY,
-          title: 'New Reply on Your Ticket',
-          body: `A ticket assigned to you has a new reply: "${dto.message.slice(0, 120)}"`,
-          metadata: { ticket_id },
-          action_url: '/support',
-        });
+        if (assignee && assignee !== String(sender)) {
+          jobs.push(
+            this.notificationsService.create({
+              recipient: assignee,
+              category: NotificationCategory.SYSTEM,
+              type: NotificationType.TICKET_REPLY,
+              title: 'New Reply on Your Ticket',
+              body: `A ticket assigned to you has a new reply: "${dto.message.slice(0, 120)}"`,
+              metadata: { ticket_id },
+              action_url: '/support',
+            }),
+          );
+        }
+        const owner = t?.customer ? String(t.customer) : null;
+        if (owner && owner !== String(sender)) {
+          jobs.push(
+            this.notificationsService.create({
+              recipient: owner,
+              category: NotificationCategory.SYSTEM,
+              type: NotificationType.TICKET_REPLY,
+              title: 'Support replied to your ticket',
+              body: `"${dto.message.slice(0, 120)}"`,
+              metadata: { ticket_id },
+              action_url: '/help/tickets',
+            }),
+          );
+        }
+        return Promise.all(jobs);
       })
       .catch((err) =>
-        this.logger.error(`Failed to notify assignee of reply: ${err?.message}`),
+        this.logger.error(`Failed to notify about reply: ${err?.message}`),
       );
 
     return saved;
@@ -340,6 +468,13 @@ export class TicketService {
       filter.business = business;
     }
 
+    // Originator filter (admin console): customer-raised vs vendor-raised.
+    if (query.origin === 'customer') {
+      filter.customer = { $ne: null };
+    } else if (query.origin === 'vendor') {
+      filter.business = filter.business ?? { $ne: null };
+    }
+
     // Assigned support team
     if (query.assigned_to) {
       filter.assigned_to = query.assigned_to;
@@ -367,7 +502,9 @@ export class TicketService {
         })
         // The console's "Assigned To" column had only a bare id to render, so
         // it showed a truncated ObjectId where a person's name belongs.
-        .populate('assigned_to', 'full_name email'),
+        .populate('assigned_to', 'full_name email')
+        .populate('business', 'business_name')
+        .populate('customer', 'full_name email'),
     ]);
 
     return Utils.getPagingData({ count, rows }, page, size);
@@ -376,7 +513,9 @@ export class TicketService {
   async findOne(id: string) {
     const ticket = await this.ticketModel
       .findById(id)
-      .populate('assigned_to', 'full_name email');
+      .populate('assigned_to', 'full_name email')
+      .populate('business', 'business_name')
+      .populate('customer', 'full_name email');
     if (!ticket) throw new NotFoundException('Ticket not found');
     return ticket;
   }
