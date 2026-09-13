@@ -2497,10 +2497,34 @@ export class BusinessService {
       .select('gender wears_preference dob')
       .lean();
 
+    // Both fields are stored as-entered ('Male', 'man', 'WOMEN'...), so raw
+    // grouping splits one intent across several chart segments. Normalise to
+    // canonical labels; anything unrecognised keeps its own (lowercased)
+    // label rather than being hidden.
+    const normalizeGender = (raw: unknown): string => {
+      const v = String(raw ?? '').trim().toLowerCase();
+      if (!v) return 'unspecified';
+      if (/^(m|male|man|men)$/.test(v)) return 'male';
+      if (/^(f|female|woman|women)$/.test(v)) return 'female';
+      return v;
+    };
+    const normalizeWears = (raw: unknown): string => {
+      const v = String(raw ?? '').trim().toLowerCase();
+      if (!v) return 'unspecified';
+      if (/^(m|male|man|men|mens|men's|menswear|men's wear)$/.test(v)) {
+        return "men's wear";
+      }
+      if (/^(f|female|woman|women|womens|women's|womenswear|women's wear)$/.test(v)) {
+        return "women's wear";
+      }
+      if (/^(both|unisex|all|everything)$/.test(v)) return 'both';
+      return v;
+    };
+
     // Gender distribution
     const genderMap: Record<string, number> = {};
     for (const user of users) {
-      const gender = (user as any).gender || 'unspecified';
+      const gender = normalizeGender((user as any).gender);
       genderMap[gender] = (genderMap[gender] || 0) + 1;
     }
     const genderDistribution = Object.entries(genderMap).map(([label, value]) => ({
@@ -2511,7 +2535,7 @@ export class BusinessService {
     // Wears preference distribution
     const wearsMap: Record<string, number> = {};
     for (const user of users) {
-      const pref = (user as any).wears_preference || 'unspecified';
+      const pref = normalizeWears((user as any).wears_preference);
       wearsMap[pref] = (wearsMap[pref] || 0) + 1;
     }
     const wearsDistribution = Object.entries(wearsMap).map(([label, value]) => ({
