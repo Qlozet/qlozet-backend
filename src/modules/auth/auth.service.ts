@@ -118,6 +118,17 @@ export class AuthService {
       $or: [{ email: personal_email }, { phone_number: personal_phone_number }],
     });
     if (existingUser) {
+      // An abandoned signup (registered, never entered the code) should be
+      // guided back to verification, not dead-ended on "already exists".
+      if (
+        !existingUser.email_verified &&
+        existingUser.email === personal_email
+      ) {
+        await this.resendVerificationEmail(existingUser.email).catch(() => {});
+        throw new ConflictException(
+          "This account already exists but isn't verified — we've sent a new code to your email.",
+        );
+      }
       const field =
         existingUser.email === personal_email ? 'email' : 'phone number';
       throw new ConflictException(
@@ -290,8 +301,16 @@ export class AuthService {
     const existingUser = await this.userModel.findOne({
       $or: [{ email }, { phone_number }],
     });
-    if (existingUser)
+    if (existingUser) {
+      // Abandoned signup → guide back to verification instead of dead-ending.
+      if (!existingUser.email_verified && existingUser.email === email) {
+        await this.resendVerificationEmail(existingUser.email).catch(() => {});
+        throw new ConflictException(
+          "This account already exists but isn't verified — we've sent a new code to your email.",
+        );
+      }
       throw new ConflictException('Email or phone number already in use');
+    }
 
     const role = await this.roleModel.findOne({ name: UserRole.CUSTOMER });
     if (!role) throw new BadRequestException('Customer role not found');
@@ -676,11 +695,16 @@ export class AuthService {
           vendor.email_verification_expires &&
           vendor.email_verification_expires < now
         ) {
-          await this.resendVerificationEmail(vendor.email);
-          return;
+          // Best-effort resend (the 2-minute throttle may reject it) — but
+          // the login must FAIL loudly either way. Returning nothing here
+          // used to produce an empty 200 the client mistook for success.
+          await this.resendVerificationEmail(vendor.email).catch(() => {});
+          throw new UnauthorizedException(
+            "Your verification code expired — we've sent a new one to your email.",
+          );
         }
         throw new UnauthorizedException(
-          'Please verify your email address before logging in. Check your inbox for the verification link.',
+          'Please verify your email address before logging in. Check your inbox for the verification code.',
         );
       }
 
@@ -936,11 +960,15 @@ export class AuthService {
           user.email_verification_expires &&
           user.email_verification_expires < now
         ) {
-          await this.resendVerificationEmail(user.email);
-          return;
+          // Best-effort resend (throttle may reject) — login still fails
+          // loudly; the old bare `return` sent an empty 200 "success".
+          await this.resendVerificationEmail(user.email).catch(() => {});
+          throw new UnauthorizedException(
+            "Your verification code expired — we've sent a new one to your email.",
+          );
         }
         throw new UnauthorizedException(
-          'Please verify your email address before logging in. Check your inbox for the verification link.',
+          'Please verify your email address before logging in. Check your inbox for the verification code.',
         );
       }
 
