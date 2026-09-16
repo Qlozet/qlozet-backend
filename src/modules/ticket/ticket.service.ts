@@ -174,15 +174,14 @@ export class TicketService {
   async customerTicket(id: string, customerId: string) {
     const ticket = await this.ticketModel
       .findOne({ _id: id, customer: new Types.ObjectId(customerId) })
-      .populate({
-        path: 'replies',
-        model: 'TicketReply',
-        options: { sort: { createdAt: 1 } },
-        populate: { path: 'sender', select: 'full_name type' },
-      })
       .lean();
     if (!ticket) throw new NotFoundException('Ticket not found');
-    return ticket;
+    const replies = await this.ticketReplyModel
+      .find({ ticket_id: ticket._id })
+      .sort({ createdAt: 1 })
+      .populate('sender', 'full_name type')
+      .lean();
+    return { ...ticket, replies };
   }
 
   /** Reply guarded to the ticket's own originator (customer or vendor). */
@@ -520,14 +519,16 @@ export class TicketService {
       .populate('assigned_to', 'full_name email')
       .populate('business', 'business_name')
       .populate('customer', 'full_name email')
-      .populate({
-        path: 'replies',
-        model: 'TicketReply',
-        options: { sort: { createdAt: 1 } },
-        populate: { path: 'sender', select: 'full_name type' },
-      });
+      .lean();
     if (!ticket) throw new NotFoundException('Ticket not found');
-    return ticket;
+    // Query by the reply's own ticket_id back-reference, not the ticket's
+    // replies array — replies whose $push linkage is missing still appear.
+    const replies = await this.ticketReplyModel
+      .find({ ticket_id: ticket._id })
+      .sort({ createdAt: 1 })
+      .populate('sender', 'full_name type')
+      .lean();
+    return { ...ticket, replies };
   }
 
   async update(id: string, dto: UpdateTicketDto, actorId?: string) {
