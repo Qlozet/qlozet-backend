@@ -62,6 +62,12 @@ export class TicketController {
     @Req() req: any,
   ) {
     if (!req?.business?.id) {
+      // Platform admins ride this route from older console builds; give
+      // them the unscoped list instead of the customer scope (which would
+      // always be empty for an admin user).
+      if (req?.user?.type === UserType.PLATFORM) {
+        return this.ticketService.findAll(filters, page, size);
+      }
       return this.ticketService.customerTickets(req.user?.id, page, size);
     }
     return this.ticketService.findAll(filters, page, size, req?.business?.id);
@@ -71,6 +77,11 @@ export class TicketController {
   @ApiOperation({ summary: 'Get a single ticket (customers: own only)' })
   findOne(@Param('id') id: string, @Req() req: any) {
     if (!req?.business?.id) {
+      // Same older-admin-console fallback as the list route: an admin has
+      // no business scope, and the customer scope would 404 every ticket.
+      if (req?.user?.type === UserType.PLATFORM) {
+        return this.ticketService.findOne(id);
+      }
       return this.ticketService.customerTicket(id, req.user?.id);
     }
     return this.ticketService.findOne(id, req.business.id);
