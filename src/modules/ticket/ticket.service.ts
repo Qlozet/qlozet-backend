@@ -528,6 +528,13 @@ export class TicketService {
       const owner =
         (ticket.business as any)?._id ?? (ticket.business as any) ?? null;
       if (!owner || String(owner) !== String(businessId)) {
+        // Diagnostic breadcrumb: shows exactly what the ownership check
+        // compared when a vendor is denied a ticket (visible in fly logs).
+        this.logger.warn(
+          `Ticket ownership mismatch: ticket=${String(ticket._id)} ` +
+            `owner=${owner ? String(owner) : 'null'} requester=${String(businessId)} ` +
+            `customer=${ticket.customer ? String((ticket.customer as any)?._id ?? ticket.customer) : 'null'}`,
+        );
         throw new NotFoundException('Ticket not found');
       }
     }
