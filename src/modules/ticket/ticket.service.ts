@@ -176,8 +176,12 @@ export class TicketService {
       .findOne({ _id: id, customer: new Types.ObjectId(customerId) })
       .lean();
     if (!ticket) throw new NotFoundException('Ticket not found');
+    // Same union-of-linkages read as findOne — see the note there.
+    const linked = Array.isArray((ticket as any).replies)
+      ? ((ticket as any).replies as Types.ObjectId[])
+      : [];
     const replies = await this.ticketReplyModel
-      .find({ ticket_id: ticket._id })
+      .find({ $or: [{ _id: { $in: linked } }, { ticket_id: ticket._id }] })
       .sort({ createdAt: 1 })
       .populate('sender', 'full_name type')
       .lean();
@@ -521,10 +525,15 @@ export class TicketService {
       .populate('customer', 'full_name email')
       .lean();
     if (!ticket) throw new NotFoundException('Ticket not found');
-    // Query by the reply's own ticket_id back-reference, not the ticket's
-    // replies array — replies whose $push linkage is missing still appear.
+    // Union of both linkages: the ids $push-ed onto the ticket (old replies
+    // whose ticket_id was stored as a raw string by the pre-fix schema and
+    // would miss an ObjectId query) plus replies whose ticket_id
+    // back-reference is intact but never made it into the array.
+    const linked = Array.isArray((ticket as any).replies)
+      ? ((ticket as any).replies as Types.ObjectId[])
+      : [];
     const replies = await this.ticketReplyModel
-      .find({ ticket_id: ticket._id })
+      .find({ $or: [{ _id: { $in: linked } }, { ticket_id: ticket._id }] })
       .sort({ createdAt: 1 })
       .populate('sender', 'full_name type')
       .lean();
