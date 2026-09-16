@@ -515,16 +515,22 @@ export class TicketService {
 
   async findOne(id: string, businessId?: string) {
     const ticket = await this.ticketModel
-      // Vendors may only open their own business's tickets.
-      .findOne({
-        _id: id,
-        ...(businessId ? { business: new Types.ObjectId(businessId) } : {}),
-      })
+      .findById(id)
       .populate('assigned_to', 'full_name email')
       .populate('business', 'business_name')
       .populate('customer', 'full_name email')
       .lean();
     if (!ticket) throw new NotFoundException('Ticket not found');
+    // Vendors may only open their own business's tickets. Compare as
+    // strings (business is populated here) so string-stored refs still
+    // match their rightful owner.
+    if (businessId) {
+      const owner =
+        (ticket.business as any)?._id ?? (ticket.business as any) ?? null;
+      if (!owner || String(owner) !== String(businessId)) {
+        throw new NotFoundException('Ticket not found');
+      }
+    }
     // Union of both linkages: the ids $push-ed onto the ticket (old replies
     // whose ticket_id was stored as a raw string by the pre-fix schema and
     // would miss an ObjectId query) plus replies whose ticket_id
