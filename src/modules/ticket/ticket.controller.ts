@@ -73,7 +73,7 @@ export class TicketController {
     if (!req?.business?.id) {
       return this.ticketService.customerTicket(id, req.user?.id);
     }
-    return this.ticketService.findOne(id);
+    return this.ticketService.findOne(id, req.business.id);
   }
 
   // Originator reply — vendors on their business tickets, customers on
