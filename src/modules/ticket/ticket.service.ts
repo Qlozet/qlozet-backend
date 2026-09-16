@@ -510,12 +510,22 @@ export class TicketService {
     return Utils.getPagingData({ count, rows }, page, size);
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, businessId?: string) {
     const ticket = await this.ticketModel
-      .findById(id)
+      // Vendors may only open their own business's tickets.
+      .findOne({
+        _id: id,
+        ...(businessId ? { business: new Types.ObjectId(businessId) } : {}),
+      })
       .populate('assigned_to', 'full_name email')
       .populate('business', 'business_name')
-      .populate('customer', 'full_name email');
+      .populate('customer', 'full_name email')
+      .populate({
+        path: 'replies',
+        model: 'TicketReply',
+        options: { sort: { createdAt: 1 } },
+        populate: { path: 'sender', select: 'full_name type' },
+      });
     if (!ticket) throw new NotFoundException('Ticket not found');
     return ticket;
   }
