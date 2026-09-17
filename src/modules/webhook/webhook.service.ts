@@ -335,10 +335,23 @@ export class WebhookService {
     // Bespoke orders are auto-confirmed: the tailor already committed by
     // quoting, so on payment they go straight to `processing` (no separate
     // vendor-confirm step) rather than `in_review`.
-    await this.orderModel.updateOne(
-      { _id: orderId },
-      { status: isBespoke ? 'processing' : 'in_review', payment_status: 'paid' },
-    );
+    //
+    // Both writes are guarded so REPEAT finalisations (webhook retries, the
+    // customer refreshing the verify page) never clobber the order's current
+    // lifecycle status — an order the customer has since cancelled (or that
+    // has moved on to shipping) must stay where it is.
+    if (!alreadyPaid) {
+      // Record the payment itself regardless of the order's state.
+      await this.orderModel.updateOne(
+        { _id: orderId },
+        { payment_status: 'paid' },
+      );
+      // Move into fulfilment only from the pre-payment state.
+      await this.orderModel.updateOne(
+        { _id: orderId, status: 'pending' },
+        { status: isBespoke ? 'processing' : 'in_review' },
+      );
+    }
 
     // Recommender purchase signal — FIRST finalisation only (webhook retries
     // and the verify safety-net both land here; alreadyPaid dedupes them).

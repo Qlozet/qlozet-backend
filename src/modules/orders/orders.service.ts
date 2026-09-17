@@ -2614,18 +2614,28 @@ export class OrderService {
       );
     }
 
+    // Cancel FIRST — the customer's intent must never be lost because a
+    // downstream refund step failed halfway. The old ordering refunded first
+    // and only saved the cancelled status at the end, so a mid-way failure
+    // (or a missing payment transaction) left the order active — sometimes
+    // after the wallet had already been credited.
+    order.status = OrderStatus.CANCELLED;
+    await order.save();
+
+    let refunded = false;
+    try {
     // Find the original payment transaction
     const transaction = await this.transactionService.findByOrderId(
       order._id.toString(),
     );
     if (!transaction) {
-      throw new BadRequestException(
-        'No payment transaction found for this order. Manual refund required.',
+      this.logger.error(
+        `[Cancel] No payment transaction found for order ${order.reference} — order cancelled; manual refund required.`,
       );
     }
 
     // Route refund based on payment channel
-    if (transaction.channel === 'wallet_checkout') {
+    if (transaction && transaction.channel === 'wallet_checkout') {
       // Wallet refund: credit customer wallet back
       const walletId = transaction.wallet?.toString();
       if (walletId) {
@@ -2652,8 +2662,9 @@ export class OrderService {
         this.logger.log(
           `[Cancel] Wallet refund of ₦${transaction.amount} processed for order ${order.reference}`,
         );
+        refunded = true;
       }
-    } else if (transaction.channel === 'checkout') {
+    } else if (transaction && transaction.channel === 'checkout') {
       // Paystack payment → refund to the customer's WALLET (instant, in-app and
       // re-spendable) rather than a card refund via the Paystack /refund API.
       const wallet = await this.walletsService.getOrCreateWallet({
@@ -2680,16 +2691,22 @@ export class OrderService {
       this.logger.log(
         `[Cancel] ₦${transaction.amount} credited to the customer's wallet for paystack order ${order.reference}`,
       );
-    } else {
+      refunded = true;
+    } else if (transaction) {
       this.logger.warn(
         `[Cancel] Unknown payment channel "${transaction.channel}" for order ${order.reference}. Manual refund required.`,
       );
     }
 
-    // Cancel the order
-    order.status = OrderStatus.CANCELLED;
-    (order as any).refund_status = 'refunded';
-    await order.save();
+    } catch (refundErr: any) {
+      this.logger.error(
+        `[Cancel] Refund failed for order ${order.reference}: ${refundErr?.message} — order stays cancelled; refund needs manual retry.`,
+      );
+    }
+    if (refunded) {
+      (order as any).refund_status = 'refunded';
+      await order.save();
+    }
 
     // Reverse business earnings (prevent vendor from getting paid)
     await this.reverseBusinessEarnings(order);
