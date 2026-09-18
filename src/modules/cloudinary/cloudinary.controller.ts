@@ -21,10 +21,20 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Uploads')
 @ApiBearerAuth('access-token')
 // @UseGuards(JwtAuthGuard)
+// The global limits (3/s, 20/10s) are tuned for JSON endpoints and choke
+// multi-image flows — creating a clothing product uploads default images plus
+// one per size variant back-to-back, and the console 429s midway. Uploads are
+// naturally paced by file transfer, so allow bursts while keeping a ceiling.
+@Throttle({
+  short: { ttl: 1000, limit: 15 },
+  medium: { ttl: 10000, limit: 60 },
+  long: { ttl: 60000, limit: 200 },
+})
 @Controller('uploads')
 export class UploadController {
   constructor(private readonly cloudinaryService: CloudinaryService) {}
