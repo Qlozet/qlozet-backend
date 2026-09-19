@@ -29,10 +29,12 @@ export interface QoreIdVerdict {
 
 // Endpoint paths per product (kept in one place — QoreID versions these
 // individually, so a doc change is a one-line fix here).
+// Confirmed against docs.qoreid.com (reference/vnin-virtual-nin,
+// reference/nuban, docs/cac-premium-v2's cac-{tier} pattern).
 const ENDPOINTS = {
   token: '/token',
-  vnin: (vnin: string) => `/v1/ng/identities/vnin/${vnin}`,
-  nuban: (account: string) => `/v1/ng/identities/nuban/${account}`,
+  vnin: (vnin: string) => `/v1/ng/identities/virtual-nin/${vnin}`,
+  nuban: '/v1/ng/identities/nuban',
   cacBasic: '/v2/ng/identities/cac-basic',
 };
 
@@ -166,7 +168,7 @@ export class QoreIdService {
       firstname,
       lastname,
     });
-    const person = body?.vnin ?? body?.nin ?? {};
+    const person = body?.v_nin ?? body?.vnin ?? body?.nin ?? {};
     const name =
       [person?.firstname, person?.lastname].filter(Boolean).join(' ') || null;
     return this.toVerdict(body, name);
@@ -179,9 +181,10 @@ export class QoreIdService {
     firstname: string,
     lastname: string,
   ): Promise<QoreIdVerdict & { account_name: string | null }> {
-    const body = await this.post(ENDPOINTS.nuban(accountNumber.trim()), {
+    const body = await this.post(ENDPOINTS.nuban, {
       firstname,
       lastname,
+      accountNumber: accountNumber.trim(),
       bankCode,
     });
     const account = body?.nuban ?? {};
@@ -200,9 +203,9 @@ export class QoreIdService {
     const body = await this.post(ENDPOINTS.cacBasic, {
       regNumber: regNumber.trim(),
     });
-    const cac = body?.cac_basic ?? body?.cac ?? {};
+    const cac = body?.cac_basic ?? body?.cac ?? body ?? {};
     const companyName: string | null =
-      cac?.companyName ?? cac?.company_name ?? null;
+      cac?.companyName ?? cac?.company_name ?? body?.companyName ?? null;
     const verdict = this.toVerdict(body, companyName);
     return { ...verdict, company_name: companyName };
   }
