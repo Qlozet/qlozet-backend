@@ -70,7 +70,6 @@ const splitName = (full: string | undefined | null) => {
 @ApiTags('Verification')
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserType.VENDOR)
 @Controller('verification')
 export class VerificationController {
   constructor(
@@ -79,6 +78,8 @@ export class VerificationController {
     private readonly businessModel: Model<BusinessDocument>,
   ) {}
 
+  // Handler-level: the RolesGuard reads roles from the handler, not the class.
+  @Roles(UserType.VENDOR)
   @Get()
   @ApiOperation({ summary: 'Current verification state for my business' })
   async state(@Req() req: any) {
@@ -93,6 +94,8 @@ export class VerificationController {
     };
   }
 
+  // Handler-level: the RolesGuard reads roles from the handler, not the class.
+  @Roles(UserType.VENDOR)
   @Post('identity/vnin')
   @ApiOperation({ summary: 'Verify my identity with a virtual NIN (vNIN)' })
   async verifyVnin(@Req() req: any, @Body() dto: VerifyVninDto) {
@@ -138,6 +141,8 @@ export class VerificationController {
     return { verified: verdict.verified, identity };
   }
 
+  // Handler-level: the RolesGuard reads roles from the handler, not the class.
+  @Roles(UserType.VENDOR)
   @Post('business/cac')
   @ApiOperation({ summary: 'Verify my CAC registration (Registered Business badge)' })
   async verifyCac(@Req() req: any, @Body() dto: VerifyCacDto) {
@@ -158,6 +163,8 @@ export class VerificationController {
     return { verified: result.verified, business: businessBlock };
   }
 
+  // Handler-level: the RolesGuard reads roles from the handler, not the class.
+  @Roles(UserType.VENDOR)
   @Post('bank')
   @ApiOperation({ summary: 'Verify my payout bank account (NUBAN)' })
   async verifyBank(@Req() req: any, @Body() dto: VerifyBankDto) {
