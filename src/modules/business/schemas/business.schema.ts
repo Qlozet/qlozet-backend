@@ -242,6 +242,17 @@ export class Business extends Document {
     default: 'pending',
   })
   status: string;
+
+  // QoreID verification results — storage-safe summaries only (verdict,
+  // provider ref, verified name, masked id). Identity numbers are never
+  // persisted; bank account details are (payouts need them) and the CAC RC
+  // number is public registry data.
+  @Prop({ type: Object, default: {} })
+  verification?: {
+    identity?: Record<string, any> | null;
+    business?: Record<string, any> | null;
+    bank?: Record<string, any> | null;
+  };
   @Prop({
     type: {
       id: { type: MongooseSchema.Types.ObjectId, ref: 'User' },

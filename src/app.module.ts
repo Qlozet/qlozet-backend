@@ -34,6 +34,7 @@ import { ReturnsModule } from './modules/returns/returns.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { BespokeModule } from './modules/bespoke/bespoke.module';
 import { HelpCenterModule } from './modules/help-center/help-center.module';
+import { QoreIdModule } from './modules/qoreid/qoreid.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { PaymentProvidersModule } from './modules/payment-providers/payment-providers.module';
 import { FabricReservationModule } from './modules/fabric-reservation/fabric-reservation.module';
@@ -116,6 +117,7 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
     WaitlistModule,
     BespokeModule,
     HelpCenterModule,
+    QoreIdModule,
     MessagingModule,
     PaymentProvidersModule,
     FabricReservationModule,
