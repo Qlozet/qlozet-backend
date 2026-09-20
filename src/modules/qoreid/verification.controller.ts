@@ -163,6 +163,55 @@ export class VerificationController {
     return { verified: result.verified, business: businessBlock };
   }
 
+  /**
+   * Verify the ALREADY-LINKED payout account (Settings → Payout) against the
+   * vendor's verified identity — the seamless path: no re-typing account
+   * details, one source of truth for the bank account.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('bank/payout')
+  @ApiOperation({ summary: 'Verify my linked payout account matches my identity' })
+  async verifyPayoutBank(@Req() req: any) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select(
+        'verification payout_account_number payout_bank_code payout_bank_name',
+      )
+      .lean();
+    const accountNumber = (business as any)?.payout_account_number;
+    const bankCode = (business as any)?.payout_bank_code;
+    if (!accountNumber || !bankCode) {
+      throw new BadRequestException(
+        'Link a payout account under Settings → Payout first.',
+      );
+    }
+    const source =
+      (business as any)?.verification?.identity?.verified_name ||
+      req.user?.full_name;
+    const { firstname, lastname } = splitName(source);
+    const result = await this.qoreid.verifyNuban(
+      accountNumber,
+      bankCode,
+      firstname,
+      lastname,
+    );
+    const bank = {
+      status: result.verified ? 'verified' : 'failed',
+      provider_ref: result.provider_ref,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      bank_name: (business as any)?.payout_bank_name ?? null,
+      account_name: result.account_name,
+      name_match: result.match,
+      verified_at: result.verified ? new Date() : null,
+    };
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      { $set: { 'verification.bank': bank } },
+    );
+    return { verified: result.verified, bank };
+  }
+
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
   @Post('bank')
