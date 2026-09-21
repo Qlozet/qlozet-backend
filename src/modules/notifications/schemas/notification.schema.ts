@@ -36,6 +36,8 @@ export enum NotificationType {
   // Bespoke
   BESPOKE_QUOTE_REQUEST = 'bespoke_quote_request',
   BESPOKE_QUOTE_RECEIVED = 'bespoke_quote_received',
+  PRESHIP_REVIEW = 'preship_review',
+  PRESHIP_DECISION = 'preship_decision',
   BESPOKE_QUOTE_REVISION = 'bespoke_quote_revision',
   BESPOKE_QUOTE_ACCEPTED = 'bespoke_quote_accepted',
 

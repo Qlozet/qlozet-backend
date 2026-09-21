@@ -478,6 +478,52 @@ export class OrderController {
   }
 
   @Roles(UserType.VENDOR)
+  @Post(':reference/preship')
+  @ApiOperation({
+    summary: 'Submit finished-piece photos for customer approval (bespoke)',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async submitPreship(
+    @Param('reference') reference: string,
+    @Body() body: { photos?: string[]; note?: string },
+    @Req() req: any,
+  ) {
+    return this.orderService.submitPreship(reference, req.business?.id, body);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Post(':reference/preship/review')
+  @ApiOperation({ summary: 'Approve or request changes on pre-ship photos' })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async reviewPreship(
+    @Param('reference') reference: string,
+    @Body() body: { approve: boolean; note?: string },
+    @Req() req: any,
+  ) {
+    return this.orderService.reviewPreship(
+      reference,
+      req.user?.id || req.user?._id,
+      body,
+    );
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Post(':reference/fit-feedback')
+  @ApiOperation({ summary: 'Rate how the delivered bespoke piece fit' })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async fitFeedback(
+    @Param('reference') reference: string,
+    @Body() body: { fit: 'perfect' | 'minor_issues' | 'poor'; comment?: string },
+    @Req() req: any,
+  ) {
+    return this.orderService.submitFitFeedback(
+      reference,
+      req.user?.id || req.user?._id,
+      body,
+    );
+  }
+
+  @Roles(UserType.VENDOR)
   @Post(':reference/production/ready-to-ship')
   @ApiOperation({
     summary: 'Mark the order ready to ship (requires all production steps complete)',
