@@ -10,8 +10,8 @@
  * and query casts — this script brings the LEGACY rows in line.
  *
  * Usage:
- *   npx ts-node -r tsconfig-paths/register scripts/migrate-objectid-paths.ts          # dry run
- *   npx ts-node -r tsconfig-paths/register scripts/migrate-objectid-paths.ts --apply  # write
+ *   npx ts-node -r tsconfig-paths/register src/scripts/migrate-objectid-paths.ts          # dry run
+ *   npx ts-node -r tsconfig-paths/register src/scripts/migrate-objectid-paths.ts --apply  # write
  *
  * Reads MONGO_URI (falls back to MONGODB_URI / DATABASE_URL). Safe to re-run:
  * converted rows no longer match `$type: 'string'`. Strings that are not
@@ -19,30 +19,30 @@
  */
 import mongoose from 'mongoose';
 
-import { AssistantConversation } from '../src/modules/assistant/schema/conversation.schema';
-import { BespokeDesign } from '../src/modules/bespoke/schemas/bespoke-design.schema';
-import { BespokeQuote } from '../src/modules/bespoke/schemas/bespoke-quote.schema';
-import { BespokeTemplate } from '../src/modules/bespoke/schemas/bespoke-template.schema';
-import { BusinessEarning, BusinessEarningSchema } from '../src/modules/business/schemas/business-earnings.schema';
-import { VendorNote, VendorNoteSchema } from '../src/modules/business/schemas/vendor-note.schema';
-import { Warehouse, WarehouseSchema } from '../src/modules/business/schemas/warehouse.schema';
-import { Cart, CartSchema } from '../src/modules/cart/schema/cart.schema';
-import { Dispute, DisputeSchema } from '../src/modules/disputes/schemas/dispute.schema';
-import { FabricClaim, FabricClaimSchema } from '../src/modules/fabric-reservation/schemas/fabric-claim.schema';
-import { FabricReservation } from '../src/modules/fabric-reservation/schemas/fabric-reservation.schema';
-import { HelpArticle, HelpArticleSchema } from '../src/modules/help-center/schema/help-article.schema';
-import { OrderMessage, OrderMessageSchema } from '../src/modules/messaging/schemas/order-message.schema';
-import { Notification, NotificationSchema } from '../src/modules/notifications/schemas/notification.schema';
-import { CheckoutRateCache } from '../src/modules/orders/schemas/checkout-rate-cache.schema';
-import { Collection, CollectionSchema } from '../src/modules/products/schemas/collection.schema';
-import { Discount, DiscountSchema } from '../src/modules/products/schemas/discount.schema';
-import { Return, ReturnSchema } from '../src/modules/returns/schemas/return.schema';
-import { TicketReply, TicketReplySchema } from '../src/modules/ticket/schema/reply-ticket.schema';
-import { TicketActivity } from '../src/modules/ticket/schema/ticket-activity.schema';
-import { Ticket, TicketSchema } from '../src/modules/ticket/schema/ticket.schema';
-import { Address, AddressSchema } from '../src/modules/ums/schemas/address.schema';
-import { TeamMember, TeamMemberSchema } from '../src/modules/ums/schemas/team.schema';
-import { Wallet, WalletSchema } from '../src/modules/wallets/schema/wallet.schema';
+import { AssistantConversation } from '../modules/assistant/schema/conversation.schema';
+import { BespokeDesign } from '../modules/bespoke/schemas/bespoke-design.schema';
+import { BespokeQuote } from '../modules/bespoke/schemas/bespoke-quote.schema';
+import { BespokeTemplate } from '../modules/bespoke/schemas/bespoke-template.schema';
+import { BusinessEarning, BusinessEarningSchema } from '../modules/business/schemas/business-earnings.schema';
+import { VendorNote, VendorNoteSchema } from '../modules/business/schemas/vendor-note.schema';
+import { Warehouse, WarehouseSchema } from '../modules/business/schemas/warehouse.schema';
+import { Cart, CartSchema } from '../modules/cart/schema/cart.schema';
+import { Dispute, DisputeSchema } from '../modules/disputes/schemas/dispute.schema';
+import { FabricClaim, FabricClaimSchema } from '../modules/fabric-reservation/schemas/fabric-claim.schema';
+import { FabricReservation } from '../modules/fabric-reservation/schemas/fabric-reservation.schema';
+import { HelpArticle, HelpArticleSchema } from '../modules/help-center/schema/help-article.schema';
+import { OrderMessage, OrderMessageSchema } from '../modules/messaging/schemas/order-message.schema';
+import { Notification, NotificationSchema } from '../modules/notifications/schemas/notification.schema';
+import { CheckoutRateCache } from '../modules/orders/schemas/checkout-rate-cache.schema';
+import { Collection, CollectionSchema } from '../modules/products/schemas/collection.schema';
+import { Discount, DiscountSchema } from '../modules/products/schemas/discount.schema';
+import { Return, ReturnSchema } from '../modules/returns/schemas/return.schema';
+import { TicketReply, TicketReplySchema } from '../modules/ticket/schema/reply-ticket.schema';
+import { TicketActivity } from '../modules/ticket/schema/ticket-activity.schema';
+import { Ticket, TicketSchema } from '../modules/ticket/schema/ticket.schema';
+import { Address, AddressSchema } from '../modules/ums/schemas/address.schema';
+import { TeamMember, TeamMemberSchema } from '../modules/ums/schemas/team.schema';
+import { Wallet, WalletSchema } from '../modules/wallets/schema/wallet.schema';
 
 // Schemas whose files export the schema under a non-`<Class>Schema` name are
 // re-created here from the class so the path metadata matches exactly.
