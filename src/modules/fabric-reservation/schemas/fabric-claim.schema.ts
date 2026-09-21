@@ -1,17 +1,17 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type FabricClaimDocument = FabricClaim & Document;
 
 @Schema({ timestamps: true })
 export class FabricClaim {
-  @Prop({ type: Types.ObjectId, ref: 'FabricReservation', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'FabricReservation', required: true })
   reservation: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   guest: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Order', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', default: null })
   order: Types.ObjectId;
 
   @Prop({ required: true, min: 0.1 })

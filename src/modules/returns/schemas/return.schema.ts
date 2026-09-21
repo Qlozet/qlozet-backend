@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type ReturnDocument = Return & Document;
 
@@ -24,19 +24,19 @@ export enum ReturnReason {
 
 @Schema({ timestamps: true })
 export class Return extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
   @Prop({ type: String, required: true })
   order_reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 
-  @Prop({ type: [Types.ObjectId], ref: 'Product', required: true })
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Product', required: true })
   items: Types.ObjectId[];
 
   @Prop({ type: String, enum: Object.values(ReturnReason), required: true })

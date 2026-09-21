@@ -1,14 +1,14 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type WalletDocument = Wallet & Document;
 
 @Schema({ timestamps: true })
 export class Wallet {
-  @Prop({ type: Types.ObjectId, ref: 'Business', unique: true, sparse: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', unique: true, sparse: true })
   business: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', unique: true, sparse: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', unique: true, sparse: true })
   customer: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })

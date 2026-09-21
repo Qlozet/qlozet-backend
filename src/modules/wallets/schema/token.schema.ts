@@ -11,7 +11,7 @@ export enum TokenTransactionType {
 
 @Schema({ timestamps: true })
 export class TokenTransaction extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Token', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Token', required: true })
   token: Types.ObjectId;
 
   @Prop({ enum: TokenTransactionType, required: true })
@@ -36,10 +36,10 @@ export const TokenTransactionSchema =
 
 @Schema({ timestamps: true })
 export class Token {
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   customer: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null, index: true })
   business: Types.ObjectId | null;
 
   @Prop({ required: true, default: 0 })

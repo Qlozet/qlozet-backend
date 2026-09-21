@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export enum BespokeDesignStatus {
   DRAFT = 'draft',
@@ -18,7 +18,7 @@ export class BespokeDesign {
   @Prop({ required: true, unique: true })
   reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
@@ -38,14 +38,14 @@ export class BespokeDesign {
   reference_images: string[];
 
   // ─── Fabric (from platform catalog) ───
-  @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   fabric: Types.ObjectId;
 
   // ─── Optional Details ───
   @Prop({ type: String, default: null })
   description: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   measurement: Types.ObjectId;
 
   // ─── State ───
@@ -56,7 +56,7 @@ export class BespokeDesign {
   })
   status: BespokeDesignStatus;
 
-  @Prop({ type: Types.ObjectId, ref: 'BespokeQuote', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeQuote', default: null })
   accepted_quote: Types.ObjectId;
 }
 

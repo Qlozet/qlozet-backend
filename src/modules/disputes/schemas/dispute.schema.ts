@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type DisputeDocument = Dispute & Document;
 
@@ -24,16 +24,16 @@ export enum DisputeReason {
 
 @Schema({ timestamps: true })
 export class Dispute extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
   @Prop({ type: String, required: true })
   order_reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 
   @Prop({ type: String, enum: Object.values(DisputeReason), required: true })
@@ -68,7 +68,7 @@ export class Dispute extends Document {
   @Prop({ type: Number, default: null })
   refund_amount?: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   resolved_by?: Types.ObjectId;
 
   @Prop({ type: Date, default: null })

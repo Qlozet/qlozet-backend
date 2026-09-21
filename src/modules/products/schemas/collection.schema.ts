@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type CollectionDocument = Collection & Document;
 
@@ -32,7 +32,7 @@ export class Collection {
   is_active: boolean;
 
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'Business',
     required: false,
     index: true,
@@ -64,13 +64,13 @@ export class Collection {
   product_types: string[]; // e.g. ['agbada', 'dress']
 
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Product' }],
     default: [],
   })
   manual_includes: Types.ObjectId[];
 
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Product' }],
     default: [],
   })
   manual_excludes: Types.ObjectId[];

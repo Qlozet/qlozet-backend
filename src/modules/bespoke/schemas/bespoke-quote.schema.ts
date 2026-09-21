@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export enum BespokeQuoteStatus {
   PENDING = 'pending',
@@ -41,13 +41,13 @@ export class BespokeQuote {
   @Prop({ required: true, unique: true })
   reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'BespokeDesign', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', required: true })
   design: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   vendor: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
   @Prop({
