@@ -2130,31 +2130,9 @@ export class OrderService {
           `(${production.completed_count}/${production.total_count} done).`,
       );
     }
-    // Bespoke pre-ship checkpoint: the customer approves photos of the
-    // finished piece before it ships. A 72h no-response window keeps orders
-    // from stalling on an absent customer.
+    // Bespoke pre-ship checkpoint (same rule as the fulfil path).
     if ((order as any).type === 'bespoke') {
-      const preship = (order as any).preship;
-      const APPROVAL_WINDOW_MS = 72 * 60 * 60 * 1000;
-      const windowElapsed =
-        preship?.submitted_at &&
-        Date.now() - new Date(preship.submitted_at).getTime() >
-          APPROVAL_WINDOW_MS;
-      if (!preship) {
-        throw new BadRequestException(
-          'Submit pre-ship photos of the finished piece for customer approval first.',
-        );
-      }
-      if (preship.status === 'changes_requested') {
-        throw new BadRequestException(
-          'The customer requested changes — address them and submit new pre-ship photos.',
-        );
-      }
-      if (preship.status === 'pending_review' && !windowElapsed) {
-        throw new BadRequestException(
-          'Waiting for the customer to approve the pre-ship photos (auto-clears after 72 hours).',
-        );
-      }
+      this.assertPreshipCleared(order as any);
     }
     if (!shipment.ready_to_ship_at) shipment.ready_to_ship_at = new Date();
     if (shipment.status === ShipmentStatus.PENDING) {
@@ -2757,6 +2735,35 @@ export class OrderService {
       message: 'Order cancelled and refunded successfully',
       data: { order_reference: order.reference, status: order.status },
     };
+  }
+
+  /**
+   * Bespoke pre-ship rule: shipping is allowed once the customer approved the
+   * finished-piece photos, or 72h passed without a response. Blocks when
+   * nothing was submitted, changes were requested, or the review is fresh.
+   */
+  private assertPreshipCleared(order: { preship?: any }) {
+    const preship = order.preship;
+    const APPROVAL_WINDOW_MS = 72 * 60 * 60 * 1000;
+    const windowElapsed =
+      preship?.submitted_at &&
+      Date.now() - new Date(preship.submitted_at).getTime() >
+        APPROVAL_WINDOW_MS;
+    if (!preship) {
+      throw new BadRequestException(
+        'Submit pre-ship photos of the finished piece for customer approval first.',
+      );
+    }
+    if (preship.status === 'changes_requested') {
+      throw new BadRequestException(
+        'The customer requested changes — address them and submit new pre-ship photos.',
+      );
+    }
+    if (preship.status === 'pending_review' && !windowElapsed) {
+      throw new BadRequestException(
+        'Waiting for the customer to approve the pre-ship photos (auto-clears after 72 hours).',
+      );
+    }
   }
 
   /**
@@ -4811,6 +4818,13 @@ export class OrderService {
         throw new BadRequestException(
           'This shipment has been rejected and cannot be fulfilled.',
         );
+      }
+      // Bespoke pre-ship checkpoint: the customer approves photos of the
+      // finished piece before it ships (72h no-response window auto-clears).
+      // Same rule as markProductionReadyToShip — this is the path the vendor
+      // console actually ships through.
+      if ((preCheck as any).type === 'bespoke' && myShipment) {
+        this.assertPreshipCleared(preCheck as any);
       }
     }
 
