@@ -17,6 +17,7 @@
  * converted rows no longer match `$type: 'string'`. Strings that are not
  * 24-hex are left untouched ($convert onError keeps the original value).
  */
+import 'dotenv/config';
 import mongoose from 'mongoose';
 
 import { AssistantConversation } from '../modules/assistant/schema/conversation.schema';
