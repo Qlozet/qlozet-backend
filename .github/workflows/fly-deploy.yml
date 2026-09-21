@@ -9,8 +9,28 @@ on:
   # (e.g. after a transient Fly builder outage).
   workflow_dispatch:
 jobs:
+  # Money-path flow tests gate the deploy: a broken payment/cancel/dispute
+  # flow must never reach production. (~30s incl. the cached mongod binary.)
+  test:
+    name: Flow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Cache mongodb-memory-server binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+      - run: npm ci
+      - run: npm run test:flows
+
   deploy:
     name: Deploy app
+    needs: test
     runs-on: ubuntu-latest
     # Serialises deploys. Do NOT add `cancel-in-progress: true` here: with
     # `--remote-only` the build and any release machine run inside Fly, so
