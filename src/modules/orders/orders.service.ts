@@ -1563,6 +1563,13 @@ export class OrderService {
         // vendor reads as an unpaid order they can never action. Claims
         // (type 'reservation_claim') DO show: the vendor hands over those yards.
         filter.type = { $ne: 'reservation' };
+        // Hide abandoned checkouts: an order is created BEFORE the customer
+        // pays (card/Stripe redirect), so an abandoned payment leaves a
+        // pending+unpaid order behind. Vendors must never see (or confirm)
+        // an order nobody paid for. $ne (a query, so schema defaults don't
+        // apply) keeps legacy orders that PREDATE the payment_status field
+        // visible — they simply have no stored value to match 'unpaid'.
+        filter.payment_status = { $ne: 'unpaid' };
       }
       if (status && status !== 'all') {
         filter.status = status;
@@ -2759,6 +2766,30 @@ export class OrderService {
   }
 
   /**
+   * Throws unless the order's money actually arrived. payment_status is the
+   * fast path; orders predating that field hydrate the schema's 'unpaid'
+   * default, so they fall back to the ledger (a successful checkout debit)
+   * and get payment_status backfilled when it confirms they were paid.
+   */
+  private async assertOrderPaid(order: any, action: string) {
+    if (order.payment_status === 'paid') return;
+    const paidTx = await this.transactionService
+      .findByOrderId(order._id.toString())
+      .catch(() => null);
+    if (paidTx) {
+      await this.orderModel.updateOne(
+        { _id: order._id },
+        { $set: { payment_status: 'paid' } },
+      );
+      order.payment_status = 'paid';
+      return;
+    }
+    throw new BadRequestException(
+      `This order has not been paid for yet — it cannot be ${action}.`,
+    );
+  }
+
+  /**
    * Bespoke pre-ship rule: shipping is allowed once the customer approved the
    * finished-piece photos, or 72h passed without a response. Blocks when
    * nothing was submitted, changes were requested, or the review is fresh.
@@ -3124,6 +3155,10 @@ export class OrderService {
 
     const order = await this.orderModel.findOne({ reference: orderReference });
     if (!order) throw new BadRequestException('Order not found');
+
+    // An order is created BEFORE payment (card/Stripe redirect), so an
+    // unpaid order is an abandoned checkout — never confirmable.
+    await this.assertOrderPaid(order, 'confirmed');
 
     const shipment = order.shipments.find(
       (s) => s.business.toString() === businessId,
@@ -4827,6 +4862,8 @@ export class OrderService {
     // ── Gate: vendor must confirm before fulfilling ──
     const preCheck = await this.orderModel.findOne({ reference: orderReference });
     if (preCheck) {
+      // Never ship an unpaid order (same rule as confirmVendorShipment).
+      await this.assertOrderPaid(preCheck, 'fulfilled');
       const myShipment = preCheck.shipments.find(
         (s) => s.business.toString() === businessId,
       );
