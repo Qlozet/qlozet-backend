@@ -581,11 +581,13 @@ export class OrderService {
           const fxSettings: any = await this.platformSettingsModel
             .findOne()
             .lean();
+          const tQuote = Date.now();
           const quote = await this.currencyService.quote(
             'NGN',
             chargeCurrency,
             fxSettings?.fx_markup_percent ?? 2,
           );
+          const quoteMs = Date.now() - tQuote;
           const amountMinor = Math.round(
             savedOrder.total * quote.effective_rate * 100,
           );
@@ -622,12 +624,25 @@ export class OrderService {
             },
           });
 
+          const tInit = Date.now();
           const init = await provider.initCharge({
             reference: intlTransaction.reference,
             email: customer.email,
             currency: chargeCurrency,
             amount_minor: amountMinor,
           });
+          this.logger.log(
+            `[Checkout] ${intlTransaction.reference} stripe init ${Date.now() - tInit}ms (fx=${quoteMs}ms)`,
+          );
+          // Stamp the session id so verification can retrieve the session
+          // directly — Stripe's Search API indexes new payments with up to
+          // ~1 minute of lag, which stalls the confirmation page.
+          if (init.session_id) {
+            await this.transactionService.attachMetadata(
+              intlTransaction.reference,
+              { stripe_session_id: init.session_id },
+            );
+          }
 
           this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
             this.logger.error('Failed to send new order notifications', err),
@@ -1461,6 +1476,12 @@ export class OrderService {
           this.logger.log(
             `[Charge] ${opts.channel} ${tx.reference} via stripe in ${Date.now() - t0}ms (fx=${quoteMs}ms, init=${Date.now() - tInit}ms)`,
           );
+          // Session id → direct retrieval at verify time (Search API lags).
+          if (init.session_id) {
+            await this.transactionService.attachMetadata(tx.reference, {
+              stripe_session_id: init.session_id,
+            });
+          }
           return {
             transaction: tx,
             payment: {

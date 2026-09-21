@@ -497,7 +497,10 @@ export class WebhookService {
           (transaction.metadata as any)?.payment_method === 'stripe';
         if (isStripeFee) {
           const check = await this.stripeProvider
-            .verifyCharge(reference)
+            .verifyCharge(
+              reference,
+              (transaction.metadata as any)?.stripe_session_id,
+            )
             .catch((e: any) => {
               this.logger.error(
                 `[VerifyAndFinalize] Reservation-fee Stripe verify failed for ${reference}: ${e?.message}`,
@@ -536,7 +539,10 @@ export class WebhookService {
       if (isStripe) {
         // Stripe reference — verifying via Paystack would wrongly fail it.
         const check = await this.stripeProvider
-          .verifyCharge(reference)
+          .verifyCharge(
+            reference,
+            (transaction.metadata as any)?.stripe_session_id,
+          )
           .catch((e: any) => {
             this.logger.error(
               `[VerifyAndFinalize] Stripe verify failed for ${reference}: ${e?.message}`,

@@ -89,6 +89,17 @@ export class TransactionService {
     return this.updateStatus(reference, TransactionStatus.SUCCESS);
   }
 
+  // Merge keys into a transaction's metadata without touching the rest of it
+  // (e.g. stamping the Stripe Checkout Session id after the charge is
+  // initialised, so verification can retrieve the session directly).
+  async attachMetadata(reference: string, patch: Record<string, any>) {
+    const set: Record<string, any> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      set[`metadata.${key}`] = value;
+    }
+    await this.transactionModel.updateOne({ reference }, { $set: set });
+  }
+
   async markFailed(reference: string) {
     return this.updateStatus(reference, TransactionStatus.FAILED);
   }
