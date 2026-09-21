@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type CheckoutRateCacheDocument = CheckoutRateCache & Document;
 
@@ -20,7 +20,7 @@ export class CachedCourierRate {
 
 @Schema({ timestamps: true })
 export class CheckoutRateCache {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true, index: true })
   customer: Types.ObjectId;
 
   @Prop({ type: String, required: true, index: true })

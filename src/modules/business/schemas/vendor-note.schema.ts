@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type VendorNoteDocument = VendorNote & Document;
 
@@ -33,18 +33,18 @@ export enum VendorNoteKind {
  */
 @Schema({ timestamps: true })
 export class VendorNote {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true, index: true })
   business: Types.ObjectId;
 
   /**
    * Set when the note is about one product rather than the vendor as a whole.
    * Null on vendor-level notes, which is what `Business.is_flagged` counts.
    */
-  @Prop({ type: Types.ObjectId, ref: 'Product', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null, index: true })
   product?: Types.ObjectId | null;
 
   /** The admin who wrote it. Kept so the trail is attributable. */
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   author: Types.ObjectId;
 
   @Prop({ type: String, required: true, trim: true })
@@ -61,7 +61,7 @@ export class VendorNote {
   @Prop({ type: Boolean, default: false })
   resolved: boolean;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   resolved_by?: Types.ObjectId;
 
   @Prop({ type: Date, default: null })

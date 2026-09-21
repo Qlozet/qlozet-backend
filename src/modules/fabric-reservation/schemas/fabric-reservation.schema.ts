@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export enum ReservationStatus {
   ACTIVE = 'active',
@@ -15,10 +15,10 @@ export class FabricReservation {
   @Prop({ required: true, unique: true })
   reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   organizer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
   fabric: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
@@ -36,7 +36,7 @@ export class FabricReservation {
   @Prop({ required: true, min: 0 })
   reservation_fee: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'Transaction', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Transaction', default: null })
   fee_transaction: Types.ObjectId;
 
   // Set by the payment webhook / verify safety-net once the organizer's

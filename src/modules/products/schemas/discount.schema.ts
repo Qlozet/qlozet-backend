@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type DiscountDocument = Discount & Document;
 
@@ -61,7 +61,7 @@ export class Discount {
   is_active: boolean;
 
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'Business',
     required: true,
     index: true,
@@ -69,13 +69,13 @@ export class Discount {
   business: Types.ObjectId;
 
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Product' }],
     default: [],
   })
   manual_includes: Types.ObjectId[];
 
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'Product' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Product' }],
     default: [],
   })
   manual_excludes: Types.ObjectId[];

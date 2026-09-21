@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 // Platform-curated bespoke starting points. A template is NOT a design —
 // it has no customer, no fabric, no quotes. "Using" one clones its images
@@ -43,7 +43,7 @@ export class BespokeTemplate {
   @Prop({ type: Number, default: 0 })
   uses: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   created_by: Types.ObjectId;
 }
 

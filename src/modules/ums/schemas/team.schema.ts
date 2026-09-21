@@ -1,15 +1,15 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class TeamMember {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: false })
   user?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Role', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Role', required: true })
   role: Types.ObjectId;
 
   @Prop({ required: true })

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type AssistantRole = 'user' | 'assistant';
 
@@ -34,11 +34,11 @@ export const AssistantMessageSchema =
 export class AssistantConversation extends Document {
   // Scoped to the vendor's business. Every vendor read filters on this.
   // Null for platform-admin conversations (scoped by admin_user instead).
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null, index: true })
   business: Types.ObjectId | null;
 
   // Platform-admin conversations are personal to the admin who asked.
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null, index: true })
   admin_user: Types.ObjectId | null;
 
   @Prop({ type: String, default: 'New conversation' })
@@ -60,7 +60,7 @@ export const AssistantConversationSchema = SchemaFactory.createForClass(
  */
 @Schema({ timestamps: true, collection: 'assistant_digests' })
 export class AssistantDigest extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true, index: true })
   business: Types.ObjectId;
 
   // Human summary paragraph.

@@ -1,29 +1,29 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type CartDocument = Cart & Document;
 
 @Schema({ timestamps: true })
 export class Cart {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, unique: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true, unique: true })
   user: Types.ObjectId;
 
   @Prop({
     type: [
       {
-        product_id: { type: Types.ObjectId, ref: 'Product', required: true },
+        product_id: { type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true },
         selections: {
           type: {
             color_variant_selections: [
               {
-                color_variant_id: { type: Types.ObjectId },
+                color_variant_id: { type: MongooseSchema.Types.ObjectId },
                 size: String,
                 quantity: { type: Number, min: 1 },
               },
             ],
             fabric_selections: [
               {
-                fabric_id: { type: Types.ObjectId },
+                fabric_id: { type: MongooseSchema.Types.ObjectId },
                 yardage: Number,
                 size: String,
                 quantity: { type: Number, min: 1 },
@@ -31,20 +31,20 @@ export class Cart {
             ],
             style_selections: [
               {
-                style_id: { type: Types.ObjectId },
+                style_id: { type: MongooseSchema.Types.ObjectId },
               },
             ],
             accessory_selections: [
               {
-                accessory_id: { type: Types.ObjectId },
-                variant_id: { type: Types.ObjectId },
+                accessory_id: { type: MongooseSchema.Types.ObjectId },
+                variant_id: { type: MongooseSchema.Types.ObjectId },
                 quantity: { type: Number, min: 1 },
               },
             ],
             addon_selections: [
               {
-                addon_id: { type: Types.ObjectId },
-                variant_id: { type: Types.ObjectId },
+                addon_id: { type: MongooseSchema.Types.ObjectId },
+                variant_id: { type: MongooseSchema.Types.ObjectId },
                 quantity: { type: Number, min: 1 },
               },
             ],
@@ -52,7 +52,7 @@ export class Cart {
           default: {},
         },
         applied_fabric_id: {
-          type: Types.ObjectId,
+          type: MongooseSchema.Types.ObjectId,
           ref: 'Product',
           default: null,
         },

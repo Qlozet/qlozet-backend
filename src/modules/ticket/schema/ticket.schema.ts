@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { TicketReply } from './reply-ticket.schema';
 
 export enum TicketStatus {
@@ -13,10 +13,10 @@ export enum TicketStatus {
 export class Ticket extends Document {
   // Exactly one originator is set: vendors raise tickets against their
   // business, customers raise them personally.
-  @Prop({ type: Types.ObjectId, ref: 'Business', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null, index: true })
   business: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null, index: true })
   customer: Types.ObjectId | null;
 
   @Prop({ required: true })
@@ -31,12 +31,12 @@ export class Ticket extends Document {
   @Prop({ enum: TicketStatus, default: TicketStatus.OPEN })
   status: TicketStatus;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   assigned_to: Types.ObjectId;
 
   @Prop({ default: false })
   is_resolved: boolean;
-  @Prop({ type: [Types.ObjectId], ref: 'TicketReply', default: [] })
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'TicketReply', default: [] })
   replies: Types.ObjectId[];
 }
 

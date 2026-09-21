@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type NotificationDocument = Notification & Document;
 
@@ -68,10 +68,10 @@ export enum NotificationType {
 
 @Schema({ timestamps: true })
 export class Notification {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true, index: true })
   recipient: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', index: true })
   recipient_business?: Types.ObjectId;
 
   @Prop({ required: true, enum: NotificationCategory })

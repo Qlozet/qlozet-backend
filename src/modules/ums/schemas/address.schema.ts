@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export enum AddressType {
   SHIPPING = 'shipping',
@@ -41,7 +41,7 @@ export class Address {
   @Prop({ type: String, enum: AddressType, default: AddressType.SHIPPING })
   type: AddressType;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 }
 

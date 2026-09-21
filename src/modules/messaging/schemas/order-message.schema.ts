@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type OrderMessageDocument = OrderMessage & Document;
 
@@ -7,19 +7,19 @@ export type OrderMessageDocument = OrderMessage & Document;
 // (the vendor_to_customer vendor). Bespoke orders only.
 @Schema({ timestamps: true })
 export class OrderMessage {
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
   @Prop({ type: String, required: true })
   order_reference: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   customer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId; // the tailor
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   sender: Types.ObjectId;
 
   @Prop({ type: String, enum: ['customer', 'vendor', 'admin'], required: true })

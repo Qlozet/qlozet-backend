@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 // One collection carries the whole help center: FAQs (question-titled
 // shorts), how-to guides, and policy pages. The distinction is editorial,
@@ -46,7 +46,7 @@ export class HelpArticle {
   @Prop({ type: Number, default: 0 })
   helpful_no: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   created_by: Types.ObjectId;
 }
 

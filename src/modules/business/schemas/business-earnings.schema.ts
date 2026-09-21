@@ -1,19 +1,19 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type BusinessEarningDocument = BusinessEarning & Document;
 
 @Schema({ timestamps: true })
 export class BusinessEarning extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
   // The specific order item this earning is for. Enables reversing a single
   // item's earning on per-item vendor rejection. Null for older records.
-  @Prop({ type: Types.ObjectId, default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, default: null })
   item?: Types.ObjectId;
 
   @Prop({ type: Number, required: true })

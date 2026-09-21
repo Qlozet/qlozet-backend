@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type WarehouseDocument = Warehouse & Document;
 
@@ -23,7 +23,7 @@ export class Warehouse {
   @Prop({ default: 'active', enum: ['active', 'inactive'] })
   status: 'active' | 'inactive';
 
-  @Prop({ type: Types.ObjectId, ref: 'Business', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true })
   business: Types.ObjectId;
 }
 

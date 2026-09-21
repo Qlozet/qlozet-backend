@@ -19,11 +19,11 @@ export enum TicketActivityType {
  */
 @Schema({ timestamps: true })
 export class TicketActivity extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'Ticket', required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Ticket', required: true, index: true })
   ticket: Types.ObjectId;
 
   /** Who did it. Null → the system (or an unattributable legacy event). */
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
   actor: Types.ObjectId | null;
 
   /** Fallback display name when there is no User actor (e.g. a vendor business). */
