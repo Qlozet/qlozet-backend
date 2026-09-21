@@ -293,7 +293,7 @@ export class FabricReservationService {
       const isStripe = (tx.metadata as any)?.payment_method === 'stripe';
       if (isStripe) {
         const check = await this.stripeProvider
-          .verifyCharge(tx.reference)
+          .verifyCharge(tx.reference, (tx.metadata as any)?.stripe_session_id)
           .catch(() => null);
         if (check?.paid) {
           await this.transactionService.markSuccess(tx.reference);

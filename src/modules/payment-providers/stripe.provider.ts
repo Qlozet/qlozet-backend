@@ -82,8 +82,34 @@ export class StripeProvider implements PaymentProvider {
     };
   }
 
-  async verifyCharge(reference: string): Promise<ChargeVerification> {
-    // The reference is stamped on the PaymentIntent's metadata at init; the
+  async verifyCharge(
+    reference: string,
+    sessionId?: string,
+  ): Promise<ChargeVerification> {
+    // Fast path: retrieve the Checkout Session stored at init. Session
+    // retrieval is immediately consistent — the Search API below indexes new
+    // payments with up to ~1 minute of lag, which stalls the confirmation
+    // page while it polls "not paid yet" on an already-successful charge.
+    if (sessionId) {
+      try {
+        const session =
+          await this.stripe().checkout.sessions.retrieve(sessionId);
+        return {
+          reference,
+          paid: session.payment_status === 'paid',
+          amount_minor: session.amount_total ?? undefined,
+          currency: session.currency?.toUpperCase(),
+          processor: this.processor,
+          raw: session,
+        };
+      } catch (e: any) {
+        this.logger.warn(
+          `Session retrieve failed for ${reference} (${e?.message}) — falling back to search`,
+        );
+      }
+    }
+    // Legacy path (transactions initiated before the session id was stored):
+    // the reference is stamped on the PaymentIntent's metadata at init; the
     // Search API finds it without us having stored the session id anywhere.
     const found = await this.stripe().paymentIntents.search({
       query: `metadata['reference']:'${reference.replace(/'/g, '')}'`,
