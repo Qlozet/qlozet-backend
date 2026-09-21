@@ -243,6 +243,14 @@ export class Business extends Document {
   })
   status: string;
 
+  // Aggregated bespoke fit outcomes from post-delivery feedback — the
+  // vendor's real fit track record (perfect / minor_issues / poor counts).
+  @Prop({
+    type: Object,
+    default: { perfect: 0, minor_issues: 0, poor: 0 },
+  })
+  fit_stats?: { perfect: number; minor_issues: number; poor: number };
+
   // QoreID verification results — storage-safe summaries only (verdict,
   // provider ref, verified name, masked id). Identity numbers are never
   // persisted; bank account details are (payouts need them) and the CAC RC

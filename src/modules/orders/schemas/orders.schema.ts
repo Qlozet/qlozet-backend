@@ -433,6 +433,28 @@ export class Order {
   })
   payout_status?: 'pending' | 'eligible' | 'paid'; // vendor PAYOUT (not customer payment)
 
+  // Pre-ship checkpoint (bespoke): the tailor submits photos of the finished
+  // piece and the CUSTOMER approves before it may ship. Approval (or a 72h
+  // no-response window) gates ready-to-ship for bespoke orders.
+  @Prop({ type: Object, default: null })
+  preship?: {
+    photos: string[];
+    note?: string | null;
+    status: 'pending_review' | 'approved' | 'changes_requested';
+    submitted_at?: Date;
+    reviewed_at?: Date | null;
+    customer_note?: string | null;
+  } | null;
+
+  // Post-delivery fit feedback (bespoke) — the platform's ground truth for
+  // "did it actually fit?", aggregated onto the vendor's fit_stats.
+  @Prop({ type: Object, default: null })
+  fit_feedback?: {
+    fit: 'perfect' | 'minor_issues' | 'poor';
+    comment?: string | null;
+    created_at: Date;
+  } | null;
+
   // Customer-facing payment/refund state (denormalised from Transactions so the
   // order list can render Paid/Refunded without joining the transactions coll).
   @Prop({ type: String, enum: ['unpaid', 'paid'], default: 'unpaid' })

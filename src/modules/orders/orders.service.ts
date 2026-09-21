@@ -2130,6 +2130,10 @@ export class OrderService {
           `(${production.completed_count}/${production.total_count} done).`,
       );
     }
+    // Bespoke pre-ship checkpoint (same rule as the fulfil path).
+    if ((order as any).type === 'bespoke') {
+      this.assertPreshipCleared(order as any);
+    }
     if (!shipment.ready_to_ship_at) shipment.ready_to_ship_at = new Date();
     if (shipment.status === ShipmentStatus.PENDING) {
       shipment.status = ShipmentStatus.READY_TO_SHIP;
@@ -2731,6 +2735,189 @@ export class OrderService {
       message: 'Order cancelled and refunded successfully',
       data: { order_reference: order.reference, status: order.status },
     };
+  }
+
+  /**
+   * Bespoke pre-ship rule: shipping is allowed once the customer approved the
+   * finished-piece photos, or 72h passed without a response. Blocks when
+   * nothing was submitted, changes were requested, or the review is fresh.
+   */
+  private assertPreshipCleared(order: { preship?: any }) {
+    const preship = order.preship;
+    const APPROVAL_WINDOW_MS = 72 * 60 * 60 * 1000;
+    const windowElapsed =
+      preship?.submitted_at &&
+      Date.now() - new Date(preship.submitted_at).getTime() >
+        APPROVAL_WINDOW_MS;
+    if (!preship) {
+      throw new BadRequestException(
+        'Submit pre-ship photos of the finished piece for customer approval first.',
+      );
+    }
+    if (preship.status === 'changes_requested') {
+      throw new BadRequestException(
+        'The customer requested changes — address them and submit new pre-ship photos.',
+      );
+    }
+    if (preship.status === 'pending_review' && !windowElapsed) {
+      throw new BadRequestException(
+        'Waiting for the customer to approve the pre-ship photos (auto-clears after 72 hours).',
+      );
+    }
+  }
+
+  /**
+   * Pre-ship checkpoint: the tailor submits photos of the FINISHED piece for
+   * the customer to approve before it ships. Resubmission (after changes)
+   * resets the review.
+   */
+  async submitPreship(
+    reference: string,
+    businessId: string,
+    dto: { photos?: string[]; note?: string },
+  ) {
+    const order = await this.orderModel.findOne({ reference });
+    if (!order) throw new NotFoundException('Order not found');
+    if (this.resolveProductionShipmentIndex(order, businessId) === -1) {
+      throw new ForbiddenException('This order does not belong to your business.');
+    }
+    if ((order as any).type !== 'bespoke') {
+      throw new BadRequestException(
+        'Pre-ship approval applies to bespoke orders.',
+      );
+    }
+    const photos = (dto.photos ?? []).filter(Boolean);
+    if (!photos.length) {
+      throw new BadRequestException(
+        'Add at least one photo of the finished piece.',
+      );
+    }
+    (order as any).preship = {
+      photos: photos.slice(0, 8),
+      note: dto.note?.trim() || null,
+      status: 'pending_review',
+      submitted_at: new Date(),
+      reviewed_at: null,
+      customer_note: null,
+    };
+    order.markModified('preship');
+    await order.save();
+
+    this.notificationsService
+      .create({
+        recipient: order.customer.toString(),
+        category: NotificationCategory.ORDER,
+        type: NotificationType.PRESHIP_REVIEW,
+        title: 'Your outfit is ready — take a look 👀',
+        body: `The tailor finished order #${order.reference} and sent photos for your approval before shipping.`,
+        metadata: { order_reference: order.reference },
+        action_url: '/profile?tab=orders',
+      })
+      .catch((e) =>
+        this.logger.warn(`Preship notify failed: ${e?.message}`),
+      );
+
+    return { message: 'Sent to the customer for approval.', data: (order as any).preship };
+  }
+
+  /** Customer approves or requests changes on the pre-ship photos. */
+  async reviewPreship(
+    reference: string,
+    customerId: string,
+    dto: { approve: boolean; note?: string },
+  ) {
+    const order = await this.orderModel.findOne({
+      reference,
+      customer: new Types.ObjectId(customerId),
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    const preship = (order as any).preship;
+    if (!preship || preship.status !== 'pending_review') {
+      throw new BadRequestException('There is nothing awaiting your review on this order.');
+    }
+    preship.status = dto.approve ? 'approved' : 'changes_requested';
+    preship.reviewed_at = new Date();
+    preship.customer_note = dto.note?.trim() || null;
+    order.markModified('preship');
+    await order.save();
+
+    // Tell the vendor owner the verdict.
+    const businessId = order.items?.[0]?.business?.toString();
+    if (businessId) {
+      this.businessModel
+        .findById(businessId)
+        .select('created_by')
+        .lean()
+        .then((b: any) => {
+          if (!b?.created_by?.id) return;
+          return this.notificationsService.create({
+            recipient: b.created_by.id.toString(),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.PRESHIP_DECISION,
+            title: dto.approve
+              ? 'Pre-ship photos approved ✅'
+              : 'Customer requested changes',
+            body: dto.approve
+              ? `Order #${order.reference} is approved — ship it.`
+              : `Order #${order.reference}: "${(dto.note ?? 'See the order for details').slice(0, 140)}"`,
+            metadata: { order_reference: order.reference },
+            action_url: '/orders',
+          });
+        })
+        .catch((e) =>
+          this.logger.warn(`Preship decision notify failed: ${e?.message}`),
+        );
+    }
+    return { message: dto.approve ? 'Approved — the tailor can ship.' : 'Change request sent to the tailor.', data: preship };
+  }
+
+  /**
+   * Post-delivery fit feedback (bespoke). One submission per order; the
+   * outcome aggregates onto the vendor's fit_stats — the platform's real
+   * measure of "did it fit?".
+   */
+  async submitFitFeedback(
+    reference: string,
+    customerId: string,
+    dto: { fit: 'perfect' | 'minor_issues' | 'poor'; comment?: string },
+  ) {
+    if (!['perfect', 'minor_issues', 'poor'].includes(dto.fit)) {
+      throw new BadRequestException('fit must be perfect, minor_issues or poor.');
+    }
+    const order = await this.orderModel.findOne({
+      reference,
+      customer: new Types.ObjectId(customerId),
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if ((order as any).type !== 'bespoke') {
+      throw new BadRequestException('Fit feedback applies to bespoke orders.');
+    }
+    if (order.status !== OrderStatus.COMPLETED) {
+      throw new BadRequestException('You can rate the fit once the order is delivered.');
+    }
+    if ((order as any).fit_feedback) {
+      throw new BadRequestException('Fit feedback was already recorded for this order.');
+    }
+    (order as any).fit_feedback = {
+      fit: dto.fit,
+      comment: dto.comment?.trim() || null,
+      created_at: new Date(),
+    };
+    order.markModified('fit_feedback');
+    await order.save();
+
+    const businessId = order.items?.[0]?.business?.toString();
+    if (businessId) {
+      await this.businessModel
+        .updateOne(
+          { _id: businessId },
+          { $inc: { [`fit_stats.${dto.fit}`]: 1 } },
+        )
+        .catch((e) =>
+          this.logger.warn(`fit_stats increment failed: ${e?.message}`),
+        );
+    }
+    return { message: 'Thanks — your fit feedback helps us match you better.', data: (order as any).fit_feedback };
   }
 
   /**
@@ -4631,6 +4818,13 @@ export class OrderService {
         throw new BadRequestException(
           'This shipment has been rejected and cannot be fulfilled.',
         );
+      }
+      // Bespoke pre-ship checkpoint: the customer approves photos of the
+      // finished piece before it ships (72h no-response window auto-clears).
+      // Same rule as markProductionReadyToShip — this is the path the vendor
+      // console actually ships through.
+      if ((preCheck as any).type === 'bespoke' && myShipment) {
+        this.assertPreshipCleared(preCheck as any);
       }
     }
 
