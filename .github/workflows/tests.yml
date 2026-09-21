@@ -1,0 +1,27 @@
+# Flow tests on every branch push and PR — the same suites that gate the
+# main-branch deploy, so breakage surfaces before merge, not after.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main # main runs them inside the Fly Deploy workflow's test gate
+
+jobs:
+  flows:
+    name: Flow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Cache mongodb-memory-server binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+      - run: npm ci
+      - run: npm run test:flows
