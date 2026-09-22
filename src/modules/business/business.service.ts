@@ -1210,10 +1210,12 @@ export class BusinessService {
 
     if (!user) throw new NotFoundException('User not found');
 
-    // Only extract the IDs for the query
-    const followingIds = (user.following_businesses || []).map(
-      (b: any) => b._id,
-    );
+    // following_businesses is a plain ObjectId array on a lean() read, so the
+    // entry IS the id — `b._id` was undefined for every row, which made this
+    // endpoint permanently return an empty list. Tolerate populated shapes too.
+    const followingIds = (user.following_businesses || [])
+      .map((b: any) => b?._id ?? b)
+      .filter(Boolean);
 
     const { take, skip } = await Utils.getPagination(
       Number(dto?.page),
