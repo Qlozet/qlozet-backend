@@ -2774,6 +2774,22 @@ export class OrderService {
   }
 
   /**
+   * Order states that occupy a vendor's capacity — the ones where they still
+   * owe work. `in_transit` is out (the piece has shipped, the bench is clear)
+   * and so is `returned`, which would otherwise hold a slot FOREVER since a
+   * returned order never reaches `completed`. `pending` stays because
+   * finalisation records payment and flips status in two separate writes: a
+   * crash between them leaves a paid order stuck at pending that the vendor
+   * can still see and work. Unpaid orders never reach this list at all — the
+   * `payment_status: 'paid'` filter excludes abandoned checkouts.
+   */
+  private static readonly OCCUPIES_CAPACITY = [
+    OrderStatus.PENDING,
+    OrderStatus.IN_REVIEW,
+    OrderStatus.PROCESSING,
+  ];
+
+  /**
    * Which of these vendors are at capacity right now.
    *
    * Capacity is WORK IN PROGRESS (`max_open_orders`), not arrivals per day: a
@@ -2810,7 +2826,7 @@ export class OrderService {
       const openOrders = await this.orderModel.countDocuments({
         'items.business': biz._id,
         payment_status: 'paid',
-        status: { $nin: [OrderStatus.COMPLETED, OrderStatus.CANCELLED] },
+        status: { $in: OrderService.OCCUPIES_CAPACITY },
       });
       if (openOrders >= biz.max_open_orders) {
         atCapacity.push({
