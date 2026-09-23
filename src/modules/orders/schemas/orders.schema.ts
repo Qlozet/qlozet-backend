@@ -13,6 +13,22 @@ export enum OrderStatus {
 }
 export const ALLOWED_STATUSES = [OrderStatus.PROCESSING, OrderStatus.COMPLETED];
 
+/**
+ * Order states that occupy a vendor's capacity — the ones where they still owe
+ * work. `in_transit` is out (the piece has shipped, the bench is clear) and so
+ * is `returned`, which would otherwise hold a slot FOREVER since a returned
+ * order never reaches `completed`. `pending` stays because finalisation
+ * records payment and flips status in two separate writes: a crash between
+ * them leaves a paid order stuck there that the vendor can still see and work.
+ * Always pair with `payment_status: 'paid'` — that is what excludes abandoned
+ * checkouts, not this list.
+ */
+export const CAPACITY_OCCUPYING_STATUSES = [
+  OrderStatus.PENDING,
+  OrderStatus.IN_REVIEW,
+  OrderStatus.PROCESSING,
+];
+
 export enum ShipmentStatus {
   PENDING = 'pending',
   READY_TO_SHIP = 'ready_to_ship',

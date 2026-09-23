@@ -85,6 +85,18 @@ export class BusinessController {
   // ─────────────────────────────────────────────────────────
 
   @Roles(UserType.VENDOR)
+  @Get('capacity')
+  @ApiOperation({
+    summary: "This vendor's live order capacity",
+    description:
+      'How many orders the vendor currently owes work on, against their ' +
+      'max_open_orders setting. at_capacity is false when no cap is set.',
+  })
+  async getCapacity(@Req() req: any) {
+    return this.businessService.getCapacity(req.business?.id);
+  }
+
+  @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER)
   @Post('warehouse')
   @ApiOperation({ summary: 'Create a new warehouse' })

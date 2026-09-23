@@ -149,6 +149,58 @@ describe('vendor order settings enforcement', () => {
       await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
     });
 
+    it('shipping frees the slot — the piece is off the bench', async () => {
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+      ];
+      await openOrder(tailorId, 'in_transit');
+
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
+    });
+
+    it('a returned order does not hold a slot forever', async () => {
+      // `returned` never becomes `completed`, so counting it would leave the
+      // vendor permanently "fully booked" after enough returns.
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+      ];
+      await openOrder(tailorId, 'returned');
+
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
+    });
+
+    it('a paid order stuck at pending still counts (split finalisation write)', async () => {
+      // finalizeCheckoutOrder records payment and flips status separately; a
+      // crash between them leaves real, workable work the vendor can see.
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+      ];
+      await openOrder(tailorId, 'pending');
+
+      await expect(service.findVendorsAtCapacity(items)).resolves.toHaveLength(1);
+    });
+
+    it('bespoke orders occupy the bench like any other work', async () => {
+      // Quote acceptance creates the order straight from the bespoke service
+      // (status `processing` on payment), so it counts here even though it
+      // never passes through cart checkout.
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+      ];
+      await orderModel.create({
+        customer: customerId,
+        items: [{ business: tailorId, product: new Types.ObjectId() }],
+        total: 90_000,
+        subtotal: 90_000,
+        type: 'bespoke',
+        status: 'processing',
+        payment_status: 'paid',
+        reference: 'ORD-BESPOKE',
+      });
+
+      await expect(service.findVendorsAtCapacity(items)).resolves.toHaveLength(1);
+    });
+
     it('only names the vendors that are actually full on a multi-vendor cart', async () => {
       businesses = [
         { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },

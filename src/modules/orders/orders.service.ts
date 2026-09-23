@@ -14,6 +14,7 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import {
   ALLOWED_STATUSES,
+  CAPACITY_OCCUPYING_STATUSES,
   Order,
   OrderDocument,
   OrderItem,
@@ -2810,7 +2811,7 @@ export class OrderService {
       const openOrders = await this.orderModel.countDocuments({
         'items.business': biz._id,
         payment_status: 'paid',
-        status: { $nin: [OrderStatus.COMPLETED, OrderStatus.CANCELLED] },
+        status: { $in: CAPACITY_OCCUPYING_STATUSES },
       });
       if (openOrders >= biz.max_open_orders) {
         atCapacity.push({
