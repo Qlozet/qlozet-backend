@@ -128,6 +128,15 @@ export class UpdateBusinessProfileDto {
   @IsNumber()
   daily_order_limit?: number;
 
+  @ApiPropertyOptional({
+    example: 5,
+    description:
+      'Maximum orders this vendor can have in flight at once (0 = unlimited).',
+  })
+  @IsOptional()
+  @IsNumber()
+  max_open_orders?: number;
+
   @ApiPropertyOptional({ example: false, description: 'Auto-process refunds on returns' })
   @IsOptional()
   @IsBoolean()

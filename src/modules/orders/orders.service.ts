@@ -256,6 +256,10 @@ export class OrderService {
         };
       });
 
+      // Backstop only — checkout preview already told the customer which
+      // vendors are full, so this should rarely fire.
+      await this.assertWithinOrderCapacity(processedItems);
+
       // Build VendorShipment entries if shipping selections are provided
       const shipments: any[] = [];
       let totalShippingFee = 0;
@@ -426,6 +430,10 @@ export class OrderService {
           };
         }
       }
+
+      // Vendors who opted into auto-confirmation skip the manual confirm step
+      // (tailored items are excluded — see the helper).
+      await this.applyAutoConfirmation(shipments, processedItems);
 
       const order = new this.orderModel({
         reference: orderReference,
@@ -2766,6 +2774,115 @@ export class OrderService {
   }
 
   /**
+   * Which of these vendors are at capacity right now.
+   *
+   * Capacity is WORK IN PROGRESS (`max_open_orders`), not arrivals per day: a
+   * workshop is saturated by how many garments are open on the bench, and an
+   * arrivals cap never measures that. A slot is held by a PAID order that is
+   * neither completed nor cancelled — so abandoned checkouts never consume
+   * capacity, and finishing an order frees a slot immediately.
+   *
+   * Returns the blocked vendors rather than throwing, so checkout PREVIEW can
+   * tell the customer before they pay and `createOrder` can still refuse as a
+   * backstop.
+   */
+  private async findVendorsAtCapacity(
+    items: any[],
+  ): Promise<{ businessId: string; businessName: string }[]> {
+    const businessIds = [
+      ...new Set(
+        (items ?? []).map((i) => i.business?.toString()).filter(Boolean),
+      ),
+    ];
+    if (!businessIds.length) return [];
+
+    const capped = await this.businessModel
+      .find({
+        _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        max_open_orders: { $gt: 0 },
+      })
+      .select('_id business_name max_open_orders')
+      .lean();
+    if (!capped.length) return [];
+
+    const atCapacity: { businessId: string; businessName: string }[] = [];
+    for (const biz of capped as any[]) {
+      const openOrders = await this.orderModel.countDocuments({
+        'items.business': biz._id,
+        payment_status: 'paid',
+        status: { $nin: [OrderStatus.COMPLETED, OrderStatus.CANCELLED] },
+      });
+      if (openOrders >= biz.max_open_orders) {
+        atCapacity.push({
+          businessId: biz._id.toString(),
+          businessName: biz.business_name ?? 'This vendor',
+        });
+      }
+    }
+    return atCapacity;
+  }
+
+  /**
+   * Backstop for the capacity rule. Checkout preview surfaces this first (see
+   * `unavailable_items`), so reaching here means the customer skipped or raced
+   * that signal — name the vendor so the shop can point at the right line.
+   */
+  private async assertWithinOrderCapacity(items: any[]) {
+    const blocked = await this.findVendorsAtCapacity(items);
+    if (!blocked.length) return;
+    const names = blocked.map((b) => b.businessName).join(', ');
+    throw new BadRequestException(
+      `${names} ${blocked.length > 1 ? 'are' : 'is'} fully booked right now and ` +
+        'cannot take new orders. Remove those items to continue, or try again later.',
+    );
+  }
+
+  /**
+   * Pre-confirms shipments for vendors who turned on auto-confirmation.
+   * Tailored (CUSTOMIZE) items are deliberately excluded: confirming is where
+   * a tailor accepts they can actually make the piece, which no toggle should
+   * answer for them. Stock goods — fabric, accessories, ready-to-wear — are a
+   * pick-and-pack, so the step is pure friction there.
+   */
+  private async applyAutoConfirmation(shipments: any[], items: any[]) {
+    if (!shipments?.length) return;
+    const businessIds = [
+      ...new Set(shipments.map((s) => s.business?.toString()).filter(Boolean)),
+    ];
+    if (!businessIds.length) return;
+
+    const optedIn = await this.businessModel
+      .find({
+        _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        order_confirmation: true,
+      })
+      .select('_id')
+      .lean();
+    if (!optedIn.length) return;
+
+    const autoIds = new Set((optedIn as any[]).map((b) => b._id.toString()));
+    const AUTO_TURNAROUND_DAYS = 3; // stock goods; same default as manual confirm
+
+    for (const shipment of shipments) {
+      const businessId = shipment.business?.toString();
+      if (!businessId || !autoIds.has(businessId)) continue;
+      const hasTailoring = (items ?? []).some(
+        (i) =>
+          i.business?.toString() === businessId &&
+          i.clothing_type === ClothingType.CUSTOMIZE,
+      );
+      if (hasTailoring) continue;
+
+      const now = new Date();
+      const deadline = new Date(now);
+      deadline.setDate(deadline.getDate() + AUTO_TURNAROUND_DAYS);
+      shipment.confirmed = true;
+      shipment.confirmed_at = now;
+      shipment.fulfillment_deadline = deadline;
+    }
+  }
+
+  /**
    * Throws unless the order's money actually arrived. payment_status is the
    * fast path; orders predating that field hydrate the schema's 'unpaid'
    * default, so they fall back to the ledger (a successful checkout debit)
@@ -4837,6 +4954,35 @@ export class OrderService {
       cart.items,
       productMap,
     );
+
+    // A vendor with a full bench can't take the order either. Surfacing it
+    // HERE — before payment — is the whole point: the customer sees which
+    // line is the problem while they can still act on it.
+    const cartLines = cart.items.map((line: any) => {
+      const product = productMap.get(String(line.product_id?._id ?? line.product_id));
+      return {
+        product,
+        business: (product as any)?.business,
+        product_id: String(line.product_id?._id ?? line.product_id),
+      };
+    });
+    const fullVendors = await this.findVendorsAtCapacity(cartLines);
+    if (fullVendors.length) {
+      const fullIds = new Set(fullVendors.map((v) => v.businessId));
+      for (const line of cartLines) {
+        const bizId = line.business ? String(line.business?._id ?? line.business) : null;
+        if (!bizId || !fullIds.has(bizId)) continue;
+        const vendor = fullVendors.find((v) => v.businessId === bizId);
+        unavailable_items.push({
+          product_id: line.product_id,
+          product_name:
+            (line.product as any)?.name ??
+            (line.product as any)?.clothing?.name ??
+            'This item',
+          reason: `${vendor?.businessName ?? 'This vendor'} is fully booked right now`,
+        });
+      }
+    }
 
     return {
       vendor_shipping: vendorShipping,

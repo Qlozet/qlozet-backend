@@ -111,8 +111,20 @@ export class Business extends Document {
   @Prop({ type: Boolean, default: true })
   order_tracking: boolean; // customer-facing order tracking
 
+  /**
+   * @deprecated Orders-per-day throttles arrivals but not workload — a cap of
+   * 3/day still lets 30 orders pile up on the bench over ten days. Superseded
+   * by max_open_orders; kept so legacy documents still read.
+   */
   @Prop({ type: Number, default: 0 })
-  daily_order_limit: number; // max orders accepted per day (0 = no limit)
+  daily_order_limit: number;
+
+  // How many orders this vendor can have IN FLIGHT at once (0 = no limit).
+  // Counts paid orders that are neither completed nor cancelled, which is what
+  // actually saturates a workshop — a tailor with a full bench is full
+  // regardless of when those orders arrived.
+  @Prop({ type: Number, default: 0 })
+  max_open_orders: number;
 
   @Prop({ type: Boolean, default: false })
   automatic_refunds: boolean; // auto-process refunds on returns
