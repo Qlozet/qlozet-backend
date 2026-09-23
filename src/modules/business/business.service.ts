@@ -40,6 +40,7 @@ import {
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
 import { sanitizeBusiness } from 'src/common/utils/sanitization';
+import { CAPACITY_OCCUPYING_STATUSES } from '../orders/schemas/orders.schema';
 import {
   Token,
   TokenDocument,
@@ -816,7 +817,44 @@ export class BusinessService {
       throw new NotFoundException('Business not found');
     }
 
-    return result[0];
+    // Storefronts show "fully booked" from this rather than letting the
+    // customer discover it at checkout. Cheap: one count on an indexed field.
+    const capacity = await this.getCapacity(businessId).catch(() => null);
+
+    return { ...result[0], at_capacity: capacity?.at_capacity ?? false };
+  }
+
+  /**
+   * A vendor's live capacity position. Reads the orders collection through the
+   * shared connection rather than injecting OrderModel, which would close a
+   * module cycle (orders already depends on business).
+   */
+  async getCapacity(businessId: string) {
+    if (!Types.ObjectId.isValid(businessId)) {
+      throw new NotFoundException('Business not found');
+    }
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('max_open_orders')
+      .lean();
+    if (!business) throw new NotFoundException('Business not found');
+
+    const limit = (business as any).max_open_orders ?? 0;
+    const openOrders = await this.connection
+      .collection('orders')
+      .countDocuments({
+        'items.business': new Types.ObjectId(businessId),
+        payment_status: 'paid',
+        status: { $in: CAPACITY_OCCUPYING_STATUSES },
+      });
+
+    return {
+      max_open_orders: limit,
+      open_orders: openOrders,
+      // 0 means the vendor set no cap, so they are never "full".
+      at_capacity: limit > 0 && openOrders >= limit,
+      remaining: limit > 0 ? Math.max(0, limit - openOrders) : null,
+    };
   }
 
   async findBusinessById(businessId: string) {
