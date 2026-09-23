@@ -256,6 +256,10 @@ export class OrderService {
         };
       });
 
+      // Vendors can cap how many orders they take in a day — refuse the
+      // checkout rather than let them overcommit and deliver late.
+      await this.assertWithinDailyOrderLimits(processedItems);
+
       // Build VendorShipment entries if shipping selections are provided
       const shipments: any[] = [];
       let totalShippingFee = 0;
@@ -426,6 +430,10 @@ export class OrderService {
           };
         }
       }
+
+      // Vendors who opted into auto-confirmation skip the manual confirm step
+      // (tailored items are excluded — see the helper).
+      await this.applyAutoConfirmation(shipments, processedItems);
 
       const order = new this.orderModel({
         reference: orderReference,
@@ -2763,6 +2771,92 @@ export class OrderService {
       message: 'Order cancelled and refunded successfully',
       data: { order_reference: order.reference, status: order.status },
     };
+  }
+
+  /**
+   * Vendor capacity guard. `business.daily_order_limit` (0 = unlimited) caps
+   * how many orders a vendor takes in a calendar day; only PAID, non-cancelled
+   * orders consume a slot, so abandoned checkouts never eat a vendor's day.
+   */
+  private async assertWithinDailyOrderLimits(items: any[]) {
+    const businessIds = [
+      ...new Set(
+        (items ?? []).map((i) => i.business?.toString()).filter(Boolean),
+      ),
+    ];
+    if (!businessIds.length) return;
+
+    const capped = await this.businessModel
+      .find({
+        _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        daily_order_limit: { $gt: 0 },
+      })
+      .select('_id business_name daily_order_limit')
+      .lean();
+    if (!capped.length) return;
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    for (const biz of capped as any[]) {
+      const takenToday = await this.orderModel.countDocuments({
+        'items.business': biz._id,
+        createdAt: { $gte: startOfDay },
+        payment_status: 'paid',
+        status: { $ne: OrderStatus.CANCELLED },
+      });
+      if (takenToday >= biz.daily_order_limit) {
+        throw new BadRequestException(
+          `${biz.business_name ?? 'This vendor'} has reached their order limit for today. ` +
+            'Please try again tomorrow, or order from another vendor.',
+        );
+      }
+    }
+  }
+
+  /**
+   * Pre-confirms shipments for vendors who turned on auto-confirmation.
+   * Tailored (CUSTOMIZE) items are deliberately excluded: confirming is where
+   * a tailor accepts they can actually make the piece, which no toggle should
+   * answer for them. Stock goods — fabric, accessories, ready-to-wear — are a
+   * pick-and-pack, so the step is pure friction there.
+   */
+  private async applyAutoConfirmation(shipments: any[], items: any[]) {
+    if (!shipments?.length) return;
+    const businessIds = [
+      ...new Set(shipments.map((s) => s.business?.toString()).filter(Boolean)),
+    ];
+    if (!businessIds.length) return;
+
+    const optedIn = await this.businessModel
+      .find({
+        _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
+        order_confirmation: true,
+      })
+      .select('_id')
+      .lean();
+    if (!optedIn.length) return;
+
+    const autoIds = new Set((optedIn as any[]).map((b) => b._id.toString()));
+    const AUTO_TURNAROUND_DAYS = 3; // stock goods; same default as manual confirm
+
+    for (const shipment of shipments) {
+      const businessId = shipment.business?.toString();
+      if (!businessId || !autoIds.has(businessId)) continue;
+      const hasTailoring = (items ?? []).some(
+        (i) =>
+          i.business?.toString() === businessId &&
+          i.clothing_type === ClothingType.CUSTOMIZE,
+      );
+      if (hasTailoring) continue;
+
+      const now = new Date();
+      const deadline = new Date(now);
+      deadline.setDate(deadline.getDate() + AUTO_TURNAROUND_DAYS);
+      shipment.confirmed = true;
+      shipment.confirmed_at = now;
+      shipment.fulfillment_deadline = deadline;
+    }
   }
 
   /**
