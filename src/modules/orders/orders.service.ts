@@ -256,9 +256,9 @@ export class OrderService {
         };
       });
 
-      // Vendors can cap how many orders they take in a day — refuse the
-      // checkout rather than let them overcommit and deliver late.
-      await this.assertWithinDailyOrderLimits(processedItems);
+      // Backstop only — checkout preview already told the customer which
+      // vendors are full, so this should rarely fire.
+      await this.assertWithinOrderCapacity(processedItems);
 
       // Build VendorShipment entries if shipping selections are provided
       const shipments: any[] = [];
@@ -2774,44 +2774,67 @@ export class OrderService {
   }
 
   /**
-   * Vendor capacity guard. `business.daily_order_limit` (0 = unlimited) caps
-   * how many orders a vendor takes in a calendar day; only PAID, non-cancelled
-   * orders consume a slot, so abandoned checkouts never eat a vendor's day.
+   * Which of these vendors are at capacity right now.
+   *
+   * Capacity is WORK IN PROGRESS (`max_open_orders`), not arrivals per day: a
+   * workshop is saturated by how many garments are open on the bench, and an
+   * arrivals cap never measures that. A slot is held by a PAID order that is
+   * neither completed nor cancelled — so abandoned checkouts never consume
+   * capacity, and finishing an order frees a slot immediately.
+   *
+   * Returns the blocked vendors rather than throwing, so checkout PREVIEW can
+   * tell the customer before they pay and `createOrder` can still refuse as a
+   * backstop.
    */
-  private async assertWithinDailyOrderLimits(items: any[]) {
+  private async findVendorsAtCapacity(
+    items: any[],
+  ): Promise<{ businessId: string; businessName: string }[]> {
     const businessIds = [
       ...new Set(
         (items ?? []).map((i) => i.business?.toString()).filter(Boolean),
       ),
     ];
-    if (!businessIds.length) return;
+    if (!businessIds.length) return [];
 
     const capped = await this.businessModel
       .find({
         _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) },
-        daily_order_limit: { $gt: 0 },
+        max_open_orders: { $gt: 0 },
       })
-      .select('_id business_name daily_order_limit')
+      .select('_id business_name max_open_orders')
       .lean();
-    if (!capped.length) return;
+    if (!capped.length) return [];
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
+    const atCapacity: { businessId: string; businessName: string }[] = [];
     for (const biz of capped as any[]) {
-      const takenToday = await this.orderModel.countDocuments({
+      const openOrders = await this.orderModel.countDocuments({
         'items.business': biz._id,
-        createdAt: { $gte: startOfDay },
         payment_status: 'paid',
-        status: { $ne: OrderStatus.CANCELLED },
+        status: { $nin: [OrderStatus.COMPLETED, OrderStatus.CANCELLED] },
       });
-      if (takenToday >= biz.daily_order_limit) {
-        throw new BadRequestException(
-          `${biz.business_name ?? 'This vendor'} has reached their order limit for today. ` +
-            'Please try again tomorrow, or order from another vendor.',
-        );
+      if (openOrders >= biz.max_open_orders) {
+        atCapacity.push({
+          businessId: biz._id.toString(),
+          businessName: biz.business_name ?? 'This vendor',
+        });
       }
     }
+    return atCapacity;
+  }
+
+  /**
+   * Backstop for the capacity rule. Checkout preview surfaces this first (see
+   * `unavailable_items`), so reaching here means the customer skipped or raced
+   * that signal — name the vendor so the shop can point at the right line.
+   */
+  private async assertWithinOrderCapacity(items: any[]) {
+    const blocked = await this.findVendorsAtCapacity(items);
+    if (!blocked.length) return;
+    const names = blocked.map((b) => b.businessName).join(', ');
+    throw new BadRequestException(
+      `${names} ${blocked.length > 1 ? 'are' : 'is'} fully booked right now and ` +
+        'cannot take new orders. Remove those items to continue, or try again later.',
+    );
   }
 
   /**
@@ -4931,6 +4954,35 @@ export class OrderService {
       cart.items,
       productMap,
     );
+
+    // A vendor with a full bench can't take the order either. Surfacing it
+    // HERE — before payment — is the whole point: the customer sees which
+    // line is the problem while they can still act on it.
+    const cartLines = cart.items.map((line: any) => {
+      const product = productMap.get(String(line.product_id?._id ?? line.product_id));
+      return {
+        product,
+        business: (product as any)?.business,
+        product_id: String(line.product_id?._id ?? line.product_id),
+      };
+    });
+    const fullVendors = await this.findVendorsAtCapacity(cartLines);
+    if (fullVendors.length) {
+      const fullIds = new Set(fullVendors.map((v) => v.businessId));
+      for (const line of cartLines) {
+        const bizId = line.business ? String(line.business?._id ?? line.business) : null;
+        if (!bizId || !fullIds.has(bizId)) continue;
+        const vendor = fullVendors.find((v) => v.businessId === bizId);
+        unavailable_items.push({
+          product_id: line.product_id,
+          product_name:
+            (line.product as any)?.name ??
+            (line.product as any)?.clothing?.name ??
+            'This item',
+          reason: `${vendor?.businessName ?? 'This vendor'} is fully booked right now`,
+        });
+      }
+    }
 
     return {
       vendor_shipping: vendorShipping,

@@ -5,8 +5,8 @@ import { ClothingType } from '../products/schemas/clothing.schema';
 import { MemoryMongo, stubLogger } from '../../test-utils/memory-mongo';
 
 /**
- * The two vendor order settings that actually do something: a daily order
- * cap (capacity, so vendors don't overcommit and deliver late) and
+ * The two vendor order settings that actually do something: an order-capacity
+ * cap (work in flight, so vendors don't overcommit and deliver late) and
  * auto-confirmation (skips the manual confirm step for stock goods only).
  * Every other control on that settings page was removed as decoration.
  */
@@ -50,8 +50,8 @@ describe('vendor order settings enforcement', () => {
                 if (filter.order_confirmation !== undefined) {
                   return b.order_confirmation === filter.order_confirmation;
                 }
-                if (filter.daily_order_limit?.$gt !== undefined) {
-                  return (b.daily_order_limit ?? 0) > filter.daily_order_limit.$gt;
+                if (filter.max_open_orders?.$gt !== undefined) {
+                  return (b.max_open_orders ?? 0) > filter.max_open_orders.$gt;
                 }
                 return true;
               }),
@@ -61,61 +61,81 @@ describe('vendor order settings enforcement', () => {
     });
   });
 
-  const paidOrderToday = (businessId: Types.ObjectId) =>
+  /** A paid order sitting on the vendor's bench (holds a capacity slot). */
+  const openOrder = (businessId: Types.ObjectId, status = 'in_review') =>
     orderModel.create({
       customer: customerId,
       items: [{ business: businessId, product: new Types.ObjectId() }],
       total: 20_000,
       subtotal: 20_000,
-      status: 'in_review',
+      status,
       payment_status: 'paid',
       reference: `ORD-${Math.random().toString(36).slice(2, 8)}`,
     });
 
-  describe('daily order limit', () => {
-    const items = [{ business: tailorId, clothing_type: ClothingType.NON_CUSTOMIZE }];
+  describe('order capacity (work in flight)', () => {
+    const items = [
+      { business: tailorId, clothing_type: ClothingType.NON_CUSTOMIZE },
+    ];
 
-    it('lets orders through while the vendor is under their cap', async () => {
+    it('is clear while the vendor is under their cap', async () => {
       businesses = [
-        { _id: tailorId, business_name: 'Kemi Couture', daily_order_limit: 2 },
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 2 },
       ];
-      await paidOrderToday(tailorId);
+      await openOrder(tailorId);
 
-      await expect(
-        service.assertWithinDailyOrderLimits(items),
-      ).resolves.toBeUndefined();
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
     });
 
-    it('refuses the checkout once the cap is reached', async () => {
+    it('reports the vendor once their bench is full', async () => {
       businesses = [
-        { _id: tailorId, business_name: 'Kemi Couture', daily_order_limit: 2 },
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 2 },
       ];
-      await paidOrderToday(tailorId);
-      await paidOrderToday(tailorId);
+      await openOrder(tailorId);
+      await openOrder(tailorId);
 
-      await expect(service.assertWithinDailyOrderLimits(items)).rejects.toThrow(
-        /Kemi Couture has reached their order limit for today/i,
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([
+        { businessId: tailorId.toString(), businessName: 'Kemi Couture' },
+      ]);
+      // createOrder's backstop turns that into a refusal naming the vendor.
+      await expect(service.assertWithinOrderCapacity(items)).rejects.toThrow(
+        /Kemi Couture is fully booked/i,
       );
     });
 
     it('0 means unlimited', async () => {
       businesses = [
-        { _id: tailorId, business_name: 'Kemi Couture', daily_order_limit: 0 },
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 0 },
       ];
-      await paidOrderToday(tailorId);
-      await paidOrderToday(tailorId);
-      await paidOrderToday(tailorId);
+      await openOrder(tailorId);
+      await openOrder(tailorId);
+      await openOrder(tailorId);
 
-      await expect(
-        service.assertWithinDailyOrderLimits(items),
-      ).resolves.toBeUndefined();
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
     });
 
-    it('unpaid (abandoned) and cancelled orders never consume capacity', async () => {
+    it('counts work in flight, not arrivals — an old open order still holds a slot', async () => {
       businesses = [
-        { _id: tailorId, business_name: 'Kemi Couture', daily_order_limit: 1 },
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
       ];
-      // An abandoned checkout…
+      const stale = await openOrder(tailorId, 'processing');
+      // Backdate it well past "today": an arrivals-per-day cap would free this
+      // slot every midnight while the garment is still on the bench.
+      await orderModel.updateOne(
+        { _id: stale._id },
+        { createdAt: new Date(Date.now() - 30 * 86400000) },
+        { timestamps: false },
+      );
+
+      await expect(service.findVendorsAtCapacity(items)).resolves.toHaveLength(1);
+    });
+
+    it('finishing or cancelling an order frees the slot; unpaid never took one', async () => {
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+      ];
+      await openOrder(tailorId, 'completed');
+      await openOrder(tailorId, 'cancelled');
       await orderModel.create({
         customer: customerId,
         items: [{ business: tailorId, product: new Types.ObjectId() }],
@@ -125,20 +145,25 @@ describe('vendor order settings enforcement', () => {
         payment_status: 'unpaid',
         reference: 'ORD-ABANDONED',
       });
-      // …and a cancelled one.
-      await orderModel.create({
-        customer: customerId,
-        items: [{ business: tailorId, product: new Types.ObjectId() }],
-        total: 20_000,
-        subtotal: 20_000,
-        status: 'cancelled',
-        payment_status: 'paid',
-        reference: 'ORD-CANCELLED',
-      });
 
-      await expect(
-        service.assertWithinDailyOrderLimits(items),
-      ).resolves.toBeUndefined();
+      await expect(service.findVendorsAtCapacity(items)).resolves.toEqual([]);
+    });
+
+    it('only names the vendors that are actually full on a multi-vendor cart', async () => {
+      businesses = [
+        { _id: tailorId, business_name: 'Kemi Couture', max_open_orders: 1 },
+        { _id: fabricVendorId, business_name: 'Lagos Fabrics', max_open_orders: 5 },
+      ];
+      await openOrder(tailorId);
+      await openOrder(fabricVendorId);
+
+      const blocked = await service.findVendorsAtCapacity([
+        { business: tailorId },
+        { business: fabricVendorId },
+      ]);
+      expect(blocked).toEqual([
+        { businessId: tailorId.toString(), businessName: 'Kemi Couture' },
+      ]);
     });
   });
 
