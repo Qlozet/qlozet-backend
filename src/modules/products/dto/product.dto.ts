@@ -16,6 +16,7 @@ import { ClothingDto } from './clothing.dto';
 import { AccessoryDto } from './accessory.dto';
 import { FabricDto } from './fabric.dto';
 import { VariantDto } from './variant.dto';
+import { ProductImageDto } from './product-image.dto';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 import { PaginatedDto } from 'src/common/dto/pagination.dto';
 
@@ -31,6 +32,17 @@ export class ColorDto {
   @IsString()
   @IsNotEmpty()
   hex: string;
+
+  @ApiPropertyOptional({
+    type: [ProductImageDto],
+    description:
+      'Photos of the garment in this colour, each with its own hotspots.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
 
   @ApiPropertyOptional({
     type: [VariantDto],
