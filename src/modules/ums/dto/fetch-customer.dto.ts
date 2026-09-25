@@ -46,6 +46,17 @@ export class FetchCustomersDto {
   status?: string;
 
   @ApiPropertyOptional({
+    description:
+      "Narrow to the customers who have actually bought from one vendor — " +
+      "backs the console's vendor page, whose Total customers link could " +
+      'only open the platform-wide list before.',
+    example: '677f5c19c918d2e4a8c55123',
+  })
+  @IsOptional()
+  @IsString()
+  businessId?: string;
+
+  @ApiPropertyOptional({
     description: 'Filter by start date (ISO string)',
     example: '2025-01-01T00:00:00Z',
   })

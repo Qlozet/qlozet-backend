@@ -624,7 +624,12 @@ export class PlatformController {
   }
 
   @Get('customer')
-  @ApiOperation({ summary: 'Fetch customers with filters' })
+  @ApiOperation({
+    summary: 'Fetch customers with filters',
+    description:
+      "Pass businessId to narrow to one vendor's buyers — the console's " +
+      'vendor page links here.',
+  })
   async fetchCustomers(@Query() filters: FetchCustomersDto) {
     return this.userService.fetchCustomers(filters.page, filters.size, filters);
   }
