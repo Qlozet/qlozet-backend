@@ -14,6 +14,21 @@ import { Product, ProductDocument } from '../../products/schemas/product.schema'
 import { User, UserDocument } from '../../ums/schemas/user.schema';
 import { classifyBodyType } from 'src/common/utils/body-type-classifier';
 
+/**
+ * A product's description lives on its kind sub-document, never at the top
+ * level — see the Product schema. Reading `product.description` returns
+ * undefined for every product.
+ */
+function resolveDescription(product: any): string | undefined {
+  if (!product) return undefined;
+  return (
+    product.clothing?.description ||
+    product.fabric?.description ||
+    product.accessory?.description ||
+    undefined
+  );
+}
+
 @Injectable()
 export class AskService {
   private openai: OpenAI;
@@ -213,7 +228,7 @@ export class AskService {
       price: item.product?.base_price || item.price,
       vendor: item.vendor,
       type: item.type,
-      description: item.product?.description || item.description,
+      description: resolveDescription(item.product) || item.description,
       tags: item.tags,
     }));
 

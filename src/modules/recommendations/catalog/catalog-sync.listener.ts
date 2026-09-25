@@ -68,7 +68,17 @@ export class CatalogSyncListener {
         itemId: product._id.toString(),
         type: itemType,
         name: name || 'Product Item',
-        description: product.description || '',
+        // Product has NO top-level `description` — it lives on the kind
+        // sub-document, exactly like `name` above. Reading product.description
+        // silently yielded '' for EVERY item, so catalog descriptions were
+        // always empty: embeddings were built from name + tags alone, and the
+        // assistant had nothing to read. That's why asking for "a dress with
+        // pockets" missed a dress whose description says pockets.
+        description:
+          product.clothing?.description ||
+          product.fabric?.description ||
+          product.accessory?.description ||
+          '',
         price: product.base_price || 0,
         currency: 'NGN', // Defaulting to NGN for Nigerian platform
         vendor: product.business ? product.business.toString() : 'Unknown',
