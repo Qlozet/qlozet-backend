@@ -830,12 +830,29 @@ export class PlatformController {
   @ApiOperation({ summary: 'Get paginated tickets with filters' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'size', required: false, example: 10 })
+  @ApiQuery({
+    name: 'business_id',
+    required: false,
+    description:
+      "Narrow to one vendor's tickets. findAll has always supported this " +
+      'filter; the route simply never passed it, so the console had to pull ' +
+      'a wide page and match on `business` client-side — which silently ' +
+      'missed any vendor whose tickets fell outside that page.',
+  })
   async findAll(
     @Query() filters: TicketFilterDto,
     @Query('page') page: number = 1,
     @Query('size') size: number = 10,
+    @Query('business_id') businessId?: string,
   ) {
-    return this.ticketService.findAll(filters, page, size);
+    return this.ticketService.findAll(
+      filters,
+      page,
+      size,
+      businessId && Types.ObjectId.isValid(businessId)
+        ? new Types.ObjectId(businessId)
+        : undefined,
+    );
   }
 
   @Roles(UserType.PLATFORM)
