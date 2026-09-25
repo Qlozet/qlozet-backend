@@ -22,19 +22,37 @@ export class CatalogController {
 
     // ─── Admin: Backfill ─────────────────────────────────
 
-    @Public()
+    // Both were left @Public() for convenience. They rebuild the catalog and
+    // spend OpenAI credit per item, so anyone who found the path could run up
+    // the bill — admin-only, like the diagnostics below.
     @Post('backfill')
-    @ApiOperation({ summary: 'Backfill catalog from existing products (TEMPORARILY PUBLIC)' })
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth('access-token')
+    @ApiOperation({ summary: 'Backfill catalog from existing products (admin only)' })
     async backfill() {
         return this.backfillService.backfillAll();
     }
 
-    @Public()
     @Post('backfill-embeddings')
-    @ApiOperation({ summary: 'Generate embeddings for catalog items (TEMPORARILY PUBLIC)' })
-    async backfillEmbeddings(@Query('limit') limit?: string) {
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserType.ADMIN)
+    @ApiBearerAuth('access-token')
+    @ApiOperation({
+        summary: 'Generate embeddings for catalog items (admin only)',
+        description:
+            'Embeds items that have no vector. Pass includeStale=true to also ' +
+            'refresh rows embedded before change-detection existed. Use limit ' +
+            'to batch — each item is an OpenAI call, and one unbounded run on a ' +
+            'large catalogue will outlive the HTTP request.',
+    })
+    async backfillEmbeddings(
+        @Query('limit') limit?: string,
+        @Query('includeStale') includeStale?: string,
+    ) {
         return this.embeddingsService.backfillItemEmbeddings({
             limit: limit ? Number(limit) : undefined,
+            includeStale: includeStale === 'true',
         });
     }
 

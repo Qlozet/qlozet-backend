@@ -204,11 +204,17 @@ export class AskService {
     const hydratedProducts = await this.hydrateProducts(productSummaries);
 
     // Build summaries from hydrated (active-only) products for GPT context
+    // The model used to receive only name/price/vendor/type, so it described
+    // garments it had never read — inferring "flowing maxi" from a product
+    // name alone. Pass what the vendor actually wrote. Prefer the live
+    // product's description; fall back to the catalog's synced copy.
     const activeProductSummaries = hydratedProducts.map((item: any) => ({
       name: item.product?.name || item.name,
       price: item.product?.base_price || item.price,
       vendor: item.vendor,
       type: item.type,
+      description: item.product?.description || item.description,
+      tags: item.tags,
     }));
 
     // ─── Step 9: Generate Conversational Reply ───────────────────
@@ -276,7 +282,7 @@ export class AskService {
       })
       .select(
         'name kind base_price business clothing fabric accessory status ' +
-        'average_rating total_ratings slug',
+        'average_rating total_ratings slug description',
       )
       .lean();
 
@@ -312,13 +318,27 @@ export class AskService {
       return this.buildFallbackReply(products, intent);
     }
 
+    // Descriptions are vendor-authored and can run long; every result's text
+    // lands in the prompt on every ask, so cap each one.
+    const DESCRIPTION_CHARS = 220;
     const productContext =
       products.length > 0
         ? products
-            .map(
-              (p, i) =>
+            .map((p, i) => {
+              const lines = [
                 `${i + 1}. "${p.name}" — ₦${p.price?.toLocaleString()} (${p.vendor}, ${p.type})`,
-            )
+              ];
+              const desc = String(p.description ?? '').replace(/\s+/g, ' ').trim();
+              if (desc) {
+                lines.push(
+                  `   ${desc.slice(0, DESCRIPTION_CHARS)}${desc.length > DESCRIPTION_CHARS ? '…' : ''}`,
+                );
+              }
+              if (Array.isArray(p.tags) && p.tags.length) {
+                lines.push(`   Tags: ${p.tags.slice(0, 8).join(', ')}`);
+              }
+              return lines.join('\n');
+            })
             .join('\n')
         : 'No products matched the query.';
 
@@ -336,6 +356,9 @@ STRICT RULES:
 - If asked about non-fashion topics, politely redirect: "I'm here to help with fashion! What are you looking for today?"
 - Keep replies under 150 words
 - Reference actual product names from the provided context only
+- Base any claim about a garment (cut, fabric, length, occasion) on its
+  description below. If the description doesn't say, don't invent it —
+  describe what you do know instead of guessing
 - If no products match, say so honestly and suggest broadening the search
 - Be warm, helpful, and conversational — like a knowledgeable fashion friend
 - Use Nigerian Naira (₦) for prices

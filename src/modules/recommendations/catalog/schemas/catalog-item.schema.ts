@@ -38,6 +38,15 @@ export class EmbeddingMetadata {
 
     @Prop()
     embedded_at: Date;
+
+    /**
+     * Hash of the canonical text this vector was built from. Lets a re-sync
+     * tell "nothing changed, skip" apart from "the vendor rewrote the
+     * description, re-embed". Absent on items embedded before this existed,
+     * which simply means they re-embed once on their next sync.
+     */
+    @Prop()
+    text_hash?: string;
 }
 
 @Schema({ timestamps: true, collection: 'catalog_items' })
