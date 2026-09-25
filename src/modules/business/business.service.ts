@@ -867,7 +867,9 @@ export class BusinessService {
           let: { vendorId: '$created_by.id' },
           pipeline: [
             { $match: { $expr: { $eq: ['$_id', '$$vendorId'] } } },
-            { $project: { _id: 1, full_name: 1, email: 1 } }, // only name and email
+            // phone_number too: the console shows the owner's phone as
+            // "Admin phone number", which had nothing to read without it.
+            { $project: { _id: 1, full_name: 1, email: 1, phone_number: 1 } },
           ],
           as: 'vendor',
         },
@@ -915,11 +917,68 @@ export class BusinessService {
       },
 
       // 4️⃣ Calculated fields
+      // Warehouses — the console shows a count beside its "View warehouses"
+      // link, which previously had no source at all.
+      {
+        $lookup: {
+          from: 'warehouses',
+          let: { businessId: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$business', '$$businessId'] } } },
+            { $count: 'count' },
+          ],
+          as: 'warehouseCount',
+        },
+      },
+
       {
         $addFields: {
           total_products: { $size: '$products' },
           total_orders: { $size: '$orders' },
           total_revenue: { $sum: '$orders.total' },
+          total_warehouses: {
+            $ifNull: [{ $arrayElemAt: ['$warehouseCount.count', 0] }, 0],
+          },
+          // Tailored throughput the vendor has actually achieved: paid,
+          // non-cancelled bespoke/custom orders over the last 30 days,
+          // averaged per day. Rounded to one decimal — most vendors sit
+          // below one a day and an integer would read as zero.
+          custom_orders_per_day: {
+            $let: {
+              vars: {
+                recentCustom: {
+                  $size: {
+                    $filter: {
+                      input: '$orders',
+                      as: 'o',
+                      cond: {
+                        $and: [
+                          { $eq: ['$$o.type', 'bespoke'] },
+                          { $eq: ['$$o.payment_status', 'paid'] },
+                          { $ne: ['$$o.status', 'cancelled'] },
+                          {
+                            $gte: [
+                              '$$o.createdAt',
+                              {
+                                $dateSubtract: {
+                                  startDate: '$$NOW',
+                                  unit: 'day',
+                                  amount: 30,
+                                },
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              in: {
+                $round: [{ $divide: ['$$recentCustom', 30] }, 1],
+              },
+            },
+          },
         },
       },
 
@@ -928,6 +987,7 @@ export class BusinessService {
         $project: {
           products: 0,
           orders: 0,
+          warehouseCount: 0,
         },
       },
     ]);
