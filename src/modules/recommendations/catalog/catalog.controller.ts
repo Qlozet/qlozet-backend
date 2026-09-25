@@ -1,10 +1,14 @@
 import { Controller, Get, Post, Body, Param, UseGuards, Query } from '@nestjs/common';
-import { Public } from '../../../common/decorators/public.decorator';
 import { CatalogService } from './catalog.service';
 import { CatalogBackfillService } from './catalog-backfill.service';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { VectorSearchService } from '../retrieval/vector-search.service';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import {
+    ApiTags,
+    ApiOperation,
+    ApiBearerAuth,
+    ApiQuery,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -45,6 +49,23 @@ export class CatalogController {
             'refresh rows embedded before change-detection existed. Use limit ' +
             'to batch — each item is an OpenAI call, and one unbounded run on a ' +
             'large catalogue will outlive the HTTP request.',
+    })
+    // Without these, Swagger infers both params as required and its own form
+    // validation blocks the call before it ever reaches the server.
+    @ApiQuery({
+        name: 'limit',
+        required: false,
+        type: Number,
+        example: 200,
+        description: 'Max items this run. Omit for no limit.',
+    })
+    @ApiQuery({
+        name: 'includeStale',
+        required: false,
+        type: Boolean,
+        example: true,
+        description:
+            'Also refresh items embedded before change-detection existed.',
     })
     async backfillEmbeddings(
         @Query('limit') limit?: string,
