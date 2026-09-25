@@ -81,9 +81,22 @@ export class UserService {
       startDate?: string;
       endDate?: string;
       status?: string;
+      businessId?: string;
     },
   ) {
     const query: any = { type: UserType.CUSTOMER };
+
+    // "This vendor's customers" = whoever has actually bought from them, which
+    // only the orders collection knows. Paid, non-cancelled orders only: an
+    // abandoned checkout never made someone a customer.
+    if (filters?.businessId && Types.ObjectId.isValid(filters.businessId)) {
+      const buyerIds = await this.orderModel.distinct('customer', {
+        'items.business': new Types.ObjectId(filters.businessId),
+        payment_status: 'paid',
+        status: { $ne: 'cancelled' },
+      });
+      query._id = { $in: buyerIds };
+    }
 
     if (filters?.search) {
       // The User schema has `full_name`, `username` and `phone_number`. This
