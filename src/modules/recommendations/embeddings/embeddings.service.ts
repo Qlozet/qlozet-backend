@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
@@ -73,6 +74,11 @@ export class EmbeddingsService {
      * Embed a single catalog item. Used by CatalogSyncListener after product sync.
      * Skips if item already has an embedding.
      */
+    /** Fingerprint of the text a vector was built from. */
+    private hashCanonicalText(text: string): string {
+        return createHash('sha256').update(text).digest('hex');
+    }
+
     async embedSingleItem(itemId: string): Promise<boolean> {
         const item = await this.catalogService.findById(itemId);
         if (!item) {
@@ -80,12 +86,22 @@ export class EmbeddingsService {
             return false;
         }
 
-        if (item.embeddings?.e_style?.length) {
-            this.logger.debug(`Item ${itemId} already has embedding, skipping`);
+        const canonicalText = this.buildCanonicalItemText(item);
+        const textHash = this.hashCanonicalText(canonicalText);
+
+        // Skip only when the vector was built from THIS text. Previously any
+        // existing vector meant skip, so an edited description never reached
+        // the recommender — the item kept scoring against its original copy
+        // forever. Items predating text_hash re-embed once, then settle.
+        if (
+            item.embeddings?.e_style?.length &&
+            item.embeddingMetadata?.text_hash === textHash &&
+            item.embeddingMetadata?.version === this.embeddingVersion
+        ) {
+            this.logger.debug(`Item ${itemId} embedding is current, skipping`);
             return false;
         }
 
-        const canonicalText = this.buildCanonicalItemText(item);
         const vector = await this.generateEmbedding(canonicalText);
 
         await this.catalogService.update(itemId, {
@@ -97,6 +113,7 @@ export class EmbeddingsService {
                 model: this.embeddingModel,
                 dim: this.embeddingDim,
                 version: this.embeddingVersion,
+                text_hash: textHash,
                 embedded_at: new Date(),
             },
         });
@@ -110,15 +127,22 @@ export class EmbeddingsService {
      * Uses targeted query instead of findAll() to avoid loading entire catalog.
      * Includes rate limiting (50ms between calls) for OpenAI API.
      */
-    async backfillItemEmbeddings(options: { kind?: string; limit?: number } = {}) {
+    async backfillItemEmbeddings(
+        options: { kind?: string; limit?: number; includeStale?: boolean } = {},
+    ) {
         this.logger.log('Starting embedding backfill...');
 
-        // Build query to only fetch items without embeddings
+        // Items with no vector at all. `includeStale` widens this to rows
+        // embedded before text_hash existed, so a one-off run can refresh
+        // everything written while edits were being ignored.
         const filter: Record<string, any> = {
             $or: [
                 { 'embeddings.e_style': { $exists: false } },
                 { 'embeddings.e_style': { $size: 0 } },
                 { 'embeddings.e_style': null },
+                ...(options.includeStale
+                    ? [{ 'embeddingMetadata.text_hash': { $exists: false } }]
+                    : []),
             ],
         };
         if (options.kind) filter.type = options.kind;
@@ -141,6 +165,7 @@ export class EmbeddingsService {
                         model: this.embeddingModel,
                         dim: this.embeddingDim,
                         version: this.embeddingVersion,
+                        text_hash: this.hashCanonicalText(canonicalText),
                         embedded_at: new Date(),
                     },
                 });
