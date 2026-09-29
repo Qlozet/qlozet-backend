@@ -286,6 +286,103 @@ export class ProductService {
   }
 
   /**
+   * Every non-blank SKU in a product payload, with where it came from.
+   *
+   * SKUs live on variants nested two levels deep (color_variants → variants)
+   * and, for accessories, on the accessory's own variants — so there is no
+   * single Mongo path to index. They are collected here instead.
+   *
+   * Blanks are skipped deliberately: `sku` is optional and the vendor console
+   * defaults it to '', so most variants carry an empty string. Treating those
+   * as values would make the second blank variant a "duplicate" and render
+   * the product unsaveable.
+   */
+  private collectSkus(dto: any): { sku: string; where: string }[] {
+    const found: { sku: string; where: string }[] = [];
+
+    const push = (raw: unknown, where: string) => {
+      const sku = typeof raw === 'string' ? raw.trim() : '';
+      if (sku) found.push({ sku, where });
+    };
+
+    for (const colour of dto?.clothing?.color_variants ?? []) {
+      for (const variant of colour?.variants ?? []) {
+        push(variant?.sku, `${colour?.name ?? 'colour'} / ${variant?.size ?? 'size'}`);
+      }
+    }
+    for (const variant of dto?.accessory?.variants ?? []) {
+      push(variant?.sku, `${variant?.size ?? 'variant'}`);
+    }
+    for (const variant of dto?.fabric?.variants ?? []) {
+      push(variant?.sku, `${variant?.size ?? 'variant'}`);
+    }
+
+    return found;
+  }
+
+  /**
+   * SKUs identify a vendor's own stock, so they must be unique WITHIN that
+   * vendor's catalogue. They are deliberately NOT unique platform-wide: a SKU
+   * is the vendor's internal warehouse code, and vendors arrive with existing
+   * schemes full of codes like "SHIRT-001". Enforcing global uniqueness would
+   * tell a new vendor their long-standing code is taken by a stranger.
+   */
+  private async assertSkusAreUnique(
+    dto: any,
+    business: Types.ObjectId,
+    productId?: string,
+  ) {
+    const entries = this.collectSkus(dto);
+    if (!entries.length) return;
+
+    // Within this payload first — cheap, and it catches a generator that
+    // produced the same code twice.
+    const seen = new Map<string, string>();
+    for (const { sku, where } of entries) {
+      const key = sku.toUpperCase();
+      const first = seen.get(key);
+      if (first) {
+        throw new BadRequestException(
+          `SKU "${sku}" is used twice in this product (${first} and ${where}). ` +
+            'Each variant needs its own code.',
+        );
+      }
+      seen.set(key, where);
+    }
+
+    // Then against everything else this vendor sells. Case-insensitive and
+    // exact — anchored so a SKU can't be matched as a substring of another.
+    const patterns = [...seen.keys()].map(
+      (key) => new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    );
+
+    const clash = await this.productModel
+      .findOne({
+        business,
+        ...(productId ? { _id: { $ne: productId } } : {}),
+        $or: [
+          { 'clothing.color_variants.variants.sku': { $in: patterns } },
+          { 'accessory.variants.sku': { $in: patterns } },
+          { 'fabric.variants.sku': { $in: patterns } },
+        ],
+      })
+      .select('clothing.name accessory.name fabric.name')
+      .lean();
+
+    if (clash) {
+      const name =
+        (clash as any)?.clothing?.name ??
+        (clash as any)?.accessory?.name ??
+        (clash as any)?.fabric?.name ??
+        'another product';
+      throw new BadRequestException(
+        `One of these SKUs is already used on "${name}". ` +
+          'A SKU must identify a single item in your catalogue.',
+      );
+    }
+  }
+
+  /**
    * Create a product and compute its price dynamically based on type
    */
   async upsert(
@@ -309,6 +406,10 @@ export class ProductService {
            totalPrice = 0; 
        }
     }
+    // Reject duplicate SKUs before anything is written, so a clash can never
+    // leave a half-saved product behind.
+    await this.assertSkusAreUnique(dto, business, dto.product_id);
+
     if (dto.product_id) {
       const existing = await this.productModel.findById(dto.product_id);
 
