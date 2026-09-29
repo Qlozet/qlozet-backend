@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
 import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryService } from './cloudinary.service';
 import { UploadController } from './cloudinary.controller';
 import { AuthModule } from '../auth/auth.module';
+import {
+  PlatformSettings,
+  PlatformSettingsSchema,
+} from '../platform/schema/platformSettings.schema';
 
 @Module({
   providers: [
@@ -22,6 +27,12 @@ import { AuthModule } from '../auth/auth.module';
   ],
   exports: [CloudinaryService],
   controllers: [UploadController],
-  imports: [AuthModule],
+  imports: [
+    AuthModule,
+    // Image limits are admin-tunable, so the upload routes read settings.
+    MongooseModule.forFeature([
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+    ]),
+  ],
 })
 export class CloudinaryModule {}

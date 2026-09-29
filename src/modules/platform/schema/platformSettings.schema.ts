@@ -112,6 +112,19 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 10 })
   reservation_fee_percent: number;
 
+  // ── Product image rules (enforced on upload) ──
+  // Minimum short edge for a PRODUCT photo. Rejecting an upload blocks a
+  // vendor mid-flow, so this is admin-tunable: it can be relaxed instantly if
+  // it turns out to be catching legitimate photos, and tightened as upload
+  // quality improves, without a deploy. 0 disables the check.
+  @Prop({ type: Number, default: 800 })
+  product_image_min_short_edge: number;
+
+  // Friendly maximum upload size in MB. A hard ceiling above this still
+  // applies in multer to bound memory.
+  @Prop({ type: Number, default: 10 })
+  product_image_max_mb: number;
+
   // Availability thresholds. A variant at/under `low_stock_threshold` units (or a
   // fabric with fewer than `low_fabric_yards` yards left) is flagged "low stock".
   @Prop({ type: Number, default: 5 })

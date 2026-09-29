@@ -11,7 +11,13 @@ import {
   FileFieldsInterceptor,
   FileInterceptor,
 } from '@nestjs/platform-express';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
 import { MulterFile } from '../../common/types/upload';
 import {
   ApiBearerAuth,
@@ -22,6 +28,11 @@ import {
 } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
+import {
+  assertValidImage,
+  imageUploadOptions,
+  IMAGE_UPLOAD,
+} from '../../common/validation/image-upload';
 
 @ApiTags('Uploads')
 @ApiBearerAuth('access-token')
@@ -37,14 +48,49 @@ import { Throttle } from '@nestjs/throttler';
 })
 @Controller('uploads')
 export class UploadController {
-  constructor(private readonly cloudinaryService: CloudinaryService) {}
+  constructor(
+    private readonly cloudinaryService: CloudinaryService,
+    @InjectModel(PlatformSettings.name)
+    private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+  ) {}
+
+  /**
+   * Admin-tunable image limits. Falls back to the code constants when the
+   * settings document is missing or unreadable — a settings problem must never
+   * stop a vendor uploading.
+   */
+  private async imageLimits(): Promise<{
+    maxBytes: number;
+    minShortEdge: number;
+  }> {
+    const settings: any = await this.platformSettingsModel
+      .findOne()
+      .lean()
+      .catch(() => null);
+
+    const maxMb = Number(settings?.product_image_max_mb);
+    const minEdge = Number(settings?.product_image_min_short_edge);
+
+    return {
+      maxBytes:
+        Number.isFinite(maxMb) && maxMb > 0
+          ? maxMb * 1024 * 1024
+          : IMAGE_UPLOAD.MAX_BYTES,
+      // 0 is a deliberate "disable the check", so only fall back when the
+      // value is absent or nonsense — not when it is a legitimate zero.
+      minShortEdge:
+        Number.isFinite(minEdge) && minEdge >= 0
+          ? minEdge
+          : IMAGE_UPLOAD.MIN_PRODUCT_SHORT_EDGE,
+    };
+  }
 
   /**
    * 👤 Upload profile image
    */
   @Public()
   @Post('profile')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Upload a profile image',
@@ -66,6 +112,9 @@ export class UploadController {
   })
   async uploadProfileImage(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file uploaded');
+    const { maxBytes } = await this.imageLimits();
+    // No minimum dimension — a logo or avatar is legitimately small.
+    assertValidImage(file, { label: 'profile image', maxBytes });
 
     const result = await this.cloudinaryService.uploadFile(file, 'profiles');
     return {
@@ -81,7 +130,7 @@ export class UploadController {
    * 🛍️ Upload product image
    */
   @Post('product')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Upload a product image',
@@ -103,6 +152,9 @@ export class UploadController {
   })
   async uploadProductImage(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file uploaded');
+    const { maxBytes, minShortEdge } = await this.imageLimits();
+    // Product photos carry the storefront, so these get the resolution floor.
+    assertValidImage(file, { label: 'product photo', maxBytes, minShortEdge });
 
     const result = await this.cloudinaryService.uploadFile(file, 'products');
     return {
@@ -116,9 +168,10 @@ export class UploadController {
 
   @Post('outfits')
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'files', maxCount: 3 }, // adjust maxCount if needed
-    ]),
+    FileFieldsInterceptor(
+      [{ name: 'files', maxCount: 3 }],
+      imageUploadOptions,
+    ),
   )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -166,6 +219,15 @@ export class UploadController {
     const uploadedFiles = files.files || [];
     if (!uploadedFiles.length)
       throw new BadRequestException('No files uploaded');
+
+    // Reference shots for AI generation — a phone snap is fine, so these are
+    // checked for type and size but not resolution. Validate all of them
+    // before uploading any, so a bad third file doesn't leave two orphans in
+    // Cloudinary.
+    const { maxBytes: refMaxBytes } = await this.imageLimits();
+    uploadedFiles.forEach((file) =>
+      assertValidImage(file, { label: 'reference image', maxBytes: refMaxBytes }),
+    );
 
     const results = await Promise.all(
       uploadedFiles.map((file) =>

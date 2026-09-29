@@ -206,6 +206,27 @@ export class UpdatePlatformSettingsDto {
   @Max(100)
   late_penalty_max_percent?: number;
 
+  // ── Product image rules ──
+  @ApiPropertyOptional({
+    description:
+      'Minimum short edge (px) for an uploaded product photo. 0 disables the ' +
+      'check. Applies to product images only, not logos or AI references.',
+    example: 800,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  product_image_min_short_edge?: number;
+
+  @ApiPropertyOptional({
+    description: 'Maximum size (MB) for an uploaded image.',
+    example: 10,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  product_image_max_mb?: number;
+
   // ── Inventory thresholds ──
   @ApiPropertyOptional({
     description: 'Units at/under which a variant is flagged "low stock"',
