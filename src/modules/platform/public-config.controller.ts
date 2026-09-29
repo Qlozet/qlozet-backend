@@ -28,6 +28,11 @@ export class PublicConfigController {
         delivery_transit_min_days: s?.delivery_transit_min_days ?? 2,
         delivery_transit_max_days: s?.delivery_transit_max_days ?? 5,
         max_quote_vendors_per_design: s?.max_quote_vendors_per_design ?? 5,
+        // Image rules, so the vendor console can reject a bad photo at pick
+        // time using the SAME numbers the upload endpoint enforces — rather
+        // than hardcoding a copy that drifts when an admin retunes them.
+        product_image_min_short_edge: s?.product_image_min_short_edge ?? 800,
+        product_image_max_mb: s?.product_image_max_mb ?? 10,
       },
     };
   }
