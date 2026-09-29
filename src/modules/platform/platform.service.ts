@@ -41,6 +41,10 @@ export class PlatformService {
       payment_handling_fee_flat: 0,
       payment_handling_fee_percent: 0,
       tax_percent: 0.75,
+      // Must match the @Prop defaults — several other fields diverge between
+      // seed and schema (see docs/platform-settings.md §6.2); don't add to it.
+      product_image_min_short_edge: 800,
+      product_image_max_mb: 10,
       token_price: {
         usd: { currency: 'USD', amount: 0.01 },
         ngn: { currency: 'NGN', amount: 0, last_updated: new Date() },
