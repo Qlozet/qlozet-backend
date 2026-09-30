@@ -15,6 +15,7 @@
     "migrate:normalize-refs": "ts-node scripts/normalize-objectid-refs.ts",
     "backfill:order-payment": "ts-node scripts/backfill-order-payment-status.ts",
     "reset:stuck-shipments": "ts-node scripts/reset-stuck-shipments.ts",
+    "migrate:accessory-variant-size": "ts-node scripts/migrate-accessory-variant-size.ts",
     "report:duplicate-skus": "ts-node scripts/report-duplicate-skus.ts",
     "fix:sparse-indexes": "ts-node scripts/fix-sparse-indexes.ts",
     "build": "nest build && copyfiles src/modules/notifications/mail/templates/**/* dist/src/modules/notifications/mail/templates",
@@ -29,7 +30,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:flows": "jest finalize-checkout cancel-order dispute-flow token-reward verification-flow preship-fit vendor-order-settings image-upload sku-uniqueness --runInBand"
+    "test:flows": "jest finalize-checkout cancel-order dispute-flow token-reward verification-flow preship-fit vendor-order-settings image-upload sku-uniqueness accessory-variants --runInBand"
   },
   "dependencies": {
     "@nest-lab/fastify-multer": "^1.3.0",
