@@ -1,6 +1,9 @@
 import { Connection } from 'mongoose';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { MemoryMongo } from '../../test-utils/memory-mongo';
 import { Product, ProductSchema } from './schemas/product.schema';
+import { AccessoryDto } from './dto/accessory.dto';
 
 /**
  * Accessory variants round-trip.
@@ -97,5 +100,49 @@ describe('Accessory variants', () => {
     expect(found.accessory.variants[0].stock).toBe(3);
     expect(found.accessory.variants[0].color.name).toBe('Black');
     expect(found.accessory.variants[0].size).toBeUndefined();
+  });
+
+  describe('stock validation', () => {
+    const dto = (stock: number) =>
+      plainToInstance(AccessoryDto, {
+        name: 'Leather Belt',
+        price: 5000,
+        taxonomy: {
+          product_type: 'accessory',
+          categories: ['Belt'],
+          audience: 'unisex',
+        },
+        variants: [{ size: 'M', stock, price: 0 }],
+        images: [
+          { url: 'https://cdn.example.com/belt.jpg', public_id: 'belt' },
+        ],
+      });
+
+    /** Every constraint message, flattened out of the nested error tree. */
+    const failures = async (stock: number): Promise<string[]> => {
+      const flatten = (errors: any[]): string[] =>
+        errors.flatMap((e) => [
+          ...Object.values(e.constraints ?? {}).map(String),
+          ...flatten(e.children ?? []),
+        ]);
+      return flatten(await validate(dto(stock)));
+    };
+
+    it('accepts a sold-out variant', async () => {
+      // This failed with "variants.0.stock must not be less than 1", which
+      // rejected the whole product: a vendor could not save a catalogue with
+      // anything out of stock. It also fired on sizes the vendor had toggled
+      // on but never filled in - a row they could not see was blocking a save
+      // they believed was complete.
+      expect(await failures(0)).toEqual([]);
+    });
+
+    it('still accepts a stocked variant', async () => {
+      expect(await failures(20)).toEqual([]);
+    });
+
+    it('still rejects negative stock', async () => {
+      expect((await failures(-1)).join(' ')).toMatch(/stock/i);
+    });
   });
 });

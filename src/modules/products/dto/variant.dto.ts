@@ -18,8 +18,14 @@ export class VariantDto {
   size: string;
 
   @ApiProperty({ example: 20, description: 'Stock quantity' })
+  // Min(0), not Min(1): zero stock is a normal state - a size that is sold
+  // out, or one the vendor has not counted yet. Requiring at least one
+  // rejected the whole product save with
+  // "accessory.variants.0.stock must not be less than 1", so a vendor could
+  // not save a catalogue that had anything out of stock.
+  @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   stock: number;
 
   @ApiProperty({ example: 5000, description: 'Price of this variant' })
