@@ -30,7 +30,9 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Throttle } from '@nestjs/throttler';
 import {
   assertValidImage,
+  assertValidDocument,
   imageUploadOptions,
+  documentUploadOptions,
   IMAGE_UPLOAD,
 } from '../../common/validation/image-upload';
 
@@ -82,6 +84,46 @@ export class UploadController {
         Number.isFinite(minEdge) && minEdge >= 0
           ? minEdge
           : IMAGE_UPLOAD.MIN_PRODUCT_SHORT_EDGE,
+    };
+  }
+
+  /**
+   * 📄 Upload a supporting document (CAC certificate)
+   *
+   * Separate from the image routes: a certificate is usually a PDF, which the
+   * image filter rejects, and a scan has no minimum resolution worth
+   * enforcing. The URL this returns is filed through
+   * POST /verification/business/cac/document.
+   */
+  @Post('document')
+  @UseInterceptors(FileInterceptor('file', documentUploadOptions))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Upload a supporting document (PDF, JPEG or PNG)',
+    required: true,
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'The document to upload',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Document uploaded successfully' })
+  async uploadDocument(@UploadedFile() file: MulterFile) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    assertValidDocument(file, { label: 'document' });
+
+    const result = await this.cloudinaryService.uploadFile(file, 'documents');
+    return {
+      message: 'Document uploaded successfully',
+      data: {
+        url: result.fileUrl,
+        public_id: result.filePublicId,
+      },
     };
   }
 
