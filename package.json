@@ -15,6 +15,7 @@
     "migrate:normalize-refs": "ts-node scripts/normalize-objectid-refs.ts",
     "backfill:order-payment": "ts-node scripts/backfill-order-payment-status.ts",
     "reset:stuck-shipments": "ts-node scripts/reset-stuck-shipments.ts",
+    "drop:identity-numbers": "ts-node scripts/drop-vendor-identity-numbers.ts",
     "backfill:accepts-bespoke": "ts-node scripts/backfill-accepts-bespoke.ts",
     "migrate:accessory-variant-size": "ts-node scripts/migrate-accessory-variant-size.ts",
     "report:duplicate-skus": "ts-node scripts/report-duplicate-skus.ts",

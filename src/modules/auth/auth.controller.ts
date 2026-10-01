@@ -63,7 +63,6 @@ export class AuthController {
           personal_name: 'John Doe',
           personal_email: 'kendo@fashionstore.com',
           personal_phone_number: '+2348012345679',
-          national_identity_number: '12345678901',
           password: 'SecurePassword123',
         },
       },

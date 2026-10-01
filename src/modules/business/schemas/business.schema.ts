@@ -53,11 +53,19 @@ export class Business extends Document {
   @Prop({ default: false })
   address_completed: boolean;
 
-  @Prop()
-  bvn?: string;
-
-  @Prop()
-  nin?: string;
+  // No bvn / nin here on purpose. The platform collected both, stored them
+  // in plaintext, excluded them from its own admin projection, and never read
+  // them for anything - not payouts, which run off transfer_recipient_code,
+  // and not verification, which uses QoreID. Holding Nigeria's two most
+  // sensitive identifiers with no purpose fails data minimisation, and a BVN
+  // cannot be rotated after a leak the way a password can.
+  //
+  // Identity lives in `verification` below: a verdict, a provider reference, a
+  // verified name and a masked id. The identity check deliberately uses vNIN -
+  // a rotatable virtual NIN the vendor generates - so the real number never
+  // needs to be handled at all.
+  //
+  // scripts/drop-vendor-identity-numbers.ts removes what was already stored.
 
   @Prop({ required: false })
   display_picture_url?: string;

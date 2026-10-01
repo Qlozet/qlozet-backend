@@ -91,15 +91,7 @@ export class UpdateBusinessProfileDto {
   @IsArray()
   cac_document_url?: string[];
 
-  @ApiPropertyOptional({ example: '12345678901' })
-  @IsOptional()
-  @IsString()
-  nin?: string;
-
-  @ApiPropertyOptional({ example: '22345678901' })
-  @IsOptional()
-  @IsString()
-  bvn?: string;
+  // nin / bvn deliberately absent - see the note in business.schema.ts.
 
   @ApiPropertyOptional({
     example: true,

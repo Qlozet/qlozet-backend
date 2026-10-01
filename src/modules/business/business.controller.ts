@@ -201,7 +201,7 @@ export class BusinessController {
   @ApiOperation({
     summary: 'Update general business profile fields',
     description:
-      'Updates non-address fields like business_name, logo, cover image, description, NIN, BVN, etc.',
+      'Updates non-address fields like business_name, logo, cover image, description, social handles, etc.',
   })
   @ApiOkResponse({ description: 'Business profile updated successfully' })
   async updateBusinessProfile(
