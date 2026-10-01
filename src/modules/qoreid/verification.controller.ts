@@ -14,7 +14,16 @@ import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas/user.schema';
-import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import {
+  Business,
+  BusinessDocument,
+  BusinessStatus,
+  VerificationState,
+} from '../business/schemas/business.schema';
+import {
+  SERVICE_AGREEMENT,
+  hasAcceptedCurrentAgreement,
+} from '../business/service-agreement';
 import { QoreIdService } from './qoreid.service';
 
 class VerifyVninDto {
@@ -40,6 +49,12 @@ class VerifyCacDto {
   @IsString()
   @IsNotEmpty({ message: 'Enter your CAC registration (RC/BN) number.' })
   rc_number: string;
+}
+
+class AcceptAgreementDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Which version are you accepting?' })
+  version: string;
 }
 
 class CacDocumentDto {
@@ -92,12 +107,46 @@ export class VerificationController {
   async state(@Req() req: any) {
     const business = await this.businessModel
       .findById(req.business.id)
-      .select('verification status business_name')
+      .select(
+        'verification status business_name verification_state ' +
+          'verification_message verification_attempts ' +
+          'verification_attempts_allowed service_agreement',
+      )
       .lean();
+
+    const b = business as any;
+    const agreementAccepted = hasAcceptedCurrentAgreement(b ?? {});
+    const state = b?.verification_state ?? VerificationState.NOT_STARTED;
+
     return {
       configured: this.qoreid.isConfigured(),
-      status: (business as any)?.status ?? 'pending',
-      verification: (business as any)?.verification ?? {},
+      status: b?.status ?? 'pending',
+      verification: b?.verification ?? {},
+      /** Where they are, and what to do next. */
+      verification_state: state,
+      verification_message: b?.verification_message ?? null,
+      /**
+       * Whether they may start (or retry) a provider run. Each run costs real
+       * money, so the allowance is explicit rather than implied by the state.
+       */
+      attempts_used: b?.verification_attempts ?? 0,
+      attempts_allowed: b?.verification_attempts_allowed ?? 1,
+      can_start:
+        agreementAccepted &&
+        (b?.verification_attempts ?? 0) < (b?.verification_attempts_allowed ?? 1) &&
+        ![
+          VerificationState.AWAITING_REVIEW,
+          VerificationState.APPROVED,
+          VerificationState.REJECTED,
+        ].includes(state),
+      service_agreement: {
+        required_version: SERVICE_AGREEMENT.VERSION,
+        url: SERVICE_AGREEMENT.URL,
+        accepted: agreementAccepted,
+        accepted_at: b?.service_agreement?.accepted_at ?? null,
+        /** True when they signed an older version and must sign again. */
+        outdated: Boolean(b?.service_agreement) && !agreementAccepted,
+      },
     };
   }
 
@@ -168,6 +217,101 @@ export class VerificationController {
       { $set: { 'verification.business': businessBlock } },
     );
     return { verified: result.verified, business: businessBlock };
+  }
+
+  /**
+   * Accept the service agreement.
+   *
+   * The version is sent by the client and must match the one in force: that
+   * way a vendor cannot accept a page they were shown before the terms
+   * changed, and a stale tab fails loudly instead of recording consent to text
+   * nobody displayed.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('service-agreement')
+  @ApiOperation({ summary: 'Accept the vendor service agreement' })
+  async acceptAgreement(@Req() req: any, @Body() dto: AcceptAgreementDto) {
+    if (dto.version !== SERVICE_AGREEMENT.VERSION) {
+      throw new BadRequestException(
+        'The agreement has been updated since this page loaded. Reload and ' +
+          'read the current version before accepting.',
+      );
+    }
+
+    const accepted = {
+      version: SERVICE_AGREEMENT.VERSION,
+      accepted_at: new Date(),
+      accepted_by: req.user?.id ?? req.user?._id ?? null,
+      // Behind a proxy the first X-Forwarded-For entry is the client.
+      ip:
+        (req.headers?.['x-forwarded-for'] ?? '').toString().split(',')[0].trim() ||
+        req.ip ||
+        null,
+    };
+
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      { $set: { service_agreement: accepted } },
+    );
+
+    return { message: 'Agreement accepted', service_agreement: accepted };
+  }
+
+  /**
+   * Submit for review once the provider checks are done.
+   *
+   * Two preconditions, and both exist to stop a vendor waiting on a queue they
+   * were never actually in: the agreement must be signed, and the provider
+   * must have returned something to review.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('submit')
+  @ApiOperation({ summary: 'Submit my business for review' })
+  async submitForReview(@Req() req: any) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select('verification_state service_agreement')
+      .lean();
+
+    if (!business) throw new BadRequestException('Business not found');
+
+    if (!hasAcceptedCurrentAgreement(business as any)) {
+      throw new BadRequestException(
+        'Accept the vendor service agreement before submitting.',
+      );
+    }
+
+    const state = (business as any).verification_state;
+    if (state === VerificationState.AWAITING_REVIEW) {
+      throw new BadRequestException('Your business is already under review.');
+    }
+    if (state === VerificationState.APPROVED) {
+      throw new BadRequestException('Your business is already approved.');
+    }
+    if (state !== VerificationState.PROVIDER_COMPLETE) {
+      throw new BadRequestException(
+        'Finish the identity checks before submitting for review.',
+      );
+    }
+
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      {
+        $set: {
+          verification_state: VerificationState.AWAITING_REVIEW,
+          verification_submitted_at: new Date(),
+          verification_message: null,
+          // Trading status follows: in-review is visible to the admin queue
+          // and still not sellable, which is the correct reading.
+          status: BusinessStatus.IN_REVIEW,
+        },
+      },
+    );
+
+    return {
+      message: 'Submitted for review',
+      verification_state: VerificationState.AWAITING_REVIEW,
+    };
   }
 
   /**

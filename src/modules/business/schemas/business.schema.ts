@@ -10,6 +10,32 @@ export enum BusinessStatus {
   VERIFIED = 'verified',
   REJECTED = 'rejected',
 }
+/**
+ * Where a vendor is in getting cleared to sell.
+ *
+ * Deliberately separate from BusinessStatus. That field answers "may this
+ * vendor trade" and is what the catalogue and checkout gate on; this one
+ * answers "how far through verification are they", which is a longer story
+ * with states that have no trading meaning - a vendor halfway through a
+ * provider flow is simply not approved, same as one who never started.
+ *
+ * ACTION_REQUIRED is the state BusinessStatus could not express. Without it a
+ * failed check is indistinguishable from a rejection, so a vendor who merely
+ * held their ID at a bad angle gets told no, permanently, with no way back.
+ */
+export enum VerificationState {
+  NOT_STARTED = 'not_started',
+  /** A provider session is open; the vendor is partway through. */
+  IN_PROGRESS = 'in_progress',
+  /** The provider has returned results; nobody has looked at them yet. */
+  PROVIDER_COMPLETE = 'provider_complete',
+  AWAITING_REVIEW = 'awaiting_review',
+  APPROVED = 'approved',
+  /** Fixable. Carries a reason and grants one retry. */
+  ACTION_REQUIRED = 'action_required',
+  REJECTED = 'rejected',
+}
+
 export type BusinessDocument = Business & Document;
 
 @Schema({ timestamps: true })
@@ -286,6 +312,56 @@ export class Business extends Document {
     default: { perfect: 0, minor_issues: 0, poor: 0 },
   })
   fit_stats?: { perfect: number; minor_issues: number; poor: number };
+
+  @Prop({
+    type: String,
+    enum: Object.values(VerificationState),
+    default: VerificationState.NOT_STARTED,
+  })
+  verification_state: VerificationState;
+
+  /**
+   * Why the vendor is in ACTION_REQUIRED or REJECTED, in words they can read.
+   *
+   * Written for the vendor, not for us: "The name on your bank account does
+   * not match your ID" is actionable, "NUBAN_NAME_MISMATCH" is not. Shown
+   * verbatim in their dashboard.
+   */
+  @Prop({ type: String, default: null })
+  verification_message?: string | null;
+
+  /**
+   * Provider attempts spent. Each run of the hosted flow costs real money, so
+   * retries are granted deliberately rather than taken: moving a vendor to
+   * ACTION_REQUIRED is what buys them another one.
+   */
+  @Prop({ type: Number, default: 0 })
+  verification_attempts: number;
+
+  @Prop({ type: Number, default: 1 })
+  verification_attempts_allowed: number;
+
+  @Prop({ type: Date, default: null })
+  verification_submitted_at?: Date | null;
+
+  @Prop({ type: Date, default: null })
+  verification_decided_at?: Date | null;
+
+  /**
+   * The vendor's acceptance of the service agreement.
+   *
+   * Versioned, because an agreement nobody can date is not worth much if it is
+   * ever disputed: we record which text they accepted, when, who clicked, and
+   * from where. A new version re-prompts rather than silently applying.
+   */
+  @Prop({ type: Object, default: null })
+  service_agreement?: {
+    version: string;
+    accepted_at: Date;
+    accepted_by?: Types.ObjectId | null;
+    /** As seen by the server, for the audit trail. */
+    ip?: string | null;
+  } | null;
 
   // QoreID verification results — storage-safe summaries only (verdict,
   // provider ref, verified name, masked id). Identity numbers are never

@@ -2,6 +2,11 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Product, ProductDocument } from '../products/schemas';
+import {
+  Business,
+  BusinessDocument,
+  BusinessStatus,
+} from '../business/schemas/business.schema';
 import { ProductKind, ClothingType } from './schemas/orders.interfaces';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
 
@@ -10,7 +15,57 @@ export class OrderValidationService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
   ) {}
+
+  /**
+   * Refuse to sell on behalf of a vendor who is not cleared to sell.
+   *
+   * The catalogue already hides these products - every public query filters to
+   * vendors whose status is approved or verified - but hiding is not the same
+   * as refusing. A product can still reach checkout from a cart saved before
+   * the vendor was suspended, a shared link, or a bespoke quote, and until now
+   * the order went through: money taken, and an obligation created with a
+   * vendor the platform has not cleared.
+   *
+   * Checked per item rather than per order, because an order can span vendors
+   * and only one of them may be the problem.
+   */
+  private async assertVendorMaySell(
+    businessId: Types.ObjectId | string | undefined,
+  ): Promise<void> {
+    if (!businessId) return; // nothing to check — handled elsewhere
+
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('business_name status is_active')
+      .lean();
+
+    if (!business) {
+      throw new BadRequestException(
+        'This item belongs to a store that no longer exists.',
+      );
+    }
+
+    const name = business.business_name ?? 'This store';
+    const sellable: string[] = [
+      BusinessStatus.APPROVED,
+      BusinessStatus.VERIFIED,
+    ];
+
+    if (business.is_active === false) {
+      throw new BadRequestException(
+        `${name} is not currently trading, so this item cannot be ordered.`,
+      );
+    }
+    if (!sellable.includes(String(business.status))) {
+      throw new BadRequestException(
+        `${name} has not completed verification yet, so this item cannot ` +
+          'be ordered. Remove it from your bag to continue.',
+      );
+    }
+  }
 
   /** Entry point for a single order item */
   async validateOrderItem(
@@ -22,6 +77,8 @@ export class OrderValidationService {
     // Fetch product once
     const product = await this.productModel.findById(item.product_id);
     if (!product) throw new BadRequestException('Product not found');
+
+    await this.assertVendorMaySell((product as any).business);
 
     let totalPrice = 0;
     const breakdown: any = {

@@ -490,6 +490,31 @@ export class PlatformController {
   }
 
   // ------------------------------------------------------
+  // DECIDE A VERIFICATION
+  // ------------------------------------------------------
+  @Post(':id/verification-decision')
+  @ApiOperation({
+    summary: 'Approve, request action on, or reject a vendor verification',
+    description:
+      'Moves the verification state and the trading status together. ' +
+      '"action_required" grants the vendor one more provider attempt and ' +
+      'requires a message, which is the only thing they are shown.',
+  })
+  @ApiParam({ name: 'id', description: 'Business ID', type: String })
+  @ApiResponse({ status: 200, description: 'Decision recorded' })
+  @ApiResponse({ status: 404, description: 'Business not found' })
+  decideVerification(
+    @Param('id') id: string,
+    @Body() body: { decision: 'approved' | 'action_required' | 'rejected'; message?: string },
+  ) {
+    return this.businessService.decideVerification(
+      id,
+      body?.decision,
+      body?.message,
+    );
+  }
+
+  // ------------------------------------------------------
   // SET BUSINESS BACK TO IN-REVIEW
   // ------------------------------------------------------
   @Post(':id/in-review')

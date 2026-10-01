@@ -1182,6 +1182,72 @@ export class BusinessService {
   }
 
   /**
+   * The admin's decision on a vendor awaiting review.
+   *
+   * Moves two fields that mean different things and must not drift: the
+   * trading status the catalogue and checkout gate on, and the verification
+   * state the vendor's dashboard reads. It routes the trading half through
+   * updateBusinessStatus rather than writing `status` directly, so the
+   * one-time signup reward still fires on the first transition into a live
+   * state.
+   *
+   * ACTION_REQUIRED is the decision this whole state machine exists for. It
+   * grants exactly one more provider attempt — each run costs real money, so
+   * the allowance moves deliberately — and it REQUIRES a message, because a
+   * vendor who is told "action required" with no action named is simply
+   * rejected with extra steps.
+   */
+  async decideVerification(
+    businessId: string,
+    decision: 'approved' | 'action_required' | 'rejected',
+    message?: string,
+  ) {
+    const business = await this.businessModel.findById(businessId);
+    if (!business) throw new NotFoundException('Business not found');
+
+    const reason = (message ?? '').trim();
+    if (decision !== 'approved' && !reason) {
+      throw new BadRequestException(
+        'Say what the vendor needs to fix — they only ever see this message.',
+      );
+    }
+
+    const update: Record<string, any> = {
+      verification_state: decision,
+      verification_message: decision === 'approved' ? null : reason,
+      verification_decided_at: new Date(),
+    };
+
+    if (decision === 'action_required') {
+      // One more run, not unlimited: the allowance is what a retry costs.
+      update.verification_attempts_allowed =
+        (business.verification_attempts ?? 0) + 1;
+    }
+
+    await this.businessModel.updateOne({ _id: businessId }, { $set: update });
+
+    // 'verified' rather than 'approved': the platform has now actually
+    // verified this vendor's identity, which is what the badge means. Both
+    // values are equally sellable, so nothing about trading changes.
+    const tradingStatus =
+      decision === 'approved'
+        ? 'verified'
+        : decision === 'rejected'
+          ? 'rejected'
+          : 'unverified';
+
+    await this.updateBusinessStatus(businessId, tradingStatus as any);
+
+    return {
+      message: `Verification ${decision.replace('_', ' ')}`,
+      data: {
+        verification_state: decision,
+        verification_message: update.verification_message,
+      },
+    };
+  }
+
+  /**
    * Grant the admin-configured signup token reward to a newly approved
    * business. Idempotent: the wallet's `signup_reward_granted` flag is flipped
    * atomically with the credit, so approve → reject → approve pays only once.
