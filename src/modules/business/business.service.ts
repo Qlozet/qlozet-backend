@@ -601,11 +601,22 @@ export class BusinessService {
    * Public storefront: list active vendors with basic profile info.
    * Used by the customer shop for vendor carousels and listing pages.
    */
-  async getPublicVendors(page = 1, limit = 20, search?: string) {
+  async getPublicVendors(
+    page = 1,
+    limit = 20,
+    search?: string,
+    bespokeOnly = false,
+  ) {
     const skip = (page - 1) * limit;
     const filter: any = {
       status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
     };
+
+    // The bespoke flow asks for this: a quote request sent to a shop that does
+    // not sew is a wasted slot for the customer, who may only pick a handful.
+    // `$ne: false` rather than `true` so a business saved before the field
+    // existed still counts as available.
+    if (bespokeOnly) filter.accepts_bespoke = { $ne: false };
 
     // When a search term is provided, return vendors that either match by their
     // own fields (name / description / category) OR that sell products matching
@@ -632,7 +643,8 @@ export class BusinessService {
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
           'website social_links total_items_sold ' +
-          'success_rate is_featured year_founded accepts_external_fabric createdAt'
+          'success_rate is_featured year_founded accepts_external_fabric ' +
+          'accepts_bespoke createdAt'
         )
         .skip(skip)
         .limit(limit)

@@ -342,6 +342,29 @@ export class BespokeService {
   //  CUSTOMER — Quote Actions
   // ════════════════════════════════════════════════════════════════
 
+  /**
+   * Refuse a quote request aimed at a vendor that does not do bespoke work.
+   *
+   * Existence was the only check here, so an accessory-only shop could be
+   * sent a tailoring request. That costs the customer more than the vendor:
+   * a design may only go to a handful of vendors at once, so a slot spent on
+   * someone who will never answer is a slot wasted.
+   *
+   * `=== false` deliberately, not a falsy test - a business saved before the
+   * field existed has it undefined and is still eligible.
+   */
+  private assertVendorsAcceptBespoke(businesses: any[]): void {
+    const declined = businesses.filter((b) => b?.accepts_bespoke === false);
+    if (declined.length === 0) return;
+
+    const names = declined.map((b) => b?.business_name ?? 'this vendor');
+    throw new BadRequestException(
+      names.length === 1
+        ? `${names[0]} does not take bespoke orders.`
+        : `These vendors do not take bespoke orders: ${names.join(', ')}.`,
+    );
+  }
+
   async requestQuotes(
     designId: string,
     dto: RequestQuotesDto,
@@ -407,6 +430,8 @@ export class BespokeService {
     if (businesses.length !== newVendorIds.length) {
       throw new BadRequestException('One or more vendor IDs are invalid');
     }
+
+    this.assertVendorsAcceptBespoke(businesses);
 
     // Create quotes
     const expiresAt = new Date();

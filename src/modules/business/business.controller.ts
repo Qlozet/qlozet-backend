@@ -59,11 +59,13 @@ export class BusinessController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('bespoke') bespoke?: string,
   ) {
     return this.businessService.getPublicVendors(
       Number(page) || 1,
       Number(limit) || 20,
       search,
+      bespoke === 'true',
     );
   }
 
