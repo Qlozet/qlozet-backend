@@ -819,8 +819,8 @@ export class BusinessService {
           year_founded: 1,
           accepts_external_fabric: 1,
           createdAt: 1,
-          // Exclude: created_by, NIN, BVN, bvn, nin, revenue, orders,
-          // earnings, payout data, team_members, order_settings, etc.
+          // Exclude: created_by, revenue, orders, earnings, payout data,
+          // team_members, order_settings, etc.
         },
       },
     ]);

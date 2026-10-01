@@ -79,17 +79,9 @@ export class VendorRegisterDto {
   @Transform(({ value }) => value.toLowerCase().trim())
   personal_email: string;
 
-  @ApiPropertyOptional({
-    description: '11-digit National Identity Number (NIN) - Optional',
-    example: '12345678901',
-    pattern: '^\\d{11}$',
-  })
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{11}$/, {
-    message: 'national_identity_number must be 11 digits',
-  })
-  national_identity_number?: string;
+  // national_identity_number is gone: it was accepted here and then never
+  // persisted or used. Identity is established by QoreID verification
+  // after signup, against a vNIN the vendor generates themselves.
 
   // 🔐 Authentication
   @ApiProperty({
