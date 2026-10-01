@@ -14,7 +14,17 @@ import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../ums/schemas/user.schema';
-import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import {
+  Business,
+  BusinessDocument,
+  BusinessStatus,
+  VerificationState,
+} from '../business/schemas/business.schema';
+import {
+  SERVICE_AGREEMENT,
+  hasAcceptedCurrentAgreement,
+} from '../business/service-agreement';
+import { nextVerificationState } from './verification-state';
 import { QoreIdService } from './qoreid.service';
 
 class VerifyVninDto {
@@ -40,6 +50,12 @@ class VerifyCacDto {
   @IsString()
   @IsNotEmpty({ message: 'Enter your CAC registration (RC/BN) number.' })
   rc_number: string;
+}
+
+class AcceptAgreementDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Which version are you accepting?' })
+  version: string;
 }
 
 class CacDocumentDto {
@@ -85,6 +101,33 @@ export class VerificationController {
     private readonly businessModel: Model<BusinessDocument>,
   ) {}
 
+  /**
+   * Move the verification state to match the checks that have passed.
+   *
+   * Called after every check, so the vendor's dashboard reflects reality
+   * without a separate "I'm done" step they could forget. The rule itself
+   * lives in nextVerificationState, shared with the workflow webhook so the
+   * two routes into verification cannot disagree about what "done" means.
+   */
+  private async refreshVerificationState(businessId: string): Promise<void> {
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('verification verification_state')
+      .lean();
+    if (!business) return;
+
+    const next = nextVerificationState(
+      (business as any).verification,
+      (business as any).verification_state,
+    );
+    if (!next) return;
+
+    await this.businessModel.updateOne(
+      { _id: businessId },
+      { $set: { verification_state: next } },
+    );
+  }
+
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
   @Get()
@@ -92,12 +135,46 @@ export class VerificationController {
   async state(@Req() req: any) {
     const business = await this.businessModel
       .findById(req.business.id)
-      .select('verification status business_name')
+      .select(
+        'verification status business_name verification_state ' +
+          'verification_message verification_attempts ' +
+          'verification_attempts_allowed service_agreement',
+      )
       .lean();
+
+    const b = business as any;
+    const agreementAccepted = hasAcceptedCurrentAgreement(b ?? {});
+    const state = b?.verification_state ?? VerificationState.NOT_STARTED;
+
     return {
       configured: this.qoreid.isConfigured(),
-      status: (business as any)?.status ?? 'pending',
-      verification: (business as any)?.verification ?? {},
+      status: b?.status ?? 'pending',
+      verification: b?.verification ?? {},
+      /** Where they are, and what to do next. */
+      verification_state: state,
+      verification_message: b?.verification_message ?? null,
+      /**
+       * Whether they may start (or retry) a provider run. Each run costs real
+       * money, so the allowance is explicit rather than implied by the state.
+       */
+      attempts_used: b?.verification_attempts ?? 0,
+      attempts_allowed: b?.verification_attempts_allowed ?? 1,
+      can_start:
+        agreementAccepted &&
+        (b?.verification_attempts ?? 0) < (b?.verification_attempts_allowed ?? 1) &&
+        ![
+          VerificationState.AWAITING_REVIEW,
+          VerificationState.APPROVED,
+          VerificationState.REJECTED,
+        ].includes(state),
+      service_agreement: {
+        required_version: SERVICE_AGREEMENT.VERSION,
+        url: SERVICE_AGREEMENT.URL,
+        accepted: agreementAccepted,
+        accepted_at: b?.service_agreement?.accepted_at ?? null,
+        /** True when they signed an older version and must sign again. */
+        outdated: Boolean(b?.service_agreement) && !agreementAccepted,
+      },
     };
   }
 
@@ -136,14 +213,12 @@ export class VerificationController {
     const update: Record<string, any> = { 'verification.identity': identity };
     await this.businessModel.updateOne({ _id: req.business.id }, { $set: update });
 
-    // A clean identity pass earns the Verified badge automatically —
-    // unless an admin has explicitly rejected the business.
-    if (verdict.verified) {
-      await this.businessModel.updateOne(
-        { _id: req.business.id, status: { $ne: 'rejected' } },
-        { $set: { status: 'verified' } },
-      );
-    }
+    // A clean identity pass does NOT make a vendor sellable. It used to set
+    // status: 'verified' here, which meant passing one check - no bank
+    // account, no CAC, no human review - put a vendor straight into the
+    // catalogue with the Verified badge. Trading status is now only ever
+    // moved by an admin decision; this check just advances the state machine.
+    await this.refreshVerificationState(req.business.id);
 
     return { verified: verdict.verified, identity };
   }
@@ -167,7 +242,193 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.business': businessBlock } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, business: businessBlock };
+  }
+
+  /**
+   * Start a hosted verification run.
+   *
+   * Mints a QoreID session against the published workflow and hands back the
+   * short-lived SDK token. The vendor completes liveness, identity document,
+   * CAC and NUBAN inside QoreID's flow; results arrive on the webhook, never
+   * from the browser, because a client that reports its own success is not a
+   * verification.
+   *
+   * Guarded on three things, in this order, because each run is billed:
+   * the agreement must be signed, an attempt must be available, and the
+   * business must not already be in a state an admin owns.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('session')
+  @ApiOperation({ summary: 'Start a verification run (hosted QoreID flow)' })
+  async startSession(@Req() req: any) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select(
+        'verification_state verification_attempts ' +
+          'verification_attempts_allowed service_agreement',
+      )
+      .lean();
+    if (!business) throw new BadRequestException('Business not found');
+
+    const b = business as any;
+
+    if (!hasAcceptedCurrentAgreement(b)) {
+      throw new BadRequestException(
+        'Accept the vendor service agreement before starting verification.',
+      );
+    }
+
+    const state = b.verification_state;
+    if (state === VerificationState.AWAITING_REVIEW) {
+      throw new BadRequestException(
+        'Your business is already under review — nothing to do right now.',
+      );
+    }
+    if (state === VerificationState.APPROVED) {
+      throw new BadRequestException('Your business is already verified.');
+    }
+    if (state === VerificationState.REJECTED) {
+      throw new BadRequestException(
+        'This business was rejected. Contact support to reopen it.',
+      );
+    }
+
+    const used = b.verification_attempts ?? 0;
+    const allowed = b.verification_attempts_allowed ?? 1;
+    if (used >= allowed) {
+      throw new BadRequestException(
+        'You have used your verification attempt. Contact support if you ' +
+          'need another.',
+      );
+    }
+
+    // Ours, unique per attempt, and what the webhook quotes back — it is how
+    // a result is matched to a business.
+    const reference = `biz_${req.business.id}_${used + 1}`;
+    const session = await this.qoreid.createWorkflowSession(reference);
+
+    // Count the attempt on mint, not on completion: the run is billed the
+    // moment it starts, and a vendor who abandons halfway has still spent it.
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      {
+        $set: {
+          verification_state: VerificationState.IN_PROGRESS,
+          verification_message: null,
+          'verification.session': {
+            session_id: session.session_id,
+            reference,
+            started_at: new Date(),
+          },
+        },
+        $inc: { verification_attempts: 1 },
+      },
+    );
+
+    return {
+      session_id: session.session_id,
+      // The browser gets the token and nothing else.
+      sdk_token: session.sdk_token,
+      expires_at: session.expires_at,
+      reference,
+    };
+  }
+
+  /**
+   * Accept the service agreement.
+   *
+   * The version is sent by the client and must match the one in force: that
+   * way a vendor cannot accept a page they were shown before the terms
+   * changed, and a stale tab fails loudly instead of recording consent to text
+   * nobody displayed.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('service-agreement')
+  @ApiOperation({ summary: 'Accept the vendor service agreement' })
+  async acceptAgreement(@Req() req: any, @Body() dto: AcceptAgreementDto) {
+    if (dto.version !== SERVICE_AGREEMENT.VERSION) {
+      throw new BadRequestException(
+        'The agreement has been updated since this page loaded. Reload and ' +
+          'read the current version before accepting.',
+      );
+    }
+
+    const accepted = {
+      version: SERVICE_AGREEMENT.VERSION,
+      accepted_at: new Date(),
+      accepted_by: req.user?.id ?? req.user?._id ?? null,
+      // Behind a proxy the first X-Forwarded-For entry is the client.
+      ip:
+        (req.headers?.['x-forwarded-for'] ?? '').toString().split(',')[0].trim() ||
+        req.ip ||
+        null,
+    };
+
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      { $set: { service_agreement: accepted } },
+    );
+
+    return { message: 'Agreement accepted', service_agreement: accepted };
+  }
+
+  /**
+   * Submit for review once the provider checks are done.
+   *
+   * Two preconditions, and both exist to stop a vendor waiting on a queue they
+   * were never actually in: the agreement must be signed, and the provider
+   * must have returned something to review.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('submit')
+  @ApiOperation({ summary: 'Submit my business for review' })
+  async submitForReview(@Req() req: any) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select('verification_state service_agreement')
+      .lean();
+
+    if (!business) throw new BadRequestException('Business not found');
+
+    if (!hasAcceptedCurrentAgreement(business as any)) {
+      throw new BadRequestException(
+        'Accept the vendor service agreement before submitting.',
+      );
+    }
+
+    const state = (business as any).verification_state;
+    if (state === VerificationState.AWAITING_REVIEW) {
+      throw new BadRequestException('Your business is already under review.');
+    }
+    if (state === VerificationState.APPROVED) {
+      throw new BadRequestException('Your business is already approved.');
+    }
+    if (state !== VerificationState.PROVIDER_COMPLETE) {
+      throw new BadRequestException(
+        'Finish the identity checks before submitting for review.',
+      );
+    }
+
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      {
+        $set: {
+          verification_state: VerificationState.AWAITING_REVIEW,
+          verification_submitted_at: new Date(),
+          verification_message: null,
+          // Trading status follows: in-review is visible to the admin queue
+          // and still not sellable, which is the correct reading.
+          status: BusinessStatus.IN_REVIEW,
+        },
+      },
+    );
+
+    return {
+      message: 'Submitted for review',
+      verification_state: VerificationState.AWAITING_REVIEW,
+    };
   }
 
   /**
@@ -253,6 +514,7 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.bank': bank } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, bank };
   }
 
@@ -295,6 +557,7 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.bank': bank } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, bank };
   }
 }

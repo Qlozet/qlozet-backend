@@ -76,7 +76,11 @@ describe('VerificationController', () => {
       expect(JSON.stringify(saved)).not.toContain('JZ426633988976CH');
     });
 
-    it('a clean pass promotes the business to verified', async () => {
+    it('a clean pass does NOT make the vendor sellable on its own', async () => {
+      // This used to set status: 'verified' here, which meant one passing
+      // check - no bank account, no CAC, no human review - put a vendor into
+      // the catalogue with the Verified badge. Trading status is now only
+      // ever moved by an admin decision.
       const business = await makeBusiness({ status: 'approved' });
       qoreid.verifyVnin.mockResolvedValue(passVerdict);
 
@@ -86,7 +90,19 @@ describe('VerificationController', () => {
 
       expect(res.verified).toBe(true);
       const saved = await businessModel.findById(business._id).lean();
-      expect(saved.status).toBe('verified');
+      expect(saved.status).toBe('approved'); // untouched
+    });
+
+    it('advances the state machine, but not to complete on identity alone', async () => {
+      const business = await makeBusiness();
+      qoreid.verifyVnin.mockResolvedValue(passVerdict);
+
+      await controller.verifyVnin(req(business), { vnin: 'JZ426633988976CH' });
+
+      const saved = await businessModel.findById(business._id).lean();
+      // CAC and the payout account are still outstanding, so there is nothing
+      // for an admin to review yet.
+      expect(saved.verification_state).toBe('in_progress');
     });
 
     it("never overrides an admin's rejection", async () => {
