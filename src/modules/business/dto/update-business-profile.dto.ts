@@ -1,7 +1,6 @@
 import {
   IsOptional,
   IsString,
-  IsArray,
   IsBoolean,
   IsNumber,
   IsIn,
@@ -83,13 +82,11 @@ export class UpdateBusinessProfileDto {
   @Type(() => SocialLinksDto)
   social_links?: SocialLinksDto;
 
-  @ApiPropertyOptional({
-    example: ['https://cdn.qlozet.com/docs/cac-cert.pdf'],
-    description: 'Array of CAC document URLs',
-  })
-  @IsOptional()
-  @IsArray()
-  cac_document_url?: string[];
+  // cac_document_url is not settable here. The CAC certificate is evidence
+  // for verification, not a profile asset, and it now arrives only through
+  // POST /verification/business/cac/document - one way in, beside the RC
+  // number check it supports, rather than through a general profile update
+  // that also carries the logo.
 
   // nin / bvn deliberately absent - see the note in business.schema.ts.
 

@@ -7,7 +7,6 @@ import {
   Matches,
   IsOptional,
   IsUrl,
-  IsArray,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -123,18 +122,7 @@ export class VendorRegisterDto {
   @IsUrl({}, { message: 'Invalid display_picture_url' })
   display_picture_url?: string;
 
-  // 🧾 CAC or Business Documents (Optional)
-  @ApiPropertyOptional({
-    description:
-      'List of URLs pointing to CAC or business registration documents (optional)',
-    example: [
-      'https://cdn.qoobea.com/uploads/fashionstore/cac_doc.pdf',
-      'https://cdn.qoobea.com/uploads/fashionstore/tax_cert.pdf',
-    ],
-    isArray: true,
-  })
-  @IsOptional()
-  @IsArray()
-  @IsUrl({}, { each: true, message: 'Each cac_document_url must be valid' })
-  cac_document_url?: string[];
+  // No cac_document_url at registration. The CAC certificate is evidence
+  // for verification, not signup data, and is filed through
+  // POST /verification/business/cac/document once the vendor is in.
 }

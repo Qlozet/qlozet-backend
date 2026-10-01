@@ -161,6 +161,78 @@ export const imageUploadOptions = {
   },
 };
 
+/**
+ * Supporting documents (the CAC certificate) are not images: a certificate is
+ * usually a PDF, and a scan of one has no meaningful minimum resolution.
+ *
+ * The CAC file picker has always offered application/pdf while uploading
+ * through the profile-image route, whose filter only admits JPEG, PNG and
+ * WebP - so choosing the actual certificate failed with "Failed to upload
+ * image" and the vendor had no way to know why.
+ */
+export const DOCUMENT_UPLOAD = {
+  ALLOWED_MIME: [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+  ] as const,
+  /** Friendly ceiling. A scanned certificate is a few MB at most. */
+  MAX_BYTES: 10 * 1024 * 1024,
+  /** Multer's hard stop, above the friendly one so the message is ours. */
+  MULTER_MAX_BYTES: 15 * 1024 * 1024,
+} as const;
+
+export const documentUploadOptions = {
+  limits: { fileSize: DOCUMENT_UPLOAD.MULTER_MAX_BYTES },
+  fileFilter: (
+    _req: unknown,
+    file: { mimetype: string },
+    cb: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    if (!DOCUMENT_UPLOAD.ALLOWED_MIME.includes(file.mimetype as never)) {
+      return cb(
+        new BadRequestException(
+          `Unsupported document type "${file.mimetype}". Upload a PDF, JPEG or PNG.`,
+        ),
+        false,
+      );
+    }
+    cb(null, true);
+  },
+};
+
+/**
+ * Documents are checked by type and size only. A PDF has no pixel dimensions,
+ * and rejecting a legible scan for being small would block the one thing the
+ * upload exists for.
+ */
+export function assertValidDocument(
+  file: MulterFile,
+  options: { maxBytes?: number; label?: string } = {},
+): void {
+  const label = options.label ?? 'document';
+  const maxBytes = options.maxBytes ?? DOCUMENT_UPLOAD.MAX_BYTES;
+
+  if (!DOCUMENT_UPLOAD.ALLOWED_MIME.includes(file.mimetype as never)) {
+    throw new BadRequestException(
+      `That ${label} is a "${file.mimetype}" file. Upload a PDF, JPEG or PNG.`,
+    );
+  }
+
+  if (!file?.buffer?.length) {
+    throw new BadRequestException(`The ${label} is empty or failed to upload.`);
+  }
+
+  // buffer.length, not file.size: size is client-declared and optional, the
+  // buffer is what was actually received. Same reasoning as assertValidImage.
+  if (file.buffer.length > maxBytes) {
+    throw new BadRequestException(
+      `That ${label} is ${prettyMb(file.buffer.length)}. ` +
+        `Keep it under ${prettyMb(maxBytes)}.`,
+    );
+  }
+}
+
 const prettyMb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))}MB`;
 
 /**

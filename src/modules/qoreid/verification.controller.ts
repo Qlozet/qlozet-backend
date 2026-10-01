@@ -42,6 +42,13 @@ class VerifyCacDto {
   rc_number: string;
 }
 
+class CacDocumentDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Upload the document first, then save it here.' })
+  @Matches(/^https:\/\//, { message: 'A document URL must be https.' })
+  document_url: string;
+}
+
 class VerifyBankDto {
   @IsString()
   @Matches(/^\d{10}$/, { message: 'A NUBAN account number is 10 digits.' })
@@ -161,6 +168,43 @@ export class VerificationController {
       { $set: { 'verification.business': businessBlock } },
     );
     return { verified: result.verified, business: businessBlock };
+  }
+
+  /**
+   * File the CAC certificate as supporting evidence.
+   *
+   * Separate from the RC-number check above, and deliberately not dependent
+   * on it: the document exists precisely for the cases the automated check
+   * cannot settle - a lookup that fails, a name that does not match, a
+   * dispute where an admin needs to see the certificate itself. Tying it to a
+   * successful verification would remove it exactly when it is needed.
+   *
+   * This is the only way the document reaches a business record now. It used
+   * to arrive through the generic profile PATCH and through registration,
+   * which put a legal document on the same footing as a logo.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('business/cac/document')
+  @ApiOperation({ summary: 'File my CAC certificate as supporting evidence' })
+  async fileCacDocument(@Req() req: any, @Body() dto: CacDocumentDto) {
+    const url = dto.document_url.trim();
+
+    // $addToSet, not $push: re-saving the same upload should not grow the
+    // list. The newest entry is the one both consoles display.
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      { $addToSet: { cac_document_url: url } },
+    );
+
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select('cac_document_url')
+      .lean();
+
+    return {
+      message: 'Document filed',
+      cac_document_url: business?.cac_document_url ?? [url],
+    };
   }
 
   /**
