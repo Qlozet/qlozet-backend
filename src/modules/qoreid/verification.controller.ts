@@ -100,6 +100,52 @@ export class VerificationController {
     private readonly businessModel: Model<BusinessDocument>,
   ) {}
 
+  /**
+   * Move the verification state to match the checks that have passed.
+   *
+   * Called after every check so the vendor's dashboard reflects reality
+   * without a separate "I'm done" step they could forget.
+   *
+   * A state an admin owns is never overwritten. Once a business is awaiting
+   * review, approved or rejected, re-running a check must not quietly pull it
+   * back out of the queue or undo a decision.
+   *
+   * All three checks are required because Qlozet onboards registered
+   * businesses: identity establishes who the person is, CAC that the company
+   * exists, and NUBAN that the payout account is theirs. Any one alone proves
+   * too little to let someone take customers' money.
+   */
+  private async refreshVerificationState(businessId: string): Promise<void> {
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('verification verification_state')
+      .lean();
+    if (!business) return;
+
+    const current = (business as any).verification_state;
+    const adminOwned: string[] = [
+      VerificationState.AWAITING_REVIEW,
+      VerificationState.APPROVED,
+      VerificationState.REJECTED,
+    ];
+    if (adminOwned.includes(String(current))) return;
+
+    const v = (business as any).verification ?? {};
+    const passed = (block: any) => block?.status === 'verified';
+    const complete =
+      passed(v.identity) && passed(v.business) && passed(v.bank);
+
+    const next = complete
+      ? VerificationState.PROVIDER_COMPLETE
+      : VerificationState.IN_PROGRESS;
+
+    if (next === current) return;
+    await this.businessModel.updateOne(
+      { _id: businessId },
+      { $set: { verification_state: next } },
+    );
+  }
+
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
   @Get()
@@ -185,14 +231,12 @@ export class VerificationController {
     const update: Record<string, any> = { 'verification.identity': identity };
     await this.businessModel.updateOne({ _id: req.business.id }, { $set: update });
 
-    // A clean identity pass earns the Verified badge automatically —
-    // unless an admin has explicitly rejected the business.
-    if (verdict.verified) {
-      await this.businessModel.updateOne(
-        { _id: req.business.id, status: { $ne: 'rejected' } },
-        { $set: { status: 'verified' } },
-      );
-    }
+    // A clean identity pass does NOT make a vendor sellable. It used to set
+    // status: 'verified' here, which meant passing one check - no bank
+    // account, no CAC, no human review - put a vendor straight into the
+    // catalogue with the Verified badge. Trading status is now only ever
+    // moved by an admin decision; this check just advances the state machine.
+    await this.refreshVerificationState(req.business.id);
 
     return { verified: verdict.verified, identity };
   }
@@ -216,6 +260,7 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.business': businessBlock } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, business: businessBlock };
   }
 
@@ -397,6 +442,7 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.bank': bank } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, bank };
   }
 
@@ -439,6 +485,7 @@ export class VerificationController {
       { _id: req.business.id },
       { $set: { 'verification.bank': bank } },
     );
+    await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, bank };
   }
 }
