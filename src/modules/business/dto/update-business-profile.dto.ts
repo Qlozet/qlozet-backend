@@ -5,8 +5,11 @@ import {
   IsBoolean,
   IsNumber,
   IsIn,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { SocialLinksDto } from './social-links.dto';
 
 export class UpdateBusinessProfileDto {
   @ApiPropertyOptional({ example: 'Qlozet Fashion House' })
@@ -63,23 +66,22 @@ export class UpdateBusinessProfileDto {
   theme_color?: string;
 
   @ApiPropertyOptional({
+    type: SocialLinksDto,
     example: {
-      instagram: 'https://instagram.com/qlozet',
-      twitter: 'https://twitter.com/qlozet',
+      instagram: 'kemicouture',
+      twitter: 'kemicouture',
       pinterest: null,
       youtube: null,
       tiktok: null,
     },
-    description: 'Vendor social media links',
+    description:
+      'Vendor social handles. Stored as handles, not URLs - a pasted profile ' +
+      'URL is reduced to its handle, and the link is built by the clients.',
   })
   @IsOptional()
-  social_links?: {
-    instagram?: string;
-    twitter?: string;
-    pinterest?: string;
-    youtube?: string;
-    tiktok?: string;
-  };
+  @ValidateNested()
+  @Type(() => SocialLinksDto)
+  social_links?: SocialLinksDto;
 
   @ApiPropertyOptional({
     example: ['https://cdn.qlozet.com/docs/cac-cert.pdf'],
