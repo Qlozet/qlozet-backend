@@ -107,6 +107,14 @@ export class UpdateBusinessProfileDto {
   @IsBoolean()
   accepts_external_fabric?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Whether this vendor takes bespoke / made-to-measure work',
+  })
+  @IsOptional()
+  @IsBoolean()
+  accepts_bespoke?: boolean;
+
   // ─── Vendor order preferences ───
   @ApiPropertyOptional({ example: false, description: 'Auto-confirm incoming orders' })
   @IsOptional()

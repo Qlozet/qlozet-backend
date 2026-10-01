@@ -101,6 +101,22 @@ export class Business extends Document {
   @Prop({ type: Boolean, default: true })
   accepts_external_fabric: boolean; // Whether this vendor accepts fabric from other vendors for bespoke orders
 
+  /**
+   * Whether this vendor takes bespoke / made-to-measure work.
+   *
+   * A capability, not a vendor "type". What a vendor sells is already
+   * derivable from the products they list; this is the one thing that is not,
+   * because a tailor with an empty catalogue still wants quote requests and
+   * an accessory shop with a full one does not.
+   *
+   * Defaults to true, which is exactly today's behaviour - every business
+   * could be sent a request - so no existing vendor silently stops receiving
+   * work. scripts/backfill-accepts-bespoke.ts turns it off for the businesses
+   * that have clearly never done tailoring.
+   */
+  @Prop({ type: Boolean, default: true })
+  accepts_bespoke: boolean;
+
   // ─── Vendor order preferences (flat, editable via PATCH /business/profile) ───
   @Prop({ type: Boolean, default: false })
   order_confirmation: boolean; // auto-confirm incoming orders
