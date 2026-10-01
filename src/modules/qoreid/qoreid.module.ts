@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { QoreIdService } from './qoreid.service';
 import { VerificationController } from './verification.controller';
+import { QoreIdWebhookController } from './qoreid-webhook.controller';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { UmsModule } from '../ums/ums.module';
 
@@ -12,7 +13,7 @@ import { UmsModule } from '../ums/ums.module';
     ]),
     UmsModule,
   ],
-  controllers: [VerificationController],
+  controllers: [VerificationController, QoreIdWebhookController],
   providers: [QoreIdService],
   exports: [QoreIdService],
 })

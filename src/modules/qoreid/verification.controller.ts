@@ -24,6 +24,7 @@ import {
   SERVICE_AGREEMENT,
   hasAcceptedCurrentAgreement,
 } from '../business/service-agreement';
+import { nextVerificationState } from './verification-state';
 import { QoreIdService } from './qoreid.service';
 
 class VerifyVninDto {
@@ -103,17 +104,10 @@ export class VerificationController {
   /**
    * Move the verification state to match the checks that have passed.
    *
-   * Called after every check so the vendor's dashboard reflects reality
-   * without a separate "I'm done" step they could forget.
-   *
-   * A state an admin owns is never overwritten. Once a business is awaiting
-   * review, approved or rejected, re-running a check must not quietly pull it
-   * back out of the queue or undo a decision.
-   *
-   * All three checks are required because Qlozet onboards registered
-   * businesses: identity establishes who the person is, CAC that the company
-   * exists, and NUBAN that the payout account is theirs. Any one alone proves
-   * too little to let someone take customers' money.
+   * Called after every check, so the vendor's dashboard reflects reality
+   * without a separate "I'm done" step they could forget. The rule itself
+   * lives in nextVerificationState, shared with the workflow webhook so the
+   * two routes into verification cannot disagree about what "done" means.
    */
   private async refreshVerificationState(businessId: string): Promise<void> {
     const business = await this.businessModel
@@ -122,24 +116,12 @@ export class VerificationController {
       .lean();
     if (!business) return;
 
-    const current = (business as any).verification_state;
-    const adminOwned: string[] = [
-      VerificationState.AWAITING_REVIEW,
-      VerificationState.APPROVED,
-      VerificationState.REJECTED,
-    ];
-    if (adminOwned.includes(String(current))) return;
+    const next = nextVerificationState(
+      (business as any).verification,
+      (business as any).verification_state,
+    );
+    if (!next) return;
 
-    const v = (business as any).verification ?? {};
-    const passed = (block: any) => block?.status === 'verified';
-    const complete =
-      passed(v.identity) && passed(v.business) && passed(v.bank);
-
-    const next = complete
-      ? VerificationState.PROVIDER_COMPLETE
-      : VerificationState.IN_PROGRESS;
-
-    if (next === current) return;
     await this.businessModel.updateOne(
       { _id: businessId },
       { $set: { verification_state: next } },
@@ -262,6 +244,96 @@ export class VerificationController {
     );
     await this.refreshVerificationState(req.business.id);
     return { verified: result.verified, business: businessBlock };
+  }
+
+  /**
+   * Start a hosted verification run.
+   *
+   * Mints a QoreID session against the published workflow and hands back the
+   * short-lived SDK token. The vendor completes liveness, identity document,
+   * CAC and NUBAN inside QoreID's flow; results arrive on the webhook, never
+   * from the browser, because a client that reports its own success is not a
+   * verification.
+   *
+   * Guarded on three things, in this order, because each run is billed:
+   * the agreement must be signed, an attempt must be available, and the
+   * business must not already be in a state an admin owns.
+   */
+  @Roles(UserType.VENDOR)
+  @Post('session')
+  @ApiOperation({ summary: 'Start a verification run (hosted QoreID flow)' })
+  async startSession(@Req() req: any) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select(
+        'verification_state verification_attempts ' +
+          'verification_attempts_allowed service_agreement',
+      )
+      .lean();
+    if (!business) throw new BadRequestException('Business not found');
+
+    const b = business as any;
+
+    if (!hasAcceptedCurrentAgreement(b)) {
+      throw new BadRequestException(
+        'Accept the vendor service agreement before starting verification.',
+      );
+    }
+
+    const state = b.verification_state;
+    if (state === VerificationState.AWAITING_REVIEW) {
+      throw new BadRequestException(
+        'Your business is already under review — nothing to do right now.',
+      );
+    }
+    if (state === VerificationState.APPROVED) {
+      throw new BadRequestException('Your business is already verified.');
+    }
+    if (state === VerificationState.REJECTED) {
+      throw new BadRequestException(
+        'This business was rejected. Contact support to reopen it.',
+      );
+    }
+
+    const used = b.verification_attempts ?? 0;
+    const allowed = b.verification_attempts_allowed ?? 1;
+    if (used >= allowed) {
+      throw new BadRequestException(
+        'You have used your verification attempt. Contact support if you ' +
+          'need another.',
+      );
+    }
+
+    // Ours, unique per attempt, and what the webhook quotes back — it is how
+    // a result is matched to a business.
+    const reference = `biz_${req.business.id}_${used + 1}`;
+    const session = await this.qoreid.createWorkflowSession(reference);
+
+    // Count the attempt on mint, not on completion: the run is billed the
+    // moment it starts, and a vendor who abandons halfway has still spent it.
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      {
+        $set: {
+          verification_state: VerificationState.IN_PROGRESS,
+          verification_message: null,
+          'verification.session': {
+            session_id: session.session_id,
+            reference,
+            started_at: new Date(),
+          },
+        },
+        $inc: { verification_attempts: 1 },
+      },
+    );
+
+    return {
+      session_id: session.session_id,
+      // The browser gets the token and nothing else.
+      sdk_token: session.sdk_token,
+      expires_at: session.expires_at,
+      reference,
+    };
   }
 
   /**

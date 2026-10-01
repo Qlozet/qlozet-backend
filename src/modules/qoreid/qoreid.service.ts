@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
  * Thin client for QoreID (https://docs.qoreid.com).
@@ -36,7 +37,19 @@ const ENDPOINTS = {
   vnin: (vnin: string) => `/v1/ng/identities/virtual-nin/${vnin}`,
   nuban: '/v1/ng/identities/nuban',
   cacBasic: '/v2/ng/identities/cac-basic',
+  // Workflow sessions. Note the auth differs from every endpoint above:
+  // docs/sdk-session-tokens specifies HTTP Basic with the same clientId and
+  // secret, not the OAuth bearer token the product endpoints use.
+  sessions: '/v1/sessions',
 };
+
+/** What a minted workflow session hands back. */
+export interface WorkflowSession {
+  session_id: string;
+  /** Short-lived, single-use JWT — the only part the browser may see. */
+  sdk_token: string;
+  expires_at: string | null;
+}
 
 @Injectable()
 export class QoreIdService {
@@ -49,6 +62,110 @@ export class QoreIdService {
     return (
       this.config.get<string>('QOREID_BASE_URL') || 'https://api.qoreid.com'
     );
+  }
+
+  /** The published workflow a vendor is sent through. */
+  get workflowId(): number | null {
+    const raw = this.config.get<string>('QOREID_WORKFLOW_ID');
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  }
+
+  /**
+   * Mint a session for the hosted verification flow.
+   *
+   * The whole workflow — liveness, identity document, CAC, NUBAN, address —
+   * runs inside QoreID's SDK against the workflow published in their console,
+   * so the document images and the selfie never touch our storage. We hold a
+   * session id and, later, the verdicts the webhook reports.
+   *
+   * `reference` is ours and comes back on the webhook; it is how a result is
+   * matched to a business, so it must be unique per attempt.
+   */
+  async createWorkflowSession(reference: string): Promise<WorkflowSession> {
+    const clientId = this.config.get<string>('QOREID_CLIENT_ID');
+    const secret = this.config.get<string>('QOREID_SECRET');
+    const workflowId = this.workflowId;
+
+    if (!clientId || !secret) {
+      throw new ServiceUnavailableException(
+        'Identity verification is not configured yet.',
+      );
+    }
+    if (!workflowId) {
+      throw new ServiceUnavailableException(
+        'No verification workflow is configured (QOREID_WORKFLOW_ID).',
+      );
+    }
+
+    const res = await fetch(`${this.baseUrl}${ENDPOINTS.sessions}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Basic, not Bearer — see the note on ENDPOINTS.sessions.
+        Authorization: `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`,
+        // Makes a retried request return the same session instead of burning
+        // a second paid workflow run.
+        'Idempotency-Key': reference,
+      },
+      body: JSON.stringify({
+        type: 'workflow',
+        workflowId,
+        reference,
+      }),
+    });
+
+    const body = await res.json().catch(() => ({}) as any);
+
+    if (!res.ok) {
+      this.logger.error(
+        `QoreID session request failed: ${res.status} ${JSON.stringify(body).slice(0, 300)}`,
+      );
+      throw new ServiceUnavailableException(
+        body?.message ||
+          'Could not start verification right now. Try again shortly.',
+      );
+    }
+
+    const token = body?.sdkSessionToken ?? body?.sdk_session_token;
+    const sessionId = body?.sessionId ?? body?.session_id;
+    if (!token || !sessionId) {
+      this.logger.error(
+        `QoreID session response missing token/id: ${JSON.stringify(body).slice(0, 300)}`,
+      );
+      throw new ServiceUnavailableException(
+        'Verification could not be started. Support has been notified.',
+      );
+    }
+
+    return {
+      session_id: String(sessionId),
+      sdk_token: String(token),
+      expires_at: body?.expiresAt ?? body?.expires_at ?? null,
+    };
+  }
+
+  /**
+   * Whether a webhook really came from QoreID.
+   *
+   * docs/webhook-configuration: the body is hashed with HMAC-SHA512 using the
+   * webhook secret and sent as `x-verifyme-signature`. Compared in constant
+   * time — a plain === leaks how much of the signature matched, which is
+   * enough to forge one given patience.
+   *
+   * Returns false when no secret is configured. Refusing is the safe default:
+   * an unauthenticated endpoint that writes verification verdicts is worth
+   * more to an attacker than any amount of convenience is worth to us.
+   */
+  verifyWebhookSignature(rawBody: string, signature?: string): boolean {
+    const secret = this.config.get<string>('QOREID_WEBHOOK_SECRET');
+    if (!secret || !signature) return false;
+
+    const expected = createHmac('sha512', secret).update(rawBody).digest('hex');
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(signature.trim(), 'utf8');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
   }
 
   isConfigured(): boolean {
