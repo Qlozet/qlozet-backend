@@ -85,6 +85,65 @@ describe('Verification state from checks', () => {
     expect(written).toBeNull();
   });
 
+  describe('liveness', () => {
+    it('is required once a workflow session exists', async () => {
+      // The hosted workflow is how a camera gets involved at all. A run that
+      // skipped the selfie has not proved the document holder is present.
+      await run({
+        verification_state: VerificationState.IN_PROGRESS,
+        verification: {
+          session: { session_id: 'sess_1' },
+          identity: pass,
+          business: pass,
+          bank: pass,
+        },
+      });
+      expect(written).toBeNull(); // liveness missing — still in_progress
+    });
+
+    it('completes a workflow run once liveness passes too', async () => {
+      await run({
+        verification_state: VerificationState.IN_PROGRESS,
+        verification: {
+          session: { session_id: 'sess_1' },
+          identity: pass,
+          business: pass,
+          bank: pass,
+          liveness: pass,
+        },
+      });
+      expect(written.verification_state).toBe(
+        VerificationState.PROVIDER_COMPLETE,
+      );
+    });
+
+    it('is not required of a vendor who used the per-check endpoints', async () => {
+      // Those cannot do liveness at all, so requiring it would leave anyone
+      // mid-migration permanently unable to finish.
+      await run({
+        verification_state: VerificationState.IN_PROGRESS,
+        verification: { identity: pass, business: pass, bank: pass },
+      });
+      expect(written.verification_state).toBe(
+        VerificationState.PROVIDER_COMPLETE,
+      );
+    });
+
+    it('does not let a failed liveness complete a workflow run', async () => {
+      await run({
+        verification_state: VerificationState.IN_PROGRESS,
+        verification: {
+          session: { session_id: 'sess_1' },
+          identity: pass,
+          business: pass,
+          bank: pass,
+          liveness: fail,
+        },
+      });
+      expect(written).toBeNull();
+    });
+  });
+
   it('writes nothing when the state is already right', async () => {
     await run({
       verification_state: VerificationState.PROVIDER_COMPLETE,

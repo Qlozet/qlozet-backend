@@ -131,6 +131,10 @@ describe('QoreID webhook', () => {
         nuban_check: { status: 'EXACT_MATCH' },
       }),
     );
+    // Still short: a workflow run also has to pass liveness.
+    expect(saved.verification_state).toBeUndefined();
+
+    await post(payload({ liveness_check: { status: 'EXACT_MATCH' } }));
     expect(saved.verification_state).toBe('provider_complete');
   });
 
@@ -140,9 +144,24 @@ describe('QoreID webhook', () => {
         nin_check: { status: 'PARTIAL_MATCH' },
         cac_check: { status: 'EXACT_MATCH' },
         nuban_check: { status: 'EXACT_MATCH' },
+        liveness_check: { status: 'EXACT_MATCH' },
       }),
     );
     expect(saved.verification_state).toBe('provider_complete');
+  });
+
+  it('records liveness separately from the identity document', async () => {
+    // liveness_check used to be aliased to identity, so a passing selfie
+    // satisfied the identity requirement — a vendor could finish with no
+    // identity document at all, which is the hole liveness exists to close.
+    await post(payload({ liveness_check: { status: 'EXACT_MATCH' } }));
+    expect(saved['verification.liveness'].status).toBe('verified');
+    expect(saved['verification.identity']).toBeUndefined();
+  });
+
+  it('reads a passport as the identity document', async () => {
+    await post(payload({ passport_check: { status: 'EXACT_MATCH' } }));
+    expect(saved['verification.identity'].status).toBe('verified');
   });
 
   it('ignores results on a _started event', async () => {
@@ -185,6 +204,7 @@ describe('QoreID webhook', () => {
           nin_check: { status: 'EXACT_MATCH' },
           cac_check: { status: 'EXACT_MATCH' },
           nuban_check: { status: 'EXACT_MATCH' },
+          liveness_check: { status: 'EXACT_MATCH' },
         },
         'verification_completed',
       ),

@@ -53,9 +53,24 @@ const isMatchFailure = (match: string): boolean =>
 /** Which stored verdict each workflow step writes to, with doc aliases. */
 const CHECK_TARGETS: { field: string; keys: string[]; label: string }[] = [
   {
+    // liveness_check is deliberately NOT here. It used to be, which meant a
+    // passing selfie satisfied the identity requirement — a vendor could
+    // reach provider_complete with liveness, CAC and NUBAN and no identity
+    // document at all, which is the exact hole liveness exists to close.
     field: 'identity',
-    keys: ['nin_check', 'vnin_check', 'identity_check', 'liveness_check'],
-    label: 'your identity',
+    keys: [
+      'vnin_check',
+      'nin_check',
+      'passport_check',
+      'nigerian_passport_check',
+      'identity_check',
+    ],
+    label: 'your identity document',
+  },
+  {
+    field: 'liveness',
+    keys: ['liveness_check', 'biometrics_check', 'selfie_check'],
+    label: 'the photo of your face',
   },
   {
     field: 'business',
