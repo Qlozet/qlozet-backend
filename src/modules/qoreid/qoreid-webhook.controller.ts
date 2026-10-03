@@ -31,6 +31,25 @@ const RESULT_EVENTS = ['verification_completed', 'step_verification_completed'];
 /** Statuses that mean "still going", as opposed to a verdict. */
 const PENDING_MATCHES = ['pending', 'in_progress', 'processing'];
 
+/**
+ * A match only fails outright on NO_MATCH.
+ *
+ * This deliberately mirrors QoreIdService.toVerdict, which the per-check
+ * endpoints use. An earlier version here required EXACT_MATCH, which meant
+ * the two routes into verification disagreed about the same vendor — and in
+ * Nigeria that gap is not academic: a bank account reading
+ * "ADEYEMI KEMI FUNMILAYO" against a NIMC record of "KEMI ADEYEMI" comes back
+ * PARTIAL_MATCH or TRANSPOSED_MATCH and is almost always the same person.
+ *
+ * A partial match is not waved through, it is handed to the human who was
+ * always going to look: every vendor passes an admin review before they can
+ * sell, and the match quality is stored and shown there. Failing it here
+ * would remove the person best placed to judge it; hiding it would remove the
+ * one signal worth seeing.
+ */
+const isMatchFailure = (match: string): boolean =>
+  match.toUpperCase() === 'NO_MATCH';
+
 /** Which stored verdict each workflow step writes to, with doc aliases. */
 const CHECK_TARGETS: { field: string; keys: string[]; label: string }[] = [
   {
@@ -132,9 +151,11 @@ export class QoreIdWebhookController {
         return undefined;
       }
 
-      const verified = match === 'EXACT_MATCH';
+      const verified = !isMatchFailure(String(match));
       return {
         status: verified ? 'verified' : 'failed',
+        // Kept whatever it was: "verified, but only partially matched" is a
+        // different thing for an admin to look at than a clean pass.
         match,
         provider_ref: data?.id ?? null,
         verified_at: verified ? new Date() : null,
