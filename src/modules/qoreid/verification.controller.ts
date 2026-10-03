@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import {
   SERVICE_AGREEMENT,
   hasAcceptedCurrentAgreement,
 } from '../business/service-agreement';
+import { getVendorAgreement } from '../business/agreements';
 import { nextVerificationState } from './verification-state';
 import { QoreIdService } from './qoreid.service';
 
@@ -169,7 +171,7 @@ export class VerificationController {
         ].includes(state),
       service_agreement: {
         required_version: SERVICE_AGREEMENT.VERSION,
-        url: SERVICE_AGREEMENT.URL,
+        /** Fetch the text from GET /verification/service-agreement. */
         accepted: agreementAccepted,
         accepted_at: b?.service_agreement?.accepted_at ?? null,
         /** True when they signed an older version and must sign again. */
@@ -333,6 +335,33 @@ export class VerificationController {
       sdk_token: session.sdk_token,
       expires_at: session.expires_at,
       reference,
+    };
+  }
+
+  /**
+   * The agreement text.
+   *
+   * Served rather than linked so that the words and the version can never
+   * drift apart: the vendor reads the exact text their acceptance record will
+   * name. An older version can still be fetched by passing ?version=, which
+   * is what makes the record worth keeping.
+   */
+  @Roles(UserType.VENDOR)
+  @Get('service-agreement')
+  @ApiOperation({ summary: 'The vendor service agreement text' })
+  async serviceAgreement(@Query('version') version?: string) {
+    const wanted = version?.trim() || SERVICE_AGREEMENT.VERSION;
+    const body = getVendorAgreement(wanted);
+
+    if (!body) {
+      throw new BadRequestException(`No agreement published for "${wanted}".`);
+    }
+
+    return {
+      version: wanted,
+      /** True when this is the version a vendor must accept today. */
+      current: wanted === SERVICE_AGREEMENT.VERSION,
+      body,
     };
   }
 
