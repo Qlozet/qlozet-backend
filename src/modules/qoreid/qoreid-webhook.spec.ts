@@ -94,12 +94,31 @@ describe('QoreID webhook', () => {
     expect(saved['verification.identity'].provider_ref).toBe('QID-999');
   });
 
-  it('treats anything short of an exact match as a failure', async () => {
-    // PARTIAL_MATCH is the interesting one: a near-miss on a name is exactly
-    // the case a human should look at, not one to wave through.
+  it('passes a partial match, and records that it was partial', async () => {
+    // A Nigerian bank account reading "ADEYEMI KEMI FUNMILAYO" against a NIMC
+    // record of "KEMI ADEYEMI" comes back PARTIAL_MATCH and is almost always
+    // the same person. Failing it here would reject them before the admin -
+    // the one person able to judge it - ever sees the case.
     await post(payload({ nin_check: { status: 'PARTIAL_MATCH' } }));
-    expect(saved['verification.identity'].status).toBe('failed');
+    expect(saved['verification.identity'].status).toBe('verified');
     expect(saved['verification.identity'].match).toBe('PARTIAL_MATCH');
+  });
+
+  it('passes a transposed match for the same reason', async () => {
+    await post(payload({ nuban_check: { status: 'TRANSPOSED_MATCH' } }));
+    expect(saved['verification.bank'].status).toBe('verified');
+  });
+
+  it('still fails a flat NO_MATCH', async () => {
+    await post(payload({ nin_check: { status: 'NO_MATCH' } }));
+    expect(saved['verification.identity'].status).toBe('failed');
+  });
+
+  it('matches the rule the per-check endpoints use', async () => {
+    // The two routes into verification must not disagree about the same
+    // vendor. QoreIdService.toVerdict passes anything but NO_MATCH.
+    await post(payload({ cac_check: { status: 'EXACT_MATCH' } }));
+    expect(saved['verification.business'].status).toBe('verified');
   });
 
   it('only reaches provider_complete once every check has passed', async () => {
@@ -108,6 +127,17 @@ describe('QoreID webhook', () => {
 
     await post(
       payload({
+        cac_check: { status: 'EXACT_MATCH' },
+        nuban_check: { status: 'EXACT_MATCH' },
+      }),
+    );
+    expect(saved.verification_state).toBe('provider_complete');
+  });
+
+  it('a partial match still completes, so the admin gets to decide', async () => {
+    await post(
+      payload({
+        nin_check: { status: 'PARTIAL_MATCH' },
         cac_check: { status: 'EXACT_MATCH' },
         nuban_check: { status: 'EXACT_MATCH' },
       }),
@@ -131,6 +161,7 @@ describe('QoreID webhook', () => {
   });
 
   it('names what failed when the workflow finishes short', async () => {
+    // NO_MATCH, not a partial one — only a flat failure ends the run short.
     // Otherwise the vendor sits on "in progress" forever, waiting for a step
     // that already failed.
     await post(
