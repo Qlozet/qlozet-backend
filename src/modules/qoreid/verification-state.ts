@@ -22,10 +22,16 @@ const ADMIN_OWNED: string[] = [
  * Returns null when nothing should change — including when the state is
  * already correct, so callers can skip a pointless write.
  *
- * All three checks are required because Qlozet onboards registered
- * businesses: identity establishes who the person is, CAC that the company
- * exists, and NUBAN that the payout account is theirs. Any one alone proves
- * too little to let someone take customers' money.
+ * Identity, CAC and NUBAN are always required, because Qlozet onboards
+ * registered businesses: identity establishes who the person is, CAC that the
+ * company exists, and NUBAN that the payout account is theirs. Any one alone
+ * proves too little to let someone take customers' money.
+ *
+ * LIVENESS is required too, but only for a business that went through the
+ * hosted workflow — which is how we know a camera was involved at all. The
+ * older per-check endpoints cannot do liveness, so requiring it of them would
+ * leave anyone mid-migration permanently unable to finish. The presence of a
+ * session is the signal: it is written when a workflow run is minted.
  *
  * Pure, and shared by the per-check endpoints and the workflow webhook, so
  * the two routes into verification can never disagree about what "done" is.
@@ -35,13 +41,20 @@ export function nextVerificationState(
     identity?: Verdict;
     business?: Verdict;
     bank?: Verdict;
+    liveness?: Verdict;
+    session?: unknown;
   } | null | undefined,
   current: string | undefined | null,
 ): VerificationState | null {
   if (current && ADMIN_OWNED.includes(String(current))) return null;
 
   const v = verification ?? {};
-  const complete = passed(v.identity) && passed(v.business) && passed(v.bank);
+  const usedWorkflow = Boolean(v.session);
+  const complete =
+    passed(v.identity) &&
+    passed(v.business) &&
+    passed(v.bank) &&
+    (!usedWorkflow || passed(v.liveness));
 
   const next = complete
     ? VerificationState.PROVIDER_COMPLETE
