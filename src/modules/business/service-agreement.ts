@@ -11,17 +11,23 @@
  * termination is.
  */
 export const SERVICE_AGREEMENT = {
-  /** ISO date of the text currently in force. */
-  VERSION: '2026-10-01',
-
-  /**
-   * Where the full text lives. Kept out of this constant on purpose: the
-   * agreement is a legal document that the people who write it must be able to
-   * change without a deploy, and embedding it here invites it drifting from
-   * whatever the website actually shows.
-   */
-  URL: '/legal/vendor-agreement',
+  /** ISO date of the text currently in force. Must exist in ./agreements. */
+  VERSION: '2026-10-02',
 } as const;
+
+/**
+ * The text is served from this API, not linked to a marketing page.
+ *
+ * An earlier draft of this file argued the opposite - keep the text outside
+ * the codebase so it can be changed without a deploy. That was wrong. If the
+ * words live on a page someone can edit and the version lives in code, the
+ * two drift: an acceptance record saying "2026-10-02" then refers to text
+ * that has silently changed, which destroys the only thing the record is for.
+ *
+ * Versions are immutable files under ./agreements. Changing the terms is a
+ * commit someone reviews, with a diff and a history - which, for a contract,
+ * is the right amount of friction.
+ */
 
 /** Whether this business has accepted the version currently in force. */
 export const hasAcceptedCurrentAgreement = (business: {
