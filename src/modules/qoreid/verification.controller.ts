@@ -150,6 +150,14 @@ export class VerificationController {
 
     return {
       configured: this.qoreid.isConfigured(),
+      /**
+       * Whether the hosted workflow is available. False until
+       * QOREID_WORKFLOW_ID is set, which is what lets the console ship ahead
+       * of the configuration: no workflow, and the vendor sees the older
+       * per-check cards, which still work.
+       */
+      workflow_available:
+        this.qoreid.isConfigured() && this.qoreid.workflowId !== null,
       status: b?.status ?? 'pending',
       verification: b?.verification ?? {},
       /** Where they are, and what to do next. */
