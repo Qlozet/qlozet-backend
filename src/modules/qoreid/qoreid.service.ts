@@ -98,34 +98,81 @@ export class QoreIdService {
       );
     }
 
-    const res = await fetch(`${this.baseUrl}${ENDPOINTS.sessions}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Basic, not Bearer — see the note on ENDPOINTS.sessions.
-        Authorization: `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`,
-        // Makes a retried request return the same session instead of burning
-        // a second paid workflow run.
-        'Idempotency-Key': reference,
-      },
-      body: JSON.stringify({
-        type: 'workflow',
-        workflowId,
-        reference,
-      }),
-    });
+    const payload = JSON.stringify({ type: 'workflow', workflowId, reference });
 
-    const body = await res.json().catch(() => ({}) as any);
+    const send = (authorization: string) =>
+      fetch(`${this.baseUrl}${ENDPOINTS.sessions}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authorization,
+          // Makes a retried request return the same session instead of
+          // burning a second paid workflow run.
+          'Idempotency-Key': reference,
+        },
+        body: payload,
+      });
+
+    // Basic first, per docs/sdk-session-tokens. The documentation is explicit
+    // about it, and it is the odd one out — every other QoreID call in this
+    // service uses the OAuth bearer token. When Basic is refused on
+    // credentials we try Bearer once rather than dead-ending the vendor on a
+    // disagreement between the docs and the API, and log which one worked so
+    // the loser can be deleted.
+    const basic = `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`;
+    let res = await send(basic);
+    let body = await res.json().catch(() => ({}) as any);
+    let scheme = 'basic';
+
+    const looksLikeAuth =
+      res.status === 401 ||
+      res.status === 403 ||
+      /credential|unauthor|not valid/i.test(String(body?.message ?? ''));
+
+    if (!res.ok && looksLikeAuth) {
+      this.logger.warn(
+        `QoreID rejected Basic auth on ${ENDPOINTS.sessions} (${res.status}: ${body?.message ?? ''}) — retrying with the bearer token`,
+      );
+      try {
+        res = await send(`Bearer ${await this.getToken()}`);
+        body = await res.json().catch(() => ({}) as any);
+        scheme = 'bearer';
+      } catch (err: any) {
+        this.logger.error(`QoreID bearer retry failed: ${err?.message}`);
+      }
+    }
 
     if (!res.ok) {
       this.logger.error(
-        `QoreID session request failed: ${res.status} ${JSON.stringify(body).slice(0, 300)}`,
+        `QoreID session request failed (${scheme}): ${res.status} ${JSON.stringify(body).slice(0, 300)}`,
       );
+      const providerMessage = String(body?.message ?? '');
       throw new ServiceUnavailableException(
-        body?.message ||
-          'Could not start verification right now. Try again shortly.',
+        /credential|not valid/i.test(providerMessage)
+          ? // Named explicitly because the two causes look identical from
+            // here and only configuration can tell them apart: keys and
+            // workflow in different environments, or an account without
+            // workflow sessions enabled.
+            `QoreID rejected the credentials for workflow ${workflowId}. ` +
+              'Check that QOREID_CLIENT_ID/SECRET and the workflow are in the ' +
+              'same environment (both Test, or both Live), and that workflow ' +
+              'sessions are enabled on the account.'
+          : providerMessage ||
+              'Could not start verification right now. Try again shortly.',
       );
     }
+
+    // The session can mint cleanly and the SDK still fail with "workflow
+    // request not found", which means the token is valid but the flow behind
+    // it is not reachable — usually a workflow published in the other
+    // environment, or an id pointing at an unpublished version. Logging what
+    // came back (keys and ids only, never the token) is what tells the two
+    // apart on the next attempt.
+    this.logger.log(
+      `QoreID workflow session minted via ${scheme} auth ` +
+        `[workflowId=${workflowId}, reference=${reference}, ` +
+        `fields=${Object.keys(body ?? {}).join(',')}]`,
+    );
 
     const token = body?.sdkSessionToken ?? body?.sdk_session_token;
     const sessionId = body?.sessionId ?? body?.session_id;
