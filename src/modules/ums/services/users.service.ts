@@ -50,6 +50,8 @@ export class UserService {
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Business.name)
+    private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(Address.name)
     private readonly addressModel: Model<AddressDocument>,
     // Read-only: the customers list joins each row's order count and last
@@ -1174,16 +1176,58 @@ export class UserService {
     });
   }
 
+  /**
+   * A customer's wishlist, filtered to what they can actually open.
+   *
+   * It used to populate and return everything. The PDP applies the approval
+   * gate and this did not, so a product whose vendor has since been suspended
+   * - or that the vendor unpublished - stayed in the list and 404'd with
+   * "Product not found" when tapped. The worst kind of error: the app told
+   * them it was there.
+   *
+   * Same rule as assertPubliclyVisible: active, not rejected by moderation,
+   * and belonging to a vendor approved to sell.
+   */
   async getWishlist(userId: string): Promise<any[]> {
     const user = await this.userModel
       .findById(userId)
-      .populate('wishlist')
+      .populate({
+        path: 'wishlist',
+        match: {
+          status: 'active',
+          'moderation.status': { $ne: 'rejected' },
+        },
+      })
       .select('wishlist');
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return user.wishlist || [];
+
+    // populate's `match` leaves non-matching entries as null, so they are
+    // dropped here rather than reaching the client as holes.
+    const products = ((user.wishlist as any[]) ?? []).filter(Boolean);
+    if (products.length === 0) return [];
+
+    // One query for every wishlisted vendor, not one per item.
+    const sellable = await this.businessModel
+      .find({
+        _id: {
+          $in: products
+            .map((item) => (item?.business as any)?._id ?? item?.business)
+            .filter(Boolean),
+        },
+        status: { $in: ['approved', 'verified'] },
+        is_active: { $ne: false },
+      })
+      .select('_id')
+      .lean();
+
+    const allowed = new Set(sellable.map((b) => String(b._id)));
+    return products.filter((item) => {
+      const businessId = (item?.business as any)?._id ?? item?.business;
+      return businessId && allowed.has(String(businessId));
+    });
   }
 
   /**
