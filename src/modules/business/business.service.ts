@@ -1154,7 +1154,10 @@ export class BusinessService {
 
   async updateBusinessStatus(
     businessId: string,
-    status: 'in-review' | 'approved' | 'verified' | 'rejected' | 'unverified',
+    // Exactly the schema's enum. It used to also list 'unverified', which
+    // the schema has never accepted — so a caller could pass it, typecheck
+    // cleanly, and get a ValidationError at save time.
+    status: BusinessStatus,
   ) {
     const business = await this.businessModel.findById(businessId);
     if (!business) throw new NotFoundException('Business not found');
@@ -1229,14 +1232,17 @@ export class BusinessService {
     // 'verified' rather than 'approved': the platform has now actually
     // verified this vendor's identity, which is what the badge means. Both
     // values are equally sellable, so nothing about trading changes.
-    const tradingStatus =
+    //
+    // action_required goes back to PENDING — not sellable, and not sitting in
+    // the review queue either, because the next move is the vendor's.
+    const tradingStatus: BusinessStatus =
       decision === 'approved'
-        ? 'verified'
+        ? BusinessStatus.VERIFIED
         : decision === 'rejected'
-          ? 'rejected'
-          : 'unverified';
+          ? BusinessStatus.REJECTED
+          : BusinessStatus.PENDING;
 
-    await this.updateBusinessStatus(businessId, tradingStatus as any);
+    await this.updateBusinessStatus(businessId, tradingStatus);
 
     return {
       message: `Verification ${decision.replace('_', ' ')}`,
@@ -1288,16 +1294,16 @@ export class BusinessService {
     );
   }
   async approveBusiness(businessId: string) {
-    return this.updateBusinessStatus(businessId, 'approved');
+    return this.updateBusinessStatus(businessId, BusinessStatus.APPROVED);
   }
   async verifyBusiness(businessId: string) {
-    return this.updateBusinessStatus(businessId, 'verified');
+    return this.updateBusinessStatus(businessId, BusinessStatus.VERIFIED);
   }
   async rejectBusiness(businessId: string) {
-    return this.updateBusinessStatus(businessId, 'rejected');
+    return this.updateBusinessStatus(businessId, BusinessStatus.REJECTED);
   }
   async setInReview(businessId: string) {
-    return this.updateBusinessStatus(businessId, 'in-review');
+    return this.updateBusinessStatus(businessId, BusinessStatus.IN_REVIEW);
   }
   async followBusiness(userId: string, businessId: string) {
     const session = await this.businessModel.startSession();
