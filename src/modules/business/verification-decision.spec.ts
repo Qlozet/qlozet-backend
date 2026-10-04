@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
-import { BusinessService } from './business.service';
+import { BusinessService, } from './business.service';
+import { BusinessStatus } from './schemas/business.schema';
 import {
   SERVICE_AGREEMENT,
   hasAcceptedCurrentAgreement,
@@ -45,14 +46,34 @@ describe('Verification decision', () => {
     expect(saved.verification_message).toBeNull();
     // Routed through updateBusinessStatus so the one-time signup reward still
     // fires on the first transition into a live state.
-    expect(statusCalls).toEqual(['verified']);
+    expect(statusCalls).toEqual([BusinessStatus.VERIFIED]);
   });
 
   it('action required grants exactly one more attempt', async () => {
     await decide('action_required', 'Your bank account name does not match your ID.');
     expect(saved.verification_state).toBe('action_required');
     expect(saved.verification_attempts_allowed).toBe(1);
-    expect(statusCalls).toEqual(['unverified']);
+    // Back to pending: not sellable, and not in the review queue either,
+    // because the next move is the vendor's.
+    expect(statusCalls).toEqual([BusinessStatus.PENDING]);
+  });
+
+  it('only ever writes a status the schema accepts', async () => {
+    // This shipped broken: 'unverified' was passed here and is not in the
+    // enum, so every "needs fixing" decision died with a 500 at save time.
+    // updateBusinessStatus advertised it as valid, which is why it typechecked.
+    const allowed = Object.values(BusinessStatus);
+    for (const [decision, message] of [
+      ['approved', undefined],
+      ['action_required', 'fix this'],
+      ['rejected', 'no'],
+    ] as const) {
+      statusCalls = [];
+      await decide(decision, message);
+      for (const status of statusCalls) {
+        expect(allowed).toContain(status);
+      }
+    }
   });
 
   it('refuses action required with no message', async () => {
@@ -69,7 +90,7 @@ describe('Verification decision', () => {
   it('rejecting stores the reason and stops trading', async () => {
     await decide('rejected', 'The CAC registration belongs to another company.');
     expect(saved.verification_message).toMatch(/another company/);
-    expect(statusCalls).toEqual(['rejected']);
+    expect(statusCalls).toEqual([BusinessStatus.REJECTED]);
   });
 
   it('records when the decision was made', async () => {
