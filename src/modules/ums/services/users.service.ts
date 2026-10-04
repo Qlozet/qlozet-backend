@@ -14,6 +14,10 @@ import * as bcrypt from 'bcrypt';
 import { UserDocument, User, UserType } from '../schemas';
 import { MailService } from '../../notifications/mail/mail.service';
 import { Address, AddressDocument } from '../schemas/address.schema';
+import {
+  Business,
+  BusinessDocument,
+} from '../../business/schemas/business.schema';
 import { AddressDto } from '../dto/address.dto';
 import { LogisticsService } from 'src/modules/logistics/logistics.service';
 import { Utils } from 'src/common/utils/pagination';
