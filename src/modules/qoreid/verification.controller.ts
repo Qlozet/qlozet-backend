@@ -319,8 +319,11 @@ export class VerificationController {
     const reference = `biz_${req.business.id}_${used + 1}`;
     const session = await this.qoreid.createWorkflowSession(reference);
 
-    // Count the attempt on mint, not on completion: the run is billed the
-    // moment it starts, and a vendor who abandons halfway has still spent it.
+    // Minting does NOT spend the attempt. QoreID bills for the checks it
+    // performs, and a session nobody uses performs none — so a vendor who
+    // opens the flow, sees what it asks for and closes it has cost nothing
+    // and must not be locked out. The attempt is counted when the workflow
+    // actually starts, which the webhook reports.
     await this.businessModel.updateOne(
       { _id: req.business.id },
       {
@@ -333,7 +336,6 @@ export class VerificationController {
             started_at: new Date(),
           },
         },
-        $inc: { verification_attempts: 1 },
       },
     );
 
