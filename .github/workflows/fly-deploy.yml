@@ -41,7 +41,16 @@ jobs:
     concurrency: deploy-group
     steps:
       - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Installed straight from Fly rather than via
+      # superfly/flyctl-actions/setup-flyctl@master. That action does nothing
+      # but download this same binary, and it is pinned to a moving branch, so
+      # when it breaks - as it did on 04 Oct 2026, failing in 1s before the
+      # deploy step ran - a release is blocked by a dependency that is not
+      # ours and has no fixed version to roll back to.
+      - name: Install flyctl
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
       # Depot (Fly's default remote builder) has transient outages that fail
       # with "timed out connecting to machine / authentication handshake
       # failed". When that happens, retry once on the classic Fly builder
