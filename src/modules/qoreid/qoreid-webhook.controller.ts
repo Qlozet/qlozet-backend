@@ -178,7 +178,19 @@ export class QoreIdWebhookController {
     };
 
     const update: Record<string, any> = {};
+    const increments: Record<string, number> = {};
     const failures: string[] = [];
+
+    // A workflow actually beginning is what costs money, and therefore what
+    // spends the vendor's attempt. Minting a session does not: one that is
+    // opened and closed runs no checks and is billed for none, so counting it
+    // there locked out vendors who had done nothing at all.
+    if (
+      (body?.event ?? '') === 'workflow' &&
+      eventType === 'verification_started'
+    ) {
+      increments.verification_attempts = 1;
+    }
 
     if (carriesResults) {
       for (const target of CHECK_TARGETS) {
@@ -200,7 +212,10 @@ export class QoreIdWebhookController {
 
     await this.businessModel.updateOne(
       { _id: business._id },
-      { $set: update },
+      {
+        $set: update,
+        ...(Object.keys(increments).length ? { $inc: increments } : {}),
+      },
     );
 
     // Re-read so the state is computed from what is actually stored, not from

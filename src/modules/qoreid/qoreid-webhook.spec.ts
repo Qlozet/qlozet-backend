@@ -164,6 +164,37 @@ describe('QoreID webhook', () => {
     expect(saved['verification.identity'].status).toBe('verified');
   });
 
+  describe('attempts', () => {
+    let incremented: Record<string, number> | null;
+
+    beforeEach(() => {
+      incremented = null;
+      const update = controller.businessModel.updateOne;
+      controller.businessModel.updateOne = async (f: any, u: any) => {
+        if (u.$inc) incremented = u.$inc;
+        return update(f, u);
+      };
+    });
+
+    it('spends one when the workflow actually starts', async () => {
+      // Running the checks is what costs money, so that is what costs the
+      // vendor their attempt.
+      await post(payload({}, 'verification_started'));
+      expect(incremented).toEqual({ verification_attempts: 1 });
+    });
+
+    it('spends none on a step starting', async () => {
+      // Otherwise a four-step workflow would spend four attempts.
+      await post(payload({}, 'step_verification_started'));
+      expect(incremented).toBeNull();
+    });
+
+    it('spends none on results arriving', async () => {
+      await post(payload({ nin_check: { status: 'EXACT_MATCH' } }));
+      expect(incremented).toBeNull();
+    });
+  });
+
   it('ignores results on a _started event', async () => {
     // verification_started and step_verification_started announce that
     // something is beginning. Reading a verdict off one would mark every
