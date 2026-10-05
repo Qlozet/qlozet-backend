@@ -406,6 +406,40 @@ export class ProductService {
            totalPrice = 0; 
        }
     }
+
+    /**
+     * 2. Determine the publish status.
+     *
+     * Every vendor payload carries the publish switch on the sub-document
+     * (`clothing.status`, `fabric.status`, ...) while every customer-facing
+     * query filters the *top-level* `status`. Nothing carried one across, so
+     * the schema default stood and a product the vendor had just published
+     * was created as a draft and never appeared in the shop.
+     *
+     * An explicit top-level status still wins, and a payload that sends
+     * neither leaves the status alone: on an edit that means keeping what the
+     * product already had, which matters because a partial update must never
+     * silently unpublish a live listing.
+     */
+    const requestedStatus: ProductStatus | undefined =
+      dto.status ?? (dto as any)[kind]?.status;
+
+    /**
+     * A draft may be priced at anything, including nothing — that is what a
+     * half-finished listing looks like. A published product may not: every
+     * branch of the price resolution above falls through to 0, so a vendor
+     * who leaves the price field empty would otherwise put a free, orderable
+     * item in the catalogue.
+     */
+    const resolvedPrice = totalPrice ?? 0;
+    const assertPriced = (status: ProductStatus) => {
+      if (status !== ProductStatus.DRAFT && !(resolvedPrice > 0)) {
+        throw new BadRequestException(
+          'Set a price above zero before publishing this product, or save it as a draft.',
+        );
+      }
+    };
+
     // Reject duplicate SKUs before anything is written, so a clash can never
     // leave a half-saved product behind.
     await this.assertSkusAreUnique(dto, business, dto.product_id);
@@ -422,9 +456,13 @@ export class ProductService {
 
         const { product_id, ...safeData } = dto;
 
+        const status = requestedStatus ?? existing.status;
+        assertPriced(status);
+
         Object.assign(existing, {
           ...safeData,
           base_price: totalPrice,
+          status,
           kind,
         });
 
@@ -441,11 +479,15 @@ export class ProductService {
     }
 
     // 3. Otherwise create new product
+    const status = requestedStatus ?? ProductStatus.DRAFT;
+    assertPriced(status);
+
     const created = await this.productModel.create({
       ...dto,
       business,
       kind,
       base_price: totalPrice,
+      status,
     });
 
     // Sync to recommendation catalog
