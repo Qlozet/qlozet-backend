@@ -21,6 +21,18 @@ import { Utils } from '../../common/utils/pagination';
 import { percentageChange } from '../../common/utils/percentageChange';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
+
+/**
+ * Order statuses that count as revenue. Matches the assistant's analytics
+ * tools, so the donut and anything the assistant reports cannot disagree.
+ */
+const REVENUE_STATUSES = ['in_review', 'processing', 'in_transit', 'completed'];
+
+export interface SalesByTypeRow {
+  name: string;
+  revenue: number;
+  orders: number;
+}
 import { ProductModerationStatus } from './enums/product-moderation.enum';
 
 import { User, UserDocument } from '../ums/schemas';
@@ -2953,4 +2965,172 @@ export class ProductService {
       this.logger.warn(`Product notification failed: ${err.message}`);
     }
   }
+
+  /**
+   * Revenue and order count per product type, for one kind of product.
+   *
+   * Backs the donut on each catalogue page. Grouped by product type rather
+   * than by category because a product carries exactly one type and an array
+   * of categories - a donut keyed on the array double-counts and its slices
+   * add up to nothing. The type lives in a different place per kind, which is
+   * what TYPE_PATH is for.
+   *
+   * Windowed rather than all-time: an all-time chart ossifies, keeping a fat
+   * slice for a line the vendor stopped making two years ago.
+   */
+  async salesByProductType(
+    business: Types.ObjectId | string,
+    kind: 'clothing' | 'fabric' | 'accessory',
+    days = 90,
+  ): Promise<{ data: SalesByTypeRow[]; meta: Record<string, any> }> {
+    // req.business.id is Mongoose's virtual, so it arrives as a string. A
+    // find() would cast it against the schema; an aggregation pipeline does
+    // not, and a string $match against an ObjectId field silently matches
+    // nothing - an empty chart rather than an error.
+    const bid = new Types.ObjectId(String(business));
+    const window = Math.min(Math.max(Number(days) || 90, 1), 365);
+    const since = new Date(Date.now() - window * 24 * 60 * 60 * 1000);
+
+    const TYPE_PATH: Record<string, string> = {
+      clothing: '$p.clothing.taxonomy.product_type',
+      accessory: '$p.accessory.taxonomy.product_type',
+      // Fabric has no taxonomy block; its type sits on the sub-document.
+      fabric: '$p.fabric.product_type',
+    };
+    const typePath = TYPE_PATH[kind];
+    if (!typePath) {
+      throw new BadRequestException(
+        'kind must be one of clothing, fabric or accessory.',
+      );
+    }
+
+    const windowMatch = {
+      status: { $in: REVENUE_STATUSES },
+      createdAt: { $gte: since },
+    };
+
+    // What this vendor sold directly. The $unwind of the product lookup drops
+    // bespoke items on purpose - they carry no catalogue product, so they
+    // belong to no product type.
+    const sold = await this.orderModel.aggregate([
+      { $match: windowMatch },
+      { $unwind: '$items' },
+      { $match: { 'items.business': bid } },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'p',
+        },
+      },
+      { $unwind: '$p' },
+      { $match: { 'p.kind': kind } },
+      {
+        $group: {
+          _id: { $ifNull: [typePath, 'Uncategorised'] },
+          revenue: { $sum: { $ifNull: ['$items.total_price', 0] } },
+          orders: { $sum: 1 },
+        },
+      },
+    ]);
+
+    /**
+     * Fabric the vendor sold into someone else's garment.
+     *
+     * That revenue is billed as the tailor's item.pricing.external_fabric and
+     * deliberately kept out of their total_price, so the item belongs to the
+     * tailor's business and the pass above cannot see it. Without this the
+     * fabric page would understate a vendor whose cloth other tailors use -
+     * which is the whole point of selling fabric on a marketplace.
+     */
+    const supplied =
+      kind === 'fabric'
+        ? await this.orderModel.aggregate([
+            { $match: windowMatch },
+            { $unwind: '$items' },
+            {
+              $match: {
+                'items.applied_fabric': { $ne: null },
+                'items.pricing.external_fabric': { $gt: 0 },
+              },
+            },
+            {
+              $lookup: {
+                from: 'products',
+                localField: 'items.applied_fabric',
+                foreignField: '_id',
+                as: 'p',
+              },
+            },
+            { $unwind: '$p' },
+            { $match: { 'p.business': bid, 'p.kind': 'fabric' } },
+            {
+              $group: {
+                _id: { $ifNull: [typePath, 'Uncategorised'] },
+                revenue: { $sum: '$items.pricing.external_fabric' },
+                orders: { $sum: 1 },
+              },
+            },
+          ])
+        : [];
+
+    const merged = new Map<string, SalesByTypeRow>();
+    for (const row of [...sold, ...supplied]) {
+      const name = String(row._id || 'Uncategorised');
+      const current = merged.get(name) ?? { name, revenue: 0, orders: 0 };
+      current.revenue += row.revenue || 0;
+      current.orders += row.orders || 0;
+      merged.set(name, current);
+    }
+
+    const data = [...merged.values()].sort((a, b) => b.revenue - a.revenue);
+
+    return {
+      data,
+      meta: {
+        kind,
+        days: window,
+        from: since.toISOString(),
+        to: new Date().toISOString(),
+        total_revenue: data.reduce((sum, row) => sum + row.revenue, 0),
+        total_orders: data.reduce((sum, row) => sum + row.orders, 0),
+      },
+    };
+  }
+
+
+  /**
+   * How many products of one kind this vendor has, and how many are archived.
+   *
+   * A vendor "delete" is a soft archive - deleteProduct sets the status rather
+   * than removing the document - so the archived count is the vendor's own
+   * retired listings, and it is worth showing them that it is not zero.
+   *
+   * Counted straight from the catalogue rather than from the table's paging
+   * total, which narrows as soon as someone types in the search box.
+   */
+  async catalogueCounts(
+    business: Types.ObjectId | string,
+    kind: 'clothing' | 'fabric' | 'accessory',
+  ): Promise<{ data: Record<string, number> }> {
+    const rows = await this.productModel.aggregate([
+      { $match: { business: new Types.ObjectId(String(business)), kind } },
+      { $group: { _id: '$status', n: { $sum: 1 } } },
+    ]);
+
+    const by = (status: ProductStatus) =>
+      rows.find((r) => r._id === status)?.n ?? 0;
+
+    return {
+      data: {
+        total: rows.reduce((sum, r) => sum + (r.n || 0), 0),
+        active: by(ProductStatus.ACTIVE),
+        draft: by(ProductStatus.DRAFT),
+        archived: by(ProductStatus.ARCHIVED),
+        scheduled: by(ProductStatus.SCHEDULED),
+      },
+    };
+  }
+
 }
