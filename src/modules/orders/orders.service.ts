@@ -2328,6 +2328,16 @@ export class OrderService {
             'accessory.name accessory.images fabric.name fabric.images',
         )
         .populate('items.business', 'business_name business_logo_url')
+        // The fabric the customer applied to a garment. The vendor read has
+        // always populated this; the customer read never did, so the fabric
+        // they chose was absent from their own order and the charge for it
+        // had nothing to label it — a receipt that did not add up to what
+        // they paid.
+        .populate({
+          path: 'items.applied_fabric',
+          select: 'fabric.name fabric.images business',
+          populate: { path: 'business', select: 'business_name' },
+        })
         .populate('customer', 'firstName lastName email')
         // Bespoke orders have no catalog product — bring the design so the
         // customer's order shows the outfit name + image.
