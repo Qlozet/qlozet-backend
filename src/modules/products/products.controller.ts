@@ -61,6 +61,31 @@ export class ProductsController {
     private moduleRef: ModuleRef,
   ) {}
 
+  // ---------------- CATALOGUE STATS ----------------
+  @Get('stats/sales-by-type')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({
+    summary: 'Revenue and order count per product type, for one product kind',
+  })
+  @ApiQuery({ name: 'kind', enum: ['clothing', 'fabric', 'accessory'] })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    description: 'Window in days (1-365, default 90)',
+  })
+  @ApiResponse({ status: 200, description: 'Sales broken down by product type' })
+  async salesByProductType(
+    @Req() req: any,
+    @Query('kind') kind: 'clothing' | 'fabric' | 'accessory',
+    @Query('days') days?: string,
+  ) {
+    return this.productService.salesByProductType(
+      req.business?.id,
+      kind,
+      days ? Number(days) : undefined,
+    );
+  }
+
   // ---------------- CLOTHING ----------------
   @Post('clothing')
   @Roles(UserType.VENDOR)
