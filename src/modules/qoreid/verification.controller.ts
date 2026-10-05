@@ -14,6 +14,8 @@ import { Model } from 'mongoose';
 import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { UserType } from '../ums/schemas/user.schema';
 import {
   Business,
@@ -132,6 +134,7 @@ export class VerificationController {
 
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Get()
   @ApiOperation({ summary: 'Current verification state for my business' })
   async state(@Req() req: any) {
@@ -190,6 +193,7 @@ export class VerificationController {
 
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('identity/vnin')
   @ApiOperation({ summary: 'Verify my identity with a virtual NIN (vNIN)' })
   async verifyVnin(@Req() req: any, @Body() dto: VerifyVninDto) {
@@ -235,6 +239,7 @@ export class VerificationController {
 
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('business/cac')
   @ApiOperation({ summary: 'Verify my CAC registration (Registered Business badge)' })
   async verifyCac(@Req() req: any, @Body() dto: VerifyCacDto) {
@@ -270,6 +275,7 @@ export class VerificationController {
    * business must not already be in a state an admin owns.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('session')
   @ApiOperation({ summary: 'Start a verification run (hosted QoreID flow)' })
   async startSession(@Req() req: any) {
@@ -357,6 +363,7 @@ export class VerificationController {
    * is what makes the record worth keeping.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Get('service-agreement')
   @ApiOperation({ summary: 'The vendor service agreement text' })
   async serviceAgreement(@Query('version') version?: string) {
@@ -384,6 +391,7 @@ export class VerificationController {
    * nobody displayed.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('service-agreement')
   @ApiOperation({ summary: 'Accept the vendor service agreement' })
   async acceptAgreement(@Req() req: any, @Body() dto: AcceptAgreementDto) {
@@ -421,6 +429,7 @@ export class VerificationController {
    * must have returned something to review.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('submit')
   @ApiOperation({ summary: 'Submit my business for review' })
   async submitForReview(@Req() req: any) {
@@ -484,6 +493,7 @@ export class VerificationController {
    * which put a legal document on the same footing as a logo.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('business/cac/document')
   @ApiOperation({ summary: 'File my CAC certificate as supporting evidence' })
   async fileCacDocument(@Req() req: any, @Body() dto: CacDocumentDto) {
@@ -513,6 +523,7 @@ export class VerificationController {
    * details, one source of truth for the bank account.
    */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('bank/payout')
   @ApiOperation({ summary: 'Verify my linked payout account matches my identity' })
   async verifyPayoutBank(@Req() req: any) {
@@ -559,6 +570,7 @@ export class VerificationController {
 
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('bank')
   @ApiOperation({ summary: 'Verify my payout bank account (NUBAN)' })
   async verifyBank(@Req() req: any, @Body() dto: VerifyBankDto) {
