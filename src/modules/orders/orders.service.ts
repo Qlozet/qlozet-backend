@@ -1829,19 +1829,71 @@ export class OrderService {
             shipmentBizId(s) === bid &&
             s.shipment_type === ShipmentType.VENDOR_TO_CUSTOMER,
         )?.shipping_fee ?? 0;
+      // Fabric on this order that belongs to THIS vendor.
+      //
+      // The applied-fabric charge is billed as each item's
+      // pricing.external_fabric and kept out of the item's total_price,
+      // because for a cross-vendor order it is the other vendor's money. When
+      // a vendor supplies fabric for their own garment it is their money, and
+      // they were credited for it — but this branch returns before the
+      // fabric-vendor view below, so the order showed the garment price alone
+      // and the fabric earning appeared nowhere. The vendor sees a payout
+      // larger than any order explains.
+      //
+      // Scoped by owner, so a tailor using someone else's fabric still gets
+      // zero here and the figures are unchanged for them.
+    const fabricOwnerId = (it: any): string | null => {
+        const applied = it?.applied_fabric;
+        return applied && typeof applied === 'object'
+          ? String(applied.business?._id ?? applied.business)
+          : null;
+      };
+
+      const ownFabricValue = myItems.reduce(
+        (sum, it: any) =>
+          fabricOwnerId(it) === bid
+            ? sum + (it?.pricing?.external_fabric || 0)
+            : sum,
+        0,
+      );
+
+      // Same formula as recordBusinessEarnings, so value − commission here
+      // equals what actually reached the wallet.
+      const cType = commission?.type ?? 'percent';
+      const cPercent = commission?.percent ?? 10;
+      const cFlat = commission?.flat ?? 0;
+      const ownFabricCommission =
+        ownFabricValue <= 0
+          ? 0
+          : cType === 'fixed'
+            ? Math.min(cFlat, ownFabricValue)
+            : ownFabricValue * (cPercent / 100);
+      const ownFabricNet = ownFabricValue - ownFabricCommission;
+
       return {
         ...order,
-        items: myItems,
+        // Flagged here rather than left to the client to compare ids: the
+        // console cannot otherwise tell "the customer brought someone else's
+        // fabric" from "this is my fabric, and I was paid for it", and those
+        // read very differently to the vendor doing the work.
+        items: myItems.map((it: any) => ({
+          ...it,
+          applied_fabric_is_own: fabricOwnerId(it) === bid,
+        })),
         shipments: myShipments,
         subtotal: bd.subtotal,
         shipping_fee: myShippingFee,
-        // THIS vendor's own total — their goods + their delivery, not the whole
-        // multi-vendor basket. (The customer's external "use my own fabric"
-        // charge is the fabric vendor's revenue and is excluded from item
-        // total_price, so it isn't part of the tailor's total here.)
-        total: bd.subtotal + myShippingFee,
-        vendor_earnings: bd.net,
-        platform_commission: bd.commission,
+        // THIS vendor's own total — their goods + their delivery, not the
+        // whole multi-vendor basket, plus any of their own fabric applied to
+        // it. Another vendor's fabric is excluded, as before.
+        total: bd.subtotal + myShippingFee + ownFabricValue,
+        vendor_earnings: bd.net + ownFabricNet,
+        platform_commission: bd.commission + ownFabricCommission,
+        // Broken out so the drawer can show it as its own line rather than
+        // leaving the vendor to work out why the total moved.
+        own_fabric_value: ownFabricValue,
+        own_fabric_commission: ownFabricCommission,
+        own_fabric_net: ownFabricNet,
       };
     }
 
