@@ -248,6 +248,7 @@ export class OrderService {
             ? ObjectIdUtils.toObjectId((item as any).applied_fabric_id)
             : null,
           applied_fabric_yards: (item as any).applied_fabric_yards ?? null,
+          applied_fabric_size: (item as any).applied_fabric_size ?? null,
           // Per-item price (computed in processOrderItems). Must NOT be the
           // whole-order total, otherwise recordBusinessEarnings over-credits
           // each vendor on multi-item orders.
@@ -1001,6 +1002,7 @@ export class OrderService {
           // Carry the customer's applied external fabric through so it lands on
           // the persisted order item (normalizedItems below reads these).
           applied_fabric_id: item.applied_fabric_id,
+          applied_fabric_size: (item as any).applied_fabric_size,
           applied_fabric_yards: item.applied_fabric_yards,
           total_price: totalPrice,
           pricing,

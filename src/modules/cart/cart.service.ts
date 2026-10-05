@@ -36,6 +36,8 @@ export class CartService {
     appliedFabricYards?: number,
     note?: string,
     selections?: OrderItemSelectionsDto,
+    // Trailing so existing positional callers are unaffected.
+    appliedFabricSize?: string,
   ): Promise<CartDocument> {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -139,6 +141,7 @@ export class CartService {
         product_id: new Types.ObjectId(productId),
         applied_fabric_id: fabricObjectId || undefined,
         applied_fabric_yards: appliedFabricYards || undefined,
+        applied_fabric_size: appliedFabricSize || undefined,
         selections: selections as any,
         quantity,
         unit_price: unitPrice,

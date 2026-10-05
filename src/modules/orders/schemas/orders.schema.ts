@@ -174,6 +174,13 @@ export class OrderItem {
   @Prop({ type: Number, default: null })
   applied_fabric_yards?: number;
 
+  /** Garment size when the customer supplied the fabric. Without it the
+   *  size travels only on a colour-variant selection, which such an order
+   *  must not carry - the garment is cut from the supplied cloth, not
+   *  taken off the shelf. */
+  @Prop({ type: String, default: null })
+  applied_fabric_size?: string;
+
   @Prop({ type: String })
   note?: string;
 
