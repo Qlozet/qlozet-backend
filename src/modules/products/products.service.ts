@@ -2982,7 +2982,10 @@ export class ProductService {
     business: Types.ObjectId | string,
     kind: 'clothing' | 'fabric' | 'accessory',
     days = 90,
-  ): Promise<{ data: SalesByTypeRow[]; meta: Record<string, any> }> {
+  ): Promise<{
+    message: string;
+    data: { rows: SalesByTypeRow[]; meta: Record<string, any> };
+  }> {
     // req.business.id is Mongoose's virtual, so it arrives as a string. A
     // find() would cast it against the schema; an aggregation pipeline does
     // not, and a string $match against an ObjectId field silently matches
@@ -3086,15 +3089,23 @@ export class ProductService {
 
     const data = [...merged.values()].sort((a, b) => b.revenue - a.revenue);
 
+    // The { message, data } envelope is what CustomResponseInterceptor
+    // un-nests. Returning a bare { data, meta } instead leaves the whole
+    // object sitting under `data`, so the client reads data.data - which is
+    // how this first shipped, and it put an object where the page expected an
+    // array.
     return {
-      data,
-      meta: {
-        kind,
-        days: window,
-        from: since.toISOString(),
-        to: new Date().toISOString(),
-        total_revenue: data.reduce((sum, row) => sum + row.revenue, 0),
-        total_orders: data.reduce((sum, row) => sum + row.orders, 0),
+      message: 'Sales by product type',
+      data: {
+        rows: data,
+        meta: {
+          kind,
+          days: window,
+          from: since.toISOString(),
+          to: new Date().toISOString(),
+          total_revenue: data.reduce((sum, row) => sum + row.revenue, 0),
+          total_orders: data.reduce((sum, row) => sum + row.orders, 0),
+        },
       },
     };
   }
@@ -3113,7 +3124,7 @@ export class ProductService {
   async catalogueCounts(
     business: Types.ObjectId | string,
     kind: 'clothing' | 'fabric' | 'accessory',
-  ): Promise<{ data: Record<string, number> }> {
+  ): Promise<{ message: string; data: Record<string, number> }> {
     const rows = await this.productModel.aggregate([
       { $match: { business: new Types.ObjectId(String(business)), kind } },
       { $group: { _id: '$status', n: { $sum: 1 } } },
@@ -3123,6 +3134,7 @@ export class ProductService {
       rows.find((r) => r._id === status)?.n ?? 0;
 
     return {
+      message: 'Catalogue counts',
       data: {
         total: rows.reduce((sum, r) => sum + (r.n || 0), 0),
         active: by(ProductStatus.ACTIVE),
