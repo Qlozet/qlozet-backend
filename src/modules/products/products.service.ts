@@ -2979,10 +2979,15 @@ export class ProductService {
    * slice for a line the vendor stopped making two years ago.
    */
   async salesByProductType(
-    business: Types.ObjectId,
+    business: Types.ObjectId | string,
     kind: 'clothing' | 'fabric' | 'accessory',
     days = 90,
   ): Promise<{ data: SalesByTypeRow[]; meta: Record<string, any> }> {
+    // req.business.id is Mongoose's virtual, so it arrives as a string. A
+    // find() would cast it against the schema; an aggregation pipeline does
+    // not, and a string $match against an ObjectId field silently matches
+    // nothing - an empty chart rather than an error.
+    const bid = new Types.ObjectId(String(business));
     const window = Math.min(Math.max(Number(days) || 90, 1), 365);
     const since = new Date(Date.now() - window * 24 * 60 * 60 * 1000);
 
@@ -3010,7 +3015,7 @@ export class ProductService {
     const sold = await this.orderModel.aggregate([
       { $match: windowMatch },
       { $unwind: '$items' },
-      { $match: { 'items.business': business } },
+      { $match: { 'items.business': bid } },
       {
         $lookup: {
           from: 'products',
@@ -3059,7 +3064,7 @@ export class ProductService {
               },
             },
             { $unwind: '$p' },
-            { $match: { 'p.business': business, 'p.kind': 'fabric' } },
+            { $match: { 'p.business': bid, 'p.kind': 'fabric' } },
             {
               $group: {
                 _id: { $ifNull: [typePath, 'Uncategorised'] },
@@ -3090,6 +3095,40 @@ export class ProductService {
         to: new Date().toISOString(),
         total_revenue: data.reduce((sum, row) => sum + row.revenue, 0),
         total_orders: data.reduce((sum, row) => sum + row.orders, 0),
+      },
+    };
+  }
+
+
+  /**
+   * How many products of one kind this vendor has, and how many are archived.
+   *
+   * A vendor "delete" is a soft archive - deleteProduct sets the status rather
+   * than removing the document - so the archived count is the vendor's own
+   * retired listings, and it is worth showing them that it is not zero.
+   *
+   * Counted straight from the catalogue rather than from the table's paging
+   * total, which narrows as soon as someone types in the search box.
+   */
+  async catalogueCounts(
+    business: Types.ObjectId | string,
+    kind: 'clothing' | 'fabric' | 'accessory',
+  ): Promise<{ data: Record<string, number> }> {
+    const rows = await this.productModel.aggregate([
+      { $match: { business: new Types.ObjectId(String(business)), kind } },
+      { $group: { _id: '$status', n: { $sum: 1 } } },
+    ]);
+
+    const by = (status: ProductStatus) =>
+      rows.find((r) => r._id === status)?.n ?? 0;
+
+    return {
+      data: {
+        total: rows.reduce((sum, r) => sum + (r.n || 0), 0),
+        active: by(ProductStatus.ACTIVE),
+        draft: by(ProductStatus.DRAFT),
+        archived: by(ProductStatus.ARCHIVED),
+        scheduled: by(ProductStatus.SCHEDULED),
       },
     };
   }

@@ -86,6 +86,18 @@ export class ProductsController {
     );
   }
 
+  @Get('stats/counts')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({ summary: 'Catalogue counts by status, for one product kind' })
+  @ApiQuery({ name: 'kind', enum: ['clothing', 'fabric', 'accessory'] })
+  @ApiResponse({ status: 200, description: 'Total, active, draft, archived' })
+  async catalogueCounts(
+    @Req() req: any,
+    @Query('kind') kind: 'clothing' | 'fabric' | 'accessory',
+  ) {
+    return this.productService.catalogueCounts(req.business?.id, kind);
+  }
+
   // ---------------- CLOTHING ----------------
   @Post('clothing')
   @Roles(UserType.VENDOR)
