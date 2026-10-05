@@ -180,6 +180,7 @@ export class WalletsController {
 
   /** Return the vendor's currently linked payout account (masked). */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Get('payout-account')
   @ApiOperation({ summary: 'Get the vendor’s linked payout account' })
   async getPayoutAccount(@Req() req: any) {
@@ -192,6 +193,7 @@ export class WalletsController {
 
   /** Resolve an account number → account name before linking (confirmation). */
   @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Post('payout-account/resolve')
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
