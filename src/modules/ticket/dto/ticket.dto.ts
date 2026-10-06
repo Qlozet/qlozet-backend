@@ -1,10 +1,15 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  PartialType,
+} from '@nestjs/swagger';
 import {
   IsNotEmpty,
   IsOptional,
   IsString,
   IsArray,
   IsIn,
+  IsMongoId,
 } from 'class-validator';
 
 export class CreateTicketDto {
@@ -37,6 +42,22 @@ export class CreateTicketDto {
   @IsArray()
   @IsOptional()
   attachments?: string[];
+
+  /**
+   * The vendor a customer is reporting.
+   *
+   * Named apart from the schema's `business` on purpose: that column means
+   * "whose ticket is this" when a vendor raises one, and "who is being
+   * reported" when a customer does. Letting a client write `business`
+   * directly would let a customer file a ticket as a vendor, so the mapping
+   * happens in the service rather than through a spread.
+   */
+  @ApiPropertyOptional({
+    description: 'Business being reported (customer store reports only)',
+  })
+  @IsMongoId()
+  @IsOptional()
+  reported_business?: string;
 }
 
 export class UpdateTicketDto extends PartialType(CreateTicketDto) {

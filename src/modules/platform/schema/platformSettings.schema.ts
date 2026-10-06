@@ -125,6 +125,19 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 10 })
   product_image_max_mb: number;
 
+  /**
+   * Read the text inside product photos and refuse any carrying contact
+   * details, so a phone number cannot simply move from the description into
+   * the image.
+   *
+   * Off by default on purpose: this uses Cloudinary's OCR add-on, which is
+   * billed per upload and which Cloudinary rejects outright if the account has
+   * no subscription - turning it on blind would stop every product upload.
+   * Subscribe first, then switch this on.
+   */
+  @Prop({ type: Boolean, default: false })
+  product_image_scan_text: boolean;
+
   // Availability thresholds. A variant at/under `low_stock_threshold` units (or a
   // fabric with fewer than `low_fabric_yards` yards left) is flagged "low stock".
   @Prop({ type: Number, default: 5 })

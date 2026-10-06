@@ -35,6 +35,7 @@ import {
   documentUploadOptions,
   IMAGE_UPLOAD,
 } from '../../common/validation/image-upload';
+import { findContactDetail } from '../products/listing-rules';
 
 @ApiTags('Uploads')
 @ApiBearerAuth('access-token')
@@ -64,6 +65,7 @@ export class UploadController {
   private async imageLimits(): Promise<{
     maxBytes: number;
     minShortEdge: number;
+    scanText: boolean;
   }> {
     const settings: any = await this.platformSettingsModel
       .findOne()
@@ -84,6 +86,10 @@ export class UploadController {
         Number.isFinite(minEdge) && minEdge >= 0
           ? minEdge
           : IMAGE_UPLOAD.MIN_PRODUCT_SHORT_EDGE,
+      // Off unless an admin turns it on. The OCR add-on is billed per use and
+      // asking for it without a subscription makes Cloudinary reject the
+      // upload outright, so the default has to be the safe one.
+      scanText: settings?.product_image_scan_text === true,
     };
   }
 
@@ -194,11 +200,43 @@ export class UploadController {
   })
   async uploadProductImage(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file uploaded');
-    const { maxBytes, minShortEdge } = await this.imageLimits();
+    const { maxBytes, minShortEdge, scanText } = await this.imageLimits();
     // Product photos carry the storefront, so these get the resolution floor.
     assertValidImage(file, { label: 'product photo', maxBytes, minShortEdge });
 
-    const result = await this.cloudinaryService.uploadFile(file, 'products');
+    const result = await this.cloudinaryService.uploadFile(file, 'products', {
+      scanText,
+    });
+
+    /**
+     * A vendor who cannot put a phone number in the description will put it in
+     * the photo - that is the ordinary next move, not a rare abuse. Without
+     * this the text rule on titles and descriptions is a speed bump.
+     *
+     * Checked here rather than at publish so the vendor learns which photo is
+     * the problem while they are still looking at it.
+     *
+     * Reads as permission when OCR returns nothing: the add-on may be off, or
+     * may simply have found no text. Treating silence as a violation would
+     * block every upload the moment the subscription lapsed.
+     */
+    const found = result.detectedText
+      ? findContactDetail(result.detectedText)
+      : null;
+
+    if (found) {
+      // The image is already in Cloudinary at this point; drop it rather than
+      // leave an orphan nobody will ever clean up.
+      await this.cloudinaryService
+        .deleteFile(result.filePublicId)
+        .catch(() => undefined);
+
+      throw new BadRequestException(
+        `This photo has ${found} printed on it. Remove it and upload again — ` +
+          'orders and messages go through Qlozet.',
+      );
+    }
+
     return {
       message: 'Product image uploaded successfully',
       data: {

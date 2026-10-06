@@ -39,7 +39,6 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
-import { sanitizeBusiness } from 'src/common/utils/sanitization';
 import { CAPACITY_OCCUPYING_STATUSES } from '../orders/schemas/orders.schema';
 import {
   Token,
@@ -802,7 +801,12 @@ export class BusinessService {
           city: 1,
           state: 1,
           country: 1,
-          website: 1,
+          // website is deliberately absent. A vendor's own site is a competing
+          // checkout carrying the same garments at no commission, and linking
+          // it from our storefront puts the exit one click from the buy
+          // button. Social handles stay: a handle is identity, and a customer
+          // can find the brand on Instagram with or without our help - a
+          // direct path to another till is a different thing.
           social_links: 1,
           cumulative_rating: 1,
           total_number_of_ratings: 1,
@@ -1415,9 +1419,26 @@ export class BusinessService {
       }),
     ]);
 
-    // Sanitize after fetching from DB
-    const sanitizedBusinesses = businesses.map((business) => ({
-      ...sanitizeBusiness(business),
+    /**
+     * Deliberately not sanitizeBusiness: that carries business_email and
+     * business_phone_number, which this endpoint was handing to any customer
+     * who followed a vendor. Following happens while browsing, long before an
+     * order exists, so there is no reason for contact details to travel with
+     * it - unlike an order, where the customer has a live reason to call.
+     *
+     * The list only ever renders a name, a logo and a link.
+     */
+    const sanitizedBusinesses = businesses.map((business: any) => ({
+      _id: business._id,
+      business_name: business.business_name,
+      business_logo_url: business.business_logo_url,
+      display_picture_url: business.display_picture_url,
+      cover_image_url: business.cover_image_url,
+      status: business.status,
+      city: business.city,
+      state: business.state,
+      country: business.country,
+      is_active: business.is_active,
       following: true,
     }));
 

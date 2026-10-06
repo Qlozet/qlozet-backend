@@ -2,6 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
 import { MulterFile } from 'src/common/types/upload';
 
+/**
+ * Pull the text Cloudinary's OCR add-on found, if it ran at all.
+ *
+ * Deliberately forgiving. The add-on may be off, the response shape may
+ * change, or OCR may simply find nothing - and none of those are a reason to
+ * fail an upload. Returning undefined means "we did not learn anything", which
+ * callers treat as permission to continue rather than as a violation.
+ */
+function readOcrText(result: Record<string, any>): string | undefined {
+  try {
+    const annotation =
+      result?.info?.ocr?.adv_ocr?.data?.[0]?.textAnnotations?.[0]?.description;
+    const text = typeof annotation === 'string' ? annotation.trim() : '';
+    return text || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 @Injectable()
 export class CloudinaryService {
   async uploadBase64(base64: string, folderName: string) {
@@ -19,6 +38,8 @@ export class CloudinaryService {
           resolve({
             fileUrl: result.secure_url,
             filePublicId: result.public_id,
+            width: result.width,
+            height: result.height,
           });
         },
       );
@@ -38,15 +59,35 @@ export class CloudinaryService {
     return path;
   }
 
+  /**
+   * Cloudinary reports the stored dimensions on every upload, and the product
+   * image schema has had width/height fields all along - they were simply
+   * never populated, because this resolved only the url and the id. Carrying
+   * them through is what makes any image-quality rule possible: a listing
+   * check cannot ask how big a photo is after the fact without re-fetching it
+   * from Cloudinary one image at a time.
+   */
   async uploadFile(
     file: MulterFile,
     folderName: string,
-  ): Promise<{ fileUrl: string; filePublicId: string }> {
+    options: { scanText?: boolean } = {},
+  ): Promise<{
+    fileUrl: string;
+    filePublicId: string;
+    width?: number;
+    height?: number;
+    detectedText?: string;
+  }> {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: folderName,
           resource_type: 'auto',
+          // Cloudinary's OCR add-on, billed per use and off unless an admin
+          // turns it on. Asking for it without a subscription makes Cloudinary
+          // reject the upload, which is why the caller decides rather than
+          // this being always-on.
+          ...(options.scanText ? { ocr: 'adv_ocr' } : {}),
         },
         (error, result) => {
           if (error) {
@@ -55,7 +96,13 @@ export class CloudinaryService {
           if (!result) {
             return reject(new Error('Upload result is undefined'));
           }
-          resolve({ fileUrl: result.secure_url, filePublicId: result.public_id });
+          resolve({
+            fileUrl: result.secure_url,
+            filePublicId: result.public_id,
+            width: result.width,
+            height: result.height,
+            detectedText: readOcrText(result),
+          });
         },
       );
 

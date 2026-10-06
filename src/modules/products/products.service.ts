@@ -21,6 +21,7 @@ import { Utils } from '../../common/utils/pagination';
 import { percentageChange } from '../../common/utils/percentageChange';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
+import { assertPublishable } from './listing-rules';
 
 /**
  * Order statuses that count as revenue. Matches the assistant's analytics
@@ -444,12 +445,33 @@ export class ProductService {
      * item in the catalogue.
      */
     const resolvedPrice = totalPrice ?? 0;
-    const assertPriced = (status: ProductStatus) => {
-      if (status !== ProductStatus.DRAFT && !(resolvedPrice > 0)) {
+
+    /**
+     * Everything a listing must clear to face customers. Drafts are exempt
+     * throughout: a draft is a workbench, and rules that fire while someone is
+     * still typing teach people to work around them rather than meet them.
+     */
+    const assertFitToPublish = (status: ProductStatus) => {
+      if (status === ProductStatus.DRAFT) return;
+
+      if (!(resolvedPrice > 0)) {
         throw new BadRequestException(
           'Set a price above zero before publishing this product, or save it as a draft.',
         );
       }
+
+      const detail = (dto as any)[kind] ?? {};
+      assertPublishable({
+        title: detail.name ?? dto.seo?.title,
+        description: detail.description,
+        images: detail.images,
+        // Clothing carries its sizes under colour variants; fabric and
+        // accessory keep a flat variant list. Flatten both to the one shape
+        // the stock check needs.
+        variants: Array.isArray(detail.color_variants)
+          ? detail.color_variants.flatMap((c: any) => c?.variants ?? [])
+          : (detail.variants ?? []),
+      });
     };
 
     // Reject duplicate SKUs before anything is written, so a clash can never
@@ -469,7 +491,7 @@ export class ProductService {
         const { product_id, ...safeData } = dto;
 
         const status = requestedStatus ?? existing.status;
-        assertPriced(status);
+        assertFitToPublish(status);
 
         Object.assign(existing, {
           ...safeData,
@@ -492,7 +514,7 @@ export class ProductService {
 
     // 3. Otherwise create new product
     const status = requestedStatus ?? ProductStatus.DRAFT;
-    assertPriced(status);
+    assertFitToPublish(status);
 
     const created = await this.productModel.create({
       ...dto,

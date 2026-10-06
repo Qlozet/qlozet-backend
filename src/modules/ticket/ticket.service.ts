@@ -109,10 +109,19 @@ export class TicketService {
   /** Customer-raised ticket — personal, no business attached. */
   async createForCustomer(customerId: string, dto: CreateTicketDto) {
     const attachments = dto.attachments ?? dto.images ?? [];
+
+    // Pulled out of the spread: a customer must not be able to set `business`
+    // itself, which would file their ticket as though a vendor raised it.
+    const { reported_business, ...rest } = dto;
+
     const ticket = await this.ticketModel.create({
+      ...rest,
       customer: new Types.ObjectId(customerId),
-      business: null,
-      ...dto,
+      // Set only for a store report. An ordinary customer ticket belongs to
+      // no vendor, which is what keeps the two readable apart in the queue.
+      business: reported_business
+        ? new Types.ObjectId(reported_business)
+        : null,
       attachments,
     });
     this.logActivity(
@@ -466,9 +475,18 @@ export class TicketService {
       filter.status = query.status;
     }
 
-    // Vendor filtering
+    /**
+     * Vendor filtering.
+     *
+     * `customer: null` is doing real work here, not tidying. A customer
+     * reporting a store files a ticket whose `business` is the reported
+     * vendor, so scoping on business alone would show vendors every complaint
+     * made against them - with the reporter's identity attached. A vendor sees
+     * the tickets they raised; reports about them go to admins only.
+     */
     if (business) {
       filter.business = business;
+      filter.customer = null;
     }
 
     // Originator filter (admin console): customer-raised vs vendor-raised.
@@ -527,7 +545,12 @@ export class TicketService {
     if (businessId) {
       const owner =
         (ticket.business as any)?._id ?? (ticket.business as any) ?? null;
-      if (!owner || String(owner) !== String(businessId)) {
+      // A store report also carries the reported vendor as `business`, so
+      // ownership alone is not enough: without the customer check a vendor
+      // could open a complaint about themselves by id and read the reporter's
+      // name and email straight off it.
+      const isCustomerReport = Boolean(ticket.customer);
+      if (!owner || String(owner) !== String(businessId) || isCustomerReport) {
         // Diagnostic breadcrumb: shows exactly what the ownership check
         // compared when a vendor is denied a ticket (visible in fly logs).
         this.logger.warn(
