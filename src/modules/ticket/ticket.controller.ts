@@ -11,6 +11,7 @@ import {
   UsePipes,
   Query,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -42,6 +43,10 @@ export class TicketController {
   // raise personal ones (the shop Help Center's "Contact support").
   @Roles(UserType.VENDOR, UserType.CUSTOMER)
   @Post()
+  // Reporting a store is a weapon if it is free: one rival can bury another
+  // under complaints. Slow enough that a genuine report is unimpeded and a
+  // campaign is not.
+  @Throttle({ short: { limit: 1, ttl: 2000 }, long: { limit: 10, ttl: 3600000 } })
   @ApiOperation({ summary: 'Create a support ticket (vendor or customer)' })
   async create(@Req() req, @Body() dto: CreateTicketDto) {
     if (req.business?.id) {
