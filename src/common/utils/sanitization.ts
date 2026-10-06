@@ -6,6 +6,9 @@ import { UserDocument } from '../../modules/ums/schemas';
 export const sanitizeUser = (user: UserDocument) => {
   const userObj = user.toObject();
   delete userObj.hashed_password;
+  // The Google sign-in path selects this explicitly, so it would otherwise
+  // ride along in the response. The client has no use for it.
+  delete userObj.google_id;
   delete userObj.email_verification_token;
   delete userObj.email_verification_expires;
   delete userObj.refreshToken;

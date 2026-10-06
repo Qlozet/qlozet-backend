@@ -3,3 +3,4 @@ import { CustomerRegistrationDto } from './customer-register.dto';
 import { VendorResponseDto } from './register-response.dto';
 
 export { VendorRegisterDto, CustomerRegistrationDto, VendorResponseDto };
+export * from './google-login.dto';

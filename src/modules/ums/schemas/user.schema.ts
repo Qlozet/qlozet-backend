@@ -3,6 +3,18 @@ import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type UserDocument = User & Document;
 
+/**
+ * How this account signs in.
+ *
+ * An enum rather than a boolean because Apple's App Store requires Sign in
+ * with Apple alongside Google in any iOS app that offers Google, so a third
+ * value is a question of when, not if.
+ */
+export enum AuthProvider {
+  LOCAL = 'local',
+  GOOGLE = 'google',
+}
+
 export enum UserType {
   PLATFORM = 'platform',
   ADMIN = 'platform', // alias for PLATFORM
@@ -21,8 +33,25 @@ export class User extends Document {
   @Prop({ required: false, unique: true, sparse: true })
   phone_number?: string;
 
-  @Prop({ required: true, select: false })
-  hashed_password: string;
+  /**
+   * Absent for accounts that only ever signed in through a provider. Code
+   * that compares a password must check this exists first - bcrypt.compare
+   * against undefined throws rather than returning false.
+   */
+  @Prop({ required: false, select: false })
+  hashed_password?: string;
+
+  @Prop({
+    required: true,
+    enum: AuthProvider,
+    default: AuthProvider.LOCAL,
+    index: true,
+  })
+  auth_provider: AuthProvider;
+
+  /** Google's stable subject id. Sparse: only provider accounts carry one. */
+  @Prop({ required: false, unique: true, sparse: true, select: false })
+  google_id?: string;
 
   @Prop({ required: true, enum: UserType, default: UserType.CUSTOMER })
   type: UserType;

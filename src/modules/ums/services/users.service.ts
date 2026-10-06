@@ -1039,6 +1039,14 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    if (!user.hashed_password) {
+      // Provider-only account: there is no current password to verify, and
+      // no password to change. Setting a first one is a separate flow.
+      throw new BadRequestException(
+        'This account signs in with Google and has no password to change.',
+      );
+    }
+
     const validCurrentPassword = await bcrypt.compare(
       currentPassword,
       user.hashed_password,
@@ -1138,6 +1146,13 @@ export class UserService {
         .populate('role');
 
       if (!user) {
+        return null;
+      }
+
+      // A provider account has no password to validate against. Guard before
+      // comparing: bcrypt.compare throws on undefined rather than returning
+      // false.
+      if (!user.hashed_password) {
         return null;
       }
 
