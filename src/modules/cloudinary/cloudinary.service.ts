@@ -19,6 +19,8 @@ export class CloudinaryService {
           resolve({
             fileUrl: result.secure_url,
             filePublicId: result.public_id,
+            width: result.width,
+            height: result.height,
           });
         },
       );
@@ -38,10 +40,23 @@ export class CloudinaryService {
     return path;
   }
 
+  /**
+   * Cloudinary reports the stored dimensions on every upload, and the product
+   * image schema has had width/height fields all along - they were simply
+   * never populated, because this resolved only the url and the id. Carrying
+   * them through is what makes any image-quality rule possible: a listing
+   * check cannot ask how big a photo is after the fact without re-fetching it
+   * from Cloudinary one image at a time.
+   */
   async uploadFile(
     file: MulterFile,
     folderName: string,
-  ): Promise<{ fileUrl: string; filePublicId: string }> {
+  ): Promise<{
+    fileUrl: string;
+    filePublicId: string;
+    width?: number;
+    height?: number;
+  }> {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -55,7 +70,12 @@ export class CloudinaryService {
           if (!result) {
             return reject(new Error('Upload result is undefined'));
           }
-          resolve({ fileUrl: result.secure_url, filePublicId: result.public_id });
+          resolve({
+            fileUrl: result.secure_url,
+            filePublicId: result.public_id,
+            width: result.width,
+            height: result.height,
+          });
         },
       );
 
