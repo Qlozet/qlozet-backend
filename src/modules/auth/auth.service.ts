@@ -1127,7 +1127,7 @@ export class AuthService {
     }
 
     // ---- New account -------------------------------------------------
-    const role = await this.roleModel.findOne({ name: 'customer' });
+    const role = await this.roleModel.findOne({ name: UserRole.CUSTOMER });
     if (!role) throw new BadRequestException('Customer role not found');
 
     const session = await this.connection.startSession();
