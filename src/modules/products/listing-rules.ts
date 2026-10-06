@@ -71,6 +71,24 @@ const CONTACT_PATTERNS: { label: string; pattern: RegExp }[] = [
   },
 ];
 
+/**
+ * The first kind of contact detail found in a piece of text, or null.
+ *
+ * Exported because the same question gets asked of two different things: the
+ * words a vendor types, and the words inside the photos they upload. Someone
+ * who cannot put a number in the description will put it in the image, so the
+ * two checks have to agree on what counts - one definition, used twice.
+ *
+ * Returns the first match only. Listing every pattern that fired reads as
+ * nagging when the fix is the same either way.
+ */
+export function findContactDetail(text: string): string | null {
+  for (const { label, pattern } of CONTACT_PATTERNS) {
+    if (pattern.test(text)) return label;
+  }
+  return null;
+}
+
 export interface ListingCandidate {
   title?: string | null;
   description?: string | null;
@@ -112,16 +130,14 @@ export function findListingViolations(listing: ListingCandidate): string[] {
     );
   }
 
-  // Contact details are checked across both fields: moving a phone number from
-  // the description to the title should not get it through.
-  const prose = `${title}\n${description}`;
-  for (const { label, pattern } of CONTACT_PATTERNS) {
-    if (pattern.test(prose)) {
-      problems.push(
-        `Remove ${label} from the listing. Orders and messages go through Qlozet.`,
-      );
-      break; // One message is enough; listing every pattern reads as nagging.
-    }
+  // Checked across both fields: moving a phone number from the description
+  // to the title should not get it through.
+  const found = findContactDetail(`${title}
+${description}`);
+  if (found) {
+    problems.push(
+      `Remove ${found} from the listing. Orders and messages go through Qlozet.`,
+    );
   }
 
   const images = listing.images ?? [];
