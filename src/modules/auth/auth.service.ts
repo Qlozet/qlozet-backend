@@ -8,7 +8,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { randomBytes } from 'crypto';
 import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 import {
@@ -22,6 +23,7 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { CustomerRegistrationDto, VendorRegisterDto } from './dto';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole, VendorRole } from '../ums/schemas/role.schema';
+import { AuthProvider } from '../ums/schemas/user.schema';
 import { JwtPayload, Tokens } from 'src/common/types';
 import { MailService } from '../notifications/mail/mail.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -346,33 +348,7 @@ export class AuthService {
         { session },
       );
 
-      await this.walletModel.create(
-        [
-          {
-            customer: newUser._id,
-            balance: 0,
-            currency: 'NGN',
-          },
-        ],
-        { session },
-      );
-
-      // Signup token reward — admin-tunable (0 = off). The wallet is keyed by
-      // `customer` (there is no `user` field on the Token schema; the old code
-      // wrote one and orphaned every signup grant).
-      const settings = await this.platformSettingsModel.findOne().lean();
-      const signupTokens = settings?.customer_signup_token_reward ?? 100;
-      await this.tokenModel.create(
-        [
-          {
-            customer: newUser._id,
-            tokens: signupTokens,
-            lifetimeEarned: signupTokens,
-            signup_reward_granted: signupTokens > 0,
-          },
-        ],
-        { session },
-      );
+      await this.provisionCustomer(newUser._id as Types.ObjectId, session);
 
       await session.commitTransaction();
 
@@ -405,6 +381,39 @@ export class AuthService {
     } finally {
       session.endSession();
     }
+  }
+
+  /**
+   * Everything a customer account needs besides the user document itself.
+   *
+   * Shared by email registration and by Google sign-up so a provider account
+   * cannot end up without a wallet - which would fail the first time they
+   * tried to pay from balance, long after signup, with nothing to point at.
+   */
+  private async provisionCustomer(
+    customerId: Types.ObjectId,
+    session: ClientSession,
+  ): Promise<void> {
+    await this.walletModel.create(
+      [{ customer: customerId, balance: 0, currency: 'NGN' }],
+      { session },
+    );
+
+    // Signup token reward — admin-tunable (0 = off). The grant is keyed by
+    // `customer`; there is no `user` field on the Token schema.
+    const settings = await this.platformSettingsModel.findOne().lean();
+    const signupTokens = settings?.customer_signup_token_reward ?? 100;
+    await this.tokenModel.create(
+      [
+        {
+          customer: customerId,
+          tokens: signupTokens,
+          lifetimeEarned: signupTokens,
+          signup_reward_granted: signupTokens > 0,
+        },
+      ],
+      { session },
+    );
   }
 
   /**
@@ -715,6 +724,13 @@ export class AuthService {
         );
       }
 
+      // hashed_password is optional on the schema because provider accounts have
+      // none. Guard before comparing: bcrypt.compare throws on undefined rather
+      // than returning false.
+      if (!vendor.hashed_password) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
       const validPassword = await bcrypt.compare(
         password,
         vendor.hashed_password,
@@ -881,6 +897,13 @@ export class AuthService {
         );
       }
 
+      // hashed_password is optional on the schema because provider accounts have
+      // none. Guard before comparing: bcrypt.compare throws on undefined rather
+      // than returning false.
+      if (!user.hashed_password) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
       const validPassword = await bcrypt.compare(
         password,
         user.hashed_password,
@@ -979,6 +1002,17 @@ export class AuthService {
         );
       }
 
+      if (!user.hashed_password) {
+        // Signed up through a provider and never set a password. Saying so beats
+        // "invalid credentials", which sends someone off to reset a password
+        // that does not exist.
+        throw new UnauthorizedException(
+          user.auth_provider === AuthProvider.GOOGLE
+            ? 'You signed up with Google. Use the Continue with Google button.'
+            : 'Invalid credentials',
+        );
+      }
+
       const validPassword = await bcrypt.compare(
         password,
         user.hashed_password,
@@ -1008,6 +1042,146 @@ export class AuthService {
   }
 
   /**
+   * Sign a customer in with a Google ID token.
+   *
+   * The token is verified against Google rather than trusted: a client can
+   * send any string, and decoding one without checking its signature and
+   * audience is the whole vulnerability. verifyIdToken checks the signature,
+   * the expiry, and that the token was minted for *our* client id - without
+   * the audience check an attacker could present a valid Google token issued
+   * to some other app.
+   */
+  async loginWithGoogle(idToken: string) {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      this.logger.error('GOOGLE_CLIENT_ID is not configured');
+      throw new InternalServerErrorException(
+        'Google sign-in is not available right now.',
+      );
+    }
+
+    let payload: TokenPayload | undefined;
+    try {
+      const ticket = await new OAuth2Client(clientId).verifyIdToken({
+        idToken,
+        audience: clientId,
+      });
+      payload = ticket.getPayload();
+    } catch (error) {
+      this.logger.warn(`Google token verification failed: ${error.message}`);
+      throw new UnauthorizedException('Could not verify your Google account.');
+    }
+
+    if (!payload?.email || !payload.sub) {
+      throw new UnauthorizedException('Could not verify your Google account.');
+    }
+
+    /**
+     * Google tells us whether it has verified the address. An unverified one
+     * must not be accepted: it is the difference between "Google says this
+     * person owns the mailbox" and "this person typed that address in", and
+     * the second would let anyone claim an existing account below.
+     */
+    if (payload.email_verified !== true) {
+      throw new UnauthorizedException(
+        'Your Google account email is not verified.',
+      );
+    }
+
+    const email = payload.email.toLowerCase();
+    const existing = await this.userModel
+      .findOne({ email })
+      .select('+google_id');
+
+    if (existing) {
+      if (existing.type !== UserType.CUSTOMER) {
+        throw new UnauthorizedException(
+          'This email belongs to a business account. Sign in with your password.',
+        );
+      }
+      if (existing.status !== 'active') {
+        throw new UnauthorizedException(
+          'Your account is not active. Please contact support.',
+        );
+      }
+
+      /**
+       * Linking an existing password account to Google is safe only because
+       * Google has verified the address above - the person demonstrably
+       * controls the mailbox that account was opened with. The local password
+       * is left in place, so they can still use either route.
+       */
+      const updates: Record<string, unknown> = { last_login: new Date() };
+      if (!existing.google_id) updates.google_id = payload.sub;
+      if (!existing.email_verified) updates.email_verified = true;
+      await this.userModel.updateOne({ _id: existing._id }, { $set: updates });
+
+      const token = await this.generateToken({
+        id: existing._id,
+        email: existing.email,
+      });
+      return {
+        message: 'Login successful. Welcome back!',
+        data: { user: sanitizeUser(existing), token },
+      };
+    }
+
+    // ---- New account -------------------------------------------------
+    const role = await this.roleModel.findOne({ name: 'customer' });
+    if (!role) throw new BadRequestException('Customer role not found');
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+    try {
+      const [newUser] = await this.userModel.create(
+        [
+          {
+            full_name: payload.name?.trim() || email.split('@')[0],
+            email,
+            role: role._id,
+            type: UserType.CUSTOMER,
+            auth_provider: AuthProvider.GOOGLE,
+            google_id: payload.sub,
+            // Google has verified the address, so there is no code to send
+            // and nothing for the customer to come back from.
+            email_verified: true,
+            status: 'active',
+            ...(payload.picture ? { profile_picture: payload.picture } : {}),
+            // No phone number: Google does not supply one, and the number
+            // that matters for delivery is captured on the shipping address.
+          },
+        ],
+        { session },
+      );
+
+      await this.provisionCustomer(newUser._id as Types.ObjectId, session);
+      await session.commitTransaction();
+
+      const token = await this.generateToken({
+        id: newUser._id,
+        email: newUser.email,
+      });
+
+      this.logger.log(`Customer registered via Google: ${email}`);
+      return {
+        message: 'Welcome to Qlozet!',
+        data: { user: sanitizeUser(newUser), token },
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      this.logger.error(
+        `Google sign-up failed: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        'Could not complete sign-in. Please try again.',
+      );
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
    * Validate user by email and password (for local strategy)
    */
   async validateUser(
@@ -1021,6 +1195,11 @@ export class AuthService {
         .populate('role');
 
       if (!user) {
+        return null;
+      }
+
+      // A provider account has no password to validate against.
+      if (!user.hashed_password) {
         return null;
       }
 
@@ -1159,6 +1338,16 @@ export class AuthService {
 
     if (!user) {
       throw new BadRequestException('User not found');
+    }
+
+    if (!user.hashed_password) {
+      // Nothing to change: this account has only ever signed in through a
+      // provider. Setting a first password is a different flow from changing
+      // one, and offering it here would let whoever holds the session add a
+      // second way in without re-authenticating.
+      throw new BadRequestException(
+        'This account signs in with Google and has no password to change.',
+      );
     }
 
     const validCurrentPassword = await bcrypt.compare(

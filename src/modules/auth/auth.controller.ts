@@ -25,6 +25,7 @@ import {
   LoginVendorResponseWrapperDto,
   VendorUserDto,
 } from './dto/login.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { PasswordResetRequestDto } from './dto/password-reset-request.dto';
@@ -198,6 +199,20 @@ export class AuthController {
   async loginCustomer(@Body() loginDto: LoginDto) {
     return this.authService.loginCustomer(loginDto.email, loginDto.password);
   }
+  @Post('google')
+  @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 10, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Customer sign-in with Google',
+    description:
+      'Verifies a Google ID token and signs the customer in, creating the ' +
+      'account on first use. Returns the same token pair as a password login.',
+  })
+  async loginWithGoogle(@Body() dto: GoogleLoginDto) {
+    return this.authService.loginWithGoogle(dto.id_token);
+  }
+
   // ✅ Verify Email
   @Post('verify-email')
   @Public()
