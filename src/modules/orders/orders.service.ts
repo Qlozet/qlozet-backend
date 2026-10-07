@@ -91,6 +91,7 @@ import {
 import { WalletsService } from '../wallets/wallets.service';
 import { estimateProductWeightKg } from '../../common/constants/product-weight.constant';
 import { NotificationsService, CreateNotificationDto } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
   NotificationType,
@@ -142,6 +143,7 @@ export class OrderService {
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
     @InjectModel(PlatformSettings.name)
@@ -552,7 +554,7 @@ export class OrderService {
         }
 
         // Notify vendor(s) about new order
-        this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+        this.notifyNewOrder(savedOrder, customer).catch((err) =>
           this.logger.error('Failed to send new order notifications', err),
         );
 
@@ -654,7 +656,7 @@ export class OrderService {
             );
           }
 
-          this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+          this.notifyNewOrder(savedOrder, customer).catch((err) =>
             this.logger.error('Failed to send new order notifications', err),
           );
           this.notifyFabricTransfers(savedOrder).catch((err) =>
@@ -706,7 +708,7 @@ export class OrderService {
         );
 
         // Notify vendor(s) about new order
-        this.notifyVendorsNewOrder(savedOrder, customer).catch((err) =>
+        this.notifyNewOrder(savedOrder, customer).catch((err) =>
           this.logger.error('Failed to send new order notifications', err),
         );
 
@@ -6997,7 +6999,18 @@ export class OrderService {
    * Notify all vendors in an order that a new order was placed.
    * Finds the vendor user (owner) for each business via User.business reference.
    */
-  private async notifyVendorsNewOrder(order: OrderDocument, customer: User) {
+  /**
+   * Everything that tells someone an order exists: the vendors in-app and by
+   * email, and the customer's confirmation.
+   *
+   * Email matters more than the bell on both sides. The customer has no other
+   * record of what they bought, and the vendor is on a 48-hour clock from the
+   * agreement that a dashboard they have not opened cannot start.
+   *
+   * Every send is best-effort. An order that is paid for must not fail
+   * because a mail host was briefly unreachable.
+   */
+  private async notifyNewOrder(order: OrderDocument, customer: User) {
     const businessIds = [
       ...new Set(
         order.items
@@ -7013,7 +7026,7 @@ export class OrderService {
     // different business would otherwise miss their new-order notification.
     const businesses = await this.businessModel
       .find({ _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) } })
-      .select('_id created_by')
+      .select('_id created_by business_name')
       .lean();
 
     const notifications: CreateNotificationDto[] = businesses
@@ -7037,6 +7050,44 @@ export class OrderService {
 
     if (notifications.length > 0) {
       await this.notificationsService.createMany(notifications);
+    }
+
+    // ── Email ───────────────────────────────────────────────────────────
+    // Settled rather than awaited in sequence: one unreachable address must
+    // not stop the rest, and none of them should delay the response.
+    const emails: Promise<unknown>[] = [];
+
+    for (const biz of businesses as any[]) {
+      const to = biz.created_by?.email;
+      if (!to) continue;
+      emails.push(
+        this.mailService.sendNewOrderVendorEmail(
+          to,
+          biz.created_by?.name || 'there',
+          biz.business_name || 'your store',
+          order,
+        ),
+      );
+    }
+
+    const customerEmail = (customer as any)?.email;
+    if (customerEmail) {
+      emails.push(
+        this.mailService.sendOrderConfirmationEmail(
+          customerEmail,
+          (customer as any).full_name || 'there',
+          order,
+          { multipleVendors: businesses.length > 1 },
+        ),
+      );
+    }
+
+    const results = await Promise.allSettled(emails);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.logger.warn(
+        `Order ${order.reference}: ${failed} of ${results.length} order emails failed to send`,
+      );
     }
   }
 

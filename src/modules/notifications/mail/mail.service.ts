@@ -15,6 +15,8 @@ interface EmailTemplates {
   vendorWelcome: CompiledTemplate;
   customerWelcome: CompiledTemplate;
   inviteUser: CompiledTemplate;
+  orderConfirmation: CompiledTemplate;
+  newOrderVendor: CompiledTemplate;
 }
 
 @Injectable()
@@ -83,6 +85,8 @@ export class MailService {
         vendorWelcome: await this.loadTemplate('vendor-welcome'),
         customerWelcome: await this.loadTemplate('customer-welcome'),
         inviteUser: await this.loadTemplate('invite-user'),
+        orderConfirmation: await this.loadTemplate('order-confirmation'),
+        newOrderVendor: await this.loadTemplate('new-order-vendor'),
       };
 
       console.log('✅ All email templates initialized successfully!');
@@ -359,6 +363,110 @@ export class MailService {
       return true;
     } catch (error) {
       console.error('❌ Failed to send customer welcome email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Shared shape for both order emails, so the customer's copy and the
+   * vendor's cannot drift on the figures they quote.
+   */
+  private orderEmailFields(order: {
+    reference?: string;
+    total?: number;
+    items?: unknown[];
+    createdAt?: Date | string;
+  }) {
+    const itemCount = order.items?.length ?? 0;
+    return {
+      orderReference: order.reference ?? '—',
+      orderTotal: `₦${Number(order.total ?? 0).toLocaleString('en-NG')}`,
+      itemCount,
+      singleItem: itemCount === 1,
+      orderDate: new Date(order.createdAt ?? Date.now()).toLocaleDateString(
+        'en-NG',
+        { day: 'numeric', month: 'long', year: 'numeric' },
+      ),
+      companyName: process.env.COMPANY_NAME || 'Qlozet',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@qlozet.app',
+    };
+  }
+
+  /**
+   * The order confirmation a customer expects within seconds of paying.
+   *
+   * Its absence is what produces "did my order go through?" - the customer
+   * has no record and no reference to quote back at us.
+   */
+  async sendOrderConfirmationEmail(
+    to: string,
+    customerName: string,
+    order: any,
+    options: { multipleVendors?: boolean } = {},
+  ) {
+    try {
+      if (!this.templates.orderConfirmation)
+        throw new Error('Order confirmation template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderConfirmation({
+        ...fields,
+        customerName,
+        multipleVendors: options.multipleVendors ?? false,
+        subject: `Order ${fields.orderReference} confirmed`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Order ${fields.orderReference} confirmed`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send order confirmation email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a vendor an order is waiting.
+   *
+   * The agreement gives them 48 hours to confirm, and until now the only
+   * notice was a bell in a dashboard they might not open that day - a
+   * deadline enforced without ever being announced.
+   */
+  async sendNewOrderVendorEmail(
+    to: string,
+    vendorName: string,
+    businessName: string,
+    order: any,
+  ) {
+    try {
+      if (!this.templates.newOrderVendor)
+        throw new Error('New order vendor template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.newOrderVendor({
+        ...fields,
+        vendorName,
+        businessName,
+        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        orderUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/orders`,
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send new order vendor email:', error);
       throw error;
     }
   }

@@ -1,0 +1,42 @@
+{{> header title="You have a new order" subtitle="Confirm it within 48 hours" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>A customer has placed an order with <strong>{{businessName}}</strong>.</p>
+
+<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 24px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size: 15px;">
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">Order reference</td>
+            <td style="padding: 6px 0; text-align: right; font-weight: 700;">{{orderReference}}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">Placed</td>
+            <td style="padding: 6px 0; text-align: right;">{{orderDate}}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">
+                {{itemCount}} item{{#unless singleItem}}s{{/unless}}
+            </td>
+            <td style="padding: 6px 0; text-align: right;"></td>
+        </tr>
+        <tr>
+            <td style="padding: 12px 0 0; border-top: 1px solid #e9ecef; font-weight: 700;">Order value</td>
+            <td style="padding: 12px 0 0; border-top: 1px solid #e9ecef; text-align: right; font-weight: 700;">
+                {{orderTotal}}</td>
+        </tr>
+    </table>
+</div>
+
+{{> button url=orderUrl text="Review the order" }}
+
+<div class="security-note" style="margin-top: 24px; background: #fff8e1; border-left-color: #f59e0b;">
+    <p style="margin: 0;"><strong>Confirm within 48 hours.</strong> That is the
+        commitment in your vendor agreement, and the customer is waiting on it.
+        Late confirmation can reduce how often your products are shown.</p>
+</div>
+
+<p style="margin-top: 28px;">The order value above is before commission and fees.
+    Your earnings for it are shown on the order in your dashboard.</p>
+
+<p>Thank you,<br>The {{companyName}} Team</p>
