@@ -1,0 +1,20 @@
+{{> header title="Money is on its way" subtitle="Earnings released to your wallet" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>Your earnings {{#if orderReference}}for order <strong>{{orderReference}}</strong>
+    {{/if}}have been released.</p>
+
+<div style="background: #f0fdf4; padding: 24px; border-radius: 8px; margin: 24px 0; text-align: center;">
+    <p style="margin: 0 0 6px; color: #6c757d; font-size: 14px;">Released to your wallet</p>
+    <p style="margin: 0; font-size: 30px; font-weight: 700; color: #0F973D;">{{amount}}</p>
+</div>
+
+{{> button url=walletUrl text="Open your wallet" }}
+
+<div class="divider"></div>
+
+<p>This is now part of your available balance. Payouts run weekly to the bank
+    account verified on your profile, once that balance reaches the minimum.</p>
+
+<p style="margin-top: 28px;">Thank you for selling with us,<br>The {{companyName}} Team</p>

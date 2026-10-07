@@ -154,6 +154,68 @@ describe('order emails', () => {
     });
   });
 
+  describe('payout released', () => {
+    const html = (orderReference = 'QLZ-2026-00841') =>
+      render('payout-released', {
+        vendorName: 'Kemi',
+        amount: '₦38,250',
+        orderReference,
+        companyName: 'Qlozet',
+        walletUrl: 'https://qlozet.app/wallet',
+      });
+
+    it('leads with the amount, which is the thing being announced', () => {
+      expect(html()).toContain('₦38,250');
+    });
+
+    it('names the order when there is one, and reads cleanly without', () => {
+      expect(html()).toContain('QLZ-2026-00841');
+      const none = html('');
+      expect(none).not.toContain('for order');
+      expect(none).not.toMatch(/\{\{/);
+    });
+  });
+
+  describe('product moderation', () => {
+    const html = (approved: boolean, reason = 'Photos belong to another shop.') =>
+      render('product-moderated', {
+        vendorName: 'Kemi',
+        productName: 'Ankara kaftan',
+        approved,
+        reason,
+        companyName: 'Qlozet',
+        productsUrl: 'https://qlozet.app/products',
+      });
+
+    it('tells an approved vendor it can go live', () => {
+      const out = html(true);
+      expect(out).toContain('approved');
+      // The rejection copy must not leak into the approval.
+      expect(out).not.toContain('moved back to draft');
+    });
+
+    it('gives a rejected vendor the reason', () => {
+      expect(html(false)).toContain('Photos belong to another shop.');
+    });
+
+    it('reassures a rejected vendor nothing was deleted', () => {
+      // Otherwise the first move is a support ticket asking where it went.
+      // Whitespace is collapsed because the sentence wraps in the template.
+      const flat = html(false).replace(/\s+/g, ' ');
+      expect(flat).toContain('nothing of yours has been deleted');
+    });
+
+    it('still renders when no reason was recorded', () => {
+      const out = html(false, '');
+      expect(out).not.toMatch(/\{\{/);
+    });
+
+    it('leaves no unresolved handlebars expressions either way', () => {
+      expect(html(true)).not.toMatch(/\{\{/);
+      expect(html(false)).not.toMatch(/\{\{/);
+    });
+  });
+
   describe('vendor alert', () => {
     const html = () =>
       render('new-order-vendor', {

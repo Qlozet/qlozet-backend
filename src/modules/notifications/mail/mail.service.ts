@@ -19,6 +19,8 @@ interface EmailTemplates {
   newOrderVendor: CompiledTemplate;
   orderShipped: CompiledTemplate;
   orderDelivered: CompiledTemplate;
+  payoutReleased: CompiledTemplate;
+  productModerated: CompiledTemplate;
 }
 
 @Injectable()
@@ -91,6 +93,8 @@ export class MailService {
         newOrderVendor: await this.loadTemplate('new-order-vendor'),
         orderShipped: await this.loadTemplate('order-shipped'),
         orderDelivered: await this.loadTemplate('order-delivered'),
+        payoutReleased: await this.loadTemplate('payout-released'),
+        productModerated: await this.loadTemplate('product-moderated'),
       };
 
       console.log('✅ All email templates initialized successfully!');
@@ -537,6 +541,95 @@ export class MailService {
       return true;
     } catch (error) {
       console.error('❌ Failed to send order delivered email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a vendor their earnings have been released.
+   *
+   * People want to hear when money moves, and until now this only appeared
+   * as a bell in a dashboard - so a vendor learned about their own payout by
+   * going looking for it.
+   */
+  async sendPayoutReleasedEmail(
+    to: string,
+    vendorName: string,
+    amount: number,
+    orderReference?: string,
+  ) {
+    try {
+      if (!this.templates.payoutReleased)
+        throw new Error('Payout released template not loaded');
+
+      const formatted = `₦${Number(amount ?? 0).toLocaleString('en-NG')}`;
+      const html = this.templates.payoutReleased({
+        vendorName,
+        amount: formatted,
+        orderReference: orderReference || '',
+        companyName: process.env.COMPANY_NAME || 'Qlozet',
+        subject: `${formatted} released to your wallet`,
+        walletUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/wallet`,
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `${formatted} released to your wallet`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send payout released email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * The outcome of a moderation decision.
+   *
+   * One template for both, because the rejection is the half that matters and
+   * splitting them invites the approval to be written carefully while the
+   * rejection is an afterthought. A rejected listing says what was wrong and
+   * that nothing was deleted - a vendor who cannot tell why, or thinks their
+   * work is gone, writes to support instead of fixing it.
+   */
+  async sendProductModeratedEmail(
+    to: string,
+    vendorName: string,
+    productName: string,
+    approved: boolean,
+    reason?: string,
+  ) {
+    try {
+      if (!this.templates.productModerated)
+        throw new Error('Product moderated template not loaded');
+
+      const subject = approved
+        ? `${productName} approved`
+        : `${productName} needs changes before it can go live`;
+
+      const html = this.templates.productModerated({
+        vendorName,
+        productName,
+        approved,
+        reason: reason?.trim() || 'No reason was given.',
+        companyName: process.env.COMPANY_NAME || 'Qlozet',
+        subject,
+        productsUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/products`,
+      });
+
+      await this.mailerService.sendMail({ to, subject, html });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send product moderated email:', error);
       throw error;
     }
   }

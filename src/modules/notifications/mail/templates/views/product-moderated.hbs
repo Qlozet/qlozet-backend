@@ -1,0 +1,30 @@
+{{#if approved}}
+{{> header title="Your product is approved" subtitle="It can go live now" }}
+{{else}}
+{{> header title="Your product needs changes" subtitle="It is not live yet" }}
+{{/if}}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+{{#if approved}}
+<p><strong>{{productName}}</strong> has been reviewed and approved. It can
+    appear in the storefront as soon as its status is set to active.</p>
+
+{{> button url=productsUrl text="View your products" }}
+{{else}}
+<p><strong>{{productName}}</strong> was reviewed and cannot go live as it
+    stands. It has been moved back to draft, so nothing of yours has been
+    deleted — edit it and submit again.</p>
+
+<div class="security-note" style="background: #fff8e1; border-left-color: #f59e0b;">
+    <p style="margin: 0 0 6px; font-weight: 700;">Why</p>
+    <p style="margin: 0;">{{reason}}</p>
+</div>
+
+{{> button url=productsUrl text="Edit this product" }}
+
+<p style="margin-top: 8px;">If you think this was a mistake, reply through
+    support and a person will look at it again.</p>
+{{/if}}
+
+<p style="margin-top: 28px;">Thank you,<br>The {{companyName}} Team</p>
