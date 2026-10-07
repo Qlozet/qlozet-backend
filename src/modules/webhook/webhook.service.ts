@@ -21,6 +21,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
   NotificationType,
@@ -46,6 +47,7 @@ export class WebhookService {
     private readonly productService: ProductService,
     private readonly paymentService: PaymentService,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
     private readonly stripeProvider: StripeProvider,
 
     @InjectModel('Order') private orderModel: Model<Order>,
@@ -939,5 +941,62 @@ export class WebhookService {
       },
       action_url: `/orders`,
     });
+
+    await this.emailCustomerShippingUpdate(order, status, trackingNumber);
+  }
+
+  /**
+   * The shipped and delivered emails.
+   *
+   * Split out so a mail problem cannot take the in-app notification with it:
+   * the bell above is already saved by the time this runs, and everything
+   * here is best-effort. A courier webhook that fails because of an email
+   * would be retried, and the customer would get the notification twice.
+   *
+   * Only two statuses send. A failed delivery is handled by a person, and an
+   * automated "there was a problem" email with nothing actionable in it is
+   * worse than the silence it replaces.
+   */
+  private async emailCustomerShippingUpdate(
+    order: OrderDocument,
+    status: ShipmentStatus,
+    trackingNumber: string,
+  ): Promise<void> {
+    if (
+      status !== ShipmentStatus.IN_TRANSIT &&
+      status !== ShipmentStatus.DELIVERED
+    ) {
+      return;
+    }
+
+    try {
+      // The order arrives with `customer` as an id. Read the address off a
+      // fresh populate rather than threading it through every caller.
+      const populated: any = await this.orderModel
+        .findById(order._id)
+        .select('customer reference total items createdAt')
+        .populate('customer', 'full_name email')
+        .lean();
+
+      const to = populated?.customer?.email;
+      if (!to) return;
+
+      const name = populated.customer.full_name || 'there';
+
+      if (status === ShipmentStatus.IN_TRANSIT) {
+        await this.mailService.sendOrderShippedEmail(
+          to,
+          name,
+          populated,
+          trackingNumber,
+        );
+      } else {
+        await this.mailService.sendOrderDeliveredEmail(to, name, populated);
+      }
+    } catch (error: any) {
+      this.logger.warn(
+        `Order ${order.reference}: ${status} email failed — ${error?.message}`,
+      );
+    }
   }
 }

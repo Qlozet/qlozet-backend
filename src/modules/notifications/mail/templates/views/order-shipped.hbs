@@ -1,0 +1,21 @@
+{{> header title="Your order is on its way" subtitle="It has left the maker" }}
+
+<p>Hello <strong>{{customerName}}</strong>,</p>
+
+<p>Order <strong>{{orderReference}}</strong> is in transit.</p>
+
+{{#if trackingNumber}}
+<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 24px 0; text-align: center;">
+    <p style="margin: 0 0 6px; color: #6c757d; font-size: 14px;">Tracking number</p>
+    <p style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 1px;">{{trackingNumber}}</p>
+</div>
+{{/if}}
+
+{{> button url=orderUrl text="Track your order" }}
+
+<div class="divider"></div>
+
+<p>Delivery times vary with the courier and your address. We will email you
+    again the moment it arrives.</p>
+
+<p style="margin-top: 28px;">Thank you,<br>The {{companyName}} Team</p>

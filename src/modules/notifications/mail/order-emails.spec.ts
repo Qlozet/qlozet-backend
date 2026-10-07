@@ -100,6 +100,60 @@ describe('order emails', () => {
     });
   });
 
+  describe('shipped', () => {
+    const html = (trackingNumber = 'SB-88213-NG') =>
+      render('order-shipped', {
+        ...orderFields,
+        customerName: 'Ada Obi',
+        trackingNumber,
+      });
+
+    it('compiles', () => {
+      expect(() => html()).not.toThrow();
+    });
+
+    it('shows the tracking number when the courier gave one', () => {
+      expect(html()).toContain('SB-88213-NG');
+      expect(html()).toContain('Tracking number');
+    });
+
+    it('drops the tracking block entirely when there is none', () => {
+      // An empty box under a "Tracking number" heading reads as a fault.
+      const none = html('');
+      expect(none).not.toContain('Tracking number');
+      expect(none).toContain('QLZ-2026-00841');
+    });
+
+    it('leaves no unresolved handlebars expressions', () => {
+      expect(html()).not.toMatch(/\{\{/);
+      expect(html('')).not.toMatch(/\{\{/);
+    });
+  });
+
+  describe('delivered', () => {
+    const html = () =>
+      render('order-delivered', { ...orderFields, customerName: 'Ada Obi' });
+
+    it('compiles', () => {
+      expect(() => html()).not.toThrow();
+    });
+
+    it('asks for problems before it asks for a review', () => {
+      const out = html();
+      expect(out.indexOf('If something is wrong')).toBeLessThan(
+        out.indexOf('review'),
+      );
+    });
+
+    it('says the funds are still held, which is why speaking up now matters', () => {
+      expect(html()).toContain('still held');
+    });
+
+    it('leaves no unresolved handlebars expressions', () => {
+      expect(html()).not.toMatch(/\{\{/);
+    });
+  });
+
   describe('vendor alert', () => {
     const html = () =>
       render('new-order-vendor', {

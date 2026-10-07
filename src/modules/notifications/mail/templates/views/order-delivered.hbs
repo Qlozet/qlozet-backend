@@ -1,0 +1,23 @@
+{{> header title="Your order has arrived" subtitle="We hope you love it" }}
+
+<p>Hello <strong>{{customerName}}</strong>,</p>
+
+<p>Order <strong>{{orderReference}}</strong> has been delivered.</p>
+
+{{> button url=orderUrl text="See your order" }}
+
+<div class="divider"></div>
+
+<h3 style="color: #2c3e50; margin-bottom: 12px;">If something is wrong</h3>
+
+<p>Tell us now rather than later. Open the order and raise it there, and we
+    will step in while the funds for it are still held. Once the return window
+    on the listing has passed, there is far less we can do.</p>
+
+<div style="margin-top: 28px;">
+    <h3 style="color: #2c3e50; margin-bottom: 12px;">If it is right</h3>
+    <p>Leaving a review is the single most useful thing you can do for the
+        person who made it — small makers live on them.</p>
+</div>
+
+<p style="margin-top: 28px;">Thank you for shopping with us,<br>The {{companyName}} Team</p>

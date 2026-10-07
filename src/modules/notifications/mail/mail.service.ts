@@ -17,6 +17,8 @@ interface EmailTemplates {
   inviteUser: CompiledTemplate;
   orderConfirmation: CompiledTemplate;
   newOrderVendor: CompiledTemplate;
+  orderShipped: CompiledTemplate;
+  orderDelivered: CompiledTemplate;
 }
 
 @Injectable()
@@ -87,6 +89,8 @@ export class MailService {
         inviteUser: await this.loadTemplate('invite-user'),
         orderConfirmation: await this.loadTemplate('order-confirmation'),
         newOrderVendor: await this.loadTemplate('new-order-vendor'),
+        orderShipped: await this.loadTemplate('order-shipped'),
+        orderDelivered: await this.loadTemplate('order-delivered'),
       };
 
       console.log('✅ All email templates initialized successfully!');
@@ -467,6 +471,72 @@ export class MailService {
       return true;
     } catch (error) {
       console.error('❌ Failed to send new order vendor email:', error);
+      throw error;
+    }
+  }
+
+  /** Tells a customer their order has left the maker. */
+  async sendOrderShippedEmail(
+    to: string,
+    customerName: string,
+    order: any,
+    trackingNumber?: string,
+  ) {
+    try {
+      if (!this.templates.orderShipped)
+        throw new Error('Order shipped template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderShipped({
+        ...fields,
+        customerName,
+        // Couriers do not always give one, and an empty box reads as an
+        // error - the template drops the block entirely instead.
+        trackingNumber: trackingNumber || '',
+        subject: `Order ${fields.orderReference} is on its way`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Order ${fields.orderReference} is on its way`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send order shipped email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a customer their order arrived.
+   *
+   * Deliberately asks for problems before it asks for a review. Funds are
+   * still held at this point and the return window is open, so this is the
+   * moment a complaint is cheapest to resolve - for the customer and for us.
+   */
+  async sendOrderDeliveredEmail(to: string, customerName: string, order: any) {
+    try {
+      if (!this.templates.orderDelivered)
+        throw new Error('Order delivered template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderDelivered({
+        ...fields,
+        customerName,
+        subject: `Order ${fields.orderReference} delivered`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.mailerService.sendMail({
+        to,
+        subject: `Order ${fields.orderReference} delivered`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to send order delivered email:', error);
       throw error;
     }
   }
