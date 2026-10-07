@@ -21,6 +21,7 @@ import {
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { Business, BusinessDocument } from './schemas/business.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
   NotificationType,
@@ -52,6 +53,7 @@ export class BusinessEarningsCron {
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
   ) {}
 
   /** Notify the vendor that a payout landed in their wallet. */
@@ -85,6 +87,22 @@ export class BusinessEarningsCron {
         },
         action_url: '/wallet',
       });
+
+      // Best-effort: a mail failure must not abort the payout run, which is
+      // processing other vendors' earnings in the same pass.
+      const to = (business as any)?.created_by?.email;
+      if (to) {
+        await this.mailService
+          .sendPayoutReleasedEmail(
+            to,
+            (business as any)?.created_by?.name || 'there',
+            Number(earning.net_amount),
+            (order as any)?.reference,
+          )
+          .catch((err: any) =>
+            this.logger.warn(`Payout email failed: ${err.message}`),
+          );
+      }
     } catch (err: any) {
       this.logger.warn(`Failed to send payout notification: ${err.message}`);
     }

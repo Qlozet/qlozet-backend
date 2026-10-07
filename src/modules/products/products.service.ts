@@ -62,6 +62,7 @@ import {
 } from './product-availability';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
   NotificationType,
@@ -90,6 +91,7 @@ export class ProductService {
     @InjectConnection() private readonly connection: Connection,
     private eventEmitter: EventEmitter2,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
   ) {}
 
   /**
@@ -2932,6 +2934,15 @@ export class ProductService {
     await product.save();
 
     const approved = decision === ProductModerationStatus.APPROVED;
+
+    /**
+     * Email as well as the bell. A rejection is the half that matters: the
+     * listing is back in draft and the vendor cannot act on a decision they
+     * never saw. Best-effort, so a mail problem cannot fail the moderation
+     * itself - the decision is already saved above.
+     */
+    void this.emailVendorOfModeration(product, approved, reason);
+
     await this.notifyVendorOfProduct(
       product,
       approved
@@ -2959,6 +2970,35 @@ export class ProductService {
   }
 
   /** Best-effort vendor notification; never fails the moderation action. */
+  /** Emails the vendor the outcome of a moderation decision. */
+  private async emailVendorOfModeration(
+    product: ProductDocument,
+    approved: boolean,
+    reason?: string,
+  ): Promise<void> {
+    try {
+      const business = await this.businessModel
+        .findById(product.business)
+        .select('created_by')
+        .lean();
+
+      const to = (business as any)?.created_by?.email;
+      if (!to) return;
+
+      await this.mailService.sendProductModeratedEmail(
+        to,
+        (business as any)?.created_by?.name || 'there',
+        ProductService.productName(product),
+        approved,
+        reason,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `Moderation email failed for product ${String(product._id)}: ${error?.message}`,
+      );
+    }
+  }
+
   private async notifyVendorOfProduct(
     product: ProductDocument,
     type: NotificationType,

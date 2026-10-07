@@ -1,0 +1,50 @@
+{{> header title="Order confirmed" subtitle="Thank you for shopping with us" }}
+
+<p>Hello <strong>{{customerName}}</strong>,</p>
+
+<p>We have your order and the {{#if multipleVendors}}makers are{{else}}maker is{{/if}}
+    being notified now. Keep this email — the reference below is what to quote if
+    you ever need to ask us about it.</p>
+
+<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 24px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size: 15px;">
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">Order reference</td>
+            <td style="padding: 6px 0; text-align: right; font-weight: 700;">{{orderReference}}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">Placed</td>
+            <td style="padding: 6px 0; text-align: right;">{{orderDate}}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #6c757d;">
+                {{itemCount}} item{{#unless singleItem}}s{{/unless}}
+            </td>
+            <td style="padding: 6px 0; text-align: right;"></td>
+        </tr>
+        <tr>
+            <td style="padding: 12px 0 0; border-top: 1px solid #e9ecef; font-weight: 700;">Total paid</td>
+            <td style="padding: 12px 0 0; border-top: 1px solid #e9ecef; text-align: right; font-weight: 700;">
+                {{orderTotal}}</td>
+        </tr>
+    </table>
+</div>
+
+{{> button url=orderUrl text="View your order" }}
+
+<div class="divider"></div>
+
+<h3 style="color: #2c3e50; margin-bottom: 12px;">What happens next</h3>
+<ul style="margin: 0; padding-left: 20px; color: #333;">
+    <li style="margin-bottom: 8px;">The maker confirms your order and begins work.</li>
+    <li style="margin-bottom: 8px;">We email you again when it ships, and when it arrives.</li>
+    <li>You can follow every step from your orders page.</li>
+</ul>
+
+<div class="security-note" style="margin-top: 28px;">
+    <p style="margin: 0;">Pay and message only through Qlozet. If anyone asks you to
+        send money another way, that is not us — tell us at
+        <a href="mailto:{{supportEmail}}" style="color: #007bff;">{{supportEmail}}</a>.</p>
+</div>
+
+<p style="margin-top: 28px;">Thank you,<br>The {{companyName}} Team</p>

@@ -1,5 +1,5 @@
 import { MailerService } from '@nestjs-modules/mailer';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import { promises as fsp } from 'fs';
@@ -15,13 +15,33 @@ interface EmailTemplates {
   vendorWelcome: CompiledTemplate;
   customerWelcome: CompiledTemplate;
   inviteUser: CompiledTemplate;
+  orderConfirmation: CompiledTemplate;
+  newOrderVendor: CompiledTemplate;
+  orderShipped: CompiledTemplate;
+  orderDelivered: CompiledTemplate;
+  payoutReleased: CompiledTemplate;
+  productModerated: CompiledTemplate;
 }
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import {
+  EmailLog,
+  EmailLogDocument,
+  EmailStatus,
+} from '../schemas/email-log.schema';
 
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
+
   private templates: Partial<EmailTemplates> = {};
 
-  constructor(private readonly mailerService: MailerService) {
+  constructor(
+    private readonly mailerService: MailerService,
+    @InjectModel(EmailLog.name)
+    private readonly emailLogModel: Model<EmailLogDocument>,
+  ) {
     this.initializeTemplates();
   }
 
@@ -50,29 +70,29 @@ export class MailService {
     );
 
     if (fs.existsSync(localSrcPath)) {
-      console.log('📂 Using local template path:', localSrcPath);
+      this.logger.log('📂 Using local template path:', localSrcPath);
       return localSrcPath;
     }
     if (fs.existsSync(distPath)) {
-      console.log('📂 Using dist template path:', distPath);
+      this.logger.log('📂 Using dist template path:', distPath);
       return distPath;
     }
     if (fs.existsSync(altDistPath)) {
-      console.log('📂 Using alt dist template path:', altDistPath);
+      this.logger.log('📂 Using alt dist template path:', altDistPath);
       return altDistPath;
     }
     if (fs.existsSync(dockerDistPath)) {
-      console.log('📂 Using docker dist template path:', dockerDistPath);
+      this.logger.log('📂 Using docker dist template path:', dockerDistPath);
       return dockerDistPath;
     }
 
-    console.warn('⚠️ No valid templates directory found.');
+    this.logger.warn('⚠️ No valid templates directory found.');
     return localSrcPath; // fallback
   }
 
   private async initializeTemplates() {
     try {
-      console.log('🟡 Initializing email templates...');
+      this.logger.log('🟡 Initializing email templates...');
       await this.registerPartials();
 
       this.templates = {
@@ -83,11 +103,120 @@ export class MailService {
         vendorWelcome: await this.loadTemplate('vendor-welcome'),
         customerWelcome: await this.loadTemplate('customer-welcome'),
         inviteUser: await this.loadTemplate('invite-user'),
+        orderConfirmation: await this.loadTemplate('order-confirmation'),
+        newOrderVendor: await this.loadTemplate('new-order-vendor'),
+        orderShipped: await this.loadTemplate('order-shipped'),
+        orderDelivered: await this.loadTemplate('order-delivered'),
+        payoutReleased: await this.loadTemplate('payout-released'),
+        productModerated: await this.loadTemplate('product-moderated'),
       };
 
-      console.log('✅ All email templates initialized successfully!');
+      this.logger.log('✅ All email templates initialized successfully!');
     } catch (error) {
-      console.error('❌ Failed to initialize email templates:', error);
+      this.logger.error('❌ Failed to initialize email templates:', error);
+    }
+  }
+
+  /**
+   * The one place an email actually leaves.
+   *
+   * Every send goes through here so each is recorded and logged the same way.
+   * Before this there were eighteen call sites and thirty-two console lines:
+   * no two failures looked alike and none of them outlived the process.
+   *
+   * Recording never blocks the send and never fails it. If the log write
+   * throws, the email has still gone, and the caller should not hear about a
+   * bookkeeping problem.
+   */
+  private async dispatch(message: {
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<void> {
+    try {
+      await this.mailerService.sendMail(message);
+      this.logger.log(`Sent "${message.subject}" to ${message.to}`);
+      void this.record(message, EmailStatus.SENT);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed "${message.subject}" to ${message.to}: ${error?.message}`,
+      );
+      void this.record(message, EmailStatus.FAILED, error?.message);
+      throw error;
+    }
+  }
+
+  private async record(
+    message: { to: string; subject: string },
+    status: EmailStatus,
+    error?: string,
+  ): Promise<void> {
+    try {
+      await this.emailLogModel.create({
+        // Lower-cased on the way in so a provider echoing a differently-cased
+        // address still matches the row. Local parts are case-sensitive in
+        // theory; no mail system in practice treats them that way.
+        to: message.to.toLowerCase(),
+        subject: message.subject,
+        status,
+        error: error ?? null,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not record email attempt: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Apply a delivery event from ZeptoMail to the row we wrote when sending.
+   *
+   * Matching is by recipient and subject, newest first, because nothing
+   * reliably carries our own id end to end: ZeptoMail's client_reference is
+   * set per-send through its API, and these go out over SMTP. Recipient plus
+   * subject is unambiguous in practice — the same person does not receive two
+   * identically-subjected emails within the same second — and the provider's
+   * own reference is stored on first contact so the two can be reconciled by
+   * hand if they ever do disagree.
+   *
+   * Unmatched events are logged, not an error. A message sent before this
+   * table existed, or outside the 90-day window, has no row to update, and
+   * that is not a fault worth alarming anyone about.
+   */
+  async applyDeliveryEvent(event: {
+    to: string;
+    subject?: string;
+    status: EmailStatus;
+    providerReference?: string;
+    detail?: string;
+  }): Promise<void> {
+    const query: Record<string, unknown> = { to: event.to.toLowerCase() };
+    if (event.subject) query.subject = event.subject;
+
+    const row = await this.emailLogModel
+      .findOne(query)
+      .sort({ createdAt: -1 })
+      .exec();
+
+    if (!row) {
+      this.logger.warn(
+        `Delivery event "${event.status}" for ${event.to} matched no sent email`,
+      );
+      return;
+    }
+
+    row.status = event.status;
+    row.status_updated_at = new Date();
+    if (event.providerReference) row.provider_reference = event.providerReference;
+    if (event.detail) row.error = event.detail;
+    await row.save();
+
+    // A hard bounce means this address will never work again. Worth noticing:
+    // a vendor whose address is dead silently misses every new-order alert,
+    // and that one carries a 48-hour deadline.
+    if (event.status === EmailStatus.HARD_BOUNCE) {
+      this.logger.error(
+        `Hard bounce for ${event.to} — this address is undeliverable and ` +
+          `should be corrected before more mail is sent to it`,
+      );
     }
   }
 
@@ -105,14 +234,14 @@ export class MailService {
           const partialPath = path.join(partialsDir, file);
           const partialContent = await fsp.readFile(partialPath, 'utf-8');
           handlebars.registerPartial(partialName, partialContent);
-          console.log(`✅ Registered partial: ${partialName}`);
+          this.logger.log(`✅ Registered partial: ${partialName}`);
         }
       }
 
-      console.log('🎉 All partials registered successfully!');
+      this.logger.log('🎉 All partials registered successfully!');
     } catch (error: any) {
-      console.warn('⚠️ Could not load email partials:', error.message);
-      console.log('Partials directory attempted:', partialsDir);
+      this.logger.warn('⚠️ Could not load email partials:', error.message);
+      this.logger.log('Partials directory attempted:', partialsDir);
     }
   }
 
@@ -145,7 +274,7 @@ export class MailService {
           handlebars.registerPartial(partialName, partialContent);
         }
       } catch {
-        console.warn(`⚠️ No partials found in ${partialsDir}`);
+        this.logger.warn(`⚠️ No partials found in ${partialsDir}`);
       }
 
       const layoutTemplate = handlebars.compile(layoutContent);
@@ -159,7 +288,7 @@ export class MailService {
         });
       };
     } catch (error) {
-      console.error(`❌ Failed to load template: ${templateName}`, error);
+      this.logger.error(`❌ Failed to load template: ${templateName}`, error);
       throw new Error(`Template ${templateName} not found or invalid`);
     }
   }
@@ -203,16 +332,16 @@ export class MailService {
         subject: 'Verify Your Email Address',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Verify Your Email Address',
         html,
       });
 
-      console.log('✅ Verification email sent successfully to:', to);
+      this.logger.log('✅ Verification email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send verification email:', error);
+      this.logger.error('❌ Failed to send verification email:', error);
       throw error;
     }
   }
@@ -229,16 +358,16 @@ export class MailService {
         subject: 'Your Password Reset Code',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Your Password Reset Code',
         html,
       });
 
-      console.log('✅ Password reset code email sent successfully to:', to);
+      this.logger.log('✅ Password reset code email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password reset code email:', error);
+      this.logger.error('❌ Failed to send password reset code email:', error);
       throw error;
     }
   }
@@ -259,16 +388,16 @@ export class MailService {
         subject: 'Password Reset Successful',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Password Reset Successful',
         html,
       });
 
-      console.log('✅ Password reset success email sent successfully to:', to);
+      this.logger.log('✅ Password reset success email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password reset success email:', error);
+      this.logger.error('❌ Failed to send password reset success email:', error);
       throw error;
     }
   }
@@ -289,16 +418,16 @@ export class MailService {
         subject: 'Password Updated Successfully',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Password Updated Successfully',
         html,
       });
 
-      console.log('✅ Password updated email sent successfully to:', to);
+      this.logger.log('✅ Password updated email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password updated email:', error);
+      this.logger.error('❌ Failed to send password updated email:', error);
       throw error;
     }
   }
@@ -321,16 +450,16 @@ export class MailService {
         }/vendor/setup-guide`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
         html,
       });
 
-      console.log('✅ Vendor welcome email sent successfully to:', to);
+      this.logger.log('✅ Vendor welcome email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send vendor welcome email:', error);
+      this.logger.error('❌ Failed to send vendor welcome email:', error);
       throw error;
     }
   }
@@ -349,16 +478,275 @@ export class MailService {
         supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
         html,
       });
 
-      console.log('✅ Customer welcome email sent successfully to:', to);
+      this.logger.log('✅ Customer welcome email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send customer welcome email:', error);
+      this.logger.error('❌ Failed to send customer welcome email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Shared shape for both order emails, so the customer's copy and the
+   * vendor's cannot drift on the figures they quote.
+   */
+  private orderEmailFields(order: {
+    reference?: string;
+    total?: number;
+    items?: unknown[];
+    createdAt?: Date | string;
+  }) {
+    const itemCount = order.items?.length ?? 0;
+    return {
+      orderReference: order.reference ?? '—',
+      orderTotal: `₦${Number(order.total ?? 0).toLocaleString('en-NG')}`,
+      itemCount,
+      singleItem: itemCount === 1,
+      orderDate: new Date(order.createdAt ?? Date.now()).toLocaleDateString(
+        'en-NG',
+        { day: 'numeric', month: 'long', year: 'numeric' },
+      ),
+      companyName: process.env.COMPANY_NAME || 'Qlozet',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@qlozet.app',
+    };
+  }
+
+  /**
+   * The order confirmation a customer expects within seconds of paying.
+   *
+   * Its absence is what produces "did my order go through?" - the customer
+   * has no record and no reference to quote back at us.
+   */
+  async sendOrderConfirmationEmail(
+    to: string,
+    customerName: string,
+    order: any,
+    options: { multipleVendors?: boolean } = {},
+  ) {
+    try {
+      if (!this.templates.orderConfirmation)
+        throw new Error('Order confirmation template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderConfirmation({
+        ...fields,
+        customerName,
+        multipleVendors: options.multipleVendors ?? false,
+        subject: `Order ${fields.orderReference} confirmed`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.dispatch({
+        to,
+        subject: `Order ${fields.orderReference} confirmed`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send order confirmation email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a vendor an order is waiting.
+   *
+   * The agreement gives them 48 hours to confirm, and until now the only
+   * notice was a bell in a dashboard they might not open that day - a
+   * deadline enforced without ever being announced.
+   */
+  async sendNewOrderVendorEmail(
+    to: string,
+    vendorName: string,
+    businessName: string,
+    order: any,
+  ) {
+    try {
+      if (!this.templates.newOrderVendor)
+        throw new Error('New order vendor template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.newOrderVendor({
+        ...fields,
+        vendorName,
+        businessName,
+        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        orderUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/orders`,
+      });
+
+      await this.dispatch({
+        to,
+        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send new order vendor email:', error);
+      throw error;
+    }
+  }
+
+  /** Tells a customer their order has left the maker. */
+  async sendOrderShippedEmail(
+    to: string,
+    customerName: string,
+    order: any,
+    trackingNumber?: string,
+  ) {
+    try {
+      if (!this.templates.orderShipped)
+        throw new Error('Order shipped template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderShipped({
+        ...fields,
+        customerName,
+        // Couriers do not always give one, and an empty box reads as an
+        // error - the template drops the block entirely instead.
+        trackingNumber: trackingNumber || '',
+        subject: `Order ${fields.orderReference} is on its way`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.dispatch({
+        to,
+        subject: `Order ${fields.orderReference} is on its way`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send order shipped email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a customer their order arrived.
+   *
+   * Deliberately asks for problems before it asks for a review. Funds are
+   * still held at this point and the return window is open, so this is the
+   * moment a complaint is cheapest to resolve - for the customer and for us.
+   */
+  async sendOrderDeliveredEmail(to: string, customerName: string, order: any) {
+    try {
+      if (!this.templates.orderDelivered)
+        throw new Error('Order delivered template not loaded');
+
+      const fields = this.orderEmailFields(order);
+      const html = this.templates.orderDelivered({
+        ...fields,
+        customerName,
+        subject: `Order ${fields.orderReference} delivered`,
+        orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
+      });
+
+      await this.dispatch({
+        to,
+        subject: `Order ${fields.orderReference} delivered`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send order delivered email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tells a vendor their earnings have been released.
+   *
+   * People want to hear when money moves, and until now this only appeared
+   * as a bell in a dashboard - so a vendor learned about their own payout by
+   * going looking for it.
+   */
+  async sendPayoutReleasedEmail(
+    to: string,
+    vendorName: string,
+    amount: number,
+    orderReference?: string,
+  ) {
+    try {
+      if (!this.templates.payoutReleased)
+        throw new Error('Payout released template not loaded');
+
+      const formatted = `₦${Number(amount ?? 0).toLocaleString('en-NG')}`;
+      const html = this.templates.payoutReleased({
+        vendorName,
+        amount: formatted,
+        orderReference: orderReference || '',
+        companyName: process.env.COMPANY_NAME || 'Qlozet',
+        subject: `${formatted} released to your wallet`,
+        walletUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/wallet`,
+      });
+
+      await this.dispatch({
+        to,
+        subject: `${formatted} released to your wallet`,
+        html,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send payout released email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * The outcome of a moderation decision.
+   *
+   * One template for both, because the rejection is the half that matters and
+   * splitting them invites the approval to be written carefully while the
+   * rejection is an afterthought. A rejected listing says what was wrong and
+   * that nothing was deleted - a vendor who cannot tell why, or thinks their
+   * work is gone, writes to support instead of fixing it.
+   */
+  async sendProductModeratedEmail(
+    to: string,
+    vendorName: string,
+    productName: string,
+    approved: boolean,
+    reason?: string,
+  ) {
+    try {
+      if (!this.templates.productModerated)
+        throw new Error('Product moderated template not loaded');
+
+      const subject = approved
+        ? `${productName} approved`
+        : `${productName} needs changes before it can go live`;
+
+      const html = this.templates.productModerated({
+        vendorName,
+        productName,
+        approved,
+        reason: reason?.trim() || 'No reason was given.',
+        companyName: process.env.COMPANY_NAME || 'Qlozet',
+        subject,
+        productsUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/products`,
+      });
+
+      await this.dispatch({ to, subject, html });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send product moderated email:', error);
       throw error;
     }
   }
@@ -384,16 +772,16 @@ export class MailService {
         supportEmail: process.env.SUPPORT_EMAIL || 'support@qoobea.com',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${businessName} on Qlozet!`,
         html,
       });
 
-      console.log('✅ Team invite email sent successfully to:', to);
+      this.logger.log('✅ Team invite email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send team invite email:', error);
+      this.logger.error('❌ Failed to send team invite email:', error);
       throw error;
     }
   }
@@ -422,15 +810,15 @@ export class MailService {
           </p>
           <p style="color:#8A7C6E;font-size:13px;">Forgot your password? Use "Forgot password" on the sign-in page.</p>
         </div>`;
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `You've been added to ${businessName} on Qlozet`,
         html,
       });
-      console.log('✅ Team added email sent successfully to:', to);
+      this.logger.log('✅ Team added email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send team added email:', error);
+      this.logger.error('❌ Failed to send team added email:', error);
       throw error;
     }
   }
@@ -474,16 +862,16 @@ export class MailService {
           <p style="color:#8A7C6E;font-size:13px;">If you were not expecting this, contact ${process.env.SUPPORT_EMAIL || 'support@qoobea.com'}.</p>
         </div>`;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Your Qlozet admin account',
         html,
       });
 
-      console.log('✅ Admin invite email sent successfully to:', to);
+      this.logger.log('✅ Admin invite email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send admin invite email:', error);
+      this.logger.error('❌ Failed to send admin invite email:', error);
       throw error;
     }
   }
@@ -517,16 +905,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `New Bespoke Quote Request: ${designName}`,
         html,
       });
 
-      console.log('✅ Quote request email sent to:', to);
+      this.logger.log('✅ Quote request email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote request email:', error);
+      this.logger.error('❌ Failed to send quote request email:', error);
       throw error;
     }
   }
@@ -561,16 +949,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Quote received from ${vendorName}`,
         html,
       });
 
-      console.log('✅ Quote submitted email sent to:', to);
+      this.logger.log('✅ Quote submitted email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote submitted email:', error);
+      this.logger.error('❌ Failed to send quote submitted email:', error);
       throw error;
     }
   }
@@ -598,16 +986,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Revision requested: ${designName}`,
         html,
       });
 
-      console.log('✅ Quote revision email sent to:', to);
+      this.logger.log('✅ Quote revision email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote revision email:', error);
+      this.logger.error('❌ Failed to send quote revision email:', error);
       throw error;
     }
   }
