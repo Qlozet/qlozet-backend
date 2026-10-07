@@ -1,5 +1,5 @@
 import { MailerService } from '@nestjs-modules/mailer';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import { promises as fsp } from 'fs';
@@ -23,11 +23,25 @@ interface EmailTemplates {
   productModerated: CompiledTemplate;
 }
 
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import {
+  EmailLog,
+  EmailLogDocument,
+  EmailStatus,
+} from '../schemas/email-log.schema';
+
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
+
   private templates: Partial<EmailTemplates> = {};
 
-  constructor(private readonly mailerService: MailerService) {
+  constructor(
+    private readonly mailerService: MailerService,
+    @InjectModel(EmailLog.name)
+    private readonly emailLogModel: Model<EmailLogDocument>,
+  ) {
     this.initializeTemplates();
   }
 
@@ -56,29 +70,29 @@ export class MailService {
     );
 
     if (fs.existsSync(localSrcPath)) {
-      console.log('📂 Using local template path:', localSrcPath);
+      this.logger.log('📂 Using local template path:', localSrcPath);
       return localSrcPath;
     }
     if (fs.existsSync(distPath)) {
-      console.log('📂 Using dist template path:', distPath);
+      this.logger.log('📂 Using dist template path:', distPath);
       return distPath;
     }
     if (fs.existsSync(altDistPath)) {
-      console.log('📂 Using alt dist template path:', altDistPath);
+      this.logger.log('📂 Using alt dist template path:', altDistPath);
       return altDistPath;
     }
     if (fs.existsSync(dockerDistPath)) {
-      console.log('📂 Using docker dist template path:', dockerDistPath);
+      this.logger.log('📂 Using docker dist template path:', dockerDistPath);
       return dockerDistPath;
     }
 
-    console.warn('⚠️ No valid templates directory found.');
+    this.logger.warn('⚠️ No valid templates directory found.');
     return localSrcPath; // fallback
   }
 
   private async initializeTemplates() {
     try {
-      console.log('🟡 Initializing email templates...');
+      this.logger.log('🟡 Initializing email templates...');
       await this.registerPartials();
 
       this.templates = {
@@ -97,9 +111,55 @@ export class MailService {
         productModerated: await this.loadTemplate('product-moderated'),
       };
 
-      console.log('✅ All email templates initialized successfully!');
+      this.logger.log('✅ All email templates initialized successfully!');
     } catch (error) {
-      console.error('❌ Failed to initialize email templates:', error);
+      this.logger.error('❌ Failed to initialize email templates:', error);
+    }
+  }
+
+  /**
+   * The one place an email actually leaves.
+   *
+   * Every send goes through here so each is recorded and logged the same way.
+   * Before this there were eighteen call sites and thirty-two console lines:
+   * no two failures looked alike and none of them outlived the process.
+   *
+   * Recording never blocks the send and never fails it. If the log write
+   * throws, the email has still gone, and the caller should not hear about a
+   * bookkeeping problem.
+   */
+  private async dispatch(message: {
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<void> {
+    try {
+      await this.mailerService.sendMail(message);
+      this.logger.log(`Sent "${message.subject}" to ${message.to}`);
+      void this.record(message, EmailStatus.SENT);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed "${message.subject}" to ${message.to}: ${error?.message}`,
+      );
+      void this.record(message, EmailStatus.FAILED, error?.message);
+      throw error;
+    }
+  }
+
+  private async record(
+    message: { to: string; subject: string },
+    status: EmailStatus,
+    error?: string,
+  ): Promise<void> {
+    try {
+      await this.emailLogModel.create({
+        to: message.to,
+        subject: message.subject,
+        status,
+        error: error ?? null,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not record email attempt: ${err?.message}`);
     }
   }
 
@@ -117,14 +177,14 @@ export class MailService {
           const partialPath = path.join(partialsDir, file);
           const partialContent = await fsp.readFile(partialPath, 'utf-8');
           handlebars.registerPartial(partialName, partialContent);
-          console.log(`✅ Registered partial: ${partialName}`);
+          this.logger.log(`✅ Registered partial: ${partialName}`);
         }
       }
 
-      console.log('🎉 All partials registered successfully!');
+      this.logger.log('🎉 All partials registered successfully!');
     } catch (error: any) {
-      console.warn('⚠️ Could not load email partials:', error.message);
-      console.log('Partials directory attempted:', partialsDir);
+      this.logger.warn('⚠️ Could not load email partials:', error.message);
+      this.logger.log('Partials directory attempted:', partialsDir);
     }
   }
 
@@ -157,7 +217,7 @@ export class MailService {
           handlebars.registerPartial(partialName, partialContent);
         }
       } catch {
-        console.warn(`⚠️ No partials found in ${partialsDir}`);
+        this.logger.warn(`⚠️ No partials found in ${partialsDir}`);
       }
 
       const layoutTemplate = handlebars.compile(layoutContent);
@@ -171,7 +231,7 @@ export class MailService {
         });
       };
     } catch (error) {
-      console.error(`❌ Failed to load template: ${templateName}`, error);
+      this.logger.error(`❌ Failed to load template: ${templateName}`, error);
       throw new Error(`Template ${templateName} not found or invalid`);
     }
   }
@@ -215,16 +275,16 @@ export class MailService {
         subject: 'Verify Your Email Address',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Verify Your Email Address',
         html,
       });
 
-      console.log('✅ Verification email sent successfully to:', to);
+      this.logger.log('✅ Verification email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send verification email:', error);
+      this.logger.error('❌ Failed to send verification email:', error);
       throw error;
     }
   }
@@ -241,16 +301,16 @@ export class MailService {
         subject: 'Your Password Reset Code',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Your Password Reset Code',
         html,
       });
 
-      console.log('✅ Password reset code email sent successfully to:', to);
+      this.logger.log('✅ Password reset code email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password reset code email:', error);
+      this.logger.error('❌ Failed to send password reset code email:', error);
       throw error;
     }
   }
@@ -271,16 +331,16 @@ export class MailService {
         subject: 'Password Reset Successful',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Password Reset Successful',
         html,
       });
 
-      console.log('✅ Password reset success email sent successfully to:', to);
+      this.logger.log('✅ Password reset success email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password reset success email:', error);
+      this.logger.error('❌ Failed to send password reset success email:', error);
       throw error;
     }
   }
@@ -301,16 +361,16 @@ export class MailService {
         subject: 'Password Updated Successfully',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Password Updated Successfully',
         html,
       });
 
-      console.log('✅ Password updated email sent successfully to:', to);
+      this.logger.log('✅ Password updated email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send password updated email:', error);
+      this.logger.error('❌ Failed to send password updated email:', error);
       throw error;
     }
   }
@@ -333,16 +393,16 @@ export class MailService {
         }/vendor/setup-guide`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
         html,
       });
 
-      console.log('✅ Vendor welcome email sent successfully to:', to);
+      this.logger.log('✅ Vendor welcome email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send vendor welcome email:', error);
+      this.logger.error('❌ Failed to send vendor welcome email:', error);
       throw error;
     }
   }
@@ -361,16 +421,16 @@ export class MailService {
         supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${process.env.COMPANY_NAME || 'Our Platform'}!`,
         html,
       });
 
-      console.log('✅ Customer welcome email sent successfully to:', to);
+      this.logger.log('✅ Customer welcome email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send customer welcome email:', error);
+      this.logger.error('❌ Failed to send customer welcome email:', error);
       throw error;
     }
   }
@@ -425,14 +485,14 @@ export class MailService {
         orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Order ${fields.orderReference} confirmed`,
         html,
       });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send order confirmation email:', error);
+      this.logger.error('❌ Failed to send order confirmation email:', error);
       throw error;
     }
   }
@@ -467,14 +527,14 @@ export class MailService {
         }/orders`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `New order ${fields.orderReference} — confirm within 48 hours`,
         html,
       });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send new order vendor email:', error);
+      this.logger.error('❌ Failed to send new order vendor email:', error);
       throw error;
     }
   }
@@ -501,14 +561,14 @@ export class MailService {
         orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Order ${fields.orderReference} is on its way`,
         html,
       });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send order shipped email:', error);
+      this.logger.error('❌ Failed to send order shipped email:', error);
       throw error;
     }
   }
@@ -533,14 +593,14 @@ export class MailService {
         orderUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/profile?tab=orders`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Order ${fields.orderReference} delivered`,
         html,
       });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send order delivered email:', error);
+      this.logger.error('❌ Failed to send order delivered email:', error);
       throw error;
     }
   }
@@ -576,14 +636,14 @@ export class MailService {
         }/wallet`,
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `${formatted} released to your wallet`,
         html,
       });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send payout released email:', error);
+      this.logger.error('❌ Failed to send payout released email:', error);
       throw error;
     }
   }
@@ -626,10 +686,10 @@ export class MailService {
         }/products`,
       });
 
-      await this.mailerService.sendMail({ to, subject, html });
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      console.error('❌ Failed to send product moderated email:', error);
+      this.logger.error('❌ Failed to send product moderated email:', error);
       throw error;
     }
   }
@@ -655,16 +715,16 @@ export class MailService {
         supportEmail: process.env.SUPPORT_EMAIL || 'support@qoobea.com',
       });
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Welcome to ${businessName} on Qlozet!`,
         html,
       });
 
-      console.log('✅ Team invite email sent successfully to:', to);
+      this.logger.log('✅ Team invite email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send team invite email:', error);
+      this.logger.error('❌ Failed to send team invite email:', error);
       throw error;
     }
   }
@@ -693,15 +753,15 @@ export class MailService {
           </p>
           <p style="color:#8A7C6E;font-size:13px;">Forgot your password? Use "Forgot password" on the sign-in page.</p>
         </div>`;
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `You've been added to ${businessName} on Qlozet`,
         html,
       });
-      console.log('✅ Team added email sent successfully to:', to);
+      this.logger.log('✅ Team added email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send team added email:', error);
+      this.logger.error('❌ Failed to send team added email:', error);
       throw error;
     }
   }
@@ -745,16 +805,16 @@ export class MailService {
           <p style="color:#8A7C6E;font-size:13px;">If you were not expecting this, contact ${process.env.SUPPORT_EMAIL || 'support@qoobea.com'}.</p>
         </div>`;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: 'Your Qlozet admin account',
         html,
       });
 
-      console.log('✅ Admin invite email sent successfully to:', to);
+      this.logger.log('✅ Admin invite email sent successfully to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send admin invite email:', error);
+      this.logger.error('❌ Failed to send admin invite email:', error);
       throw error;
     }
   }
@@ -788,16 +848,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `New Bespoke Quote Request: ${designName}`,
         html,
       });
 
-      console.log('✅ Quote request email sent to:', to);
+      this.logger.log('✅ Quote request email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote request email:', error);
+      this.logger.error('❌ Failed to send quote request email:', error);
       throw error;
     }
   }
@@ -832,16 +892,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Quote received from ${vendorName}`,
         html,
       });
 
-      console.log('✅ Quote submitted email sent to:', to);
+      this.logger.log('✅ Quote submitted email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote submitted email:', error);
+      this.logger.error('❌ Failed to send quote submitted email:', error);
       throw error;
     }
   }
@@ -869,16 +929,16 @@ export class MailService {
         </div>
       `;
 
-      await this.mailerService.sendMail({
+      await this.dispatch({
         to,
         subject: `Revision requested: ${designName}`,
         html,
       });
 
-      console.log('✅ Quote revision email sent to:', to);
+      this.logger.log('✅ Quote revision email sent to:', to);
       return true;
     } catch (error) {
-      console.error('❌ Failed to send quote revision email:', error);
+      this.logger.error('❌ Failed to send quote revision email:', error);
       throw error;
     }
   }
