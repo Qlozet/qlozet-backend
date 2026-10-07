@@ -6,8 +6,8 @@ import {
   Req,
   UnauthorizedException,
   UseGuards,
-  Logger,
-} from '@nestjs/common';
+  Logger, HttpCode } from '@nestjs/common';
+import { timingSafeEqual } from 'crypto';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -85,6 +85,47 @@ export class WebhookController {
   async verifyPayment(@Param('reference') reference: string) {
     const result = await this.webhookService.verifyAndFinalize(reference);
     return { message: 'Payment verification processed', data: result };
+  }
+
+  /**
+   * ZeptoMail delivery events.
+   *
+   * ZeptoMail does not sign its webhooks — its own console says the call is
+   * unauthenticated — and instead lets you nominate a header it will send.
+   * So the shared secret below is the whole of the authentication, and it is
+   * compared in constant time rather than with === to keep the comparison
+   * from leaking its length through timing.
+   *
+   * Always answers 200, even when it rejects the body. ZeptoMail retries
+   * anything else, and a malformed event retried forever is noise, not
+   * resilience. Refusal is recorded in the log instead.
+   */
+  @Public()
+  @Post('zeptomail')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Handle ZeptoMail delivery and bounce events' })
+  @ApiResponse({ status: 200, description: 'Event accepted' })
+  async handleZeptomailWebhook(@Req() req: any) {
+    const expected = this.configService.get<string>('ZEPTOMAIL_WEBHOOK_SECRET');
+    const header = process.env.ZEPTOMAIL_WEBHOOK_HEADER || 'x-qlozet-webhook';
+    const provided = req.headers?.[header];
+
+    if (!expected) {
+      this.logger?.warn?.(
+        'ZEPTOMAIL_WEBHOOK_SECRET is not set — delivery events are being ignored',
+      );
+      return { received: true };
+    }
+
+    const a = Buffer.from(String(provided ?? ''));
+    const b = Buffer.from(expected);
+    const ok = a.length === b.length && timingSafeEqual(a, b);
+    if (!ok) {
+      return { received: true };
+    }
+
+    await this.webhookService.handleZeptomailWebhook(req.body);
+    return { received: true };
   }
 
   @Public()

@@ -22,6 +22,7 @@ import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
+import { EmailStatus } from '../notifications/schemas/email-log.schema';
 import {
   NotificationCategory,
   NotificationType,
@@ -943,6 +944,90 @@ export class WebhookService {
     });
 
     await this.emailCustomerShippingUpdate(order, status, trackingNumber);
+  }
+
+  /**
+   * Turn a ZeptoMail event into a status on the row we wrote when sending.
+   *
+   * The payload nests oddly: `event_name` is an array holding one name, and
+   * `event_message` is an array of objects each wrapping an `email_info`.
+   * Both are read defensively — this is someone else's shape, it arrives
+   * unauthenticated bar a shared header, and a change at their end should
+   * produce a log line rather than a stack trace.
+   *
+   * A feedback-loop event is a spam complaint. It is recorded as its own
+   * status rather than folded into bounces because it means something
+   * different: the address works, and the person did not want the mail.
+   */
+  async handleZeptomailWebhook(payload: any): Promise<{ received: true }> {
+    const name = String(
+      Array.isArray(payload?.event_name)
+        ? payload.event_name[0]
+        : payload?.event_name ?? '',
+    ).toLowerCase();
+
+    const STATUSES: Record<string, EmailStatus> = {
+      delivered: EmailStatus.DELIVERED,
+      softbounce: EmailStatus.SOFT_BOUNCE,
+      soft_bounce: EmailStatus.SOFT_BOUNCE,
+      hardbounce: EmailStatus.HARD_BOUNCE,
+      hard_bounce: EmailStatus.HARD_BOUNCE,
+      feedbackloop: EmailStatus.COMPLAINT,
+      feedback_loop: EmailStatus.COMPLAINT,
+    };
+
+    const status = STATUSES[name];
+    if (!status) {
+      this.logger.warn(`ZeptoMail: ignoring unknown event "${name}"`);
+      return { received: true };
+    }
+
+    const messages = Array.isArray(payload?.event_message)
+      ? payload.event_message
+      : [];
+
+    for (const entry of messages) {
+      const info = entry?.email_info ?? entry;
+      if (!info) continue;
+
+      // `to` is a list of { email_address: { address, name } }. A bounce also
+      // carries bounce_address, which is the one that actually failed.
+      const recipients: string[] = Array.isArray(info.to)
+        ? info.to
+            .map((t: any) => t?.email_address?.address)
+            .filter((a: unknown): a is string => typeof a === 'string')
+        : [];
+
+      if (typeof info.bounce_address === 'string' && info.bounce_address) {
+        recipients.push(info.bounce_address);
+      }
+
+      for (const to of [...new Set(recipients)]) {
+        await this.mailService
+          .applyDeliveryEvent({
+            to,
+            subject: typeof info.subject === 'string' ? info.subject : undefined,
+            status,
+            providerReference:
+              typeof info.email_reference === 'string'
+                ? info.email_reference
+                : undefined,
+            detail:
+              typeof info.reason === 'string'
+                ? info.reason
+                : typeof info.details === 'string'
+                  ? info.details
+                  : undefined,
+          })
+          .catch((err: any) =>
+            this.logger.warn(
+              `ZeptoMail: could not apply "${name}" for ${to}: ${err?.message}`,
+            ),
+          );
+      }
+    }
+
+    return { received: true };
   }
 
   /**

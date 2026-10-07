@@ -153,13 +153,70 @@ export class MailService {
   ): Promise<void> {
     try {
       await this.emailLogModel.create({
-        to: message.to,
+        // Lower-cased on the way in so a provider echoing a differently-cased
+        // address still matches the row. Local parts are case-sensitive in
+        // theory; no mail system in practice treats them that way.
+        to: message.to.toLowerCase(),
         subject: message.subject,
         status,
         error: error ?? null,
       });
     } catch (err: any) {
       this.logger.warn(`Could not record email attempt: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Apply a delivery event from ZeptoMail to the row we wrote when sending.
+   *
+   * Matching is by recipient and subject, newest first, because nothing
+   * reliably carries our own id end to end: ZeptoMail's client_reference is
+   * set per-send through its API, and these go out over SMTP. Recipient plus
+   * subject is unambiguous in practice — the same person does not receive two
+   * identically-subjected emails within the same second — and the provider's
+   * own reference is stored on first contact so the two can be reconciled by
+   * hand if they ever do disagree.
+   *
+   * Unmatched events are logged, not an error. A message sent before this
+   * table existed, or outside the 90-day window, has no row to update, and
+   * that is not a fault worth alarming anyone about.
+   */
+  async applyDeliveryEvent(event: {
+    to: string;
+    subject?: string;
+    status: EmailStatus;
+    providerReference?: string;
+    detail?: string;
+  }): Promise<void> {
+    const query: Record<string, unknown> = { to: event.to.toLowerCase() };
+    if (event.subject) query.subject = event.subject;
+
+    const row = await this.emailLogModel
+      .findOne(query)
+      .sort({ createdAt: -1 })
+      .exec();
+
+    if (!row) {
+      this.logger.warn(
+        `Delivery event "${event.status}" for ${event.to} matched no sent email`,
+      );
+      return;
+    }
+
+    row.status = event.status;
+    row.status_updated_at = new Date();
+    if (event.providerReference) row.provider_reference = event.providerReference;
+    if (event.detail) row.error = event.detail;
+    await row.save();
+
+    // A hard bounce means this address will never work again. Worth noticing:
+    // a vendor whose address is dead silently misses every new-order alert,
+    // and that one carries a 48-hour deadline.
+    if (event.status === EmailStatus.HARD_BOUNCE) {
+      this.logger.error(
+        `Hard bounce for ${event.to} — this address is undeliverable and ` +
+          `should be corrected before more mail is sent to it`,
+      );
     }
   }
 

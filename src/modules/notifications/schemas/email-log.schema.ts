@@ -4,8 +4,18 @@ import { Document } from 'mongoose';
 export type EmailLogDocument = EmailLog & Document;
 
 export enum EmailStatus {
+  /** Handed to the mail host and accepted. Not yet proof of anything. */
   SENT = 'sent',
+  /** The mail host refused it, or we never reached one. */
   FAILED = 'failed',
+  /** The provider confirmed it reached the recipient's server. */
+  DELIVERED = 'delivered',
+  /** Temporary: a full mailbox, a server having a bad day. Will retry. */
+  SOFT_BOUNCE = 'soft_bounce',
+  /** Permanent: the address does not exist. Stop sending to it. */
+  HARD_BOUNCE = 'hard_bounce',
+  /** The recipient marked it as spam. Worse than a bounce for the domain. */
+  COMPLAINT = 'complaint',
 }
 
 /**
@@ -36,6 +46,18 @@ export class EmailLog {
   /** Why it failed, when it did. Absent on success. */
   @Prop({ type: String, default: null })
   error?: string | null;
+
+  /**
+   * The provider's own id for the message, learned from its webhook rather
+   * than at send time. Kept so a row can be matched back to what ZeptoMail
+   * shows in its console when the two disagree.
+   */
+  @Prop({ type: String, default: null, index: true })
+  provider_reference?: string | null;
+
+  /** When the provider last told us something about this message. */
+  @Prop({ type: Date, default: null })
+  status_updated_at?: Date | null;
 
   /**
    * Kept for 90 days. These are an operational breadcrumb, not a record worth
