@@ -1,105 +1,153 @@
-<!DOCTYPE html>
-<html lang="en">
+{{!--
+  Qlozet email shell.
+
+  Built for mail clients, not browsers. Three rules shape it:
+
+  1. Tables, not divs. Outlook renders through Word, which ignores most CSS on
+     block elements — a div-based 600px container collapses to full width
+     there, which is how an email ends up unreadable on a corporate laptop.
+  2. Solid colours, no gradients. Outlook drops a gradient entirely, and the
+     old header relied on one for its background: white text on white.
+  3. Every colour also written inline where it matters. Embedded CSS survives
+     most clients now, but not all, and a stripped stylesheet should leave a
+     plain readable email rather than a broken one.
+
+  Class names from before are all still defined — the views use `divider`,
+  `security-note`, `code`, `card`, `muted` and others, and several of those
+  were never in the stylesheet at all, so they had been rendering bare.
+--}}
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    {{!-- Ask clients not to invert our palette; several will anyway. --}}
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
     <title>{{subject}}</title>
-    <style>
-        /* Reset styles */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+
+    <style type="text/css">
+        /* ── Resets ─────────────────────────────────────────────── */
+        body,
+        table,
+        td,
+        a {
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+
+        table,
+        td {
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }
+
+        img {
+            -ms-interpolation-mode: bicubic;
+            border: 0;
+            outline: none;
+            text-decoration: none;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f4f4f4;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            background-color: #F6F3EF;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                Helvetica, Arial, sans-serif;
+            color: #3F3A36;
+            line-height: 1.65;
         }
 
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: #ffffff;
+        /* ── Type ───────────────────────────────────────────────── */
+        h1 {
+            margin: 0 0 10px;
+            font-size: 24px;
+            line-height: 1.3;
+            font-weight: 700;
+            color: #2C1810;
         }
 
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 0;
-            text-align: center;
+        h2,
+        h3 {
+            margin: 0 0 12px;
+            font-size: 17px;
+            line-height: 1.4;
+            font-weight: 700;
+            color: #2C1810;
         }
 
-        .content {
-            padding: 40px 30px;
+        p {
+            margin: 0 0 16px;
+            font-size: 16px;
+            line-height: 1.65;
+            color: #3F3A36;
         }
 
-        .footer {
-            background: #f8f9fa;
-            padding: 30px;
-            text-align: center;
-            font-size: 14px;
-            color: #6c757d;
+        ul {
+            margin: 0 0 16px;
+            padding-left: 20px;
+            font-size: 16px;
+            color: #3F3A36;
         }
 
-        .logo-container {
-            display: inline-block;
-            background: #ffffff;
-            padding: 15px 25px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        a {
+            color: #8A5A3B;
         }
 
-        .logo-img {
-            max-width: 180px;
-            height: auto;
-        }
-
-        .logo-text {
-            color: #ffffff;
-            font-size: 28px;
-            font-weight: bold;
-            text-decoration: none;
-        }
-
-        .button {
-            display: inline-block;
-            padding: 14px 28px;
-            background: #007bff;
-            color: #ffffff;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: 600;
-            margin: 20px 0;
-        }
-
-        .code {
-            font-size: 32px;
-            font-weight: bold;
-            text-align: center;
-            letter-spacing: 8px;
-            color: #007bff;
-            margin: 20px 0;
-        }
-
+        /* ── Pieces the views reach for ─────────────────────────── */
         .divider {
             height: 1px;
-            background: #e9ecef;
-            margin: 30px 0;
+            line-height: 1px;
+            font-size: 0;
+            background: #EDE7E0;
+            margin: 28px 0;
         }
 
+        /* A warm aside, used for the things worth slowing down over. */
         .security-note {
-            background: #e7f3ff;
-            padding: 15px;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-            margin: 20px 0;
+            background: #FBF7F0;
+            border-left: 3px solid #C9A227;
+            padding: 16px 18px;
+            margin: 22px 0;
+            border-radius: 0 8px 8px 0;
         }
 
+        .security-note p {
+            margin: 0;
+            font-size: 15px;
+        }
+
+        .card {
+            background: #FAF8F5;
+            border: 1px solid #EDE7E0;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 22px 0;
+        }
+
+        /* Verification codes. Large, spaced, and the one brown that reads
+           as "this is the thing you came for". */
+        .code {
+            font-size: 32px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 8px;
+            color: #2C1810;
+            background: #FAF8F5;
+            border: 1px solid #EDE7E0;
+            border-radius: 12px;
+            padding: 18px 10px;
+            margin: 22px 0;
+        }
+
+        .muted,
         .text-muted {
-            color: #6c757d;
+            color: #8A7C6E;
+            font-size: 14px;
         }
 
         .text-center {
@@ -113,29 +161,105 @@
         .mt-20 {
             margin-top: 20px;
         }
+
+        /* Defined because views already use them; they were previously bare. */
+        .success-icon {
+            font-size: 40px;
+            line-height: 1;
+            color: #0F973D;
+            text-align: center;
+        }
+
+        .info-icon {
+            font-size: 40px;
+            line-height: 1;
+            color: #8A5A3B;
+            text-align: center;
+        }
+
+        /* Views that carry their own shell still land somewhere sensible. */
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+        }
+
+        .footer {
+            font-size: 13px;
+            color: #8A7C6E;
+        }
+
+        /* ── Phones ─────────────────────────────────────────────── */
+        @media only screen and (max-width: 620px) {
+            .wrap {
+                width: 100% !important;
+            }
+
+            .pad {
+                padding-left: 22px !important;
+                padding-right: 22px !important;
+            }
+
+            h1 {
+                font-size: 21px !important;
+            }
+
+            .code {
+                font-size: 26px !important;
+                letter-spacing: 5px !important;
+            }
+        }
     </style>
 </head>
 
-<body>
-    <div class="container">
-        <div class="header">
-            {{#if companyLogoUrl}}
-            <div class="logo-container">
-                <a href="{{websiteUrl}}">
-                    <img src="{{companyLogoUrl}}" alt="{{companyName}}" class="logo-img" />
-                </a>
-            </div>
-            {{else}}
-            <a href="{{websiteUrl}}" class="logo-text">{{companyName}}</a>
-            {{/if}}
-        </div>
-
-        <div class="content">
-            {{{body}}}
-        </div>
-
-        {{> footer }}
+<body style="margin:0; padding:0; background-color:#F6F3EF;">
+    {{!-- The inbox preview line. Without it clients grab whatever text comes
+          first, which is usually "Hello <name>," on every single email. --}}
+    {{#if preheader}}
+    <div
+        style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#F6F3EF; opacity:0;">
+        {{preheader}}
     </div>
+    {{/if}}
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+        style="background-color:#F6F3EF;">
+        <tr>
+            <td align="center" style="padding: 28px 12px;">
+
+                <table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0"
+                    style="width:600px; max-width:600px; background-color:#FFFFFF; border:1px solid #E8E1D9; border-radius:16px; overflow:hidden;">
+
+                    <!-- Brand bar. Solid, because Outlook drops gradients and
+                         the old one left white text on a white background. -->
+                    <tr>
+                        <td align="center" bgcolor="#2C1810" style="background-color:#2C1810; padding: 26px 24px;">
+                            {{#if companyLogoUrl}}
+                            <img src="{{companyLogoUrl}}" alt="{{companyName}}" width="132"
+                                style="display:block; width:132px; max-width:132px; height:auto; border:0;" />
+                            {{else}}
+                            <a href="{{websiteUrl}}"
+                                style="color:#FFFFFF; font-size:22px; font-weight:700; letter-spacing:2px; text-decoration:none; text-transform:uppercase;">{{companyName}}</a>
+                            {{/if}}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="pad" style="padding: 34px 36px 36px;">
+                            {{{body}}}
+                        </td>
+                    </tr>
+
+                    {{> footer }}
+
+                </table>
+
+            </td>
+        </tr>
+    </table>
 </body>
 
 </html>
