@@ -296,17 +296,32 @@ export class MailService {
   private getTemplateData(customData: any) {
     const currentYear = new Date().getFullYear();
 
+    /**
+     * Fallbacks are real values, not placeholders.
+     *
+     * These were "Your App", "support@yourapp.com", "123 Business St" and a
+     * via.placeholder.com image reading LOGO — which is what a customer saw
+     * on any environment where the variables were unset, and they are not
+     * documented anywhere, so that was most of them. A wrong default in an
+     * email is worse than a missing one: nobody notices it until a customer
+     * asks who Your App are.
+     */
     return {
       ...customData,
       year: currentYear,
-      websiteUrl: process.env.FRONTEND_URL || 'https://yourapp.com',
-      companyName: process.env.COMPANY_NAME || 'Your App',
-      supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com',
-      companyAddress:
-        process.env.COMPANY_ADDRESS || '123 Business St, City, State 12345',
-      companyLogoUrl:
-        process.env.COMPANY_LOGO_URL ||
-        'https://via.placeholder.com/180x60/667eea/ffffff?text=LOGO',
+      websiteUrl: process.env.FRONTEND_URL || 'https://qlozet.app',
+      companyName: process.env.COMPANY_NAME || 'Qlozet',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@qlozet.app',
+      // Omitted rather than guessed. The footer skips the line when there is
+      // no address, which beats inventing one.
+      companyAddress: process.env.COMPANY_ADDRESS || '',
+      /**
+       * Unset means no image, which is deliberate: the layout then draws the
+       * name as a wordmark in white on the brand bar. A broken or
+       * placeholder image is worse than clean type, and a logo file has to
+       * be a transparent or brown-matched PNG to sit on that bar at all.
+       */
+      companyLogoUrl: process.env.COMPANY_LOGO_URL || '',
     };
   }
 
