@@ -8,6 +8,7 @@ import {
 import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { MessagingService } from './messaging.service';
 import { MessagingGateway } from './messaging.gateway';
 import { OrderMessagesController } from './order-messages.controller';
@@ -21,6 +22,7 @@ import { AdminOrderMessagesController } from './admin-order-messages.controller'
       { name: Business.name, schema: BusinessSchema }, // resolve tailor's user id
     ]),
     AuthModule, // provides the JwtService the guards depend on
+    NotificationsModule, // the bell, for anyone without the thread open
   ],
   controllers: [OrderMessagesController, AdminOrderMessagesController],
   providers: [MessagingService, MessagingGateway, JwtService],

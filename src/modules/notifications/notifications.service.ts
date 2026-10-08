@@ -93,19 +93,25 @@ export class NotificationsService {
   }
 
   /**
-   * Create a notification only if the recipient has no UNREAD notification of the
-   * same type for the same product. Prevents spamming e.g. a low-stock alert on
-   * every sale while the product stays low. Returns null when skipped.
+   * Create a notification only if the recipient has no UNREAD notification of
+   * the same type against the same subject. Prevents spamming e.g. a low-stock
+   * alert on every sale while the product stays low, or one bell entry per
+   * message in a back-and-forth conversation. Returns null when skipped.
+   *
+   * `uniqueBy` names the metadata field that identifies the subject. It
+   * defaults to product_id, which is what every caller before the order chat
+   * used; the chat passes order_id.
    */
   async createUnique(
     data: CreateNotificationDto,
+    uniqueBy: string = 'product_id',
   ): Promise<NotificationDocument | null> {
-    const productId = data.metadata?.product_id;
-    if (data.recipient && productId) {
+    const subject = data.metadata?.[uniqueBy];
+    if (data.recipient && subject) {
       const exists = await this.notificationModel.exists({
         recipient: new Types.ObjectId(data.recipient.toString()),
         type: data.type,
-        'metadata.product_id': productId,
+        [`metadata.${uniqueBy}`]: subject,
         is_read: false,
       });
       if (exists) return null;
