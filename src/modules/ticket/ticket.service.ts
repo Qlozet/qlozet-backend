@@ -16,6 +16,13 @@ import {
   TicketActivityType,
 } from './schema/ticket-activity.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears that support replied. A ticket about the business is
+// customer-support work; a tailor does not need the platform's support thread.
+// The owner is always included by the resolver.
+const TICKET_ROLES = [VendorRole.CUSTOMER_SUPPORT];
 import {
   NotificationCategory,
   NotificationType,
@@ -31,6 +38,7 @@ export class TicketService {
     @InjectModel(TicketActivity.name)
     private ticketActivityModel: Model<TicketActivity>,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   /**
@@ -226,6 +234,40 @@ export class TicketService {
     );
   }
 
+  /**
+   * Who should hear that a ticket moved.
+   *
+   * Tickets come from two places and only ever one of them per ticket: a
+   * customer raises it personally, a vendor raises it against their business.
+   * A customer is one person; a business is a team, so a vendor ticket
+   * resolves to everyone there who handles support.
+   */
+  private async resolveTicketAudience(ticket: any): Promise<
+    {
+      userId: string;
+      businessId?: string;
+      isVendor: boolean;
+    }[]
+  > {
+    if (ticket?.customer) {
+      return [{ userId: String(ticket.customer), isVendor: false }];
+    }
+
+    if (ticket?.business) {
+      const recipients = await this.vendorRecipients.resolve(
+        ticket.business,
+        TICKET_ROLES,
+      );
+      return recipients.map((r) => ({
+        userId: r.userId,
+        businessId: String(ticket.business),
+        isVendor: true,
+      }));
+    }
+
+    return [];
+  }
+
   async createReply(
     ticket_id: Types.ObjectId,
     sender: Types.ObjectId,
@@ -254,9 +296,9 @@ export class TicketService {
     // A customer originator gets the mirror notification when support replies.
     this.ticketModel
       .findById(ticket_id)
-      .select('assigned_to customer')
+      .select('assigned_to customer business')
       .lean()
-      .then((t: any) => {
+      .then(async (t: any) => {
         const jobs: Promise<any>[] = [];
         const assignee = t?.assigned_to ? String(t.assigned_to) : null;
         if (assignee && assignee !== String(sender)) {
@@ -272,17 +314,24 @@ export class TicketService {
             }),
           );
         }
-        const owner = t?.customer ? String(t.customer) : null;
-        if (owner && owner !== String(sender)) {
+
+        // Who raised this ticket. A customer's ticket carries `customer`; a
+        // vendor's carries `business` and no customer at all, and the vendor
+        // branch did not exist - so a vendor was never told that support had
+        // replied to them, in app or anywhere else.
+        const audience = await this.resolveTicketAudience(t);
+        for (const member of audience) {
+          if (member.userId === String(sender)) continue;
           jobs.push(
             this.notificationsService.create({
-              recipient: owner,
+              recipient: member.userId,
+              recipient_business: member.businessId,
               category: NotificationCategory.SYSTEM,
               type: NotificationType.TICKET_REPLY,
               title: 'Support replied to your ticket',
               body: `"${dto.message.slice(0, 120)}"`,
               metadata: { ticket_id },
-              action_url: '/help/tickets',
+              action_url: member.isVendor ? '/support' : '/help/tickets',
             }),
           );
         }

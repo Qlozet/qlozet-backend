@@ -10,6 +10,14 @@ import {
   BusinessEarningDocument,
 } from '../business/schemas/business-earnings.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears about a dispute. The tailor made the garment being
+// disputed and is the only person who can say what was done; customer support
+// handles the correspondence. The owner is always included by the resolver.
+const DISPUTE_ROLES = [VendorRole.TAILOR, VendorRole.CUSTOMER_SUPPORT];
 import {
   NotificationCategory,
   NotificationType,
@@ -33,6 +41,8 @@ export class DisputesService {
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
+    private readonly vendorRecipients: VendorRecipientsService,
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
   ) {}
@@ -95,23 +105,54 @@ export class DisputesService {
 
     // Notify vendor
     const business = await this.businessModel.findById(dto.business_id);
-    if (business?.created_by?.id) {
-      this.notificationsService.create({
-        recipient: business.created_by.id.toString(),
-        category: NotificationCategory.ORDER,
-        type: NotificationType.ORDER_CANCELLED,
-        title: 'Customer Filed a Dispute ⚠️',
-        body: `A customer has filed a dispute for order #${order.reference}. Reason: ${dto.reason}. Please review and respond.`,
-        metadata: {
-          order_id: order._id,
-          order_reference: order.reference,
-          dispute_id: dispute._id,
-          reason: dto.reason,
-        },
-        action_url: `/orders`,
-      }).catch((err) =>
-        this.logger.error(`Failed to notify vendor about dispute: ${err.message}`),
-      );
+    // Everyone at the vendor who can act on this, not only the account that
+    // signed the business up. The tailor is the person who can say what was
+    // actually made, and they were previously told nothing.
+    const vendorRecipients = await this.vendorRecipients.resolve(
+      dto.business_id,
+      DISPUTE_ROLES,
+    );
+
+    for (const recipient of vendorRecipients) {
+      this.notificationsService
+        .create({
+          recipient: recipient.userId,
+          recipient_business: dto.business_id,
+          category: NotificationCategory.ORDER,
+          type: NotificationType.DISPUTE_OPENED,
+          title: 'Customer Filed a Dispute ⚠️',
+          body: `A customer has filed a dispute for order #${order.reference}. Reason: ${dto.reason}. Please review and respond.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            dispute_id: dispute._id,
+            reason: dto.reason,
+          },
+          action_url: `/orders`,
+        })
+        .catch((err) =>
+          this.logger.error(`Failed to notify vendor about dispute: ${err.message}`),
+        );
+
+      // The money is held from this moment with no deadline on the
+      // arbitration, so the bell alone is not enough — they may not open the
+      // platform for days. Fire-and-forget: a mail failure must not roll back
+      // a dispute already filed and a payout already frozen.
+      if (recipient.email) {
+        this.mailService
+          .sendDisputeOpenedEmail(
+            recipient.email,
+            recipient.name || 'there',
+            order.reference,
+            dto.reason,
+            dto.description,
+          )
+          .catch((err) =>
+            this.logger.error(
+              `Failed to email vendor about dispute: ${err?.message}`,
+            ),
+          );
+      }
     }
 
     // Admins arbitrate disputes — every platform user gets the work-queue ping.
@@ -280,24 +321,34 @@ export class DisputesService {
       this.logger.error(`Failed to notify customer about resolution: ${err.message}`),
     );
 
-    // Notify vendor
-    const business = await this.businessModel.findById(businessId);
-    if (business?.created_by?.id) {
-      this.notificationsService.create({
-        recipient: business.created_by.id.toString(),
-        category: NotificationCategory.ORDER,
-        type: NotificationType.ORDER_CONFIRMED,
-        title: 'Dispute Resolved',
-        body: `Dispute for order #${dispute.order_reference} has been resolved: ${dto.resolution.replace(/_/g, ' ')}.`,
-        metadata: {
-          order_reference: dispute.order_reference,
-          dispute_id: dispute._id,
-          resolution: dto.resolution,
-        },
-        action_url: `/orders`,
-      }).catch((err) =>
-        this.logger.error(`Failed to notify vendor about resolution: ${err.message}`),
-      );
+    // Everyone who was told about the dispute hears how it ended.
+    const resolutionRecipients = await this.vendorRecipients.resolve(
+      businessId,
+      DISPUTE_ROLES,
+    );
+    for (const recipient of resolutionRecipients) {
+      this.notificationsService
+        .create({
+          recipient: recipient.userId,
+          recipient_business: String(businessId),
+          category: NotificationCategory.ORDER,
+          // Was ORDER_CONFIRMED, under a title reading "Dispute Resolved" —
+          // so a resolved dispute was counted as a confirmed order.
+          type: NotificationType.DISPUTE_OPENED,
+          title: 'Dispute Resolved',
+          body: `Dispute for order #${dispute.order_reference} has been resolved: ${dto.resolution.replace(/_/g, ' ')}.`,
+          metadata: {
+            order_reference: dispute.order_reference,
+            dispute_id: dispute._id,
+            resolution: dto.resolution,
+          },
+          action_url: `/orders`,
+        })
+        .catch((err) =>
+          this.logger.error(
+            `Failed to notify vendor about resolution: ${err.message}`,
+          ),
+        );
     }
 
     return { message: `Dispute resolved: ${dto.resolution}`, data: dispute };

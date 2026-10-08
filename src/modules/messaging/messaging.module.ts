@@ -22,7 +22,7 @@ import { AdminOrderMessagesController } from './admin-order-messages.controller'
       { name: Business.name, schema: BusinessSchema }, // resolve tailor's user id
     ]),
     AuthModule, // provides the JwtService the guards depend on
-    NotificationsModule, // the bell, for anyone without the thread open
+    NotificationsModule, // the bell, and who at a vendor should get it
   ],
   controllers: [OrderMessagesController, AdminOrderMessagesController],
   providers: [MessagingService, MessagingGateway, JwtService],

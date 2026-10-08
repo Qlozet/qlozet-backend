@@ -16,6 +16,13 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at the tailor's business is part of an order conversation. The tailor
+// does the work and answers the questions about it; customer support fields
+// the rest. The owner is always included by the resolver.
+const CHAT_ROLES = [VendorRole.TAILOR, VendorRole.CUSTOMER_SUPPORT];
 
 // Bespoke order statuses during which new messages may be sent (production +
 // fulfilment). Reading history is allowed in any state.
@@ -40,6 +47,7 @@ export class MessagingService {
     @InjectModel('Business') private readonly businessModel: Model<any>,
     private readonly eventEmitter: EventEmitter2,
     private readonly notifications: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   // Resolve the order + the caller's role in its thread. Messaging is a
@@ -127,17 +135,20 @@ export class MessagingService {
       read_by_vendor: role === 'vendor',
     });
 
-    // Push the new message live to both participants (customer + tailor's user).
-    const business: any = await this.businessModel
-      .findById(tailorBusinessId)
-      .select('created_by')
-      .lean();
-    const vendorUserId = business?.created_by?.id
-      ? String(business.created_by.id)
-      : null;
+    // Push the new message live to every participant: the customer, and the
+    // people at the tailor's business who are part of this conversation.
+    //
+    // This used to be business.created_by alone, so a tailor with the chat
+    // sheet open received nothing — the socket room was keyed to the owner's
+    // user id. They could already read and send over REST, because
+    // authorisation is business-scoped; only delivery was owner-only.
+    const vendorRecipients = await this.vendorRecipients.resolve(
+      tailorBusinessId,
+      CHAT_ROLES,
+    );
     const participantUserIds = [
       String((order as any).customer),
-      ...(vendorUserId ? [vendorUserId] : []),
+      ...vendorRecipients.map((r) => r.userId),
     ];
     this.eventEmitter.emit(ORDER_MESSAGE_CREATED, {
       message: message.toObject ? message.toObject() : message,
@@ -160,7 +171,7 @@ export class MessagingService {
       order,
       role,
       tailorBusinessId,
-      vendorUserId,
+      vendorRecipients.filter((r) => r.userId !== String(req.user!.id)),
       body,
     );
 
@@ -175,7 +186,7 @@ export class MessagingService {
     order: any,
     senderRole: 'customer' | 'vendor',
     tailorBusinessId: string,
-    vendorUserId: string | null,
+    vendorRecipients: { userId: string }[],
     body: string,
   ) {
     try {
@@ -186,27 +197,36 @@ export class MessagingService {
       const reference = String(order.reference);
 
       if (senderRole === 'customer') {
-        if (!vendorUserId) return; // no owner on the tailor's business
+        if (!vendorRecipients.length) return;
         const business: any = await this.businessModel
           .findById(tailorBusinessId)
           .select('business_name')
           .lean();
-        await this.notifications.createUnique(
-          {
-            recipient: vendorUserId,
-            recipient_business: tailorBusinessId,
-            category: NotificationCategory.BESPOKE,
-            type: NotificationType.NEW_MESSAGE,
-            title: `New message on ${reference}`,
-            body: snippet,
-            metadata: {
-              order_id: String(order._id),
-              order_reference: reference,
-              business_name: business?.business_name,
-            },
-            action_url: '/orders',
-          },
-          'order_id',
+
+        // One entry per person, each de-duped against their OWN unread entry
+        // for this order — so a burst stays one row for everybody, and a
+        // tailor who has read the thread is not kept at zero by a colleague
+        // who has not.
+        await Promise.all(
+          vendorRecipients.map((recipient) =>
+            this.notifications.createUnique(
+              {
+                recipient: recipient.userId,
+                recipient_business: tailorBusinessId,
+                category: NotificationCategory.BESPOKE,
+                type: NotificationType.NEW_MESSAGE,
+                title: `New message on ${reference}`,
+                body: snippet,
+                metadata: {
+                  order_id: String(order._id),
+                  order_reference: reference,
+                  business_name: business?.business_name,
+                },
+                action_url: '/orders',
+              },
+              'order_id',
+            ),
+          ),
         );
         return;
       }

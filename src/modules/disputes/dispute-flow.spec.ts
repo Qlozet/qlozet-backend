@@ -59,6 +59,10 @@ describe('DisputesService', () => {
         create: jest.fn().mockResolvedValue({}),
         notifyPlatformAdmins: jest.fn().mockResolvedValue(undefined),
       },
+      mailService: { sendDisputeOpenedEmail: jest.fn().mockResolvedValue(true) },
+      // Who at the vendor hears about a dispute. These tests are about the
+      // money, so an empty team keeps the fan-out out of the way.
+      vendorRecipients: { resolve: jest.fn().mockResolvedValue([]) },
       transactionService: { findByOrderId, refundPaystackPayment: jest.fn() },
       walletsService: { creditWallet },
     });

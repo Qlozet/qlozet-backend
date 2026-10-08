@@ -1,0 +1,36 @@
+{{> header title="A customer has disputed an order" subtitle="Your earnings for it are on hold until it is settled" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>A customer has raised a dispute on order <strong>{{orderReference}}</strong>.
+    Your earnings for that order are held while we look into it.</p>
+
+<div class="boxpad card" style="background: #FAF8F5; padding: 20px; border-radius: 8px; margin: 24px 0;">
+    <p style="margin: 0 0 6px; color: #8A7C6E; font-size: 14px;">Their reason</p>
+    <p style="margin: 0; font-weight: 700;">{{reason}}</p>
+    {{#if details}}
+    <p style="margin: 12px 0 0; font-size: 15px;">{{details}}</p>
+    {{/if}}
+</div>
+
+{{> button url=disputeUrl text="Respond to this dispute" }}
+
+<div class="divider" style="height:1px; line-height:1px; font-size:0; background:#EDE7E0; margin:28px 0;">&nbsp;</div>
+
+<h3 style="color:#2C1810; margin:0 0 12px;">What helps your case</h3>
+<ul style="margin:0; padding-left:20px; color:#3F3A36;">
+    <li style="margin-bottom:8px;">Photos of the finished piece before it was sent.</li>
+    <li style="margin-bottom:8px;">The measurements you worked to, and where they came from.</li>
+    <li>Anything you and the customer agreed in writing.</li>
+</ul>
+
+{{!-- Deliberately no deadline: there is no response clock in the system, and
+      inventing one in an email we cannot enforce would be a lie to the vendor. --}}
+<div class="security-note"
+    style="background:#FBF7F0; border-left:3px solid #C9A227; padding:16px 18px; margin:22px 0; border-radius:0 8px 8px 0;">
+    <p style="margin:0; font-size:15px;">Responding early is what usually settles
+        these. A dispute with nothing from the vendor on it leaves us only the
+        customer&rsquo;s account to go on.</p>
+</div>
+
+<p style="margin-top: 28px;">We will tell you as soon as there is a decision,<br>The {{companyName}} Team</p>
