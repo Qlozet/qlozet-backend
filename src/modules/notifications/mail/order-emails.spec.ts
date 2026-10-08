@@ -39,6 +39,101 @@ const orderFields = {
   orderUrl: 'https://qlozet.app/profile?tab=orders',
 };
 
+/**
+ * The shell, composed the way loadTemplate composes it: layout wrapping a
+ * rendered view, with the partials registered. The per-view tests above only
+ * render the view, so without this nothing checks the part every email shares.
+ */
+const renderFull = (view: string, data: Record<string, unknown>): string => {
+  for (const file of fs.readdirSync(PARTIALS)) {
+    Handlebars.registerPartial(
+      path.basename(file, '.hbs'),
+      fs.readFileSync(path.join(PARTIALS, file), 'utf8'),
+    );
+  }
+  const layout = Handlebars.compile(
+    fs.readFileSync(
+      path.join(__dirname, 'templates', 'layouts', 'main.hbs'),
+      'utf8',
+    ),
+  );
+  const body = Handlebars.compile(
+    fs.readFileSync(path.join(VIEWS, `${view}.hbs`), 'utf8'),
+  );
+  const full = {
+    year: 2026,
+    websiteUrl: 'https://qlozet.app',
+    companyName: 'Qlozet',
+    supportEmail: 'support@qlozet.app',
+    companyAddress: 'Lagos, Nigeria',
+    ...data,
+  };
+  return layout({ ...full, body: body(full) });
+};
+
+describe('the email shell', () => {
+  const html = (extra: Record<string, unknown> = {}) =>
+    renderFull('order-confirmation', {
+      ...orderFields,
+      customerName: 'Ada Obi',
+      multipleVendors: false,
+      ...extra,
+    });
+
+  it('produces a complete document', () => {
+    const out = html();
+    expect(out).toContain('<!DOCTYPE');
+    expect(out).toContain('</html>');
+  });
+
+  it('lays out with tables, which is what Outlook can render', () => {
+    expect(html()).toContain('role="presentation"');
+    expect(html()).toContain('cellpadding="0"');
+  });
+
+  it('wears the brand colour, not the old generic blue', () => {
+    const out = html();
+    expect(out).toContain('#2C1810');
+    expect(out.toLowerCase()).not.toContain('#007bff');
+    // The gradient header Outlook refused to draw.
+    expect(out).not.toContain('linear-gradient');
+  });
+
+  it('sets the background with bgcolor as well as CSS', () => {
+    // Outlook ignores background-color on a td; bgcolor it honours.
+    expect(html()).toContain('bgcolor="#2C1810"');
+  });
+
+  it('uses the preheader for the inbox preview when given one', () => {
+    const out = html({ preheader: 'Your order is confirmed' });
+    expect(out).toContain('Your order is confirmed');
+    expect(out).toContain('mso-hide:all');
+  });
+
+  it('omits the preheader block entirely when there is none', () => {
+    expect(html()).not.toContain('mso-hide:all');
+  });
+
+  it('carries the footer, and no unresolved expressions anywhere', () => {
+    const out = html();
+    expect(out).toContain('support@qlozet.app');
+    expect(out).toContain('2026');
+    expect(out).not.toMatch(/\{\{/);
+  });
+
+  it('renders every view through the shell without breaking', () => {
+    const views = fs
+      .readdirSync(VIEWS)
+      .filter((f) => f.endsWith('.hbs'))
+      .map((f) => path.basename(f, '.hbs'));
+
+    expect(views.length).toBeGreaterThan(10);
+    for (const view of views) {
+      expect(() => renderFull(view, { ...orderFields })).not.toThrow();
+    }
+  });
+});
+
 describe('order emails', () => {
   describe('customer confirmation', () => {
     const html = () =>

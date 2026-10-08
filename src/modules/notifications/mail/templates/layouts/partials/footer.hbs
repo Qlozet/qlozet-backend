@@ -1,27 +1,32 @@
-<div class="footer">
-    <div class="divider"></div>
+{{!--
+  Footer. A table row, because it sits inside the shell's table — a div here
+  would break out of the 600px column in Outlook.
+--}}
+<tr>
+    <td bgcolor="#FAF8F5" class="pad"
+        style="background-color:#FAF8F5; border-top:1px solid #EDE7E0; padding: 26px 36px 30px; text-align:center;">
 
-    {{#if companyLogoUrl}}
-    <div style="margin-bottom: 15px;">
-        <img src="{{companyLogoUrl}}" alt="{{companyName}}" style="max-width: 100px; height: auto; opacity: 0.7;" />
-    </div>
-    {{/if}}
+        <p style="margin:0 0 6px; font-size:14px; font-weight:700; color:#2C1810;">{{companyName}}</p>
 
-    <p style="margin-bottom: 10px; font-weight: 600; color: #495057;">{{companyName}}</p>
+        <p style="margin:0 0 14px; font-size:13px; line-height:1.6; color:#8A7C6E;">
+            Need a hand? Write to
+            <a href="mailto:{{supportEmail}}"
+                style="color:#8A5A3B; text-decoration:underline;">{{supportEmail}}</a>
+        </p>
 
-    <p style="margin-bottom: 10px;">
-        Need help? Contact our support team at
-        <a href="mailto:{{supportEmail}}" style="color: #007bff; text-decoration: none;">{{supportEmail}}</a>
-    </p>
+        {{#if companyAddress}}
+        <p style="margin:0 0 14px; font-size:12px; line-height:1.6; color:#A39588;">{{companyAddress}}</p>
+        {{/if}}
 
-    <p style="margin-bottom: 10px; color: #6c757d;">{{companyAddress}}</p>
+        <p style="margin:0 0 4px; font-size:12px; color:#A39588;">
+            &copy; {{year}} {{companyName}}
+        </p>
 
-    <p class="text-muted">
-        &copy; {{year}} {{companyName}}. All rights reserved.
-    </p>
-
-    <p class="text-muted" style="font-size: 12px; margin-top: 10px;">
-        This email was sent to you because you have an account with {{companyName}}.
-        If you didn't request this, please ignore this email.
-    </p>
-</div>
+        {{!-- Why this landed, rather than an unsubscribe link: everything we
+              send is transactional. Offering to opt out of an order
+              confirmation would be a promise we should not keep. --}}
+        <p style="margin:0; font-size:12px; line-height:1.6; color:#A39588;">
+            You are receiving this because you have a {{companyName}} account.
+        </p>
+    </td>
+</tr>
