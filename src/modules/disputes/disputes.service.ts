@@ -10,6 +10,7 @@ import {
   BusinessEarningDocument,
 } from '../business/schemas/business-earnings.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
   NotificationType,
@@ -33,6 +34,7 @@ export class DisputesService {
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
   ) {}
@@ -98,8 +100,9 @@ export class DisputesService {
     if (business?.created_by?.id) {
       this.notificationsService.create({
         recipient: business.created_by.id.toString(),
+        recipient_business: dto.business_id,
         category: NotificationCategory.ORDER,
-        type: NotificationType.ORDER_CANCELLED,
+        type: NotificationType.DISPUTE_OPENED,
         title: 'Customer Filed a Dispute ⚠️',
         body: `A customer has filed a dispute for order #${order.reference}. Reason: ${dto.reason}. Please review and respond.`,
         metadata: {
@@ -112,6 +115,26 @@ export class DisputesService {
       }).catch((err) =>
         this.logger.error(`Failed to notify vendor about dispute: ${err.message}`),
       );
+
+      // The vendor's money is held from this moment, with no deadline on the
+      // arbitration, so the bell alone is not enough — they may not open the
+      // platform for days. Fire-and-forget: a mail failure must not roll back
+      // a dispute that is already filed and a payout already frozen.
+      if (business.created_by.email) {
+        this.mailService
+          .sendDisputeOpenedEmail(
+            business.created_by.email,
+            business.created_by.name || 'there',
+            order.reference,
+            dto.reason,
+            dto.description,
+          )
+          .catch((err) =>
+            this.logger.error(
+              `Failed to email vendor about dispute: ${err?.message}`,
+            ),
+          );
+      }
     }
 
     // Admins arbitrate disputes — every platform user gets the work-queue ping.

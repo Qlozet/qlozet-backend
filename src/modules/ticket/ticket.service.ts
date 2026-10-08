@@ -31,6 +31,7 @@ export class TicketService {
     @InjectModel(TicketActivity.name)
     private ticketActivityModel: Model<TicketActivity>,
     private readonly notificationsService: NotificationsService,
+    @InjectModel('Business') private readonly businessModel: Model<any>,
   ) {}
 
   /**
@@ -226,6 +227,48 @@ export class TicketService {
     );
   }
 
+  /**
+   * Which user raised a ticket.
+   *
+   * Tickets come from two places and only ever one of them per ticket: a
+   * customer raises it personally, a vendor raises it against their business.
+   * A business record has no user of its own, so a vendor ticket resolves
+   * through `created_by` - the same single-owner limitation the order chat
+   * has, and worth widening in both places at once.
+   */
+  private async resolveTicketOwner(ticket: any): Promise<{
+    userId: string;
+    businessId?: string;
+    isVendor: boolean;
+  } | null> {
+    try {
+      if (ticket?.customer) {
+        return { userId: String(ticket.customer), isVendor: false };
+      }
+
+      if (ticket?.business) {
+        const business: any = await this.businessModel
+          .findById(ticket.business)
+          .select('created_by')
+          .lean();
+        const ownerId = business?.created_by?.id;
+        if (!ownerId) return null;
+        return {
+          userId: String(ownerId),
+          businessId: String(ticket.business),
+          isVendor: true,
+        };
+      }
+
+      return null;
+    } catch (err) {
+      this.logger.error(
+        `Failed to resolve ticket owner: ${(err as any)?.message}`,
+      );
+      return null;
+    }
+  }
+
   async createReply(
     ticket_id: Types.ObjectId,
     sender: Types.ObjectId,
@@ -254,9 +297,9 @@ export class TicketService {
     // A customer originator gets the mirror notification when support replies.
     this.ticketModel
       .findById(ticket_id)
-      .select('assigned_to customer')
+      .select('assigned_to customer business')
       .lean()
-      .then((t: any) => {
+      .then(async (t: any) => {
         const jobs: Promise<any>[] = [];
         const assignee = t?.assigned_to ? String(t.assigned_to) : null;
         if (assignee && assignee !== String(sender)) {
@@ -272,17 +315,23 @@ export class TicketService {
             }),
           );
         }
-        const owner = t?.customer ? String(t.customer) : null;
-        if (owner && owner !== String(sender)) {
+
+        // Who raised this ticket. A customer's ticket carries `customer`; a
+        // vendor's carries `business` and no customer at all, and the vendor
+        // branch did not exist - so a vendor was never told that support had
+        // replied to them, in app or anywhere else.
+        const owner = await this.resolveTicketOwner(t);
+        if (owner && owner.userId !== String(sender)) {
           jobs.push(
             this.notificationsService.create({
-              recipient: owner,
+              recipient: owner.userId,
+              recipient_business: owner.businessId,
               category: NotificationCategory.SYSTEM,
               type: NotificationType.TICKET_REPLY,
               title: 'Support replied to your ticket',
               body: `"${dto.message.slice(0, 120)}"`,
               metadata: { ticket_id },
-              action_url: '/help/tickets',
+              action_url: owner.isVendor ? '/support' : '/help/tickets',
             }),
           );
         }

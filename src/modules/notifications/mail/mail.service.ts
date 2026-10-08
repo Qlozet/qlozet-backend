@@ -26,6 +26,8 @@ interface EmailTemplates {
   quoteRequest: CompiledTemplate;
   quoteSubmitted: CompiledTemplate;
   quoteRevision: CompiledTemplate;
+  disputeOpened: CompiledTemplate;
+  lowStockDigest: CompiledTemplate;
 }
 
 import { InjectModel } from '@nestjs/mongoose';
@@ -119,6 +121,8 @@ export class MailService {
         quoteRequest: await this.loadTemplate('quote-request'),
         quoteSubmitted: await this.loadTemplate('quote-submitted'),
         quoteRevision: await this.loadTemplate('quote-revision'),
+        disputeOpened: await this.loadTemplate('dispute-opened'),
+        lowStockDigest: await this.loadTemplate('low-stock-digest'),
       };
 
       this.logger.log('✅ All email templates initialized successfully!');
@@ -726,6 +730,103 @@ export class MailService {
       return true;
     } catch (error) {
       this.logger.error('❌ Failed to send payout released email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * A dispute was opened against one of the vendor's orders.
+   *
+   * The vendor is the one who has to act and the one whose money is held, so
+   * this goes to them rather than to the admins who arbitrate — admins work
+   * the dispute queue inside the platform all day.
+   *
+   * Nothing here promises a response window. There is no deadline field, no
+   * SLA and no auto-resolve job in the dispute module, so an email saying
+   * "respond within 48 hours" would be inventing a rule nothing enforces.
+   */
+  async sendDisputeOpenedEmail(
+    to: string,
+    vendorName: string,
+    orderReference: string,
+    reason: string,
+    details?: string,
+  ) {
+    try {
+      if (!this.templates.disputeOpened)
+        throw new Error('Dispute opened template not loaded');
+
+      const subject = `A customer disputed order ${orderReference}`;
+      const html = this.templates.disputeOpened({
+        vendorName,
+        orderReference,
+        reason,
+        details: details?.trim() || '',
+        subject,
+        preheader: `Your earnings for ${orderReference} are held until this is settled.`,
+        disputeUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/orders`,
+      });
+
+      await this.dispatch({ to, subject, html });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send dispute opened email:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stock warnings for one vendor, as a single email.
+   *
+   * Takes a LIST on purpose. One order can push several listings below the
+   * threshold at once, and the in-app notifications are raised one per
+   * product — mirroring that in email would send five separate messages about
+   * one order, which is how a sender gets filtered. The caller groups by
+   * vendor and calls this once.
+   */
+  async sendLowStockDigestEmail(
+    to: string,
+    vendorName: string,
+    items: { name: string; outOfStock: boolean }[],
+  ) {
+    try {
+      if (!this.templates.lowStockDigest)
+        throw new Error('Low stock digest template not loaded');
+      if (!items.length) return false;
+
+      const anyOut = items.some((i) => i.outOfStock);
+      const single = items.length === 1;
+
+      // The subject carries the worst state in the list, because that is what
+      // decides whether this is worth opening now.
+      const subject = single
+        ? `${items[0].name} is ${items[0].outOfStock ? 'out of stock' : 'running low'}`
+        : anyOut
+          ? `${items.length} products need restocking`
+          : `${items.length} products are running low`;
+
+      const html = this.templates.lowStockDigest({
+        vendorName,
+        items,
+        singleItem: single,
+        title: anyOut ? 'Some products need restocking' : 'Stock is running low',
+        subject,
+        preheader: subject,
+        productsUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/products`,
+      });
+
+      await this.dispatch({ to, subject, html });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send low stock digest email:', error);
       throw error;
     }
   }

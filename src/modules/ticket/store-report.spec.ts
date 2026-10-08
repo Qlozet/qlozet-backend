@@ -63,6 +63,13 @@ describe('store reports', () => {
             notifyPlatformAdmins: jest.fn().mockResolvedValue({}),
           },
         },
+        // Read-only, and only on the reply path: a vendor's ticket resolves
+        // its owner through business.created_by. Nothing in these tests
+        // replies, so an empty lookup is enough.
+        {
+          provide: getModelToken('Business'),
+          useValue: { findById: jest.fn().mockReturnValue(chain(null)) },
+        },
       ],
     }).compile();
 

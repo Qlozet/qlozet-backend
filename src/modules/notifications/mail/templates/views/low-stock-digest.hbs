@@ -1,0 +1,33 @@
+{{> header title=title subtitle="So you can restock before the orders stop" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>{{#if singleItem}}One of your products has{{else}}Some of your products
+    have{{/if}} dropped to the point where it is worth a look.</p>
+
+{{!-- One email listing every affected product, rather than one per product.
+      A single order can push several listings below the threshold at once, and
+      five separate emails about five products is how a vendor learns to filter
+      us out of their inbox. --}}
+<div class="boxpad card" style="background: #FAF8F5; padding: 20px; border-radius: 8px; margin: 24px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size: 15px;">
+        {{#each items}}
+        <tr>
+            <td style="padding: 7px 0; color: #3F3A36;">{{this.name}}</td>
+            <td style="padding: 7px 0; text-align: right; white-space: nowrap; font-weight: 700; color: {{#if this.outOfStock}}#A8321E{{else}}#8A6A10{{/if}};">
+                {{#if this.outOfStock}}Out of stock{{else}}Low{{/if}}
+            </td>
+        </tr>
+        {{/each}}
+    </table>
+</div>
+
+{{> button url=productsUrl text="Update your stock" }}
+
+<div class="divider" style="height:1px; line-height:1px; font-size:0; background:#EDE7E0; margin:28px 0;">&nbsp;</div>
+
+<p class="muted" style="color:#8A7C6E; font-size:14px;">An out-of-stock listing
+    stays on your storefront but cannot be bought. A low one still sells &mdash;
+    this is just the early warning.</p>
+
+<p style="margin-top: 28px;">Thank you for selling with us,<br>The {{companyName}} Team</p>

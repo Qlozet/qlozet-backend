@@ -108,15 +108,42 @@ export class ProductService {
         .find({ _id: { $in: ids } })
         .lean();
 
+      // Collected per vendor so the EMAIL goes out once, listing everything,
+      // rather than once per product. A single order can push several
+      // listings below the threshold, and five separate emails about one
+      // order is how a sender gets filtered into a folder nobody opens. The
+      // in-app notifications stay one per product - a bell row per product is
+      // what makes them actionable, and they de-dupe on their own.
+      type StockDigest = {
+        email: string;
+        name: string;
+        items: { name: string; outOfStock: boolean }[];
+      };
+      const digests = new Map<string, StockDigest>();
+
+      // One lookup per business rather than per product.
+      const businessCache = new Map<string, any>();
+      const loadBusiness = async (id?: string) => {
+        if (!id) return null;
+        if (!businessCache.has(id)) {
+          businessCache.set(
+            id,
+            await this.businessModel
+              .findById(id)
+              .select('created_by business_name')
+              .lean(),
+          );
+        }
+        return businessCache.get(id);
+      };
+
       for (const p of products) {
         const avail = computeAvailability(p, thresholds);
         if (avail.state !== 'low_stock' && avail.state !== 'out_of_stock')
           continue;
 
-        const business = await this.businessModel
-          .findById((p as any).business)
-          .select('created_by')
-          .lean();
+        const businessId = (p as any).business?.toString?.();
+        const business = await loadBusiness(businessId);
         const recipient = (business as any)?.created_by?.id?.toString();
         if (!recipient) continue;
 
@@ -127,9 +154,9 @@ export class ProductService {
           'A product';
         const out = avail.state === 'out_of_stock';
 
-        await this.notificationsService.createUnique({
+        const created = await this.notificationsService.createUnique({
           recipient,
-          recipient_business: (p as any).business?.toString?.(),
+          recipient_business: businessId,
           category: NotificationCategory.PRODUCT,
           type: NotificationType.LOW_STOCK,
           title: out ? 'Out of stock ⚠️' : 'Low stock ⚠️',
@@ -139,6 +166,35 @@ export class ProductService {
           metadata: { product_id: (p as any)._id, state: avail.state },
           action_url: '/products',
         });
+
+        // createUnique returns null when an unread warning for this product
+        // already exists. Keying the email off that is the whole dedupe: a
+        // vendor who has not acted on the first warning is not emailed again
+        // every time another order touches the same product.
+        if (!created) continue;
+
+        const to = (business as any)?.created_by?.email;
+        if (!to) continue;
+
+        const entry: StockDigest = digests.get(recipient) ?? {
+          email: to,
+          name: (business as any)?.created_by?.name || 'there',
+          items: [],
+        };
+        entry.items.push({ name, outOfStock: out });
+        digests.set(recipient, entry);
+      }
+
+      // Out-of-stock first: that is the half that has already cost a sale.
+      for (const digest of digests.values()) {
+        digest.items.sort(
+          (a, b) => Number(b.outOfStock) - Number(a.outOfStock),
+        );
+        await this.mailService
+          .sendLowStockDigestEmail(digest.email, digest.name, digest.items)
+          .catch((err) =>
+            this.logger.warn(`Low-stock email failed: ${err?.message}`),
+          );
       }
     } catch (err: any) {
       this.logger.warn(`Low-stock notification failed: ${err.message}`);
@@ -1021,6 +1077,8 @@ export class ProductService {
       r.user.equals(new Types.ObjectId(userId)),
     );
 
+    const isFirstReview = !existingRating;
+
     if (existingRating) {
       existingRating.value = value;
       existingRating.comment = comment;
@@ -1053,8 +1111,71 @@ export class ProductService {
 
     await product.save();
 
+    // Tell the vendor. NotificationType.NEW_REVIEW has existed in the enum
+    // from the start and was created nowhere, so until now a vendor was never
+    // told a review had landed - by any channel. Notification only, no email:
+    // a review needs no action, and the bell is where it belongs.
+    if (isFirstReview) {
+      void this.notifyVendorOfReview(product, value, comment);
+    }
+
     return product;
   }
+
+  /**
+   * One bell entry for a new review. Only for a FIRST review from a customer -
+   * an edit to their own rating is not news.
+   *
+   * Never throws: a notification failure must not fail a review that is
+   * already saved, and the caller does not await it.
+   */
+  private async notifyVendorOfReview(
+    product: any,
+    value: number,
+    comment?: string,
+  ): Promise<void> {
+    try {
+      const businessId = product?.business?.toString?.();
+      if (!businessId) return;
+
+      const business: any = await this.businessModel
+        .findById(businessId)
+        .select('created_by')
+        .lean();
+      const recipient = business?.created_by?.id?.toString();
+      if (!recipient) return;
+
+      const name =
+        product?.clothing?.name ??
+        product?.accessory?.name ??
+        product?.fabric?.name ??
+        'your product';
+
+      const stars = `${value} star${value === 1 ? '' : 's'}`;
+      const trimmed = comment?.trim();
+
+      await this.notificationsService.create({
+        recipient,
+        recipient_business: businessId,
+        category: NotificationCategory.PRODUCT,
+        type: NotificationType.NEW_REVIEW,
+        title: `New ${stars} review`,
+        // The comment is the part worth reading, so lead with it where there
+        // is one and fall back to the bare rating where there is not.
+        body: trimmed
+          ? `${name} — "${trimmed.length > 140 ? `${trimmed.slice(0, 140).trimEnd()}...` : trimmed}"`
+          : `${name} was rated ${stars}.`,
+        metadata: {
+          product_id: product?._id,
+          rating: value,
+        },
+        action_url: '/products',
+      });
+    } catch (err: any) {
+      this.logger.warn(`New-review notification failed: ${err?.message}`);
+    }
+  }
+
   async getProductRating(productId: string) {
     const product = await this.productModel
       .findById(productId)
