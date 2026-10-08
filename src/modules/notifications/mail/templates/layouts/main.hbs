@@ -28,6 +28,11 @@
     <meta name="supported-color-schemes" content="light" />
     <title>{{subject}}</title>
 
+    {{!-- Honoured by Apple Mail, iOS Mail and Outlook for Mac; ignored
+          everywhere else, which is why the stack below it matters more than
+          this line does. --}}
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet" />
+
     <style type="text/css">
         /* ── Resets ─────────────────────────────────────────────── */
         body,
@@ -60,6 +65,34 @@
                 Helvetica, Arial, sans-serif;
             color: #3F3A36;
             line-height: 1.65;
+        }
+
+        /* ── The wordmark ───────────────────────────────────────────
+           Druk Condensed Heavy and DIN Condensed are the brand faces, and
+           neither can be loaded here: Gmail, Outlook on Windows and Yahoo all
+           ignore @font-face, which is most recipients. Licensing rules them
+           out as webfonts in any case.
+
+           So this is a fallback ladder of condensed faces that are already on
+           the machine. Arial Narrow ships with Windows and macOS; Impact is
+           effectively everywhere. Even with no webfont at all the name reads
+           condensed and heavy rather than as generic system sans.
+
+           Bebas Neue is linked below for the clients that do honour webfonts
+           — Apple Mail, iOS Mail, Outlook for Mac — because it is the one of
+           the three that is free to embed. The exact Druk cut belongs in the
+           logo PNG, which is the only way to put it in front of Gmail. */
+        .wordmark {
+            font-family: 'Bebas Neue', 'Oswald', 'Arial Narrow',
+                'Helvetica Neue Condensed', 'Franklin Gothic Medium', Impact,
+                Haettenschweiler, sans-serif;
+            font-weight: 700;
+            font-size: 30px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #FFFFFF;
+            text-decoration: none;
+            line-height: 1.1;
         }
 
         /* ── Type ───────────────────────────────────────────────── */
@@ -241,8 +274,8 @@
                             <img src="{{companyLogoUrl}}" alt="{{companyName}}" width="132"
                                 style="display:block; width:132px; max-width:132px; height:auto; border:0;" />
                             {{else}}
-                            <a href="{{websiteUrl}}"
-                                style="color:#FFFFFF; font-size:22px; font-weight:700; letter-spacing:2px; text-decoration:none; text-transform:uppercase;">{{companyName}}</a>
+                            <a href="{{websiteUrl}}" class="wordmark"
+                                style="font-family:'Bebas Neue','Oswald','Arial Narrow','Helvetica Neue Condensed','Franklin Gothic Medium',Impact,Haettenschweiler,sans-serif; font-size:30px; font-weight:700; letter-spacing:3px; line-height:1.1; color:#FFFFFF; text-decoration:none; text-transform:uppercase;">{{companyName}}</a>
                             {{/if}}
                         </td>
                     </tr>
