@@ -21,6 +21,11 @@ interface EmailTemplates {
   orderDelivered: CompiledTemplate;
   payoutReleased: CompiledTemplate;
   productModerated: CompiledTemplate;
+  adminInvite: CompiledTemplate;
+  teamAdded: CompiledTemplate;
+  quoteRequest: CompiledTemplate;
+  quoteSubmitted: CompiledTemplate;
+  quoteRevision: CompiledTemplate;
 }
 
 import { InjectModel } from '@nestjs/mongoose';
@@ -109,6 +114,11 @@ export class MailService {
         orderDelivered: await this.loadTemplate('order-delivered'),
         payoutReleased: await this.loadTemplate('payout-released'),
         productModerated: await this.loadTemplate('product-moderated'),
+        adminInvite: await this.loadTemplate('admin-invite'),
+        teamAdded: await this.loadTemplate('team-added'),
+        quoteRequest: await this.loadTemplate('quote-request'),
+        quoteSubmitted: await this.loadTemplate('quote-submitted'),
+        quoteRevision: await this.loadTemplate('quote-revision'),
       };
 
       this.logger.log('✅ All email templates initialized successfully!');
@@ -812,28 +822,27 @@ export class MailService {
     businessName: string,
   ) {
     try {
-      const loginUrl = `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qlozet-vert.vercel.app'}/auth/sign-in`;
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #2C1810;">
-          <h2 style="color: #2C1810;">You've been added to ${businessName}</h2>
-          <p>Hello <strong>${name}</strong>,</p>
-          <p>You've been added to <strong>${businessName}</strong> on Qlozet as a <strong>${role}</strong>.</p>
-          <p>Because you already have a Qlozet account, just sign in with your <strong>existing email and password</strong> — no new password is needed. After signing in you can switch to ${businessName}.</p>
-          <p style="margin:22px 0;">
-            <a href="${loginUrl}" target="_blank"
-               style="display:inline-block;background:#2C1810;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600;">Sign in</a>
-          </p>
-          <p style="color:#8A7C6E;font-size:13px;">Forgot your password? Use "Forgot password" on the sign-in page.</p>
-        </div>`;
-      await this.dispatch({
-        to,
-        subject: `You've been added to ${businessName} on Qlozet`,
-        html,
+      if (!this.templates.teamAdded)
+        throw new Error('Team added template not loaded');
+
+      const subject = `You have been added to ${businessName} on Qlozet`;
+      const html = this.templates.teamAdded({
+        name,
+        role,
+        businessName,
+        subject,
+        preheader: `Sign in with your existing password to join ${businessName}.`,
+        loginUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/auth/sign-in`,
       });
-      this.logger.log('✅ Team added email sent successfully to:', to);
+
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      this.logger.error('❌ Failed to send team added email:', error);
+      this.logger.error('Failed to send team added email', error as any);
       throw error;
     }
   }
@@ -853,40 +862,29 @@ export class MailService {
     invitedBy?: string,
   ) {
     try {
-      const loginUrl = `${process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'https://qlozet-admin.vercel.app'}/login`;
-      const roleLabel = role.replace(/[_-]+/g, ' ');
-      const invitedLine = invitedBy
-        ? `<p><strong>${invitedBy}</strong> added you to the Qlozet admin console.</p>`
-        : `<p>You have been added to the Qlozet admin console.</p>`;
+      if (!this.templates.adminInvite)
+        throw new Error('Admin invite template not loaded');
 
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #2C1810;">
-          <h2 style="color: #2C1810;">Welcome to the Qlozet admin console</h2>
-          <p>Hello <strong>${name}</strong>,</p>
-          ${invitedLine}
-          <p>Your role is <strong>${roleLabel}</strong>.</p>
-          <p>Sign in with the credentials below, then change your password from your profile.</p>
-          <div style="background:#F7F4F1;border-radius:10px;padding:16px;margin:18px 0;">
-            <p style="margin:0 0 6px;"><strong>Email:</strong> ${to}</p>
-            <p style="margin:0;"><strong>Temporary password:</strong> ${temporaryPassword}</p>
-          </div>
-          <p style="margin:22px 0;">
-            <a href="${loginUrl}" target="_blank"
-               style="display:inline-block;background:#2C1810;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600;">Sign in</a>
-          </p>
-          <p style="color:#8A7C6E;font-size:13px;">If you were not expecting this, contact ${process.env.SUPPORT_EMAIL || 'support@qoobea.com'}.</p>
-        </div>`;
-
-      await this.dispatch({
-        to,
-        subject: 'Your Qlozet admin account',
-        html,
+      const subject = 'Your Qlozet admin account';
+      const html = this.templates.adminInvite({
+        name,
+        email: to,
+        temporaryPassword,
+        invitedBy,
+        roleLabel: role.replace(/[_-]+/g, ' '),
+        subject,
+        preheader: 'Your admin sign-in details are inside.',
+        loginUrl: `${
+          process.env.ADMIN_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet-admin.vercel.app'
+        }/login`,
       });
 
-      this.logger.log('✅ Admin invite email sent successfully to:', to);
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      this.logger.error('❌ Failed to send admin invite email:', error);
+      this.logger.error('Failed to send admin invite email', error as any);
       throw error;
     }
   }
@@ -899,37 +897,30 @@ export class MailService {
     to: string,
     vendorName: string,
     designName: string,
-    designImages: string[],
+    designImages: string[] = [],
   ) {
     try {
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2C1810;">New Bespoke Quote Request</h2>
-          <p>Hello <strong>${vendorName}</strong>,</p>
-          <p>A customer has requested a quote for their bespoke design: <strong>${designName}</strong>.</p>
-          ${designImages.length > 0 ? `<p><img src="${designImages[0]}" alt="Design" style="max-width: 300px; border-radius: 12px;" /></p>` : ''}
-          <p>You have <strong>7 days</strong> to submit your quote before it expires.</p>
-          <p>Log in to your vendor dashboard to review the design details and submit your quote.</p>
-          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/vendor/bespoke/quotes" 
-             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
-            View Quote Request
-          </a>
-          <p style="margin-top: 24px; color: #888; font-size: 12px;">
-            Custom orders become non-cancellable after cutting begins.
-          </p>
-        </div>
-      `;
+      if (!this.templates.quoteRequest)
+        throw new Error('Quote request template not loaded');
 
-      await this.dispatch({
-        to,
-        subject: `New Bespoke Quote Request: ${designName}`,
-        html,
+      const subject = `New bespoke quote request: ${designName}`;
+      const html = this.templates.quoteRequest({
+        vendorName,
+        designName,
+        designImage: designImages?.[0] || '',
+        subject,
+        preheader: `${designName} — you have 7 days to quote.`,
+        quotesUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/vendor/bespoke/quotes`,
       });
 
-      this.logger.log('✅ Quote request email sent to:', to);
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      this.logger.error('❌ Failed to send quote request email:', error);
+      this.logger.error('Failed to send quote request email', error as any);
       throw error;
     }
   }
@@ -939,41 +930,34 @@ export class MailService {
     customerName: string,
     vendorName: string,
     total: number,
-    estimatedDays: number,
+    estimatedDays?: number,
   ) {
     try {
+      if (!this.templates.quoteSubmitted)
+        throw new Error('Quote submitted template not loaded');
+
       const formattedTotal = new Intl.NumberFormat('en-NG', {
         style: 'currency',
         currency: 'NGN',
-      }).format(total);
+        maximumFractionDigits: 0,
+      }).format(Number(total ?? 0));
 
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2C1810;">Quote Received!</h2>
-          <p>Hello <strong>${customerName}</strong>,</p>
-          <p><strong>${vendorName}</strong> has submitted a quote for your bespoke design.</p>
-          <div style="background: #F9F7F4; padding: 16px; border-radius: 12px; margin: 16px 0;">
-            <p style="margin: 4px 0;"><strong>Total:</strong> ${formattedTotal}</p>
-            <p style="margin: 4px 0;"><strong>Estimated completion:</strong> ${estimatedDays} days</p>
-          </div>
-          <p>Log in to review and compare quotes for your design.</p>
-          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/bespoke" 
-             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
-            View Quotes
-          </a>
-        </div>
-      `;
-
-      await this.dispatch({
-        to,
-        subject: `Quote received from ${vendorName}`,
-        html,
+      const subject = `Quote received from ${vendorName}`;
+      const html = this.templates.quoteSubmitted({
+        customerName,
+        vendorName,
+        total: formattedTotal,
+        estimatedDays,
+        singleDay: estimatedDays === 1,
+        subject,
+        preheader: `${vendorName} quoted ${formattedTotal} for your design.`,
+        bespokeUrl: `${process.env.FRONTEND_URL || 'https://qlozet.app'}/bespoke`,
       });
 
-      this.logger.log('✅ Quote submitted email sent to:', to);
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      this.logger.error('❌ Failed to send quote submitted email:', error);
+      this.logger.error('Failed to send quote submitted email', error as any);
       throw error;
     }
   }
@@ -985,32 +969,27 @@ export class MailService {
     revisionMessage: string,
   ) {
     try {
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2C1810;">Revision Requested</h2>
-          <p>Hello <strong>${vendorName}</strong>,</p>
-          <p>A customer has requested a revision on your quote for <strong>${designName}</strong>.</p>
-          <div style="background: #FFF3CD; padding: 16px; border-radius: 12px; margin: 16px 0; border-left: 4px solid #D97706;">
-            <p style="font-style: italic; margin: 0;">"${revisionMessage}"</p>
-          </div>
-          <p>Please update your quote and resubmit.</p>
-          <a href="${process.env.FRONTEND_URL || 'https://qlozet.app'}/vendor/bespoke/quotes" 
-             style="display: inline-block; padding: 12px 24px; background: #2C1810; color: #fff; text-decoration: none; border-radius: 8px; margin-top: 12px;">
-            Update Quote
-          </a>
-        </div>
-      `;
+      if (!this.templates.quoteRevision)
+        throw new Error('Quote revision template not loaded');
 
-      await this.dispatch({
-        to,
-        subject: `Revision requested: ${designName}`,
-        html,
+      const subject = `Revision requested on your quote for ${designName}`;
+      const html = this.templates.quoteRevision({
+        vendorName,
+        designName,
+        revisionMessage,
+        subject,
+        preheader: 'The customer has asked for a change before deciding.',
+        quotesUrl: `${
+          process.env.VENDOR_FRONTEND_URL ||
+          process.env.FRONTEND_URL ||
+          'https://qlozet.app'
+        }/vendor/bespoke/quotes`,
       });
 
-      this.logger.log('✅ Quote revision email sent to:', to);
+      await this.dispatch({ to, subject, html });
       return true;
     } catch (error) {
-      this.logger.error('❌ Failed to send quote revision email:', error);
+      this.logger.error('Failed to send quote revision email', error as any);
       throw error;
     }
   }

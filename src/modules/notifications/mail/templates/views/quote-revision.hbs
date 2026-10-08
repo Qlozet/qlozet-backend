@@ -1,0 +1,16 @@
+{{> header title="A revision was requested" subtitle="On a quote you submitted" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>A customer has asked for a revision on your quote for
+    <strong>{{designName}}</strong>.</p>
+
+{{#if revisionMessage}}
+<div class="security-note">
+    <p style="font-style:italic;">&ldquo;{{revisionMessage}}&rdquo;</p>
+</div>
+{{/if}}
+
+<p>Update your quote and submit it again — the customer is waiting on it.</p>
+
+{{> button url=quotesUrl text="Update your quote" }}
