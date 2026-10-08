@@ -225,24 +225,92 @@
             color: #8A7C6E;
         }
 
-        /* ── Phones ─────────────────────────────────────────────── */
+        /* A hook with no declarations of its own. Several views set their box
+           padding inline, and an inline declaration outranks any normal rule in
+           a stylesheet — so the only way a media query can reach them is an
+           !important override on a class, which is what the phone block below
+           uses. Adding this class changes nothing on a desktop. */
+        .boxpad {
+            /* intentionally empty */
+        }
+
+        /* ── Phones ─────────────────────────────────────────────────
+           Worth doing the arithmetic rather than guessing. On a 375px screen
+           the old rules left 305px of text: 12px of outer gutter each side,
+           the card border, then 22px of inner padding. On a 320px phone that
+           fell to 250px, which is where a line of body copy starts breaking
+           awkwardly and an order reference wraps.
+
+           So the outer gutter shrinks before the inner padding does — space
+           outside the card is doing less work than space around the words.
+           The vertical padding comes down too; 34px above the greeting is a
+           third of the first screen spent on nothing.
+
+           Not every client honours a media query — Outlook.com strips them,
+           and Gmail only applies them for some account types. The layout is
+           built to survive that: the card is width:100% with a max-width, so
+           it shrinks on its own and these rules only make a narrow screen
+           more comfortable rather than being what rescues it. */
         @media only screen and (max-width: 620px) {
             .wrap {
                 width: 100% !important;
             }
 
+            /* Reclaim the outer gutter first. */
+            .outer {
+                padding: 14px 8px !important;
+            }
+
             .pad {
-                padding-left: 22px !important;
-                padding-right: 22px !important;
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+                padding-top: 24px !important;
+                padding-bottom: 26px !important;
+            }
+
+            .brandbar {
+                padding: 20px 16px !important;
             }
 
             h1 {
                 font-size: 21px !important;
             }
 
+            p,
+            ul {
+                font-size: 15px !important;
+            }
+
+            .card,
+            .security-note,
+            .boxpad {
+                padding: 15px 16px !important;
+            }
+
             .code {
-                font-size: 26px !important;
-                letter-spacing: 5px !important;
+                font-size: 24px !important;
+                letter-spacing: 4px !important;
+                padding: 15px 8px !important;
+            }
+
+            /* A tracking number or an order reference must not force the
+               whole table wider than the screen. */
+            td,
+            p {
+                word-break: break-word !important;
+            }
+        }
+
+        /* Very small phones still in use. */
+        @media only screen and (max-width: 360px) {
+            .pad {
+                padding-left: 16px !important;
+                padding-right: 16px !important;
+            }
+
+            .code {
+                font-size: 21px !important;
+                letter-spacing: 2px !important;
             }
         }
     </style>
@@ -261,7 +329,7 @@
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
         style="background-color:#F6F3EF;">
         <tr>
-            <td align="center" style="padding: 28px 12px;">
+            <td align="center" class="outer" style="padding: 28px 12px;">
 
                 <table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0"
                     style="width:600px; max-width:600px; background-color:#FFFFFF; border:1px solid #E8E1D9; border-radius:16px; overflow:hidden;">
@@ -269,7 +337,7 @@
                     <!-- Brand bar. Solid, because Outlook drops gradients and
                          the old one left white text on a white background. -->
                     <tr>
-                        <td align="center" bgcolor="#2C1810" style="background-color:#2C1810; padding: 26px 24px;">
+                        <td align="center" class="brandbar" bgcolor="#2C1810" style="background-color:#2C1810; padding: 26px 24px;">
                             {{#if companyLogoUrl}}
                             <img src="{{companyLogoUrl}}" alt="{{companyName}}" width="132"
                                 style="display:block; width:132px; max-width:132px; height:auto; border:0;" />

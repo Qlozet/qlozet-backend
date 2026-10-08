@@ -1,74 +1,28 @@
-<!DOCTYPE html>
-<html>
+{{> header title="Verify your email" subtitle="One step left to finish setting up" }}
 
-<head>
-    <meta charset="utf-8">
-    <meta name="x-apple-disable-message-reformatting">
-</head>
+<p>Hello <strong>{{name}}</strong>,</p>
 
-<body style="margin:0; padding:0; font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <div style="max-width:600px; margin:0 auto; padding:20px;">
+<p>Welcome to {{companyName}}. Confirm this is your address and your account is
+    ready to use.</p>
 
-        <div style="text-align:center; margin-bottom:30px;">
-            <h1 style="margin:0; font-size:24px; font-weight:bold;">Verify Your Email Address</h1>
-        </div>
+{{> button url=verificationLink text="Verify my email" }}
 
-        <p>Hello <strong>{{name}}</strong>,</p>
+<p>Or enter this code instead:</p>
 
-        <p>Welcome to {{companyName}}! Please verify your email address to complete your registration.</p>
+<div class="code"
+    style="font-size:32px; font-weight:700; text-align:center; letter-spacing:8px; color:#2C1810; background:#FAF8F5; border:1px solid #EDE7E0; border-radius:12px; padding:18px 10px; margin:22px 0;">
+    {{verificationCode}}</div>
 
-        <!-- FULLY CLICKABLE EMAIL-SAFE BUTTON -->
-        <div style="text-align:center; margin:30px 0;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
-                <tr>
-                    <td style="background-color:#0F973D; border-radius:6px;">
-                        <a href="{{verificationLink}}" style="
-                                display:inline-block;
-                                padding:14px 28px;
-                                color:#ffffff;
-                                text-decoration:none;
-                                font-size:16px;
-                                font-weight:bold;
-                                border-radius:6px;
-                                background-color:#0F973D;
-                                mso-padding-alt:0;
-                            ">
-                            Verify Email Address
-                        </a>
-                    </td>
-                </tr>
-            </table>
-        </div>
+<p class="muted" style="color:#8A7C6E; font-size:14px;">The link and the code both
+    expire in 24 hours.</p>
 
-        <p>Or use this verification code:</p>
+<div class="divider" style="height:1px; line-height:1px; font-size:0; background:#EDE7E0; margin:28px 0;">&nbsp;</div>
 
-        <div style="
-            font-size:24px;
-            font-weight:bold;
-            text-align:center;
-            margin:20px 0;
-            padding:10px;
-            background-color:#FAF8F5;
-            border-radius:4px;
-        ">
-            {{verificationCode}}
-        </div>
+{{!-- Kept because some clients strip the href from a styled anchor, and a
+      verification email that cannot be acted on is a dead end. --}}
+<p class="muted" style="color:#8A7C6E; font-size:14px;">If the button does not work,
+    paste this into your browser:<br />
+    <a href="{{verificationLink}}" style="color:#8A5A3B; word-break:break-all;">{{verificationLink}}</a>
+</p>
 
-        <p>If the button doesn't work, copy and paste this link into your browser:</p>
-
-        <p>
-            <a href="{{verificationLink}}" style="color:#8A5A3B;">
-                {{verificationLink}}
-            </a>
-        </p>
-
-        <p>This verification link will expire in 24 hours.</p>
-
-        <div style="text-align:center; margin-top:40px; font-size:12px; color:#666;">
-            <p>&copy; {{year}} {{companyName}}. All rights reserved.</p>
-        </div>
-
-    </div>
-</body>
-
-</html>
+<p style="margin-top: 28px;">Welcome aboard,<br>The {{companyName}} Team</p>
