@@ -40,6 +40,8 @@ export enum NotificationType {
   PRESHIP_DECISION = 'preship_decision',
   BESPOKE_QUOTE_REVISION = 'bespoke_quote_revision',
   BESPOKE_QUOTE_ACCEPTED = 'bespoke_quote_accepted',
+  // A reply on a bespoke order's customer <-> tailor thread.
+  NEW_MESSAGE = 'new_message',
 
   // Product
   NEW_REVIEW = 'new_review',

@@ -34,6 +34,19 @@ import { MessagingService } from './messaging.service';
 export class OrderMessagesController {
   constructor(private readonly messaging: MessagingService) {}
 
+  // Declared before the :reference route so the literal path reads first.
+  // Both roles are listed for the same reason as the routes below — without
+  // @Roles the guard leaves req.business unset and a vendor counts as a
+  // customer, which would silently return zero.
+  @Roles(UserType.CUSTOMER, UserType.VENDOR)
+  @Get('messages/unread')
+  @ApiOperation({
+    summary: 'Unread order-message counts for the caller (total + per order)',
+  })
+  async unread(@Req() req: any) {
+    return this.messaging.unreadCounts(req);
+  }
+
   @Roles(UserType.CUSTOMER, UserType.VENDOR)
   @Get(':reference/messages')
   @ApiOperation({ summary: 'Get the message thread for a bespoke order' })
