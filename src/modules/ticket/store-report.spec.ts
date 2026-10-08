@@ -4,6 +4,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
 import { TicketService } from './ticket.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { Ticket } from './schema/ticket.schema';
 import { TicketReply } from './schema/reply-ticket.schema';
 import { TicketActivity } from './schema/ticket-activity.schema';
@@ -63,12 +64,11 @@ describe('store reports', () => {
             notifyPlatformAdmins: jest.fn().mockResolvedValue({}),
           },
         },
-        // Read-only, and only on the reply path: a vendor's ticket resolves
-        // its owner through business.created_by. Nothing in these tests
-        // replies, so an empty lookup is enough.
+        // Only used on the reply path, to reach the vendor's support team.
+        // Nothing in these tests replies, so an empty team is enough.
         {
-          provide: getModelToken('Business'),
-          useValue: { findById: jest.fn().mockReturnValue(chain(null)) },
+          provide: VendorRecipientsService,
+          useValue: { resolve: jest.fn().mockResolvedValue([]) },
         },
       ],
     }).compile();

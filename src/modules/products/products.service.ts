@@ -63,6 +63,12 @@ import {
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears about their catalogue: the people who manage listings.
+// The owner is always included by the resolver.
+const CATALOGUE_ROLES = [VendorRole.OPERATIONS, VendorRole.MARKETING];
 import {
   NotificationCategory,
   NotificationType,
@@ -92,6 +98,7 @@ export class ProductService {
     private eventEmitter: EventEmitter2,
     private readonly notificationsService: NotificationsService,
     private readonly mailService: MailService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   /**
@@ -122,19 +129,16 @@ export class ProductService {
       const digests = new Map<string, StockDigest>();
 
       // One lookup per business rather than per product.
-      const businessCache = new Map<string, any>();
-      const loadBusiness = async (id?: string) => {
-        if (!id) return null;
-        if (!businessCache.has(id)) {
-          businessCache.set(
+      const recipientCache = new Map<string, any[]>();
+      const loadRecipients = async (id?: string) => {
+        if (!id) return [];
+        if (!recipientCache.has(id)) {
+          recipientCache.set(
             id,
-            await this.businessModel
-              .findById(id)
-              .select('created_by business_name')
-              .lean(),
+            await this.vendorRecipients.resolve(id, [VendorRole.OPERATIONS]),
           );
         }
-        return businessCache.get(id);
+        return recipientCache.get(id) ?? [];
       };
 
       for (const p of products) {
@@ -143,9 +147,8 @@ export class ProductService {
           continue;
 
         const businessId = (p as any).business?.toString?.();
-        const business = await loadBusiness(businessId);
-        const recipient = (business as any)?.created_by?.id?.toString();
-        if (!recipient) continue;
+        const recipients = await loadRecipients(businessId);
+        if (!recipients.length) continue;
 
         const name =
           (p as any).clothing?.name ??
@@ -154,35 +157,42 @@ export class ProductService {
           'A product';
         const out = avail.state === 'out_of_stock';
 
-        const created = await this.notificationsService.createUnique({
-          recipient,
-          recipient_business: businessId,
-          category: NotificationCategory.PRODUCT,
-          type: NotificationType.LOW_STOCK,
-          title: out ? 'Out of stock ⚠️' : 'Low stock ⚠️',
-          body: out
-            ? `${name} is now out of stock — restock to keep selling.`
-            : `${name} is running low on stock.`,
-          metadata: { product_id: (p as any)._id, state: avail.state },
-          action_url: '/products',
+        // Each person is de-duped against their OWN unread warning for this
+        // product, so one colleague reading it does not silence the rest.
+        const created = await Promise.all(
+          recipients.map((r: any) =>
+            this.notificationsService.createUnique(
+              {
+                recipient: r.userId,
+                recipient_business: businessId,
+                category: NotificationCategory.PRODUCT,
+                type: NotificationType.LOW_STOCK,
+                title: out ? 'Out of stock ⚠️' : 'Low stock ⚠️',
+                body: out
+                  ? `${name} is now out of stock — restock to keep selling.`
+                  : `${name} is running low on stock.`,
+                metadata: { product_id: (p as any)._id, state: avail.state },
+                action_url: '/products',
+              },
+              'product_id',
+            ),
+          ),
+        );
+
+        // createUnique returns null when an unread warning already exists, and
+        // the email keys off that: somebody who has not acted on the first
+        // warning is not emailed again every time another order touches the
+        // same product.
+        recipients.forEach((r: any, i: number) => {
+          if (!created[i] || !r.email) return;
+          const entry: StockDigest = digests.get(r.userId) ?? {
+            email: r.email,
+            name: r.name || 'there',
+            items: [],
+          };
+          entry.items.push({ name, outOfStock: out });
+          digests.set(r.userId, entry);
         });
-
-        // createUnique returns null when an unread warning for this product
-        // already exists. Keying the email off that is the whole dedupe: a
-        // vendor who has not acted on the first warning is not emailed again
-        // every time another order touches the same product.
-        if (!created) continue;
-
-        const to = (business as any)?.created_by?.email;
-        if (!to) continue;
-
-        const entry: StockDigest = digests.get(recipient) ?? {
-          email: to,
-          name: (business as any)?.created_by?.name || 'there',
-          items: [],
-        };
-        entry.items.push({ name, outOfStock: out });
-        digests.set(recipient, entry);
       }
 
       // Out-of-stock first: that is the half that has already cost a sale.
@@ -1138,12 +1148,10 @@ export class ProductService {
       const businessId = product?.business?.toString?.();
       if (!businessId) return;
 
-      const business: any = await this.businessModel
-        .findById(businessId)
-        .select('created_by')
-        .lean();
-      const recipient = business?.created_by?.id?.toString();
-      if (!recipient) return;
+      const recipients = await this.vendorRecipients.resolve(businessId, [
+        VendorRole.MARKETING,
+      ]);
+      if (!recipients.length) return;
 
       const name =
         product?.clothing?.name ??
@@ -1154,23 +1162,27 @@ export class ProductService {
       const stars = `${value} star${value === 1 ? '' : 's'}`;
       const trimmed = comment?.trim();
 
-      await this.notificationsService.create({
-        recipient,
-        recipient_business: businessId,
-        category: NotificationCategory.PRODUCT,
-        type: NotificationType.NEW_REVIEW,
-        title: `New ${stars} review`,
+      await Promise.all(
+        recipients.map((r) =>
+          this.notificationsService.create({
+            recipient: r.userId,
+            recipient_business: businessId,
+            category: NotificationCategory.PRODUCT,
+            type: NotificationType.NEW_REVIEW,
+            title: `New ${stars} review`,
         // The comment is the part worth reading, so lead with it where there
         // is one and fall back to the bare rating where there is not.
-        body: trimmed
-          ? `${name} — "${trimmed.length > 140 ? `${trimmed.slice(0, 140).trimEnd()}...` : trimmed}"`
-          : `${name} was rated ${stars}.`,
-        metadata: {
-          product_id: product?._id,
-          rating: value,
-        },
-        action_url: '/products',
-      });
+            body: trimmed
+              ? `${name} — "${trimmed.length > 140 ? `${trimmed.slice(0, 140).trimEnd()}...` : trimmed}"`
+              : `${name} was rated ${stars}.`,
+            metadata: {
+              product_id: product?._id,
+              rating: value,
+            },
+            action_url: '/products',
+          }),
+        ),
+      );
     } catch (err: any) {
       this.logger.warn(`New-review notification failed: ${err?.message}`);
     }
@@ -3098,20 +3110,23 @@ export class ProductService {
     reason?: string,
   ): Promise<void> {
     try {
-      const business = await this.businessModel
-        .findById(product.business)
-        .select('created_by')
-        .lean();
+      const recipients = await this.vendorRecipients.resolve(
+        product.business,
+        CATALOGUE_ROLES,
+      );
 
-      const to = (business as any)?.created_by?.email;
-      if (!to) return;
-
-      await this.mailService.sendProductModeratedEmail(
-        to,
-        (business as any)?.created_by?.name || 'there',
-        ProductService.productName(product),
-        approved,
-        reason,
+      await Promise.all(
+        recipients
+          .filter((r) => r.email)
+          .map((r) =>
+            this.mailService.sendProductModeratedEmail(
+              r.email as string,
+              r.name || 'there',
+              ProductService.productName(product),
+              approved,
+              reason,
+            ),
+          ),
       );
     } catch (error: any) {
       this.logger.warn(
@@ -3127,23 +3142,26 @@ export class ProductService {
     body: string,
   ): Promise<void> {
     try {
-      const business = await this.businessModel
-        .findById(product.business)
-        .select('created_by')
-        .lean();
-      const recipient = (business as any)?.created_by?.id?.toString();
-      if (!recipient) return;
+      const recipients = await this.vendorRecipients.resolve(
+        product.business,
+        CATALOGUE_ROLES,
+      );
+      if (!recipients.length) return;
 
-      await this.notificationsService.create({
-        recipient,
-        recipient_business: product.business?.toString?.(),
-        category: NotificationCategory.PRODUCT,
-        type,
-        title,
-        body,
-        metadata: { product_id: product._id },
-        action_url: '/products',
-      });
+      await Promise.all(
+        recipients.map((r) =>
+          this.notificationsService.create({
+            recipient: r.userId,
+            recipient_business: product.business?.toString?.(),
+            category: NotificationCategory.PRODUCT,
+            type,
+            title,
+            body,
+            metadata: { product_id: product._id },
+            action_url: '/products',
+          }),
+        ),
+      );
     } catch (err: any) {
       this.logger.warn(`Product notification failed: ${err.message}`);
     }

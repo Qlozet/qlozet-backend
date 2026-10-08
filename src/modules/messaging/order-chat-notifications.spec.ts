@@ -27,7 +27,10 @@ describe('Bespoke order chat — knowing you were messaged', () => {
     ],
   };
 
+  const TAILOR_STAFF_ID = new Types.ObjectId();
+
   let notifications: { createUnique: jest.Mock; create: jest.Mock };
+  let vendorRecipients: { resolve: jest.Mock };
   let messageModel: any;
   let businessModel: any;
   let orderModel: any;
@@ -42,6 +45,18 @@ describe('Bespoke order chat — knowing you were messaged', () => {
     notifications = {
       createUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(null),
+    };
+
+    // By default a one-person business: the owner. Individual tests add staff.
+    vendorRecipients = {
+      resolve: jest.fn().mockResolvedValue([
+        {
+          userId: String(TAILOR_USER_ID),
+          email: 'owner@example.com',
+          name: 'Ibidun',
+          isOwner: true,
+        },
+      ]),
     };
 
     messageModel = {
@@ -70,6 +85,7 @@ describe('Bespoke order chat — knowing you were messaged', () => {
       businessModel,
       { emit: jest.fn() } as any,
       notifications as any,
+      vendorRecipients as any,
     );
   });
 
@@ -80,6 +96,7 @@ describe('Bespoke order chat — knowing you were messaged', () => {
       expect(notifications.createUnique).toHaveBeenCalledTimes(1);
       const [payload, uniqueBy] = notifications.createUnique.mock.calls[0];
       expect(payload.recipient).toBe(String(TAILOR_USER_ID));
+      expect(payload.recipient_business).toBe(String(TAILOR_BUSINESS_ID));
       expect(payload.type).toBe(NotificationType.NEW_MESSAGE);
       expect(payload.action_url).toBe('/orders');
       // Keyed on the order so a burst of messages collapses to one entry.
@@ -106,6 +123,52 @@ describe('Bespoke order chat — knowing you were messaged', () => {
         ([p]: any[]) => String(p.recipient),
       );
       expect(recipients).not.toContain(String(CUSTOMER_ID));
+    });
+
+    it('reaches a tailor on the team, not only the owner', async () => {
+      vendorRecipients.resolve.mockResolvedValue([
+        { userId: String(TAILOR_USER_ID), email: 'owner@example.com', isOwner: true },
+        { userId: String(TAILOR_STAFF_ID), email: 'tailor@example.com', isOwner: false },
+      ]);
+
+      await service.sendMessage(REFERENCE, { user: { id: String(CUSTOMER_ID) } }, 'Sleeves?');
+
+      const recipients = notifications.createUnique.mock.calls.map(
+        ([p]: any[]) => String(p.recipient),
+      );
+      expect(recipients).toContain(String(TAILOR_STAFF_ID));
+      expect(recipients).toContain(String(TAILOR_USER_ID));
+    });
+
+    it('asks for the tailor and support roles', async () => {
+      await service.sendMessage(REFERENCE, { user: { id: String(CUSTOMER_ID) } }, 'Hi');
+
+      const [, roles] = vendorRecipients.resolve.mock.calls[0];
+      expect(roles).toEqual(['tailor', 'customer_support']);
+    });
+
+    it('does not notify a tailor of their own message', async () => {
+      // The sender is filtered out of the recipient list before the fan-out,
+      // so a staff tailor replying does not get a bell entry for it.
+      vendorRecipients.resolve.mockResolvedValue([
+        { userId: String(TAILOR_USER_ID), isOwner: true },
+        { userId: String(TAILOR_STAFF_ID), isOwner: false },
+      ]);
+
+      await service.sendMessage(
+        REFERENCE,
+        {
+          user: { id: String(TAILOR_STAFF_ID) },
+          business: { id: String(TAILOR_BUSINESS_ID) },
+        },
+        'Two inches?',
+      );
+
+      const recipients = notifications.createUnique.mock.calls.map(
+        ([p]: any[]) => String(p.recipient),
+      );
+      // A vendor's message notifies the customer, never their own colleagues.
+      expect(recipients).toEqual([String(CUSTOMER_ID)]);
     });
 
     it('truncates a long message rather than putting it all in the bell', async () => {

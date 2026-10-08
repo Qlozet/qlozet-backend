@@ -16,6 +16,13 @@ import {
   TicketActivityType,
 } from './schema/ticket-activity.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears that support replied. A ticket about the business is
+// customer-support work; a tailor does not need the platform's support thread.
+// The owner is always included by the resolver.
+const TICKET_ROLES = [VendorRole.CUSTOMER_SUPPORT];
 import {
   NotificationCategory,
   NotificationType,
@@ -31,7 +38,7 @@ export class TicketService {
     @InjectModel(TicketActivity.name)
     private ticketActivityModel: Model<TicketActivity>,
     private readonly notificationsService: NotificationsService,
-    @InjectModel('Business') private readonly businessModel: Model<any>,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   /**
@@ -228,45 +235,37 @@ export class TicketService {
   }
 
   /**
-   * Which user raised a ticket.
+   * Who should hear that a ticket moved.
    *
    * Tickets come from two places and only ever one of them per ticket: a
    * customer raises it personally, a vendor raises it against their business.
-   * A business record has no user of its own, so a vendor ticket resolves
-   * through `created_by` - the same single-owner limitation the order chat
-   * has, and worth widening in both places at once.
+   * A customer is one person; a business is a team, so a vendor ticket
+   * resolves to everyone there who handles support.
    */
-  private async resolveTicketOwner(ticket: any): Promise<{
-    userId: string;
-    businessId?: string;
-    isVendor: boolean;
-  } | null> {
-    try {
-      if (ticket?.customer) {
-        return { userId: String(ticket.customer), isVendor: false };
-      }
-
-      if (ticket?.business) {
-        const business: any = await this.businessModel
-          .findById(ticket.business)
-          .select('created_by')
-          .lean();
-        const ownerId = business?.created_by?.id;
-        if (!ownerId) return null;
-        return {
-          userId: String(ownerId),
-          businessId: String(ticket.business),
-          isVendor: true,
-        };
-      }
-
-      return null;
-    } catch (err) {
-      this.logger.error(
-        `Failed to resolve ticket owner: ${(err as any)?.message}`,
-      );
-      return null;
+  private async resolveTicketAudience(ticket: any): Promise<
+    {
+      userId: string;
+      businessId?: string;
+      isVendor: boolean;
+    }[]
+  > {
+    if (ticket?.customer) {
+      return [{ userId: String(ticket.customer), isVendor: false }];
     }
+
+    if (ticket?.business) {
+      const recipients = await this.vendorRecipients.resolve(
+        ticket.business,
+        TICKET_ROLES,
+      );
+      return recipients.map((r) => ({
+        userId: r.userId,
+        businessId: String(ticket.business),
+        isVendor: true,
+      }));
+    }
+
+    return [];
   }
 
   async createReply(
@@ -320,18 +319,19 @@ export class TicketService {
         // vendor's carries `business` and no customer at all, and the vendor
         // branch did not exist - so a vendor was never told that support had
         // replied to them, in app or anywhere else.
-        const owner = await this.resolveTicketOwner(t);
-        if (owner && owner.userId !== String(sender)) {
+        const audience = await this.resolveTicketAudience(t);
+        for (const member of audience) {
+          if (member.userId === String(sender)) continue;
           jobs.push(
             this.notificationsService.create({
-              recipient: owner.userId,
-              recipient_business: owner.businessId,
+              recipient: member.userId,
+              recipient_business: member.businessId,
               category: NotificationCategory.SYSTEM,
               type: NotificationType.TICKET_REPLY,
               title: 'Support replied to your ticket',
               body: `"${dto.message.slice(0, 120)}"`,
               metadata: { ticket_id },
-              action_url: owner.isVendor ? '/support' : '/help/tickets',
+              action_url: member.isVendor ? '/support' : '/help/tickets',
             }),
           );
         }

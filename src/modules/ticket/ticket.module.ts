@@ -9,7 +9,6 @@ import {
   TicketActivitySchema,
 } from './schema/ticket-activity.schema';
 import { JwtService } from '@nestjs/jwt';
-import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -21,9 +20,6 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Ticket.name, schema: TicketSchema },
       { name: TicketReply.name, schema: TicketReplySchema },
       { name: TicketActivity.name, schema: TicketActivitySchema },
-      // Read-only: a vendor's ticket reaches its owner through
-      // business.created_by, which is the only user on a business record.
-      { name: Business.name, schema: BusinessSchema },
     ]),
   ],
   controllers: [TicketController],
