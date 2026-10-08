@@ -1,0 +1,20 @@
+{{> header title="You have a quote" subtitle="Compare it with the others" }}
+
+<p>Hello <strong>{{customerName}}</strong>,</p>
+
+<p><strong>{{vendorName}}</strong> has quoted for your bespoke design.</p>
+
+<div class="card" style="text-align:center;">
+    <p style="margin:0 0 6px; font-size:14px; color:#8A7C6E;">Quoted price</p>
+    <p style="margin:0; font-size:28px; font-weight:700; color:#2C1810;">{{total}}</p>
+    {{#if estimatedDays}}
+    <p style="margin:10px 0 0; font-size:14px; color:#8A7C6E;">
+        Ready in about {{estimatedDays}} day{{#unless singleDay}}s{{/unless}}
+    </p>
+    {{/if}}
+</div>
+
+{{> button url=bespokeUrl text="Review quotes" }}
+
+<p>Take your time — you can compare every quote on your design side by side
+    before choosing a maker.</p>

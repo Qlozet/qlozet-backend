@@ -65,6 +65,15 @@ MAIL_USERNAME=
 MAIL_PASSWORD=
 MAIL_SENDER=
 
+# Shown in every email. Unset, these fall back to sensible Qlozet values —
+# but set them, because the footer and the sign-off read from here.
+COMPANY_NAME=
+SUPPORT_EMAIL=
+COMPANY_ADDRESS=
+# Absolute https URL. Must be transparent or brown-backed: it sits on the
+# #2C1810 brand bar. Leave empty to use the text wordmark instead.
+COMPANY_LOGO_URL=
+
 # AI
 OPENAI_API_KEY=
 HUGGING_FACE_TOKEN=

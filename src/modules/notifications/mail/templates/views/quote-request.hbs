@@ -1,0 +1,20 @@
+{{> header title="New bespoke quote request" subtitle="You have 7 days to respond" }}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+<p>A customer has asked for a quote on their bespoke design,
+    <strong>{{designName}}</strong>.</p>
+
+{{#if designImage}}
+<p style="margin:22px 0;">
+    <img src="{{designImage}}" alt="{{designName}}" width="300"
+        style="display:block; width:300px; max-width:100%; height:auto; border-radius:12px; border:1px solid #EDE7E0;" />
+</p>
+{{/if}}
+
+{{> button url=quotesUrl text="Review and quote" }}
+
+<div class="security-note">
+    <p>Quotes expire after <strong>7 days</strong>. After that the customer stops
+        seeing yours alongside the others.</p>
+</div>
