@@ -15,7 +15,10 @@ import {
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
-import { BusinessService } from './business.service';
+import {
+  BusinessService,
+  type PublicVendorSort,
+} from './business.service';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -60,12 +63,22 @@ export class BusinessController {
     @Query('limit') limit?: string,
     @Query('search') search?: string,
     @Query('bespoke') bespoke?: string,
+    @Query('sort') sort?: string,
   ) {
+    // An unknown value falls back to the default rather than 400ing: this is
+    // a public browse endpoint, and a bad query string should not break a
+    // storefront page.
+    const allowed: PublicVendorSort[] = ['active', 'newest', 'name'];
+    const chosen = allowed.includes(sort as PublicVendorSort)
+      ? (sort as PublicVendorSort)
+      : 'active';
+
     return this.businessService.getPublicVendors(
       Number(page) || 1,
       Number(limit) || 20,
       search,
       bespoke === 'true',
+      chosen,
     );
   }
 

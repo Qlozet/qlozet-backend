@@ -48,6 +48,9 @@ import {
   TokenTransactionType,
 } from '../wallets/schema/token.schema';
 
+/** Orderings the public vendor list accepts. */
+export type PublicVendorSort = 'active' | 'newest' | 'name';
+
 @Injectable()
 export class BusinessService {
   private readonly logger = new Logger(BusinessService.name);
@@ -597,14 +600,47 @@ export class BusinessService {
   }
 
   /**
+   * Orderings the public vendor list offers.
+   *
+   * Every one ends in `_id` so the order is total: without a unique final key
+   * two vendors that tie on everything else can swap places between page 1
+   * and page 2, which shows one twice and hides the other.
+   *
+   * `active` is the default and leads on sales rather than on `is_featured`.
+   * The featured flag exists, and putting it first would make the default
+   * order quietly editorial — if featured placement is ever wanted it should
+   * be labelled on the card, not hidden in the sort.
+   */
+  private static readonly PUBLIC_VENDOR_SORTS: Record<
+    PublicVendorSort,
+    Record<string, 1 | -1>
+  > = {
+    active: { total_items_sold: -1, createdAt: -1, _id: -1 },
+    newest: { createdAt: -1, _id: -1 },
+    name: { business_name: 1, _id: 1 },
+  };
+
+  /**
    * Public storefront: list active vendors with basic profile info.
    * Used by the customer shop for vendor carousels and listing pages.
+   *
+   * This had no sort at all, which was two problems wearing one coat.
+   *
+   * The visible one: Mongo's natural order put the earliest-registered
+   * vendors first, so they collected the attention on every vendor list in
+   * the shop, permanently, and nothing a newer vendor did could change it.
+   *
+   * The quieter one: an unsorted find() with skip/limit has no defined order
+   * between calls, so paging could show the same vendor twice and never show
+   * another at all. Any sort fixes that only if it is total, which is why
+   * every option below ends in `_id`.
    */
   async getPublicVendors(
     page = 1,
     limit = 20,
     search?: string,
     bespokeOnly = false,
+    sort: PublicVendorSort = 'active',
   ) {
     const skip = (page - 1) * limit;
     const filter: any = {
@@ -638,6 +674,7 @@ export class BusinessService {
     const [vendors, total] = await Promise.all([
       this.businessModel
         .find(filter)
+        .sort(BusinessService.PUBLIC_VENDOR_SORTS[sort])
         .select(
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
