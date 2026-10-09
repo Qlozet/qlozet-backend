@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { SuggestedVendorsService } from './suggested-vendors.service';
+import { BusinessStatus } from '../business/schemas/business.schema';
 
 /**
  * Which tailors to offer for a design.
@@ -30,6 +31,9 @@ describe('Suggested vendors for a bespoke design', () => {
     business_name: 'A Tailor',
     business_category: 'tailoring',
     accepts_bespoke: true,
+    // Approved rather than verified, so the verified boost only shows up
+    // where a test opts into it.
+    status: BusinessStatus.APPROVED,
     success_rate: 0,
     total_items_sold: 0,
     // Old enough not to count as new unless a test says otherwise.
@@ -218,7 +222,27 @@ describe('Suggested vendors for a bespoke design', () => {
       const [filter] = businessModel.find.mock.calls[0];
       // Offering one who does not sew spends a slot on someone who will never
       // answer, and request-quotes rejects it anyway.
-      expect(filter).toEqual({ accepts_bespoke: { $ne: false } });
+      expect(filter.accepts_bespoke).toEqual({ $ne: false });
+    });
+
+    it('only considers vendors the platform lists', async () => {
+      // The same statuses getPublicVendors uses. A pending, in-review or
+      // rejected tailor must not be offered work, and the quote picker must
+      // not be able to offer a shop the storefront refuses to show.
+      await service.forDesign(String(design._id));
+      const [filter] = businessModel.find.mock.calls[0];
+      expect(filter.status).toEqual({
+        $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED],
+      });
+    });
+
+    it('does not filter on is_active', async () => {
+      // business.service documents why: it defaults to true and nothing ever
+      // sets it false, so filtering on it would look like a check while
+      // passing every vendor through.
+      await service.forDesign(String(design._id));
+      const [filter] = businessModel.find.mock.calls[0];
+      expect(filter).not.toHaveProperty('is_active');
     });
 
     it('reports the full count so the client can offer "see all"', async () => {
@@ -282,6 +306,48 @@ describe('Suggested vendors for a bespoke design', () => {
     it('still ranks with no criteria at all', async () => {
       const { data } = await service.forCriteria({});
       expect(data.vendors).toHaveLength(3);
+    });
+  });
+
+  describe('verification', () => {
+    it('ranks a verified tailor above an otherwise equal approved one', async () => {
+      businesses = [
+        biz({ business_name: 'Approved' }),
+        biz({ business_name: 'Verified', status: BusinessStatus.VERIFIED }),
+      ];
+      design.fabric = null;
+      expect((await names())[0]).toBe('Verified');
+    });
+
+    it('shows the badge and the reason', async () => {
+      businesses = [
+        biz({ business_name: 'Verified', status: BusinessStatus.VERIFIED }),
+      ];
+      design.fabric = null;
+      const { data } = await service.forDesign(String(design._id));
+      expect(data.vendors[0].verified).toBe(true);
+      expect(data.vendors[0].reasons.map((r) => r.code)).toContain('verified');
+    });
+
+    it('still offers an approved tailor, marked unverified', async () => {
+      // A nudge, not a gate: requiring verification would shrink the bespoke
+      // pool to a handful and contradict the storefront, which lists approved
+      // vendors too.
+      businesses = [biz({ business_name: 'Approved' })];
+      design.fabric = null;
+      const { data } = await service.forDesign(String(design._id));
+      expect(data.vendors).toHaveLength(1);
+      expect(data.vendors[0].verified).toBe(false);
+    });
+
+    it('does not let verification outrank the fabric supplier', async () => {
+      // The fabric owner is cheaper for this design in actual money. A badge
+      // must not beat that.
+      businesses = [
+        biz({ _id: FABRIC_OWNER, business_name: 'Fabric House' }),
+        biz({ business_name: 'Verified', status: BusinessStatus.VERIFIED }),
+      ];
+      expect((await names())[0]).toBe('Fabric House');
     });
   });
 

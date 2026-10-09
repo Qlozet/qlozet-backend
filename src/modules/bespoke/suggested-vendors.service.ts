@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { BusinessStatus } from '../business/schemas/business.schema';
 
 /** Why a vendor is where it is in the list. Shown on the row. */
 export interface SuggestionReason {
@@ -10,6 +11,7 @@ export interface SuggestionReason {
     | 'well_rated'
     | 'reliable'
     | 'experienced'
+    | 'verified'
     | 'new_here';
   label: string;
 }
@@ -27,6 +29,8 @@ export interface SuggestedVendor {
   success_rate?: number;
   total_items_sold?: number;
   accepts_external_fabric?: boolean;
+  /** The platform's own verification tier, so the row can show it. */
+  verified: boolean;
   reasons: SuggestionReason[];
 }
 
@@ -50,6 +54,14 @@ const W = {
   SUCCESS_RATE: 20, // × rate 0..1
   ITEMS_SOLD: 10, // × a saturating curve, never more than this
 } as const;
+
+/**
+ * Verified is the platform's own top tier, above merely approved, so it earns
+ * a nudge and a badge. Deliberately a nudge rather than a gate: requiring it
+ * would shrink the bespoke pool to a handful and contradict the storefront,
+ * which lists approved vendors too. The customer sees which is which.
+ */
+const W_VERIFIED = 25;
 
 /** Ratings below this are too thin to rank on. */
 const MIN_RATINGS_TO_TRUST = 3;
@@ -132,13 +144,27 @@ export class SuggestedVendorsService {
     const fabricOwnerId = input.fabricOwnerId;
     const design = { category: input.category };
 
-    // Only tailors who take bespoke work. Offering one who does not spends a
-    // slot on someone who will never answer, and the API rejects it anyway.
+    // Only vendors the platform actually lists, and only those who take
+    // bespoke work.
+    //
+    // The status filter is the same one getPublicVendors uses, deliberately —
+    // a tailor who is pending, in review or rejected must not be offered work,
+    // and defining "active" differently here would mean the quote picker could
+    // offer a shop the storefront refuses to show.
+    //
+    // NOT `is_active`: there is a note on ACTIVE_VENDOR_STATUSES in
+    // business.service explaining that it defaults to true and nothing ever
+    // sets it false, so filtering on it would report every vendor as active
+    // while looking like a real check.
     const candidates = await this.businessModel
-      .find({ accepts_bespoke: { $ne: false } })
+      .find({
+        status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
+        accepts_bespoke: { $ne: false },
+      })
       .select(
         'business_name business_logo_url business_logo_svg_url business_category ' +
-          'city state success_rate total_items_sold accepts_external_fabric createdAt',
+          'city state success_rate total_items_sold accepts_external_fabric ' +
+          'status createdAt',
       )
       .lean();
 
@@ -164,6 +190,11 @@ export class SuggestedVendorsService {
       const rating = ratings.get(id) ?? { average: 0, count: 0 };
       const reasons: SuggestionReason[] = [];
       let score = 0;
+
+      if (biz.status === BusinessStatus.VERIFIED) {
+        score += W_VERIFIED;
+        reasons.push({ code: 'verified', label: 'Verified by Qlozet' });
+      }
 
       if (fabricOwnerId && id === fabricOwnerId) {
         score += W.FABRIC_OWNER;
@@ -232,6 +263,7 @@ export class SuggestedVendorsService {
           success_rate: biz.success_rate,
           total_items_sold: biz.total_items_sold,
           accepts_external_fabric: biz.accepts_external_fabric,
+          verified: biz.status === BusinessStatus.VERIFIED,
           reasons,
         } as SuggestedVendor,
         score,
@@ -272,8 +304,8 @@ export class SuggestedVendorsService {
         // So the client can say what it is ordering by rather than just
         // asserting "recommended".
         ranked_by: (fabricOwnerId
-          ? ['fabric', 'category', 'rating', 'reliability']
-          : ['category', 'rating', 'reliability']) as string[],
+          ? ['fabric', 'category', 'verified', 'rating', 'reliability']
+          : ['category', 'verified', 'rating', 'reliability']) as string[],
       },
     };
   }
