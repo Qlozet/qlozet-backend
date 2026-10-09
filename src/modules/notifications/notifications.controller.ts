@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   Patch,
+  Post,
   Param,
   Query,
   Req,
@@ -17,16 +19,64 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
-import { JwtAuthGuard } from '../../common/guards';
+import { BroadcastsService } from './broadcasts.service';
+import { CreateBroadcastDto } from './dto/broadcast.dto';
+import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserType } from '../ums/schemas/user.schema';
 
 @ApiTags('Notifications')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(
     private readonly notificationsService: NotificationsService,
+    private readonly broadcasts: BroadcastsService,
   ) {}
+
+  // ─── Admin announcements ────────────────────────────────────────────
+  // Declared before the :id routes so the literal path reads first.
+  //
+  // These replaced a settings grid that let an admin toggle individual
+  // notification types per channel. It persisted nothing, and most of what it
+  // offered should never have been switchable — a shipping notice is an
+  // obligation, not a preference. The thing that was actually missing was the
+  // ability to tell everyone something.
+
+  @Post('broadcasts')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Send or schedule an announcement to a whole audience (Admin)',
+    description:
+      'Creates the record and returns immediately; the fan-out runs in the ' +
+      'background. Poll the list endpoint for progress counters.',
+  })
+  async createBroadcast(@Body() dto: CreateBroadcastDto, @Req() req: any) {
+    return this.broadcasts.create(dto, {
+      id: req.user.id,
+      name: req.user.full_name || req.user.first_name,
+    });
+  }
+
+  @Get('broadcasts')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({ summary: 'Announcement history, newest first (Admin)' })
+  async listBroadcasts(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.broadcasts.list(Number(page) || 1, Number(limit) || 20);
+  }
+
+  @Patch('broadcasts/:id/cancel')
+  @Roles(UserType.PLATFORM)
+  @ApiOperation({
+    summary: 'Cancel a scheduled announcement before it sends (Admin)',
+  })
+  async cancelBroadcast(@Param('id') id: string) {
+    return this.broadcasts.cancel(id);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get paginated notifications for the logged-in user' })

@@ -28,6 +28,7 @@ interface EmailTemplates {
   quoteRevision: CompiledTemplate;
   disputeOpened: CompiledTemplate;
   lowStockDigest: CompiledTemplate;
+  announcement: CompiledTemplate;
 }
 
 import { InjectModel } from '@nestjs/mongoose';
@@ -123,6 +124,7 @@ export class MailService {
         quoteRevision: await this.loadTemplate('quote-revision'),
         disputeOpened: await this.loadTemplate('dispute-opened'),
         lowStockDigest: await this.loadTemplate('low-stock-digest'),
+        announcement: await this.loadTemplate('announcement'),
       };
 
       this.logger.log('✅ All email templates initialized successfully!');
@@ -828,6 +830,46 @@ export class MailService {
     } catch (error) {
       this.logger.error('❌ Failed to send low stock digest email:', error);
       throw error;
+    }
+  }
+
+  /**
+   * An admin announcement, in the shared shell.
+   *
+   * Returns a boolean rather than throwing, because a broadcast sends to
+   * thousands of addresses and one bad mailbox must not abort the run — the
+   * caller counts successes and failures.
+   */
+  async sendAnnouncementEmail(
+    to: string,
+    subject: string,
+    bodyHtml: string,
+    recipientName?: string,
+  ): Promise<boolean> {
+    try {
+      if (!this.templates.announcement)
+        throw new Error('Announcement template not loaded');
+
+      const html = this.templates.announcement({
+        headline: subject,
+        body: bodyHtml,
+        recipientName: recipientName || '',
+        subject,
+        // Stripped of markup so the inbox preview is readable text.
+        preheader: bodyHtml
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 140),
+      });
+
+      await this.dispatch({ to, subject, html });
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to send announcement to ${to}: ${(error as any)?.message}`,
+      );
+      return false;
     }
   }
 
