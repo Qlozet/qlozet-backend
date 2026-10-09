@@ -62,6 +62,9 @@ export enum NotificationType {
   // Admin work queues — platform-wide events that demand admin action.
   DISPUTE_OPENED = 'dispute_opened',
   DISPUTE_RESOLVED = 'dispute_resolved',
+  // A customer asked to send something back. Was borrowing
+  // ORDER_CANCELLED, so a return counted as a cancellation.
+  RETURN_REQUESTED = 'return_requested',
   VENDOR_APPLICATION = 'vendor_application',
   PRODUCT_PENDING_REVIEW = 'product_pending_review',
   TICKET_CREATED = 'ticket_created',
