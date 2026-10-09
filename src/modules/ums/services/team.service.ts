@@ -20,6 +20,8 @@ import {
 } from '../../business/schemas/business.schema';
 import { ObjectIdUtils } from '../../../common/utils/objectId.utils';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { VendorRecipientsService } from '../../notifications/vendor-recipients.service';
+import { VendorRole } from '../../ums/schemas/role.schema';
 import {
   NotificationCategory,
   NotificationType,
@@ -39,6 +41,7 @@ export class TeamService {
     @InjectConnection() private readonly connection: Connection,
     private readonly mailService: MailService,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   async inviteTeamMember(
@@ -162,11 +165,16 @@ export class TeamService {
           );
       }
 
-      // In-app notification to business owner. The recipient MUST be the
-      // vendor's USER id (notifications are queried by recipient=user id) — the
-      // business _id here meant the owner never saw it.
+      // Deliberately owner-only: who is on the team is an owner's business,
+      // not something to tell the team about each other. Resolved through the
+      // team records rather than created_by, which is the same lookup every
+      // other vendor notification now uses.
+      const owner = await this.vendorRecipients.owner(
+        (business as any)._id?.toString(),
+      );
+      if (owner) {
       this.notificationsService.create({
-        recipient: (business as any).created_by?.id?.toString(),
+        recipient: owner.userId,
         recipient_business: (business as any)._id?.toString(),
         category: NotificationCategory.TEAM,
         type: NotificationType.TEAM_MEMBER_JOINED,
@@ -179,6 +187,7 @@ export class TeamService {
         },
         action_url: '/settings',
       }).catch((err) => this.logger.warn(`Failed to create team notification: ${err.message}`));
+      }
 
       return {
         message: isNewUser

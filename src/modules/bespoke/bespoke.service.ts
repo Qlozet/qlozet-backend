@@ -55,6 +55,12 @@ import { ProductDocument } from '../products/schemas';
 import { User } from '../ums/schemas';
 import { Utils } from '../../common/utils/pagination';
 import { NotificationsService } from '../notifications/notifications.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears about a quote: the tailor is the person who can
+// judge the work and price it. The owner is always included by the resolver.
+const QUOTE_ROLES = [VendorRole.TAILOR];
 import {
   NotificationCategory,
   NotificationType,
@@ -94,6 +100,7 @@ export class BespokeService {
     private readonly businessService: BusinessService,
     private readonly mailService: MailService,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   /**
@@ -475,20 +482,26 @@ export class BespokeService {
         );
       }
 
-      // In-app notification
-      this.notificationsService.create({
-        // Recipient must be the vendor's USER id (queried by recipient=user id).
-        recipient: (business as any).created_by?.id?.toString(),
-        recipient_business: (business as any)._id?.toString(),
-        category: NotificationCategory.BESPOKE,
-        type: NotificationType.BESPOKE_QUOTE_REQUEST,
-        title: 'New Bespoke Quote Request',
-        body: `A customer wants a quote for "${design.name}". You have 7 days to respond.`,
-        metadata: { design_id: design._id, design_name: design.name },
-        // The vendor console has no /bespoke route — quote requests live on
-        // the Quote Requests tab of the orders page.
-        action_url: `/orders?tab=quotes`,
-      }).catch((err) => this.logger.warn(`Failed to create in-app notification: ${err.message}`));
+      // In-app notification to everyone at the vendor who can price this,
+      // not only the account that registered the business.
+      const quoteRecipients = await this.vendorRecipients.resolve(
+        (business as any)._id?.toString(),
+        QUOTE_ROLES,
+      );
+      for (const member of quoteRecipients) {
+        this.notificationsService.create({
+          recipient: member.userId,
+          recipient_business: (business as any)._id?.toString(),
+          category: NotificationCategory.BESPOKE,
+          type: NotificationType.BESPOKE_QUOTE_REQUEST,
+          title: 'New Bespoke Quote Request',
+          body: `A customer wants a quote for "${design.name}". You have 7 days to respond.`,
+          metadata: { design_id: design._id, design_name: design.name },
+          // The vendor console has no /bespoke route — quote requests live on
+          // the Quote Requests tab of the orders page.
+          action_url: `/orders?tab=quotes`,
+        }).catch((err) => this.logger.warn(`Failed to create in-app notification: ${err.message}`));
+      }
     }
 
     this.logger.log(
@@ -909,18 +922,23 @@ export class BespokeService {
     // In-app notification to vendor
     const vendorBiz = quote.vendor as any;
     const revDesign = quote.design as any;
-    this.notificationsService.create({
-      // Vendor's USER id, not the business id.
-      recipient: (vendorBiz as any).created_by?.id?.toString(),
-      recipient_business: vendorBiz._id?.toString(),
-      category: NotificationCategory.BESPOKE,
-      type: NotificationType.BESPOKE_QUOTE_REVISION,
-      title: 'Quote Revision Requested',
-      body: `A customer requested a revision on your quote for "${revDesign?.name || 'a design'}".`,
-      metadata: { quote_id: quote._id, design_name: revDesign?.name },
-      // Vendor-facing: /bespoke does not exist in the vendor console.
-      action_url: `/orders?tab=quotes`,
-    }).catch((err) => this.logger.warn(`Failed to create revision notification: ${err.message}`));
+    const revisionRecipients = await this.vendorRecipients.resolve(
+      vendorBiz._id?.toString(),
+      QUOTE_ROLES,
+    );
+    for (const member of revisionRecipients) {
+      this.notificationsService.create({
+        recipient: member.userId,
+        recipient_business: vendorBiz._id?.toString(),
+        category: NotificationCategory.BESPOKE,
+        type: NotificationType.BESPOKE_QUOTE_REVISION,
+        title: 'Quote Revision Requested',
+        body: `A customer requested a revision on your quote for "${revDesign?.name || 'a design'}".`,
+        metadata: { quote_id: quote._id, design_name: revDesign?.name },
+        // Vendor-facing: /bespoke does not exist in the vendor console.
+        action_url: `/orders?tab=quotes`,
+      }).catch((err) => this.logger.warn(`Failed to create revision notification: ${err.message}`));
+    }
 
     return { message: 'Revision requested', data: quote };
   }

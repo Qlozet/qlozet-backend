@@ -14,6 +14,11 @@ import {
 } from '../platform/schema/platformSettings.schema';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// A return is fulfilment work and a customer conversation at once.
+const RETURN_ROLES = [VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT];
 import {
   NotificationCategory,
   NotificationType,
@@ -40,6 +45,7 @@ export class ReturnsService {
     @InjectModel('Event')
     private readonly recEventModel: Model<any>,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
     private readonly transactionService: TransactionService,
     private readonly walletsService: WalletsService,
     private readonly productService: ProductService,
@@ -105,20 +111,26 @@ export class ReturnsService {
       `[Return] Customer ${customerId} requested return for order ${order.reference}, vendor ${dto.business_id}`,
     );
 
-    // Notify vendor
-    const business = await this.businessModel.findById(dto.business_id);
-    if (business?.created_by?.id) {
+    // Notify everyone at the vendor who handles returns.
+    const returnRecipients = await this.vendorRecipients.resolve(
+      dto.business_id,
+      RETURN_ROLES,
+    );
+    for (const member of returnRecipients) {
       this.notificationsService.create({
-        recipient: business.created_by.id.toString(),
+        recipient: member.userId,
+        recipient_business: dto.business_id,
         category: NotificationCategory.ORDER,
-        type: NotificationType.ORDER_CANCELLED,
+        // Was ORDER_CANCELLED under the title "Return Request", so a return
+        // counted as a cancellation anywhere notifications are grouped by type.
+        type: NotificationType.RETURN_REQUESTED,
         title: 'Return Request 📦',
         body: `A customer has requested a return for order #${order.reference}. Reason: ${dto.reason}.`,
         metadata: {
           order_reference: order.reference,
           return_id: returnRequest._id,
         },
-        action_url: `/orders`,
+        action_url: `/orders?tab=returns`,
       }).catch((err) =>
         this.logger.error(`Failed to notify vendor about return: ${err.message}`),
       );

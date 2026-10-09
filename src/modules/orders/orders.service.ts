@@ -91,6 +91,17 @@ import {
 import { WalletsService } from '../wallets/wallets.service';
 import { estimateProductWeightKg } from '../../common/constants/product-weight.constant';
 import { NotificationsService, CreateNotificationDto } from '../notifications/notifications.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
+
+// Who at a vendor hears about what.
+//
+// A new order and a pre-ship verdict are production work: the tailor making it
+// and whoever runs fulfilment. A penalty and a satisfaction confirmation are
+// about money and the schedule, which is operations. The owner is always
+// included by the resolver, so none of these lists name them.
+const FULFILMENT_ROLES = [VendorRole.OPERATIONS, VendorRole.TAILOR];
+const OPERATIONS_ROLES = [VendorRole.OPERATIONS];
 import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
@@ -143,6 +154,7 @@ export class OrderService {
     @Inject(forwardRef(() => WalletsService))
     private readonly walletsService: WalletsService,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
     private readonly mailService: MailService,
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
@@ -3077,29 +3089,32 @@ export class OrderService {
     order.markModified('preship');
     await order.save();
 
-    // Tell the vendor owner the verdict.
+    // Tell the people who made it the verdict — the tailor above all, since
+    // "customer requested changes" is their work to redo.
     const businessId = order.items?.[0]?.business?.toString();
     if (businessId) {
-      this.businessModel
-        .findById(businessId)
-        .select('created_by')
-        .lean()
-        .then((b: any) => {
-          if (!b?.created_by?.id) return;
-          return this.notificationsService.create({
-            recipient: b.created_by.id.toString(),
-            category: NotificationCategory.ORDER,
-            type: NotificationType.PRESHIP_DECISION,
-            title: dto.approve
-              ? 'Pre-ship photos approved ✅'
-              : 'Customer requested changes',
-            body: dto.approve
-              ? `Order #${order.reference} is approved — ship it.`
-              : `Order #${order.reference}: "${(dto.note ?? 'See the order for details').slice(0, 140)}"`,
-            metadata: { order_reference: order.reference },
-            action_url: '/orders',
-          });
-        })
+      this.vendorRecipients
+        .resolve(businessId, FULFILMENT_ROLES)
+        .then((members) =>
+          Promise.all(
+            members.map((member) =>
+              this.notificationsService.create({
+                recipient: member.userId,
+                recipient_business: businessId,
+                category: NotificationCategory.ORDER,
+                type: NotificationType.PRESHIP_DECISION,
+                title: dto.approve
+                  ? 'Pre-ship photos approved ✅'
+                  : 'Customer requested changes',
+                body: dto.approve
+                  ? `Order #${order.reference} is approved — ship it.`
+                  : `Order #${order.reference}: "${(dto.note ?? 'See the order for details').slice(0, 140)}"`,
+                metadata: { order_reference: order.reference },
+                action_url: '/orders',
+              }),
+            ),
+          ),
+        )
         .catch((e) =>
           this.logger.warn(`Preship decision notify failed: ${e?.message}`),
         );
@@ -4536,10 +4551,16 @@ export class OrderService {
             );
           }
 
-          // Notify vendor
-          if (business?.created_by?.id) {
+          // Notify whoever runs fulfilment, not only the account holder — a
+          // penalty that compounds daily needs to reach someone who can ship.
+          const penaltyRecipients = await this.vendorRecipients.resolve(
+            business?._id?.toString(),
+            OPERATIONS_ROLES,
+          );
+          for (const member of penaltyRecipients) {
             this.notificationsService.create({
-              recipient: business.created_by.id.toString(),
+              recipient: member.userId,
+              recipient_business: business?._id?.toString(),
               category: NotificationCategory.ORDER,
               type: NotificationType.LATE_FULFILLMENT_PENALTY,
               title: 'Late Fulfillment Penalty',
@@ -7026,27 +7047,39 @@ export class OrderService {
     // different business would otherwise miss their new-order notification.
     const businesses = await this.businessModel
       .find({ _id: { $in: businessIds.map((id) => new Types.ObjectId(id)) } })
-      .select('_id created_by business_name')
+      .select('_id business_name')
       .lean();
 
-    const notifications: CreateNotificationDto[] = businesses
-      .filter((biz: any) => biz.created_by?.id)
-      .map((biz: any) => ({
-        recipient: biz.created_by.id.toString(),
-        recipient_business: biz._id?.toString(),
-        category: NotificationCategory.ORDER,
-        type: NotificationType.NEW_ORDER,
-        title: 'New Order Received!',
-        body: `Order #${order.reference} has been placed (₦${order.total?.toLocaleString()}). Check your orders to review.`,
-        metadata: {
-          order_id: order._id,
-          order_reference: order.reference,
-          total: order.total,
-          items_count: order.items.length,
-          customer_name: (customer as any).full_name || '',
-        },
-        action_url: `/orders`,
-      }));
+    // One row per person who should act on it, across every vendor on the
+    // order — previously one row per business, addressed to whoever registered
+    // it, so a tailor never learned an order had come in.
+    const perBusiness = await Promise.all(
+      businesses.map((biz: any) =>
+        this.vendorRecipients
+          .resolve(biz._id?.toString(), FULFILMENT_ROLES)
+          .then((members) => ({ biz, members })),
+      ),
+    );
+
+    const notifications: CreateNotificationDto[] = perBusiness.flatMap(
+      ({ biz, members }) =>
+        members.map((member) => ({
+          recipient: member.userId,
+          recipient_business: biz._id?.toString(),
+          category: NotificationCategory.ORDER,
+          type: NotificationType.NEW_ORDER,
+          title: 'New Order Received!',
+          body: `Order #${order.reference} has been placed (₦${order.total?.toLocaleString()}). Check your orders to review.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            total: order.total,
+            items_count: order.items.length,
+            customer_name: (customer as any).full_name || '',
+          },
+          action_url: `/orders`,
+        })),
+    );
 
     if (notifications.length > 0) {
       await this.notificationsService.createMany(notifications);
@@ -7220,10 +7253,14 @@ export class OrderService {
     // Notify each vendor
     const vendorBusinessIds = [...new Set(order.items.map(i => i.business?.toString()).filter(Boolean))];
     for (const businessId of vendorBusinessIds) {
-      const business = await this.businessModel.findById(businessId);
-      if (business?.created_by?.id) {
+      const members = await this.vendorRecipients.resolve(
+        businessId,
+        OPERATIONS_ROLES,
+      );
+      for (const member of members) {
         this.notificationsService.create({
-          recipient: business.created_by.id.toString(),
+          recipient: member.userId,
+          recipient_business: businessId,
           category: NotificationCategory.ORDER,
           type: NotificationType.ORDER_CONFIRMED,
           title: 'Customer Confirmed Satisfaction! 🎉',
