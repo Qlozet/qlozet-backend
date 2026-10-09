@@ -25,6 +25,7 @@ import { Public } from 'src/common/decorators/public.decorator';
 import { UserType } from '../ums/schemas';
 
 import { BespokeService } from './bespoke.service';
+import { SuggestedVendorsService } from './suggested-vendors.service';
 import { CreateDesignDto } from './dto/create-design.dto';
 import { RequestQuotesDto } from './dto/request-quotes.dto';
 import { SubmitQuoteDto } from './dto/submit-quote.dto';
@@ -37,7 +38,10 @@ import { RevisionRequestDto } from './dto/revision-request.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class BespokeController {
-  constructor(private readonly bespokeService: BespokeService) {}
+  constructor(
+    private readonly bespokeService: BespokeService,
+    private readonly suggestedVendorsService: SuggestedVendorsService,
+  ) {}
 
   // ════════════════════════════════════════════════════════════════
   //  TEMPLATES — public, browsable before sign-in
@@ -101,6 +105,49 @@ export class BespokeController {
       size || 10,
       status,
     );
+  }
+
+  /**
+   * Which tailors to offer for this design, best first.
+   *
+   * Design-scoped rather than a sort on the generic vendor list, because the
+   * two strongest signals depend on the design: who supplies its fabric (and
+   * so avoids the cross-vendor surcharge) and who makes that kind of garment.
+   * The generic list knows neither, and returned vendors in no order at all —
+   * effectively oldest first, which handed the work to whoever registered
+   * earliest.
+   */
+  /**
+   * The same ranking for a design that has not been saved yet.
+   *
+   * The studio saves a design when quotes are requested, not before, so on a
+   * first request there is no id — which is the usual case. Takes the two
+   * things the ranking needs directly.
+   */
+  @Get('suggested-vendors')
+  @ApiOperation({
+    summary: 'Ranked tailors for an unsaved design (category + fabric)',
+  })
+  async suggestedVendorsFor(
+    @Query('category') category?: string,
+    @Query('fabric_id') fabricId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.suggestedVendorsService.forCriteria(
+      { category, fabricId },
+      Number(limit) || 8,
+    );
+  }
+
+  @Get('designs/:id/suggested-vendors')
+  @ApiOperation({
+    summary: 'Ranked tailors to request quotes from, with the reason for each',
+  })
+  async suggestedVendors(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.suggestedVendorsService.forDesign(id, Number(limit) || 8);
   }
 
   @Get('designs/:id')
