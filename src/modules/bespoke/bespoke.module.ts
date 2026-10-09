@@ -28,6 +28,8 @@ import { ProductModule } from '../products/products.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WalletsModule } from '../wallets/wallets.module';
 
+import { SuggestedVendorsService } from './suggested-vendors.service';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -48,7 +50,7 @@ import { WalletsModule } from '../wallets/wallets.module';
     WalletsModule,       // provides WalletsService (wallet payment)
   ],
   controllers: [BespokeController, AdminBespokeController],
-  providers: [BespokeService],
+  providers: [BespokeService, SuggestedVendorsService],
   exports: [BespokeService],
 })
 export class BespokeModule {}
