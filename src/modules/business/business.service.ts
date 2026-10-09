@@ -641,7 +641,9 @@ export class BusinessService {
         .select(
           'business_name business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
-          'website social_links total_items_sold ' +
+          // website omitted here for the same reason it is omitted from the
+          // public detail projection below: it is a competing checkout.
+          'social_links total_items_sold ' +
           'success_rate is_featured year_founded accepts_external_fabric ' +
           'accepts_bespoke createdAt'
         )

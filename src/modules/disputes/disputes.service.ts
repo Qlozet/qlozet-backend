@@ -308,7 +308,7 @@ export class DisputesService {
     this.notificationsService.create({
       recipient: dispute.customer.toString(),
       category: NotificationCategory.ORDER,
-      type: NotificationType.ORDER_CONFIRMED,
+      type: NotificationType.DISPUTE_RESOLVED,
       title: 'Dispute Resolved',
       body: `Your dispute for order #${dispute.order_reference} has been resolved: ${dto.resolution.replace(/_/g, ' ')}.${dispute.refund_amount ? ` Refund: ₦${dispute.refund_amount.toLocaleString()}` : ''}`,
       metadata: {
@@ -334,7 +334,7 @@ export class DisputesService {
           category: NotificationCategory.ORDER,
           // Was ORDER_CONFIRMED, under a title reading "Dispute Resolved" —
           // so a resolved dispute was counted as a confirmed order.
-          type: NotificationType.DISPUTE_OPENED,
+          type: NotificationType.DISPUTE_RESOLVED,
           title: 'Dispute Resolved',
           body: `Dispute for order #${dispute.order_reference} has been resolved: ${dto.resolution.replace(/_/g, ' ')}.`,
           metadata: {
