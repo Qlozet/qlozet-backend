@@ -12,6 +12,8 @@ import { EmailLog, EmailLogSchema } from './schemas/email-log.schema';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationsGateway } from './notifications.gateway';
 import { VendorRecipientsService } from './vendor-recipients.service';
+import { BroadcastsService } from './broadcasts.service';
+import { Broadcast, BroadcastSchema } from './schemas/broadcast.schema';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
 
@@ -25,6 +27,7 @@ import { Role, RoleSchema } from '../ums/schemas/role.schema';
       // about something. The owner is a TeamMember row like everyone else.
       { name: TeamMember.name, schema: TeamMemberSchema },
       { name: Role.name, schema: RoleSchema },
+      { name: Broadcast.name, schema: BroadcastSchema },
     ]),
   ],
   controllers: [NotificationsController],
@@ -34,11 +37,13 @@ import { Role, RoleSchema } from '../ums/schemas/role.schema';
     JwtService,
     NotificationsGateway,
     VendorRecipientsService,
+    BroadcastsService,
   ],
   exports: [
     NotificationsService,
     MailService,
     VendorRecipientsService,
+    BroadcastsService,
     MongooseModule,
   ],
 })

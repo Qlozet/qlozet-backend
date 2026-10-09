@@ -1,0 +1,22 @@
+{{> header title=headline }}
+
+<p>Hello{{#if recipientName}} <strong>{{recipientName}}</strong>{{/if}},</p>
+
+{{!-- The admin's own words, rendered as written. Everything around it is the
+      shared shell, so an announcement looks like the rest of our mail rather
+      than like a different company wrote it. --}}
+<div class="announcement-body">
+    {{{body}}}
+</div>
+
+{{#if actionUrl}}
+{{> button url=actionUrl text="Open Qlozet" }}
+{{/if}}
+
+<div class="divider" style="height:1px; line-height:1px; font-size:0; background:#EDE7E0; margin:28px 0;">&nbsp;</div>
+
+<p class="muted" style="color:#8A7C6E; font-size:14px;">You are receiving this
+    because you have a {{companyName}} account. It is not a marketing list and
+    there is nothing to unsubscribe from &mdash; we send these rarely.</p>
+
+<p style="margin-top: 28px;">The {{companyName}} Team</p>
