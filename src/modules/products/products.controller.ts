@@ -35,6 +35,7 @@ import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 import { VendorRole } from '../ums/schemas/role.schema';
 import { ProductService } from './products.service';
+import { DiscoverVendorsService } from './discover-vendors.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
 import { RateProductDto } from './dto/rate-product.dto';
 import { FindAllProductsDto } from './dto/find-all-products.dto';
@@ -58,8 +59,42 @@ import { Public } from '../../common/decorators/public.decorator';
 export class ProductsController {
   constructor(
     private readonly productService: ProductService,
+    private readonly discoverVendors: DiscoverVendorsService,
     private moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Vendors who stock one kind of product, best first, each with a few items.
+   *
+   * Backs the home page's category rows. Two segments so it cannot be
+   * swallowed by @Get(':id').
+   *
+   * One request per row, deliberately. The home page used to fetch the 50
+   * newest products once and split them four ways, so the rows competed for
+   * a shared budget: when recent uploads skewed to clothing, Fabric and
+   * Accessories starved, and a starved row vanished from the page — not
+   * because there was no stock, but because nobody had uploaded recently.
+   */
+  @Public()
+  @Get('discover/vendors')
+  @ApiOperation({
+    summary: 'Vendors stocking one product kind, ranked, with sample items',
+  })
+  async discoverVendorsForKind(
+    @Query('kind') kind: 'clothing' | 'accessory' | 'fabric',
+    @Query('clothing_type') clothingType?: 'customize' | 'non_customize',
+    @Query('audience') audience?: string,
+    @Query('limit') limit?: string,
+    @Query('per_vendor') perVendor?: string,
+  ) {
+    return this.discoverVendors.vendorsForKind({
+      kind,
+      clothingType,
+      audience,
+      limit: Number(limit) || 8,
+      perVendor: Number(perVendor) || 4,
+    });
+  }
 
   // ---------------- CATALOGUE STATS ----------------
   @Get('stats/sales-by-type')
