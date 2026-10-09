@@ -485,7 +485,9 @@ export class BespokeService {
         title: 'New Bespoke Quote Request',
         body: `A customer wants a quote for "${design.name}". You have 7 days to respond.`,
         metadata: { design_id: design._id, design_name: design.name },
-        action_url: `/bespoke/quotes`,
+        // The vendor console has no /bespoke route — quote requests live on
+        // the Quote Requests tab of the orders page.
+        action_url: `/orders?tab=quotes`,
       }).catch((err) => this.logger.warn(`Failed to create in-app notification: ${err.message}`));
     }
 
@@ -916,7 +918,8 @@ export class BespokeService {
       title: 'Quote Revision Requested',
       body: `A customer requested a revision on your quote for "${revDesign?.name || 'a design'}".`,
       metadata: { quote_id: quote._id, design_name: revDesign?.name },
-      action_url: `/bespoke/quotes`,
+      // Vendor-facing: /bespoke does not exist in the vendor console.
+      action_url: `/orders?tab=quotes`,
     }).catch((err) => this.logger.warn(`Failed to create revision notification: ${err.message}`));
 
     return { message: 'Revision requested', data: quote };
