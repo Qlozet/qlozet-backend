@@ -27,6 +27,8 @@ import {
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
+import { DiscoverVendorsService } from './discover-vendors.service';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -51,7 +53,13 @@ import { NotificationsModule } from '../notifications/notifications.module';
     DiscountController,
     CollectionController,
   ],
-  providers: [JwtService, ProductService, DiscountService, CollectionService],
+  providers: [
+    JwtService,
+    ProductService,
+    DiscountService,
+    CollectionService,
+    DiscoverVendorsService,
+  ],
   exports: [JwtService, ProductService, DiscountService, CollectionService, MongooseModule],
 })
 export class ProductModule {}
