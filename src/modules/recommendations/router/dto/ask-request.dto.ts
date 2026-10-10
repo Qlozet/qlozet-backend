@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsArray,
   IsEnum,
+  IsMongoId,
   ValidateNested,
   Max,
   Min,
@@ -79,4 +80,13 @@ export class AskRequestDto {
   @ValidateNested({ each: true })
   @Type(() => ChatMessageDto)
   history?: ChatMessageDto[];
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Continue a saved conversation. When set (and the caller is signed in), the stored turns are used as context instead of `history`, and this exchange is appended to it. Omit to start a new one; the response carries the id to send next time.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  conversation_id?: string;
 }

@@ -19,12 +19,18 @@ import { AuthModule } from 'src/modules/auth/auth.module';
 import { PlatformModule } from 'src/modules/platform/platform.module';
 import { Product, ProductSchema } from '../../products/schemas/product.schema';
 import { User, UserSchema } from '../../ums/schemas/user.schema';
+import {
+  AskConversation,
+  AskConversationSchema,
+} from './schemas/ask-conversation.schema';
+import { AskConversationsService } from './ask-conversations.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Product.name, schema: ProductSchema },
       { name: User.name, schema: UserSchema },
+      { name: AskConversation.name, schema: AskConversationSchema },
     ]),
     ConfigModule,
     UserEmbeddingsModule,
@@ -41,7 +47,7 @@ import { User, UserSchema } from '../../ums/schemas/user.schema';
     PlatformModule,    // provides PlatformService (needed by RouterController)
   ],
   controllers: [RouterController],
-  providers: [RouterService, AskService, GuardrailsService],
+  providers: [RouterService, AskService, GuardrailsService, AskConversationsService],
   exports: [RouterService, AskService],
 })
 export class RouterModule {}

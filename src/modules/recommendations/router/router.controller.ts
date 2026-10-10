@@ -1,6 +1,10 @@
 import {
   Controller,
   Post,
+  Get,
+  Delete,
+  Param,
+  Query,
   Body,
   Req,
   UseGuards,
@@ -12,7 +16,15 @@ import {
 import { RouterService } from './router.service';
 import { AskService } from './ask.service';
 import { GuardrailsService } from './guardrails.service';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiBody,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
+import { AskConversationsService } from './ask-conversations.service';
 import { AskRequestDto } from './dto/ask-request.dto';
 import { Public } from 'src/common/decorators/public.decorator';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
@@ -31,6 +43,7 @@ export class RouterController {
     private readonly guardrailsService: GuardrailsService,
     private readonly platformService: PlatformService,
     private readonly tokenService: TokenService,
+    private readonly conversations: AskConversationsService,
   ) {}
 
   @Post('recommend')
@@ -77,14 +90,37 @@ export class RouterController {
       }
     }
 
+    // ─── Conversation memory ───────────────────────────────────
+    // Signed-in callers get a remembered thread. When they name one, the
+    // stored turns are the context (not whatever the client re-sent): a
+    // thread resumed from the history list has no client copy at all.
+    const userId: string | undefined = req.user?.id;
+    let history = dto.history;
+    if (userId && dto.conversation_id) {
+      history = await this.conversations.historyFor(userId, dto.conversation_id);
+    }
+
     // ─── Execute the AI pipeline ───────────────────────────────
     const result = await this.askService.ask(
       dto.query,
-      dto.userId || req.user?.id,
+      dto.userId || userId,
       dto.sessionId,
       dto.limit || 10,
-      dto.history,
+      history,
     );
+
+    let conversationId: string | null = dto.conversation_id ?? null;
+    if (userId) {
+      conversationId = await this.conversations.record(
+        userId,
+        dto.conversation_id,
+        dto.query,
+        result.reply ?? '',
+        (result.products ?? [])
+          .map((p: any) => p?.product?._id ?? p?.itemId ?? p?._id)
+          .filter(Boolean),
+      );
+    }
 
     // ─── Deduct tokens after success (only if price > 0) ──────
     if (tokenPrice > 0 && req.user) {
@@ -98,6 +134,39 @@ export class RouterController {
     return {
       ...result,
       tokensCost: tokenPrice,
+      conversation_id: conversationId,
     };
+  }
+
+  // ─── Saved conversations ─────────────────────────────────────
+  // No @Public(): a thread is personal and there is nothing to list for an
+  // anonymous caller. JwtAuthGuard on the class does the rejecting.
+
+  @Get('conversations')
+  @ApiOperation({ summary: 'My saved stylist conversations, most recent first' })
+  @ApiQuery({ name: 'limit', required: false })
+  async listConversations(@Req() req: any, @Query('limit') limit?: string) {
+    const n = Number(limit);
+    return this.conversations.list(req.user.id, Number.isFinite(n) && n > 0 ? n : 30);
+  }
+
+  @Get('conversations/:id')
+  @ApiOperation({ summary: 'One saved conversation, with the products each reply showed' })
+  @ApiParam({ name: 'id' })
+  async getConversation(@Req() req: any, @Param('id') id: string) {
+    return this.conversations.get(req.user.id, id);
+  }
+
+  @Delete('conversations/:id')
+  @ApiOperation({ summary: 'Delete one saved conversation' })
+  @ApiParam({ name: 'id' })
+  async deleteConversation(@Req() req: any, @Param('id') id: string) {
+    return this.conversations.remove(req.user.id, id);
+  }
+
+  @Delete('conversations')
+  @ApiOperation({ summary: 'Delete all my saved conversations' })
+  async deleteConversations(@Req() req: any) {
+    return this.conversations.removeAll(req.user.id);
   }
 }
