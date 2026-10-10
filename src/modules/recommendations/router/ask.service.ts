@@ -13,6 +13,21 @@ import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
 import { Product, ProductDocument } from '../../products/schemas/product.schema';
 import { User, UserDocument } from '../../ums/schemas/user.schema';
 import { classifyBodyType } from 'src/common/utils/body-type-classifier';
+import { normalizeAudience, productFacts } from '../catalog/product-facts';
+import { buildProductContext, PromptProduct } from './ask-product-context';
+import { FilterSpec } from '../filters/dto/filter-spec.dto';
+
+/** Below this many strict matches, colour and size are relaxed rather than answering "nothing". */
+const MIN_STRICT_MATCHES = 3;
+
+/** The intent extractor returns colours as an array, a string, or not at all. */
+const asList = (v: unknown): string[] => {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof v === 'string' && v.trim()) {
+    return v.split(/,|\band\b|\/|&/).map((x) => x.trim()).filter(Boolean);
+  }
+  return [];
+};
 
 /**
  * A product's description lives on its kind sub-document, never at the top
@@ -61,6 +76,9 @@ export class AskService {
 
     // ─── Step 0: Fetch User Body Profile ──────────────────────────
     let bodyContext = '';
+    // Who they shop for, from the profile - the default audience when the
+    // question itself does not name one.
+    let customerAudience: string | undefined;
     if (userId) {
       try {
         const user = await this.userModel
@@ -69,6 +87,7 @@ export class AskService {
           .lean();
 
         if (user) {
+          customerAudience = normalizeAudience(user.gender);
           let btc = user.body_type_classification;
           const activeSet = (user.measurementSets || []).find((s) => s.active);
           const measurements = activeSet?.measurements;
@@ -178,14 +197,41 @@ export class AskService {
     // ─── Step 5: Filter using LLM-extracted constraints ──────────
     const filterStart = Date.now();
     const constraints = classification.constraints || {};
+    const wantedColors = asList(constraints.color ?? constraints.colors ?? constraints.colour);
+    const wantedSize = typeof constraints.size === 'string' ? constraints.size.trim() : undefined;
     const filterSpec = this.filtersService.buildFilterSpecFromRequest({
       maxPrice: constraints.budget || constraints.maxPrice,
       gender: constraints.gender,
       category: constraints.category || constraints.type,
     });
+    filterSpec.colors = wantedColors;
+    filterSpec.size = wantedSize || undefined;
 
-    const { items: filteredItems, metrics: filterMetrics } =
-      this.filtersService.applyHardFilters(candidates, filterSpec);
+    const strict = this.filtersService.applyHardFilters(candidates, filterSpec);
+    let filteredItems = strict.items;
+    let filterMetrics = strict.metrics;
+    const strictIds = new Set(strict.items.map((i: any) => i.itemId));
+
+    // A colour or size nobody stocks must not turn into "no products matched".
+    // Keep the strict matches, top up with the closest otherwise, and tell the
+    // model so it can say "not in red, but" instead of pretending.
+    const relaxed: string[] = [];
+    if (filteredItems.length < MIN_STRICT_MATCHES && (wantedColors.length || wantedSize)) {
+      const loose: FilterSpec = Object.assign(new FilterSpec(), filterSpec, {
+        colors: undefined,
+        size: undefined,
+      });
+      const again = this.filtersService.applyHardFilters(candidates, loose);
+      if (again.items.length > filteredItems.length) {
+        if (wantedColors.length) relaxed.push(`colour (${wantedColors.join(', ')})`);
+        if (wantedSize) relaxed.push(`size ${wantedSize}`);
+        filteredItems = [
+          ...strict.items,
+          ...again.items.filter((i: any) => !strictIds.has(i.itemId)),
+        ];
+        filterMetrics = again.metrics;
+      }
+    }
     debug.filterMs = Date.now() - filterStart;
     debug.filteredCount = filteredItems.length;
 
@@ -193,6 +239,8 @@ export class AskService {
     const rankStart = Date.now();
     const rankingContext: RankingContext = {
       budgetMax: constraints.budget || constraints.maxPrice,
+      // The question wins; the profile is only the default.
+      preferredAudience: constraints.gender ? undefined : customerAudience,
     };
     const ranked = this.rankersService.rankCandidates(
       filteredItems,
@@ -223,14 +271,20 @@ export class AskService {
     // garments it had never read — inferring "flowing maxi" from a product
     // name alone. Pass what the vendor actually wrote. Prefer the live
     // product's description; fall back to the catalog's synced copy.
-    const activeProductSummaries = hydratedProducts.map((item: any) => ({
+    const activeProductSummaries: PromptProduct[] = hydratedProducts.map((item: any) => ({
       name: item.product?.name || item.name,
       price: item.product?.base_price || item.price,
-      vendor: item.vendor,
+      // The business NAME. The catalog's `vendor` is the business id, and
+      // that id was what the model used to read as the vendor.
+      vendor: item.product?.business?.business_name || undefined,
       type: item.type,
+      kind: item.product?.kind,
       description: resolveDescription(item.product) || item.description,
       tags: item.tags,
+      // From the live product, not the synced copy: stock and price as of now.
+      facts: item.product ? productFacts(item.product) : undefined,
     }));
+    const strictMatches = hydratedProducts.filter((item: any) => strictIds.has(item.itemId)).length;
 
     // ─── Step 9: Generate Conversational Reply ───────────────────
     let reply: string | null = null;
@@ -245,6 +299,7 @@ export class AskService {
         constraints,
         history,
         bodyContext,
+        { customerAudience, relaxed, strictMatches },
       );
       // Sanitize the output
       reply = this.guardrailsService.sanitizeReply(reply);
@@ -296,7 +351,7 @@ export class AskService {
         select: 'business_name business_logo_url',
       })
       .select(
-        'name kind base_price business clothing fabric accessory status ' +
+        'name kind base_price discounted_price business clothing fabric accessory status ' +
         'average_rating total_ratings slug description',
       )
       .lean();
@@ -322,40 +377,30 @@ export class AskService {
 
   private async generateConversationalReply(
     query: string,
-    products: any[],
+    products: PromptProduct[],
     intent: string,
     constraints: Record<string, any>,
     history?: Array<{ role: 'user' | 'assistant'; content: string }>,
     bodyContext?: string,
+    extras: { customerAudience?: string; relaxed?: string[]; strictMatches?: number } = {},
   ): Promise<string> {
     if (this.openai.apiKey === 'dummy') {
       this.logger.warn('Skipping reply generation (no API key)');
       return this.buildFallbackReply(products, intent);
     }
 
-    // Descriptions are vendor-authored and can run long; every result's text
-    // lands in the prompt on every ask, so cap each one.
-    const DESCRIPTION_CHARS = 220;
-    const productContext =
-      products.length > 0
-        ? products
-            .map((p, i) => {
-              const lines = [
-                `${i + 1}. "${p.name}" — ₦${p.price?.toLocaleString()} (${p.vendor}, ${p.type})`,
-              ];
-              const desc = String(p.description ?? '').replace(/\s+/g, ' ').trim();
-              if (desc) {
-                lines.push(
-                  `   ${desc.slice(0, DESCRIPTION_CHARS)}${desc.length > DESCRIPTION_CHARS ? '…' : ''}`,
-                );
-              }
-              if (Array.isArray(p.tags) && p.tags.length) {
-                lines.push(`   Tags: ${p.tags.slice(0, 8).join(', ')}`);
-              }
-              return lines.join('\n');
-            })
-            .join('\n')
-        : 'No products matched the query.';
+    const productContext = buildProductContext(products);
+
+    const AUDIENCE_LABEL: Record<string, string> = { men: "men's", women: "women's" };
+    const audienceLine = extras.customerAudience
+      ? `Customer usually shops: ${AUDIENCE_LABEL[extras.customerAudience] ?? extras.customerAudience}`
+      : 'Customer audience: not known';
+    const relaxedLine = extras.relaxed?.length
+      ? (extras.strictMatches
+          ? `Note: only ${extras.strictMatches} of the products below match the requested ${extras.relaxed.join(' and ')}; the rest are the closest otherwise`
+          : `Note: nothing available matches the requested ${extras.relaxed.join(' and ')}; the products below are the closest otherwise`) +
+        ' - say so plainly, then recommend from what is listed.'
+      : '';
 
     const systemPrompt = `You are Qlozet's fashion shopping assistant. You ONLY discuss:
 - Fashion products, clothing, fabrics, accessories, and styling
@@ -377,6 +422,12 @@ STRICT RULES:
 - If no products match, say so honestly and suggest broadening the search
 - Be warm, helpful, and conversational — like a knowledgeable fashion friend
 - Use Nigerian Naira (₦) for prices
+- Each product line states its vendor, audience, cut (ready to wear or made to
+  order), colours, sizes in stock and rating. Use them: name the vendor, never
+  claim a colour or size that is not listed, and if the customer's size is not
+  in stock say so rather than recommending it anyway
+- Prefer items for the audience the customer shops for (below) unless they are
+  clearly shopping for someone else
 ${bodyContext ? `
 BODY & FIT RULES:
 - You DO have access to this user's body measurements and profile (shown below). Always acknowledge this when asked.
@@ -390,6 +441,8 @@ BODY & FIT RULES:
 CONTEXT:
 User intent: ${intent}
 Extracted constraints: ${JSON.stringify(constraints)}
+${audienceLine}
+${relaxedLine}
 Matching products:
 ${productContext}
 ${bodyContext || ''}`;

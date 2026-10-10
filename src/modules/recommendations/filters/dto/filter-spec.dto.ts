@@ -29,4 +29,15 @@ export class FilterSpec {
     @IsString()
     @IsOptional()
     category?: string;
+
+    /** Colour words the shopper asked for; an item passes if it offers any of them. */
+    @IsArray()
+    @IsString({ each: true })
+    @IsOptional()
+    colors?: string[];
+
+    /** A size the shopper asked for; items that list sizes must list this one. */
+    @IsString()
+    @IsOptional()
+    size?: string;
 }

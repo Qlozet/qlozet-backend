@@ -54,7 +54,13 @@ export class RouterService {
             - substitution: "Alternative to X"
             
             Return JSON only: { "intent": string, "constraints": object, "confidence": number }.
-            Extract constraints like "gender", "color", "occasion", "budget".
+            Extract constraints present in the text:
+            - "gender": "male" | "female" - who the item is FOR (a gift "for my husband" is male)
+            - "color": array of lowercase colour words, e.g. ["red", "burgundy"]
+            - "size": a clothing size as written, e.g. "XL", "14", "42"
+            - "occasion": e.g. "wedding", "work", "date night"
+            - "budget": the maximum price as a plain number in naira (50k -> 50000)
+            - "category": the kind of item, e.g. "dress", "kaftan", "fabric", "bag"
             Do not extract constraints not present in text.
             `
                     },

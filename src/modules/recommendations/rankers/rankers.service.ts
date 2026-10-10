@@ -5,8 +5,17 @@ export interface RankingContext {
     budgetMax?: number;
     businesses?: Map<string, any>;
     perfectFitProducts?: Set<string>;
-    // userProfile info could go here
+    /**
+     * Who the customer shops for when the query does not say (men | women).
+     * A soft preference: items for the other audience sink, unisex and
+     * unlabelled items are untouched, and nothing is dropped - the stylist
+     * can still reach them if nothing else fits.
+     */
+    preferredAudience?: string;
 }
+
+const OTHER_AUDIENCE_PENALTY = -0.25;
+const SAME_AUDIENCE_BOOST = 0.05;
 
 export interface RankedItem extends CatalogItem {
     finalScore: number;
@@ -65,19 +74,29 @@ export class RankersService {
             fitBoost = 0.3; // Boost products that perfectly fit the customer's size
         }
 
-        // Formula: 0.70*vScore + 0.15*vendorQuality + 0.10*etaScore + 0.05*priceFit + boost + fitBoost
+        // 6. Audience preference
+        let audienceAdjust = 0;
+        if (context.preferredAudience) {
+            const audience = item.facts?.audience || item.fitMeta?.targetDemographic;
+            if (audience && audience !== 'unisex') {
+                audienceAdjust = audience === context.preferredAudience ? SAME_AUDIENCE_BOOST : OTHER_AUDIENCE_PENALTY;
+            }
+        }
+
+        // Formula: 0.70*vScore + 0.15*vendorQuality + 0.10*etaScore + 0.05*priceFit + boost + fitBoost + audience
         const finalScore =
             (0.70 * vScore) +
             (0.15 * vendorQualityScore) +
             (0.10 * etaScore) +
             (0.05 * priceFit) +
             vendorBoost +
-            fitBoost;
+            fitBoost +
+            audienceAdjust;
 
         return {
             ...item,
             finalScore,
-            scoringDebug: { vScore, vendorQualityScore, etaScore, priceFit, vendorBoost, fitBoost }
+            scoringDebug: { vScore, vendorQualityScore, etaScore, priceFit, vendorBoost, fitBoost, audienceAdjust }
         };
     }
 }
