@@ -16,6 +16,14 @@ import { classifyBodyType } from 'src/common/utils/body-type-classifier';
 import { normalizeAudience, productFacts } from '../catalog/product-facts';
 import { buildProductContext, PromptProduct } from './ask-product-context';
 import { FilterSpec } from '../filters/dto/filter-spec.dto';
+import { BusinessService } from '../../business/business.service';
+import { UserEmbeddingsService } from '../user-embeddings/user-embeddings.service';
+import { blendVectors } from './vectors';
+
+/** How much of the retrieval vector is the customer's taste rather than the question. */
+const TASTE_WEIGHT = 0.2;
+/** How many saved (wishlisted) items the stylist is told about. */
+const SAVED_ITEMS_SHOWN = 8;
 
 /** Below this many strict matches, colour and size are relaxed rather than answering "nothing". */
 const MIN_STRICT_MATCHES = 3;
@@ -59,6 +67,8 @@ export class AskService {
     private rankersService: RankersService,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    private businessService: BusinessService,
+    private userEmbeddingsService: UserEmbeddingsService,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = new OpenAI({ apiKey: apiKey || 'dummy' });
@@ -79,15 +89,21 @@ export class AskService {
     // Who they shop for, from the profile - the default audience when the
     // question itself does not name one.
     let customerAudience: string | undefined;
+    let aesthetics: string[] = [];
+    let wishlistIds: string[] = [];
     if (userId) {
       try {
         const user = await this.userModel
           .findById(userId)
-          .select('gender body_type_classification measurementSets body_fit')
+          .select('gender body_type_classification measurementSets body_fit aesthetic_preferences wishlist')
           .lean();
 
         if (user) {
           customerAudience = normalizeAudience(user.gender);
+          aesthetics = Array.isArray(user.aesthetic_preferences)
+            ? user.aesthetic_preferences.filter(Boolean)
+            : [];
+          wishlistIds = (user.wishlist || []).slice(-SAVED_ITEMS_SHOWN).map(String);
           let btc = user.body_type_classification;
           const activeSet = (user.measurementSets || []).find((s) => s.active);
           const measurements = activeSet?.measurements;
@@ -166,15 +182,34 @@ export class AskService {
     }
 
     // ─── Step 2: Classify Intent ─────────────────────────────────
+    // With the previous question in view: a follow-up ("cheaper", "same in
+    // blue") only means something against it, and the classifier carries
+    // the earlier constraints forward when it decides this one continues.
     const classificationStart = Date.now();
-    const classification = await this.routerService.classifyIntent(query);
+    const lastUserTurn = [...(history || [])].reverse().find((m) => m.role === 'user')?.content;
+    const classification = await this.routerService.classifyIntent(query, lastUserTurn);
     debug.classificationMs = Date.now() - classificationStart;
+    const continuesPrevious = classification.continuesPrevious === true && !!lastUserTurn;
 
     // ─── Step 3: Embed Query for Vector Search ───────────────────
+    // A follow-up is embedded together with the question it follows, or
+    // "the same in blue" retrieves nothing about the thing it refers to.
+    // Then a little of the customer's taste vector is folded in - the one
+    // the home feed is personalised with - so two people asking the same
+    // question get results leaning their own way.
     let queryVector: number[] | null = null;
     const embeddingStart = Date.now();
     try {
-      queryVector = await this.embeddingsService.generateEmbedding(query);
+      const embedText = continuesPrevious ? `${lastUserTurn}. ${query}` : query;
+      queryVector = await this.embeddingsService.generateEmbedding(embedText);
+      if (userId && queryVector) {
+        try {
+          const taste = await this.userEmbeddingsService.getOrComputeUserStyleVector(userId);
+          queryVector = blendVectors(queryVector, taste, TASTE_WEIGHT);
+        } catch (error) {
+          this.logger.warn(`Taste vector unavailable for ${userId}: ${error?.message}`);
+        }
+      }
     } catch (error) {
       this.logger.error('Query embedding failed, falling back to trending', error);
     }
@@ -194,6 +229,39 @@ export class AskService {
     debug.retrievalMs = Date.now() - retrievalStart;
     debug.candidateCount = candidates.length;
 
+    // ─── Step 4.5: What the home feed knows and ask did not ──────
+    // The vendors behind the candidates (trust gating before ranking, and
+    // success rate / featured in the score instead of a flat 0.8 for all),
+    // and the pre-computed set of products that fit this customer's saved
+    // measurements.
+    const businesses = new Map<string, any>();
+    try {
+      const vendorIds = [...new Set(candidates.map((c) => c.vendor).filter(Boolean))];
+      if (vendorIds.length) {
+        const docs = await this.businessService.findBusinessesByIds(vendorIds);
+        docs.forEach((b: any) => { if (b) businesses.set(String(b._id), b); });
+      }
+    } catch (error) {
+      this.logger.warn(`Business lookup failed for ask: ${error?.message}`);
+    }
+
+    let perfectFitProducts = new Set<string>();
+    if (userId && Types.ObjectId.isValid(userId)) {
+      try {
+        const fitUser = await this.productModel.db
+          .collection('users')
+          .findOne({ _id: new Types.ObjectId(userId) }, { projection: { fitting_products_cache: 1 } });
+        const cache = fitUser?.fitting_products_cache;
+        const CACHE_TTL_MS = 60 * 60 * 1000;
+        if (cache?.product_ids?.length && cache.computed_at) {
+          const age = Date.now() - new Date(cache.computed_at).getTime();
+          if (age < CACHE_TTL_MS) perfectFitProducts = new Set(cache.product_ids.map(String));
+        }
+      } catch (error) {
+        this.logger.warn(`Fitting cache unavailable for ${userId}: ${error?.message}`);
+      }
+    }
+
     // ─── Step 5: Filter using LLM-extracted constraints ──────────
     const filterStart = Date.now();
     const constraints = classification.constraints || {};
@@ -207,7 +275,7 @@ export class AskService {
     filterSpec.colors = wantedColors;
     filterSpec.size = wantedSize || undefined;
 
-    const strict = this.filtersService.applyHardFilters(candidates, filterSpec);
+    const strict = this.filtersService.applyHardFilters(candidates, filterSpec, businesses);
     let filteredItems = strict.items;
     let filterMetrics = strict.metrics;
     const strictIds = new Set(strict.items.map((i: any) => i.itemId));
@@ -221,7 +289,7 @@ export class AskService {
         colors: undefined,
         size: undefined,
       });
-      const again = this.filtersService.applyHardFilters(candidates, loose);
+      const again = this.filtersService.applyHardFilters(candidates, loose, businesses);
       if (again.items.length > filteredItems.length) {
         if (wantedColors.length) relaxed.push(`colour (${wantedColors.join(', ')})`);
         if (wantedSize) relaxed.push(`size ${wantedSize}`);
@@ -241,6 +309,8 @@ export class AskService {
       budgetMax: constraints.budget || constraints.maxPrice,
       // The question wins; the profile is only the default.
       preferredAudience: constraints.gender ? undefined : customerAudience,
+      businesses,
+      perfectFitProducts,
     };
     const ranked = this.rankersService.rankCandidates(
       filteredItems,
@@ -283,8 +353,29 @@ export class AskService {
       tags: item.tags,
       // From the live product, not the synced copy: stock and price as of now.
       facts: item.product ? productFacts(item.product) : undefined,
+      fitsCustomer: perfectFitProducts.has(String(item.itemId)),
     }));
     const strictMatches = hydratedProducts.filter((item: any) => strictIds.has(item.itemId)).length;
+
+    // The names of what they saved, so the stylist can say "like the kaftan
+    // you saved" - names only, never the list recited back.
+    let savedNames: string[] = [];
+    if (wishlistIds.length) {
+      try {
+        const saved = await this.productModel
+          .find({
+            _id: { $in: wishlistIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) },
+            status: 'active',
+          })
+          .select('kind clothing.name fabric.name accessory.name')
+          .lean();
+        savedNames = saved
+          .map((p: any) => p.clothing?.name || p.fabric?.name || p.accessory?.name)
+          .filter(Boolean);
+      } catch (error) {
+        this.logger.warn(`Wishlist lookup failed for ${userId}: ${error?.message}`);
+      }
+    }
 
     // ─── Step 9: Generate Conversational Reply ───────────────────
     let reply: string | null = null;
@@ -299,7 +390,7 @@ export class AskService {
         constraints,
         history,
         bodyContext,
-        { customerAudience, relaxed, strictMatches },
+        { customerAudience, relaxed, strictMatches, aesthetics, savedNames },
       );
       // Sanitize the output
       reply = this.guardrailsService.sanitizeReply(reply);
@@ -382,7 +473,13 @@ export class AskService {
     constraints: Record<string, any>,
     history?: Array<{ role: 'user' | 'assistant'; content: string }>,
     bodyContext?: string,
-    extras: { customerAudience?: string; relaxed?: string[]; strictMatches?: number } = {},
+    extras: {
+      customerAudience?: string;
+      relaxed?: string[];
+      strictMatches?: number;
+      aesthetics?: string[];
+      savedNames?: string[];
+    } = {},
   ): Promise<string> {
     if (this.openai.apiKey === 'dummy') {
       this.logger.warn('Skipping reply generation (no API key)');
@@ -401,6 +498,10 @@ export class AskService {
           : `Note: nothing available matches the requested ${extras.relaxed.join(' and ')}; the products below are the closest otherwise`) +
         ' - say so plainly, then recommend from what is listed.'
       : '';
+    const tasteLines = [
+      extras.aesthetics?.length ? `Customer's style words: ${extras.aesthetics.join(', ')}` : '',
+      extras.savedNames?.length ? `Items the customer saved: ${extras.savedNames.join('; ')}` : '',
+    ].filter(Boolean).join('\n');
 
     const systemPrompt = `You are Qlozet's fashion shopping assistant. You ONLY discuss:
 - Fashion products, clothing, fabrics, accessories, and styling
@@ -428,6 +529,9 @@ STRICT RULES:
   in stock say so rather than recommending it anyway
 - Prefer items for the audience the customer shops for (below) unless they are
   clearly shopping for someone else
+- A product marked as matching their saved measurements is a confirmed fit -
+  say so. If a product echoes their style words or something they saved, say
+  so in a few words; never recite their saved items back to them
 ${bodyContext ? `
 BODY & FIT RULES:
 - You DO have access to this user's body measurements and profile (shown below). Always acknowledge this when asked.
@@ -443,6 +547,7 @@ User intent: ${intent}
 Extracted constraints: ${JSON.stringify(constraints)}
 ${audienceLine}
 ${relaxedLine}
+${tasteLines}
 Matching products:
 ${productContext}
 ${bodyContext || ''}`;

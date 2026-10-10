@@ -61,6 +61,11 @@ describe('ask product context', () => {
     expect(text).not.toContain('t8');
   });
 
+  it('marks a confirmed fit from the saved-measurements set', () => {
+    const line = factsLine({ name: 'Shirt', price: 1, kind: 'clothing', fitsCustomer: true, facts: { colors: [], sizes: ['M'], made_to_order: false } });
+    expect(line).toContain("sizes in stock: M · matches the customer's saved measurements");
+  });
+
   it('says so when nothing matched', () => {
     expect(buildProductContext([])).toBe('No products matched the query.');
   });

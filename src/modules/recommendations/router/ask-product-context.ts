@@ -10,6 +10,8 @@ export interface PromptProduct {
   description?: string;
   tags?: string[];
   facts?: ProductFacts;
+  /** In the customer's pre-computed set of products that fit their saved measurements. */
+  fitsCustomer?: boolean;
 }
 
 // Descriptions are vendor-authored and can run long; every result's text
@@ -62,6 +64,7 @@ export function factsLine(p: PromptProduct): string {
     parts.push(`${f.made_to_order ? 'sizes' : 'sizes in stock'}: ${shortList(f.sizes)}`);
   }
 
+  if (p.fitsCustomer) parts.push("matches the customer's saved measurements");
   if (f?.rating) parts.push(`rated ${f.rating}/5 by ${f.rating_count}`);
 
   return parts.join(' · ');
