@@ -28,7 +28,13 @@ export class RouterService {
         this.openai = new OpenAI({ apiKey: apiKey || 'dummy' });
     }
 
-    async classifyIntent(text: string): Promise<RouterResponseDto> {
+    /**
+     * @param previousQuestion the customer's last question in this thread, if
+     * any. A follow-up ("cheaper", "same in blue", "what about for my wife")
+     * only makes sense against it: the classifier then carries the earlier
+     * constraints forward and applies just the change.
+     */
+    async classifyIntent(text: string, previousQuestion?: string): Promise<RouterResponseDto> {
         if (!text || !text.trim()) {
             return { intent: RecommendationIntent.HOME_FEED, confidence: 1.0, constraints: {} };
         }
@@ -53,12 +59,31 @@ export class RouterService {
             - bespoke: Custom tailoring requests
             - substitution: "Alternative to X"
             
-            Return JSON only: { "intent": string, "constraints": object, "confidence": number }.
-            Extract constraints like "gender", "color", "occasion", "budget".
+            Return JSON only: { "intent": string, "constraints": object, "confidence": number, "continues_previous": boolean }.
+            Extract constraints present in the text:
+            - "gender": "male" | "female" - who the item is FOR (a gift "for my husband" is male)
+            - "color": array of lowercase colour words, e.g. ["red", "burgundy"]
+            - "size": a clothing size as written, e.g. "XL", "14", "42"
+            - "occasion": e.g. "wedding", "work", "date night"
+            - "budget": the maximum price as a plain number in naira (50k -> 50000)
+            - "category": the kind of item, e.g. "dress", "kaftan", "fabric", "bag"
             Do not extract constraints not present in text.
+
+            If a previous question is given, decide whether the current one continues it:
+            set "continues_previous" to true for a follow-up or refinement ("cheaper ones",
+            "the same in blue", "what about for my wife", "any under 30k?"), false for a new
+            subject. When it continues, carry the previous question's constraints forward and
+            apply only the change the current one makes: "cheaper" lowers the budget below the
+            previous one, "in blue" keeps everything and sets color, "for my husband" changes
+            gender. When it does not continue, extract from the current question alone.
             `
                     },
-                    { role: 'user', content: text }
+                    {
+                        role: 'user',
+                        content: previousQuestion
+                            ? `Previous question: "${previousQuestion}"\nCurrent question: "${text}"`
+                            : text,
+                    }
                 ],
                 response_format: { type: 'json_object' },
                 temperature: 0,
@@ -84,14 +109,16 @@ export class RouterService {
                 return {
                     intent: RecommendationIntent.HOME_FEED,
                     confidence: confidence,
-                    constraints: result.constraints || {}
+                    constraints: result.constraints || {},
+                    continuesPrevious: result.continues_previous === true,
                 };
             }
 
             return {
                 intent: intent as RecommendationIntent,
                 confidence: confidence,
-                constraints: result.constraints || {}
+                constraints: result.constraints || {},
+                continuesPrevious: result.continues_previous === true,
             };
 
         } catch (error) {

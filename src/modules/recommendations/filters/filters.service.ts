@@ -44,8 +44,13 @@ export class FiltersService {
             dropped_blocked_vendor: 0,
             dropped_demographic: 0,
             dropped_category: 0,
+            dropped_color: 0,
+            dropped_size: 0,
             total_output: 0,
         };
+
+        const wantColors = (spec.colors || []).map((c) => c.toLowerCase().trim()).filter(Boolean);
+        const wantSize = (spec.size || '').toLowerCase().trim();
 
         const filtered = items.filter(item => {
             // 0. Vendor Trust Gating
@@ -63,10 +68,10 @@ export class FiltersService {
                 }
             }
 
-            // 1. Stock Check
+            // 1. Stock Check - the synced facts first, the legacy import field after
             if (spec.inStockOnly) {
                 const stock = item.rawVendorData?.inventory_quantity;
-                if (stock !== undefined && stock <= 0) {
+                if (item.facts?.in_stock === false || (stock !== undefined && stock <= 0)) {
                     metrics.dropped_stock++;
                     return false;
                 }
@@ -84,9 +89,12 @@ export class FiltersService {
                 return false;
             }
 
-            // 4. Gender / Demographic (synonym-aware: male↔men, female↔women)
-            if (spec.gender && item.fitMeta?.targetDemographic) {
-                const target = this.normalizeGender(item.fitMeta.targetDemographic);
+            // 4. Gender / Demographic (synonym-aware: male↔men, female↔women).
+            // facts.audience covers fabrics and accessories too; fitMeta is the
+            // garment-only field items synced before facts existed still carry.
+            const audience = item.facts?.audience || item.fitMeta?.targetDemographic;
+            if (spec.gender && audience) {
+                const target = this.normalizeGender(audience);
                 const want = this.normalizeGender(spec.gender);
                 if (target !== 'unisex' && target !== want) {
                     metrics.dropped_demographic++;
@@ -101,6 +109,30 @@ export class FiltersService {
                 const matchesTags = item.tags?.some(t => t.toLowerCase() === cat);
                 if (!matchesType && !matchesTags) {
                     metrics.dropped_category++;
+                    return false;
+                }
+            }
+
+            // 6. Colour: the vendor's colour variants, or the words they wrote.
+            // Many vendors never fill colour variants, so the name, tags and
+            // description count too.
+            if (wantColors.length) {
+                const haystack = [
+                    ...(item.facts?.colors || []),
+                    ...(item.tags || []),
+                    item.name || '',
+                    item.description || '',
+                ].join(' ').toLowerCase();
+                if (!wantColors.some((c) => haystack.includes(c))) {
+                    metrics.dropped_color++;
+                    return false;
+                }
+            }
+
+            // 7. Size: only items that list sizes can fail this; unknown is kept.
+            if (wantSize && item.facts?.sizes?.length) {
+                if (!item.facts.sizes.some((s) => s.toLowerCase().trim() === wantSize)) {
+                    metrics.dropped_size++;
                     return false;
                 }
             }

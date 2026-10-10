@@ -1,4 +1,14 @@
-import { IsEnum, IsString, IsNotEmpty, IsOptional, IsNumber, IsArray, ValidateNested, IsObject } from 'class-validator';
+import {
+    IsEnum,
+    IsString,
+    IsNotEmpty,
+    IsOptional,
+    IsNumber,
+    IsArray,
+    ValidateNested,
+    IsObject,
+} from 'class-validator';
+import type { ProductFacts } from '../product-facts';
 import { Type } from 'class-transformer';
 import { CatalogItemType } from '../enums/catalog-item-type.enum';
 
@@ -63,6 +73,10 @@ export class CreateCatalogItemDto {
     @Type(() => FitMetaDto)
     @IsOptional()
     fitMeta?: FitMetaDto;
+
+    @IsOptional()
+    @IsObject()
+    facts?: ProductFacts;
 
     @IsString()
     @IsOptional()

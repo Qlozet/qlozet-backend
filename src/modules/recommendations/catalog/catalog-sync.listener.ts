@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { productFacts } from './product-facts';
 import { OnEvent } from '@nestjs/event-emitter';
 import { CatalogService } from './catalog.service';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
@@ -64,6 +65,13 @@ export class CatalogSyncListener {
         tags = [productType, ...tags];
       }
 
+      // The structured facts: audience, colours, sizes in stock, cut. Colours
+      // and audience also go into the tags so "red dress" and "men's kaftan"
+      // are retrievable by vector search, not only when a vendor happened to
+      // write the colour into the name.
+      const facts = productFacts(product);
+      tags = [...tags, ...facts.colors.map((c) => c.toLowerCase()), facts.audience ?? ''];
+
       const dto: CreateCatalogItemDto = {
         itemId: product._id.toString(),
         type: itemType,
@@ -82,8 +90,9 @@ export class CatalogSyncListener {
         price: product.base_price || 0,
         currency: 'NGN', // Defaulting to NGN for Nigerian platform
         vendor: product.business ? product.business.toString() : 'Unknown',
-        tags: tags.filter(Boolean),
+        tags: Array.from(new Set(tags.filter(Boolean))),
         rawVendorData: product,
+        facts,
       };
 
       if (itemType === CatalogItemType.GARMENT) {

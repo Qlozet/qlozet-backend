@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { CatalogItemType } from '../enums/catalog-item-type.enum';
+import { Audience } from '../product-facts';
 
 export type CatalogItemDocument = HydratedDocument<CatalogItem>;
 
@@ -14,6 +15,50 @@ export class FitMeta {
 
     @Prop([String])
     measurementsPoints: string[]; // e.g., ['chest', 'waist']
+}
+
+/**
+ * The facts a shopper asks about, flattened out of the kind sub-documents by
+ * productFacts() at sync time. What the hard filters read for colour, size,
+ * stock and audience across every candidate, before anything is hydrated.
+ */
+@Schema({ _id: false })
+export class CatalogProductFacts {
+    @Prop()
+    audience?: Audience;
+
+    @Prop({ type: [String], default: [] })
+    colors: string[];
+
+    @Prop({ type: [String], default: [] })
+    sizes: string[];
+
+    @Prop()
+    in_stock?: boolean;
+
+    @Prop()
+    made_to_order?: boolean;
+
+    @Prop()
+    turnaround_days?: number;
+
+    @Prop()
+    material?: string;
+
+    @Prop()
+    pattern?: string;
+
+    @Prop()
+    price_per_yard?: number;
+
+    @Prop()
+    discounted_price?: number;
+
+    @Prop()
+    rating?: number;
+
+    @Prop()
+    rating_count?: number;
 }
 
 @Schema({ _id: false })
@@ -86,6 +131,9 @@ export class CatalogItem {
     // Type-specific fields
     @Prop({ type: FitMeta })
     fitMeta?: FitMeta; // Only for garments
+
+    @Prop({ type: CatalogProductFacts })
+    facts?: CatalogProductFacts;
 
     @Prop()
     fabricComposition?: string; // For garments and fabrics

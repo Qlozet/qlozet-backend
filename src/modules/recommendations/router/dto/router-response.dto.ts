@@ -11,4 +11,7 @@ export class RouterResponseDto {
 
     @IsNumber()
     confidence: number;
+
+    /** The current question continues the previous one (a follow-up), per the classifier. */
+    continuesPrevious?: boolean;
 }

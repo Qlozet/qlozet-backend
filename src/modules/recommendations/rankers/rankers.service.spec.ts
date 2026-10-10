@@ -38,6 +38,24 @@ describe('RankersService', () => {
             expect(result[1].itemId).toBe('2');
         });
 
+        it("sinks the other audience's items below unisex and same-audience ones, without dropping them", () => {
+            const mixed: CatalogItem[] = [
+                { itemId: 'mens', price: 100, score: 0.9, facts: { audience: 'men', colors: [], sizes: [] } } as any,
+                { itemId: 'unisex', price: 100, score: 0.8, facts: { audience: 'unisex', colors: [], sizes: [] } } as any,
+                { itemId: 'womens', price: 100, score: 0.8, facts: { audience: 'women', colors: [], sizes: [] } } as any,
+                { itemId: 'legacy-womens', price: 100, score: 0.8, fitMeta: { targetDemographic: 'women' } } as any,
+            ];
+            // Same vector score: the customer's own audience edges ahead of
+            // unisex, and the other audience sinks below both, even from 0.9.
+            const result = service.rankCandidates(mixed, { preferredAudience: 'women' });
+            expect(result.map(r => r.itemId)).toEqual(['womens', 'legacy-womens', 'unisex', 'mens']);
+            expect(result).toHaveLength(4);
+
+            // No preference known: nothing moves.
+            const plain = service.rankCandidates(mixed, {});
+            expect(plain[0].itemId).toBe('mens');
+        });
+
         it('should penalize price overflow', () => {
             const overBudget = { itemId: '3', price: 200, score: 0.9, rawVendorData: { vendorQuality: 1.0, eta_days: 1 } } as any; // Same as item1 but expensive
             const result = service.rankCandidates([overBudget], { budgetMax: 100 });
