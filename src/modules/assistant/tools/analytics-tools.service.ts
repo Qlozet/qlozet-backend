@@ -10,6 +10,7 @@ import {
   resolveRange,
 } from './date-range';
 import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
+import { VendorOpsToolsService } from './vendor-ops-tools.service';
 
 // Orders that represent real, paid sales (excludes unpaid/cancelled/returned).
 const REVENUE_STATUSES = ['in_review', 'processing', 'in_transit', 'completed'];
@@ -47,6 +48,7 @@ export class AnalyticsToolsService {
     @InjectModel('Transaction')
     private readonly transactionModel: Model<any>,
     @InjectModel('Product') private readonly productModel: Model<any>,
+    private readonly ops: VendorOpsToolsService,
   ) {}
 
   /** Tool definitions advertised to the model. */
@@ -152,11 +154,13 @@ export class AnalyticsToolsService {
           required: ['type', 'title', 'data'],
         },
       },
+      ...this.ops.getToolDefs(),
     ];
   }
 
   /** Dispatch a tool call, always scoped to businessId. */
   async execute(name: string, businessId: string, args: any): Promise<any> {
+    if (this.ops.handles(name)) return this.ops.execute(name, businessId, args);
     const bid = new Types.ObjectId(businessId);
     switch (name) {
       case 'get_sales_summary':

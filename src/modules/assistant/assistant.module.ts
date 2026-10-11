@@ -18,6 +18,10 @@ import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { Ticket, TicketSchema } from '../ticket/schema/ticket.schema';
 import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
+import { Return, ReturnSchema } from '../returns/schemas/return.schema';
+import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
+import { BespokeDesign, BespokeDesignSchema } from '../bespoke/schemas/bespoke-design.schema';
+import { Event, EventSchema } from '../recommendations/events/schemas/event.schema';
 import {
   TokenTransaction,
   TokenTransactionSchema,
@@ -34,6 +38,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
+import { VendorOpsToolsService } from './tools/vendor-ops-tools.service';
 import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { AssistantDigestCron } from './assistant-digest.cron';
@@ -53,6 +58,10 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: Business.name, schema: BusinessSchema },
       { name: Ticket.name, schema: TicketSchema },
       { name: Dispute.name, schema: DisputeSchema },
+      { name: Return.name, schema: ReturnSchema },
+      { name: BespokeQuote.name, schema: BespokeQuoteSchema },
+      { name: BespokeDesign.name, schema: BespokeDesignSchema },
+      { name: Event.name, schema: EventSchema },
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
@@ -64,6 +73,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
   providers: [
     AssistantService,
     AnalyticsToolsService,
+    VendorOpsToolsService,
     AdminAnalyticsToolsService,
     AssistantDigestService,
     AssistantDigestCron,
