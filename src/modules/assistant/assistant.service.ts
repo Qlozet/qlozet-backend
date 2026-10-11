@@ -26,6 +26,7 @@ import {
 import { buildSystemPrompt, buildAdminSystemPrompt } from './assistant.prompt';
 import { TokenService } from '../wallets/token.service';
 import type { Response } from 'express';
+import { VendorActionsService } from './actions/vendor-actions.service';
 
 // How many prior turns to replay as context. Fresh numbers always come from
 // tool re-fetch, so we don't need deep history.
@@ -44,6 +45,7 @@ export class AssistantService {
     @InjectModel('User') private readonly userModel: Model<any>,
     private readonly tokenService: TokenService,
     private readonly config: ConfigService,
+    private readonly actions: VendorActionsService,
   ) {}
 
   private get smartModel(): string {
@@ -124,12 +126,16 @@ export class AssistantService {
       // Collect any charts the model asks to render (render_chart is a UI
       // directive, intercepted here — it never touches the DB).
       const charts: Record<string, any>[] = [];
+      const actions: Record<string, any>[] = [];
 
       const result = await this.llm.runToolLoop({
         system: buildSystemPrompt(businessName),
         messages: history,
-        tools: this.tools.getToolDefs(),
-        onToolCall: (name, input) => {
+        tools: [...this.tools.getToolDefs(), this.actions.toolDef()],
+        onToolCall: async (name, input) => {
+          if (name === 'propose_action') {
+            return this.proposeAction(businessId, conversation, input, actions);
+          }
           if (name === 'render_chart') {
             charts.push({
               type: ['bar', 'line', 'pie'].includes(input?.type)
@@ -174,6 +180,7 @@ export class AssistantService {
         content: answer,
         tools_used: result.toolsUsed,
         charts,
+        actions,
         createdAt: new Date(),
       } as AssistantMessage);
       conversation.last_message_at = new Date();
@@ -186,6 +193,7 @@ export class AssistantService {
         conversation_id: (conversation._id as any).toString(),
         answer,
         charts,
+        actions,
         tools_used: result.toolsUsed,
       };
     } catch (err) {
@@ -257,6 +265,7 @@ export class AssistantService {
     const send = (obj: any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
     const charts: Record<string, any>[] = [];
+    const actions: Record<string, any>[] = [];
 
     try {
       const conversation = await this.getOrCreateConversation(
@@ -271,7 +280,10 @@ export class AssistantService {
 
       // Shared tool handler for both streaming and the non-streaming fallback.
       // render_chart is a UI directive — captured + emitted, never sent to a DB.
-      const onToolCall = (name: string, input: any) => {
+      const onToolCall = async (name: string, input: any) => {
+        if (name === 'propose_action') {
+          return this.proposeAction(businessId, conversation, input, actions, send);
+        }
         if (name === 'render_chart') {
           const spec = {
             type: ['bar', 'line', 'pie'].includes(input?.type)
@@ -298,7 +310,7 @@ export class AssistantService {
       const common = {
         system: buildSystemPrompt(businessName),
         messages: history,
-        tools: this.tools.getToolDefs(),
+        tools: [...this.tools.getToolDefs(), this.actions.toolDef()],
         onToolCall,
         model: this.smartModel,
         maxTokens: 1024,
@@ -338,6 +350,7 @@ export class AssistantService {
         content: answer,
         tools_used: result.toolsUsed,
         charts,
+        actions,
         createdAt: new Date(),
       } as AssistantMessage);
       conversation.last_message_at = new Date();
@@ -370,6 +383,38 @@ export class AssistantService {
       }
       res.end();
     }
+  }
+
+  /**
+   * propose_action is intercepted like render_chart: the model never writes.
+   * The actions service validates the request against the vendor's data and
+   * stores a proposal; the card goes to the vendor (streamed when possible),
+   * and the model is told plainly that nothing has happened yet.
+   */
+  private async proposeAction(
+    businessId: string,
+    conversation: any,
+    input: any,
+    actions: Record<string, any>[],
+    send?: (obj: any) => void,
+  ) {
+    const outcome = await this.actions.propose(
+      businessId,
+      conversation?._id ? String(conversation._id) : null,
+      input,
+    );
+    if ('error' in outcome) return { ok: false, error: outcome.error };
+    actions.push(outcome.card);
+    send?.({ type: 'action', action: outcome.card });
+    return {
+      ok: true,
+      action_id: outcome.card.action_id,
+      status: 'proposed',
+      note:
+        'Prepared and shown to the vendor as a card with a Confirm button. NOT done yet. ' +
+        'Tell them in one or two lines what is ready and that they can confirm it on the card below. ' +
+        'Do not say it has been done, and do not repeat every detail - the card shows them.',
+    };
   }
 
   private async getOrCreateConversation(
