@@ -20,6 +20,7 @@ import { UserType } from '../ums/schemas';
 import { AssistantService } from './assistant.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { ChatDto } from './dto/chat.dto';
+import { VendorActionsService } from './actions/vendor-actions.service';
 
 @ApiTags('Assistant')
 @ApiBearerAuth('access-token')
@@ -30,6 +31,7 @@ export class AssistantController {
   constructor(
     private readonly assistantService: AssistantService,
     private readonly digestService: AssistantDigestService,
+    private readonly actionsService: VendorActionsService,
   ) {}
 
   // Dual vendor/platform route: vendors get their store analyst, platform
@@ -134,5 +136,30 @@ export class AssistantController {
   @ApiOperation({ summary: 'Generate weekly digests for all active vendors (admin)' })
   async runDigests() {
     return this.digestService.generateAll();
+  }
+
+  // ── Prepared actions ──────────────────────────────────────────────────────
+  // The assistant can only PREPARE these; the vendor's tap here is the one
+  // thing that executes, scoped to their own business by the service.
+
+  @Roles(UserType.VENDOR)
+  @Get('actions/:id')
+  @ApiOperation({ summary: 'A prepared action and its current status' })
+  async getAction(@Req() req: any, @Param('id') id: string) {
+    return this.actionsService.get(req.business?.id ?? '', id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post('actions/:id/confirm')
+  @ApiOperation({ summary: 'Confirm (execute) an action the assistant prepared' })
+  async confirmAction(@Req() req: any, @Param('id') id: string) {
+    return this.actionsService.confirm(req.business?.id ?? '', req.user?.id, id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post('actions/:id/cancel')
+  @ApiOperation({ summary: 'Dismiss an action the assistant prepared' })
+  async cancelAction(@Req() req: any, @Param('id') id: string) {
+    return this.actionsService.cancel(req.business?.id ?? '', id);
   }
 }

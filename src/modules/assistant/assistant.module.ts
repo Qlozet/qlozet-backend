@@ -39,6 +39,11 @@ import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { AnalyticsToolsService } from './tools/analytics-tools.service';
 import { VendorOpsToolsService } from './tools/vendor-ops-tools.service';
+import { VendorActionsService } from './actions/vendor-actions.service';
+import { AssistantAction, AssistantActionSchema } from './schema/action.schema';
+import { OrdersModule } from '../orders/orders.module';
+import { ProductModule } from '../products/products.module';
+import { BespokeModule } from '../bespoke/bespoke.module';
 import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { AssistantDigestCron } from './assistant-digest.cron';
@@ -65,15 +70,22 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
+      { name: AssistantAction.name, schema: AssistantActionSchema },
     ]),
     HttpModule,
     WalletsModule, // provides TokenService (ai_ask metering)
+    // The services the prepared actions execute through - the same ones the
+    // dashboard calls, so their rules apply to the assistant too.
+    OrdersModule,
+    ProductModule,
+    BespokeModule,
   ],
   controllers: [AssistantController],
   providers: [
     AssistantService,
     AnalyticsToolsService,
     VendorOpsToolsService,
+    VendorActionsService,
     AdminAnalyticsToolsService,
     AssistantDigestService,
     AssistantDigestCron,

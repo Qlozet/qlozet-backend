@@ -24,6 +24,12 @@ export class AssistantMessage {
   @Prop({ type: [Object], default: [] })
   charts: Record<string, any>[];
 
+  // Actions the assistant PREPARED with this answer, as cards. Copies of the
+  // AssistantAction records (which stay the truth); status is synced back so
+  // a reopened thread shows what happened. Shape: AssistantActionCard.
+  @Prop({ type: [Object], default: [] })
+  actions?: Record<string, any>[];
+
   @Prop({ type: Date, default: () => new Date() })
   createdAt: Date;
 }
