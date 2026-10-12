@@ -403,9 +403,10 @@ export class OrderController {
 
   @Roles(UserType.VENDOR)
   @Get('chart')
-  @ApiOperation({ summary: 'Get chart data' })
-  async getOrderChartData(@Req() req: any) {
-    return this.orderService.getBusinessChart(req.business?.id);
+  @ApiOperation({ summary: 'Vendor dashboard: summary, breakdowns and order series over one window' })
+  @ApiQuery({ name: 'range', required: false, enum: ['7d', '30d', '12w', '12m'], description: 'Default 7d.' })
+  async getOrderChartData(@Req() req: any, @Query('range') range?: string) {
+    return this.orderService.getBusinessChart(req.business?.id, range);
   }
 
   @Roles(UserType.VENDOR)

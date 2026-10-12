@@ -168,3 +168,116 @@ export function describeDiscount(req: DiscountRequest, affected: number): string
     : '';
   return `${amount} ${scope}${when}.`;
 }
+
+// ── Listing changes ───────────────────────────────────────────────────────
+
+export const AUDIENCES = ['men', 'women', 'unisex', 'kids'] as const;
+const DESCRIPTION_MIN = 40;
+const DESCRIPTION_MAX = 1500;
+
+export interface ListingVocabulary {
+  /** Product types valid for this kind; null when the taxonomy has none. */
+  product_types: string[] | null;
+  /** Allowed categories/attributes for the product's product type; null when unknown. */
+  categories: string[] | null;
+  attributes: string[] | null;
+}
+
+export interface ListingChangeInput {
+  description?: unknown;
+  audience?: unknown;
+  product_type?: unknown;
+  categories?: unknown;
+  attributes?: unknown;
+}
+
+/** Match typed values to a vocabulary, case-insensitively; report what did not match. */
+function pickFromVocabulary(
+  typed: string[],
+  allowed: string[] | null,
+): { picked: string[]; unknown: string[] } {
+  if (!allowed) return { picked: typed, unknown: [] };
+  const byLower = new Map(allowed.map((a) => [norm(a), a]));
+  const picked: string[] = [];
+  const unknown: string[] = [];
+  for (const t of typed) {
+    const hit = byLower.get(norm(t));
+    if (hit) { if (!picked.includes(hit)) picked.push(hit); }
+    else unknown.push(t);
+  }
+  return { picked, unknown };
+}
+
+const asStrings = (v: unknown): string[] | null =>
+  Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : null;
+
+/**
+ * Turn a drafted listing change into the exact $set the product needs, or an
+ * error the assistant can ask about. Taxonomy values must come from the
+ * platform's vocabulary when one exists: search and the stylist filter on
+ * these exact strings, so a near-miss is a product nobody finds.
+ */
+export function validateListingChange(
+  product: any,
+  input: ListingChangeInput,
+  vocab: ListingVocabulary,
+): { set: Record<string, any>; details: { label: string; value: string }[]; changed: string[] } | { error: string } {
+  const kind = product?.kind;
+  if (!['clothing', 'fabric', 'accessory'].includes(kind)) return { error: 'This product kind cannot be edited here.' };
+  const sub = product?.[kind] ?? {};
+  const tax = sub.taxonomy ?? {};
+  const set: Record<string, any> = {};
+  const details: { label: string; value: string }[] = [];
+  const changed: string[] = [];
+  const show = (xs: string[] | undefined | null) => (xs && xs.length ? xs.join(', ') : 'none');
+
+  if (input.description !== undefined) {
+    const text = String(input.description ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length < DESCRIPTION_MIN) return { error: `The description is too short (${text.length} characters; at least ${DESCRIPTION_MIN}).` };
+    if (text.length > DESCRIPTION_MAX) return { error: `The description is too long (${text.length} characters; at most ${DESCRIPTION_MAX}).` };
+    if (/https?:\/\/|www\./i.test(text)) return { error: 'Descriptions cannot contain links.' };
+    set[`${kind}.description`] = text;
+    details.push({ label: 'Description', value: text.length > 220 ? `${text.slice(0, 220)}…` : text });
+    changed.push('description');
+  }
+
+  if (input.audience !== undefined) {
+    const a = norm(input.audience);
+    if (!(AUDIENCES as readonly string[]).includes(a)) return { error: `audience must be one of ${AUDIENCES.join(', ')}.` };
+    set[`${kind}.taxonomy.audience`] = a;
+    details.push({ label: 'Audience', value: `${tax.audience || 'not set'} → ${a}` });
+    changed.push('audience');
+  }
+
+  if (input.product_type !== undefined) {
+    const t = String(input.product_type ?? '').trim();
+    if (!t) return { error: 'product_type cannot be empty.' };
+    const { picked, unknown } = pickFromVocabulary([t], vocab.product_types);
+    if (unknown.length) return { error: `"${t}" is not a product type for ${kind}. Allowed: ${show(vocab.product_types)}.` };
+    set[`${kind}.taxonomy.product_type`] = picked[0];
+    details.push({ label: 'Product type', value: `${tax.product_type || 'not set'} → ${picked[0]}` });
+    changed.push('product type');
+  }
+
+  const cats = asStrings(input.categories);
+  if (cats) {
+    if (!cats.length) return { error: 'categories cannot be empty; a product needs at least one.' };
+    const { picked, unknown } = pickFromVocabulary(cats, vocab.categories);
+    if (unknown.length) return { error: `Not in the allowed categories: ${unknown.join(', ')}. Allowed: ${show(vocab.categories)}.` };
+    set[`${kind}.taxonomy.categories`] = picked;
+    details.push({ label: 'Categories', value: `${show(tax.categories)} → ${picked.join(', ')}` });
+    changed.push('categories');
+  }
+
+  const attrs = asStrings(input.attributes);
+  if (attrs) {
+    const { picked, unknown } = pickFromVocabulary(attrs, vocab.attributes);
+    if (unknown.length) return { error: `Not in the allowed attributes: ${unknown.join(', ')}. Allowed: ${show(vocab.attributes)}.` };
+    set[`${kind}.taxonomy.attributes`] = picked;
+    details.push({ label: 'Attributes', value: `${show(tax.attributes)} → ${show(picked)}` });
+    changed.push('attributes');
+  }
+
+  if (!changed.length) return { error: 'Nothing to change: give a description, audience, product_type, categories or attributes.' };
+  return { set, details, changed };
+}

@@ -1,4 +1,4 @@
-import { buildDiscountDto, describeDiscount, pickByName, resolveStockTarget } from './vendor-actions.helpers';
+import { buildDiscountDto, describeDiscount, pickByName, resolveStockTarget, validateListingChange } from './vendor-actions.helpers';
 
 describe('pickByName', () => {
   const items = [{ n: 'Black Kaftan' }, { n: 'Black Kaftan Deluxe' }, { n: 'Agbada' }];
@@ -68,5 +68,48 @@ describe('buildDiscountDto', () => {
   it('describes the discount the way the card and the model should say it', () => {
     expect(describeDiscount({ title: 'S', value: 10, value_type: 'percentage', applies_to: 'all' }, 42)).toBe('10% off everything in the store.');
     expect(describeDiscount({ title: 'S', value: 2000, value_type: 'fixed', applies_to: 'accessory' }, 1)).toBe('₦2,000 off all accessory (1 product).');
+  });
+});
+
+describe('validateListingChange', () => {
+  const product = {
+    kind: 'clothing',
+    clothing: { name: 'Kaftan', description: 'Old.', taxonomy: { product_type: 'Kaftan', categories: ['Casual'], attributes: [], audience: 'men' } },
+  };
+  const vocab = { product_types: ['Kaftan', 'Agbada'], categories: ['Casual', 'Occasion', 'Office'], attributes: ['Embroidered', 'Linen'] };
+  const longDesc = 'A relaxed linen kaftan with hand embroidery at the neckline, cut for warm evenings and long lunches.';
+
+  it('builds the exact $set paths for the kind and shows before -> after', () => {
+    const out = validateListingChange(product, { description: longDesc, audience: 'Unisex', categories: ['occasion', 'Office'], attributes: ['linen'] }, vocab);
+    if ('error' in out) throw new Error(out.error);
+    expect(out.set).toEqual({
+      'clothing.description': longDesc,
+      'clothing.taxonomy.audience': 'unisex',
+      'clothing.taxonomy.categories': ['Occasion', 'Office'],
+      'clothing.taxonomy.attributes': ['Linen'],
+    });
+    expect(out.details.find((d) => d.label === 'Audience')?.value).toBe('men → unisex');
+    expect(out.details.find((d) => d.label === 'Categories')?.value).toBe('Casual → Occasion, Office');
+    expect(out.changed).toEqual(['description', 'audience', 'categories', 'attributes']);
+  });
+
+  it('refuses values outside the vocabulary and says what is allowed', () => {
+    const out = validateListingChange(product, { categories: ['Wedding'] }, vocab);
+    expect('error' in out && out.error).toContain('Not in the allowed categories: Wedding');
+    expect('error' in out && out.error).toContain('Casual, Occasion, Office');
+    const pt = validateListingChange(product, { product_type: 'Boubou' }, vocab);
+    expect('error' in pt && pt.error).toContain('not a product type');
+  });
+
+  it('accepts free text where the taxonomy has no vocabulary', () => {
+    const out = validateListingChange(product, { categories: ['Anything'] }, { product_types: null, categories: null, attributes: null });
+    expect('set' in out && out.set['clothing.taxonomy.categories']).toEqual(['Anything']);
+  });
+
+  it('guards the description: length, links, and an empty change', () => {
+    expect('error' in validateListingChange(product, { description: 'Too short' }, vocab)).toBe(true);
+    expect('error' in validateListingChange(product, { description: `${longDesc} See https://example.com` }, vocab)).toBe(true);
+    expect('error' in validateListingChange(product, { audience: 'boys' }, vocab)).toBe(true);
+    expect('error' in validateListingChange(product, {}, vocab)).toBe(true);
   });
 });

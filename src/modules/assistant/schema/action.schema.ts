@@ -6,6 +6,7 @@ export const ASSISTANT_ACTION_KINDS = [
   'reply_to_quote',
   'update_stock',
   'create_discount',
+  'update_listing',
 ] as const;
 export type AssistantActionKind = (typeof ASSISTANT_ACTION_KINDS)[number];
 

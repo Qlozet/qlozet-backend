@@ -236,8 +236,8 @@ export class BusinessController {
   }
   @Roles(UserType.VENDOR)
   @Get('earnings-chart')
-  async getEarningChart(@Req() req: any) {
-    return this.businessService.getEarningsChart(req.business?.id);
+  async getEarningChart(@Req() req: any, @Query('range') range?: string) {
+    return this.businessService.getEarningsChart(req.business?.id, range);
   }
 
   // Admin-only one-time repair: record earnings for paid orders that are

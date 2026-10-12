@@ -12,6 +12,8 @@ import {
   reviewStats,
   vendorShipment,
 } from './vendor-ops.helpers';
+import { productFacts } from '../../recommendations/catalog/product-facts';
+import { escapeRegex, pickByName, productName } from '../actions/vendor-actions.helpers';
 
 const RANGE_PROPS = {
   period: {
@@ -56,6 +58,7 @@ export class VendorOpsToolsService {
     @InjectModel('Dispute') private readonly disputeModel: Model<any>,
     @InjectModel('BespokeQuote') private readonly quoteModel: Model<any>,
     @InjectModel('Event') private readonly eventModel: Model<any>,
+    @InjectModel('SystemCategory') private readonly categoryModel: Model<any>,
   ) {}
 
   getToolDefs(): LlmToolDef[] {
@@ -103,6 +106,16 @@ export class VendorOpsToolsService {
         input_schema: { type: 'object', properties: { ...RANGE_PROPS } },
       },
       {
+        name: 'get_product_listing',
+        description:
+          "One product's full listing as shoppers and search see it - description, product type, categories, attributes, audience, colours, sizes, images, price, size guide - with its issues, AND the allowed product types, categories and attributes for it. Call this before drafting or fixing a listing; taxonomy values in update_listing must come from these allowed lists.",
+        input_schema: {
+          type: 'object',
+          required: ['product'],
+          properties: { product: { type: 'string', description: 'The product name (or part of it).' } },
+        },
+      },
+      {
         name: 'get_catalogue_health',
         description:
           "What is missing from the vendor's product listings - photos, descriptions, audience, colours, sizes, size guide, price - plus stale drafts, sold-out items and active products nobody viewed in 30 days. These are the fields search, the home page and the AI stylist filter on, so a gap means the product is not shown to shoppers.",
@@ -136,6 +149,8 @@ export class VendorOpsToolsService {
         return this.bespokePipeline(bid, a);
       case 'get_catalogue_health':
         return this.catalogueHealth(bid, a);
+      case 'get_product_listing':
+        return this.productListing(bid, a);
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -449,6 +464,82 @@ export class VendorOpsToolsService {
           orders: production.slice(0, 10),
         },
         note: 'Quote requests are counted from when the customer asked; a request waiting more than a day is usually lost to another tailor.',
+      },
+    };
+  }
+
+  // ── One listing ───────────────────────────────────────────────────────────
+
+  private async productListing(bid: Types.ObjectId, args: any) {
+    const typed = String(args.product ?? '').trim();
+    if (!typed) return { error: 'Give product (its name).' };
+    const rx = new RegExp(escapeRegex(typed), 'i');
+    const candidates = await this.productModel
+      .find({ business: bid, status: { $ne: 'archived' }, $or: [{ 'clothing.name': rx }, { 'fabric.name': rx }, { 'accessory.name': rx }] })
+      .select('kind status base_price discounted_price size_guide createdAt average_rating total_ratings clothing fabric accessory')
+      .lean();
+    const pick = pickByName(candidates as any[], typed, productName);
+    if ('none' in pick) return { error: `No product named "${typed}".` };
+    if ('ambiguous' in pick) return { error: `Several products match "${typed}": ${pick.ambiguous.join(', ')}. Which one?` };
+    const p: any = pick.match;
+    const sub = p[p.kind] ?? {};
+    const tax = sub.taxonomy ?? {};
+    const facts = productFacts(p);
+
+    let allowed: { product_types: string[]; categories: string[] | null; attributes: string[] | null } = { product_types: [], categories: null, attributes: null };
+    try {
+      const [types, cat] = await Promise.all([
+        this.categoryModel.find({ kind: p.kind, is_active: true }).select('product_type').lean(),
+        tax.product_type ? this.categoryModel.findOne({ kind: p.kind, product_type: tax.product_type, is_active: true }).lean() : null,
+      ]);
+      allowed = {
+        product_types: (types as any[]).map((t) => t.product_type).filter(Boolean),
+        categories: cat ? (cat as any).categories ?? [] : null,
+        attributes: cat ? (cat as any).attributes ?? [] : null,
+      };
+    } catch (err: any) {
+      this.logger.warn(`Taxonomy lookup failed: ${err?.message}`);
+    }
+
+    const description = String(sub.description ?? '');
+    return {
+      currency: 'NGN',
+      data: {
+        name: productName(p),
+        kind: p.kind,
+        status: p.status,
+        price: p.base_price,
+        discounted_price: facts.discounted_price ?? null,
+        price_per_yard: facts.price_per_yard ?? null,
+        description,
+        description_length: description.trim().length,
+        taxonomy: {
+          product_type: tax.product_type ?? null,
+          categories: tax.categories ?? [],
+          attributes: tax.attributes ?? [],
+          audience: tax.audience ?? null,
+        },
+        colours: facts.colors,
+        sizes: facts.sizes,
+        in_stock: facts.in_stock ?? null,
+        made_to_order: facts.made_to_order ?? false,
+        turnaround_days: facts.turnaround_days ?? null,
+        material: facts.material ?? null,
+        pattern: facts.pattern ?? null,
+        images: Array.isArray(sub.images) ? sub.images.length : 0,
+        has_size_guide: !!p.size_guide,
+        rating: facts.rating ?? null,
+        rating_count: facts.rating_count ?? null,
+        issues: catalogueIssues(p, new Date()).map((i) => CATALOGUE_ISSUE_LABEL[i] ?? i),
+        allowed: {
+          audiences: ['men', 'women', 'unisex', 'kids'],
+          product_types: allowed.product_types,
+          categories: allowed.categories,
+          attributes: allowed.attributes,
+          note: allowed.categories === null
+            ? 'No vocabulary is defined for this product type yet, so categories and attributes are free text here.'
+            : 'update_listing accepts only these categories and attributes.',
+        },
       },
     };
   }

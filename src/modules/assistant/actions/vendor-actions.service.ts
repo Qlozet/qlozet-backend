@@ -30,6 +30,8 @@ import {
   pickByName,
   productName,
   resolveStockTarget,
+  validateListingChange,
+  ListingVocabulary,
 } from './vendor-actions.helpers';
 
 type Prepared = {
@@ -67,6 +69,7 @@ export class VendorActionsService {
     @InjectModel('Product') private readonly productModel: Model<any>,
     @InjectModel('BespokeQuote') private readonly quoteModel: Model<any>,
     @InjectModel('Business') private readonly businessModel: Model<any>,
+    @InjectModel('SystemCategory') private readonly categoryModel: Model<any>,
     private readonly orderService: OrderService,
     private readonly bespokeService: BespokeService,
     private readonly discountService: DiscountService,
@@ -82,6 +85,7 @@ export class VendorActionsService {
         'reply_to_quote: quote_reference, estimated_completion_days, required_fabric_yards, and either total or line_items; vendor_notes optional. ' +
         'update_stock: product (name), stock (new quantity; yards for fabric), plus color and size when the product has several. ' +
         'create_discount: title, value, value_type (percentage|fixed), applies_to (all|clothing|fabric|accessory|products), products (names, when applies_to is products), start_date/end_date (YYYY-MM-DD, optional; makes it a flash sale). ' +
+        'update_listing: product (name) plus any of description, audience, product_type, categories, attributes - taxonomy values ONLY from the allowed lists get_product_listing returns. ' +
         'If the result is an error, ask the vendor the question it raises instead of guessing.',
       input_schema: {
         type: 'object',
@@ -110,6 +114,11 @@ export class VendorActionsService {
           products: { type: 'array', items: { type: 'string' }, description: 'create_discount: product names when applies_to is products.' },
           start_date: { type: 'string' },
           end_date: { type: 'string' },
+          description: { type: 'string', description: 'update_listing: the new product description (40-1500 characters, no links).' },
+          audience: { type: 'string', enum: ['men', 'women', 'unisex', 'kids'], description: 'update_listing: who the product is for.' },
+          product_type: { type: 'string', description: 'update_listing: one of the allowed product types for the kind.' },
+          categories: { type: 'array', items: { type: 'string' }, description: 'update_listing: from the allowed categories for the product type.' },
+          attributes: { type: 'array', items: { type: 'string' }, description: 'update_listing: from the allowed attributes for the product type.' },
         },
       },
     };
@@ -133,6 +142,7 @@ export class VendorActionsService {
         case 'reply_to_quote': prepared = await this.prepareReplyToQuote(bid, input); break;
         case 'update_stock': prepared = await this.prepareUpdateStock(bid, input); break;
         case 'create_discount': prepared = await this.prepareCreateDiscount(bid, input); break;
+        case 'update_listing': prepared = await this.prepareUpdateListing(bid, input); break;
       }
     } catch (err: any) {
       this.logger.warn(`propose ${kind} failed: ${err?.message}`);
@@ -361,6 +371,53 @@ export class VendorActionsService {
     };
   }
 
+  /** The platform's vocabulary for a product: what categories/attributes it may carry. */
+  async listingVocabulary(product: any): Promise<ListingVocabulary> {
+    const kind = product?.kind;
+    const productType = product?.[kind]?.taxonomy?.product_type;
+    try {
+      const [types, cat] = await Promise.all([
+        this.categoryModel.find({ kind, is_active: true }).select('product_type').lean(),
+        productType ? this.categoryModel.findOne({ kind, product_type: productType, is_active: true }).lean() : null,
+      ]);
+      const product_types = (types as any[]).map((t) => t.product_type).filter(Boolean);
+      return {
+        product_types: product_types.length ? product_types : null,
+        categories: cat ? (cat as any).categories ?? [] : null,
+        attributes: cat ? (cat as any).attributes ?? [] : null,
+      };
+    } catch (err: any) {
+      this.logger.warn(`Taxonomy vocabulary unavailable: ${err?.message}`);
+      return { product_types: null, categories: null, attributes: null };
+    }
+  }
+
+  private async prepareUpdateListing(bid: Types.ObjectId, input: any): Promise<PrepareOutcome> {
+    const typed = String(input?.product ?? '').trim();
+    if (!typed) return { error: 'Which product? Give product (its name).' };
+    const pick = await this.findVendorProduct(bid, typed);
+    if ('none' in pick) return { error: `No product of yours named "${typed}".` };
+    if ('ambiguous' in pick) return { error: `Several products match "${typed}": ${pick.ambiguous.join(', ')}. Which one?` };
+    const product: any = pick.match;
+
+    // A new product type changes which categories are allowed: validate
+    // against the vocabulary of the type being set, not the old one.
+    const forVocab = input?.product_type
+      ? { ...product, [product.kind]: { ...product[product.kind], taxonomy: { ...(product[product.kind]?.taxonomy ?? {}), product_type: String(input.product_type) } } }
+      : product;
+    const vocab = await this.listingVocabulary(forVocab);
+    const out = validateListingChange(product, input, vocab);
+    if ('error' in out) return out;
+
+    const name = productName(product);
+    return {
+      title: `Update the listing for ${name}`,
+      summary: `Change the ${out.changed.join(', ')} of ${name}. Shoppers see the new listing immediately; audience, categories and attributes decide which searches it appears in.`,
+      details: [{ label: 'Product', value: name }, ...out.details],
+      params: { product_id: String(product._id), set: out.set, changed: out.changed },
+    };
+  }
+
   // ── Decide ────────────────────────────────────────────────────────────────
 
   async get(businessId: string, actionId: string): Promise<AssistantActionCard> {
@@ -470,6 +527,17 @@ export class VendorActionsService {
       case 'create_discount': {
         const created: any = await this.discountService.create(p.dto, businessId);
         return { result: { discount_id: String(created?._id), title: p.dto.title }, text: `Discount "${p.dto.title}" created` };
+      }
+      case 'update_listing': {
+        const res = await this.productModel.updateOne(
+          { _id: new Types.ObjectId(p.product_id), business: doc.business },
+          { $set: p.set },
+        );
+        if (!res?.matchedCount) throw new Error('Product no longer exists');
+        const fresh: any = await this.productModel.findById(p.product_id).lean();
+        // Same event the dashboard's save fires: catalog sync (and its facts), discounts, size guides.
+        this.events.emit('product.upserted', fresh);
+        return { result: { product: productName(fresh), changed: p.changed }, text: `${productName(fresh)}: ${(p.changed as string[]).join(', ')} updated` };
       }
       default:
         throw new Error(`Unknown action kind ${doc.kind}`);
