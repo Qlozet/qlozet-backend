@@ -23,6 +23,7 @@ import { Return, ReturnSchema } from '../returns/schemas/return.schema';
 import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
 import { BespokeDesign, BespokeDesignSchema } from '../bespoke/schemas/bespoke-design.schema';
 import { Event, EventSchema } from '../recommendations/events/schemas/event.schema';
+import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import {
   TokenTransaction,
   TokenTransactionSchema,
@@ -78,6 +79,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
       { name: BespokeDesign.name, schema: BespokeDesignSchema },
       { name: Event.name, schema: EventSchema },
+      { name: TeamMember.name, schema: TeamMemberSchema },
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
