@@ -377,14 +377,21 @@ export class AdminActionsService {
     const b: any = pick.match;
     const roles = topic === 'listings' ? ['operations', 'marketing'] : topic === 'fulfilment' ? ['operations', 'tailor'] : ['operations'];
     const recipients = await this.vendorRecipients.resolve(String(b._id), roles as VendorRole[]);
+    if (!recipients.length) {
+      return { error: `${b.business_name} has no accepted team member in the ${roles.join('/')} or owner roles to notify. Check their team in the console.` };
+    }
     const title = topic === 'listings' ? 'A note from Qlozet about your listings' : topic === 'fulfilment' ? 'A note from Qlozet about your orders' : 'A note from Qlozet';
+    // Name who gets it: "1 person" told the admin nothing when the person
+    // turned out not to be the one they expected.
+    const who = recipients.map((r: any) => [r.name, r.email].filter(Boolean).join(' · ') || r.userId).join('; ');
     return {
       title: `Nudge ${b.business_name}`,
-      summary: `Send ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'} at ${b.business_name} an in-app notification titled "${title}" with your message. They can open the assistant from it.`,
+      summary: `Send ${recipients.length === 1 ? 'one person' : `${recipients.length} people`} at ${b.business_name} (${who}) an in-app notification titled "${title}" with your message. They can open the assistant from it.`,
       details: [
         { label: 'Vendor', value: b.business_name },
         { label: 'Topic', value: topic },
-        { label: 'Recipients', value: `${recipients.length} (${roles.join(', ')} + owner)` },
+        { label: 'To', value: who },
+        { label: 'Roles', value: `owner + ${roles.join(', ')}` },
         { label: 'Message', value: message.length > 300 ? `${message.slice(0, 300)}…` : message },
       ],
       params: { business_id: String(b._id), business_name: b.business_name, topic, title, message, recipient_ids: recipients.map((r: any) => String(r.userId)) },
