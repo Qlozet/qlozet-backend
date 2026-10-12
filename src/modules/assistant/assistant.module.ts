@@ -50,6 +50,9 @@ import { BusinessModule } from '../business/business.module';
 import { TicketModule } from '../ticket/ticket.module';
 import { DisputesModule } from '../disputes/disputes.module';
 import { AdminActionsService } from './actions/admin-actions.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { AssistantBriefService } from './assistant-brief.service';
+import { AssistantBriefCron } from './assistant-brief.cron';
 import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
 import { AdminOpsToolsService } from './tools/admin-ops-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
@@ -91,6 +94,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     BusinessModule,
     TicketModule,
     DisputesModule,
+    NotificationsModule,
   ],
   controllers: [AssistantController],
   providers: [
@@ -99,6 +103,8 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     VendorOpsToolsService,
     VendorActionsService,
     AdminActionsService,
+    AssistantBriefService,
+    AssistantBriefCron,
     AdminAnalyticsToolsService,
     AdminOpsToolsService,
     AssistantDigestService,

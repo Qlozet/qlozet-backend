@@ -3,8 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { LlmToolDef } from '../llm/llm-provider.interface';
 import { PERIOD_ENUM, RangeArgs, resolveRange } from './date-range';
-import { stuckOrdersFrom, vendorHealth, VendorHealthInput } from './admin-ops.helpers';
-import { describeOrder, vendorItems } from './vendor-ops.helpers';
+import { searchGaps, stuckOrdersFrom, vendorHealth, VendorHealthInput } from './admin-ops.helpers';
+import { CATALOGUE_ISSUE_LABEL, catalogueIssues, describeOrder, vendorItems } from './vendor-ops.helpers';
 import { escapeRegex, pickByName, productName } from '../actions/vendor-actions.helpers';
 
 const RANGE_PROPS = {
@@ -48,6 +48,8 @@ export class AdminOpsToolsService {
     @InjectModel('Return') private readonly returnModel: Model<any>,
     @InjectModel('BusinessEarning') private readonly earningModel: Model<any>,
     @InjectModel('Wallet') private readonly walletModel: Model<any>,
+    @InjectModel('Transaction') private readonly transactionModel: Model<any>,
+    @InjectModel('Event') private readonly eventModel: Model<any>,
   ) {}
 
   getToolDefs(): LlmToolDef[] {
@@ -100,6 +102,24 @@ export class AdminOpsToolsService {
         input_schema: { type: 'object', properties: { limit: { type: 'number', description: 'Max orders per reason (default 10, max 25).' } } },
       },
       {
+        name: 'get_payment_reconciliation',
+        description:
+          'Money that does not add up, for a period: paid orders with no successful payment transaction on record, payment transactions that succeeded on orders not marked paid, payment attempts stuck pending or failed for over an hour, refunds recorded on orders without a refund transaction and refund transactions on orders that show no refund, plus paid value by processor (Paystack / Stripe). Finance only.',
+        input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max items per list (default 10, max 25).' } } },
+      },
+      {
+        name: 'get_search_gaps',
+        description:
+          "What shoppers search for and do not find: terms searched at least twice in the period where half or more of the searches returned nothing - demand the catalogue is not supplying - plus the most-searched terms overall. Searches recorded before result counts were kept are counted but not judged.",
+        input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max terms (default 15, max 40).' } } },
+      },
+      {
+        name: 'get_catalogue_quality',
+        description:
+          'Platform-wide listing quality: how many active products are missing photos, a description, audience, colours, sizes, a size guide or a price, and the vendors with the most incomplete catalogues (share of their listings with gaps). These are the fields search and the shopper AI filter on, so a gap is a product nobody is shown. Pairs with the nudge_vendor action.',
+        input_schema: { type: 'object', properties: { limit: { type: 'number', description: 'Max vendors to list (default 15, max 40).' } } },
+      },
+      {
         name: 'get_vendor_health',
         description:
           'Vendor reliability for a period: per vendor, late-shipment rate, cancellation rate, dispute rate, return rate and rating, against the platform medians, with the vendors breaching thresholds flagged and the reasons named. Give `business` to see one vendor against the medians. Vendors with under three orders in the period are shown but never flagged.',
@@ -124,6 +144,9 @@ export class AdminOpsToolsService {
       case 'get_dispute': return this.dispute(a);
       case 'get_stuck_orders': return this.stuckOrders(a);
       case 'get_vendor_health': return this.vendorHealthReport(a);
+      case 'get_payment_reconciliation': return this.paymentReconciliation(a);
+      case 'get_search_gaps': return this.searchGapsReport(a);
+      case 'get_catalogue_quality': return this.catalogueQuality(a);
       default: return { error: `Unknown tool: ${name}` };
     }
   }
@@ -609,6 +632,140 @@ export class AdminOpsToolsService {
         past_deadline_unshipped: { count: report.past_deadline.length, items: trim(report.past_deadline) },
         in_transit_over_10d: { count: report.in_transit_too_long.length, items: trim(report.in_transit_too_long) },
         preship_waiting_on_customer_over_48h: { count: report.preship_waiting_on_customer.length, items: trim(report.preship_waiting_on_customer) },
+      },
+    };
+  }
+
+  // ── Payment reconciliation ────────────────────────────────────────────────
+
+  private async paymentReconciliation(args: any) {
+    const range = resolveRange((args ?? {}) as RangeArgs);
+    const limit = this.clamp(args.limit, 10, 25);
+    const window = { createdAt: { $gte: range.start, $lt: range.end } };
+    const staleBefore = new Date(Date.now() - 3_600_000);
+
+    const [paidOrders, orderTxns, byProcessor] = await Promise.all([
+      this.orderModel.find({ ...window, payment_status: 'paid' }).select('reference total processor refund_status createdAt').lean(),
+      this.transactionModel.find({ ...window, order: { $ne: null } }).select('order type status amount reference payment_method createdAt').lean(),
+      this.orderModel.aggregate([
+        { $match: { ...window, payment_status: 'paid' } },
+        { $group: { _id: { $ifNull: ['$processor', 'paystack'] }, orders: { $sum: 1 }, value: { $sum: '$total' } } },
+      ]),
+    ]);
+
+    const txByOrder = new Map<string, any[]>();
+    for (const t of orderTxns as any[]) {
+      const k = String(t.order);
+      txByOrder.set(k, [...(txByOrder.get(k) ?? []), t]);
+    }
+    const isPaymentTx = (t: any) => t.type !== 'refund';
+    const paidIds = new Set((paidOrders as any[]).map((o) => String(o._id)));
+
+    const paidWithoutTransaction = (paidOrders as any[]).filter((o) => !(txByOrder.get(String(o._id)) ?? []).some((t) => isPaymentTx(t) && t.status === 'success'));
+    const successNotPaid: any[] = [];
+    const stuck: any[] = [];
+    for (const t of orderTxns as any[]) {
+      if (!isPaymentTx(t)) continue;
+      if (t.status === 'success' && !paidIds.has(String(t.order))) successNotPaid.push(t);
+      if (['pending', 'failed'].includes(t.status) && new Date(t.createdAt) < staleBefore) stuck.push(t);
+    }
+    const refundOrdersNoTx = (paidOrders as any[]).filter((o) => ['partial', 'refunded'].includes(o.refund_status) && !(txByOrder.get(String(o._id)) ?? []).some((t) => t.type === 'refund' && t.status === 'success'));
+    const refundTxNoFlag: any[] = [];
+    for (const t of orderTxns as any[]) {
+      if (t.type === 'refund' && t.status === 'success') {
+        const o = (paidOrders as any[]).find((x) => String(x._id) === String(t.order));
+        if (o && (!o.refund_status || o.refund_status === 'none')) refundTxNoFlag.push({ ...t, reference_order: o.reference });
+      }
+    }
+    const refs = new Map((paidOrders as any[]).map((o) => [String(o._id), o.reference]));
+    const txRow = (t: any) => ({ transaction: t.reference, order: refs.get(String(t.order)) ?? String(t.order), type: t.type, status: t.status, amount: t.amount, method: t.payment_method ?? null, at: t.createdAt });
+
+    return {
+      ...({ period: range.label, currency: 'NGN' }),
+      data: {
+        totals: {
+          paid_orders: paidOrders.length,
+          paid_value: Math.round((paidOrders as any[]).reduce((s, o) => s + (Number(o.total) || 0), 0) * 100) / 100,
+          by_processor: byProcessor.map((r: any) => ({ processor: r._id, orders: r.orders, value: Math.round(r.value * 100) / 100 })),
+          paid_without_transaction: paidWithoutTransaction.length,
+          transaction_success_order_not_paid: successNotPaid.length,
+          payment_attempts_stuck: stuck.length,
+          refund_flag_without_transaction: refundOrdersNoTx.length,
+          refund_transaction_without_flag: refundTxNoFlag.length,
+        },
+        paid_without_transaction: paidWithoutTransaction.slice(0, limit).map((o) => ({ order: o.reference, total: o.total, processor: o.processor ?? 'paystack', at: o.createdAt })),
+        transaction_success_order_not_paid: successNotPaid.slice(0, limit).map(txRow),
+        payment_attempts_stuck: stuck.slice(0, limit).map(txRow),
+        refund_flag_without_transaction: refundOrdersNoTx.slice(0, limit).map((o) => ({ order: o.reference, refund_status: o.refund_status, total: o.total })),
+        refund_transaction_without_flag: refundTxNoFlag.slice(0, limit).map((t) => ({ ...txRow(t), order: t.reference_order })),
+        note: 'Card payments confirmed by the processor webhook mark the order paid directly and may carry no transaction record; "paid without transaction" is a list to check, not proof of a problem. Stuck attempts are pending/failed for over an hour.',
+      },
+    };
+  }
+
+  // ── Search gaps ───────────────────────────────────────────────────────────
+
+  private async searchGapsReport(args: any) {
+    const range = resolveRange((args ?? {}) as RangeArgs);
+    const limit = this.clamp(args.limit, 15, 40);
+    const rows = await this.eventModel
+      .find({ eventType: 'search', timestamp: { $gte: range.start, $lt: range.end }, 'metadata.query': { $exists: true, $ne: '' } })
+      .select('metadata.query metadata.results timestamp')
+      .limit(20000)
+      .lean();
+    const report = searchGaps((rows as any[]).map((e) => ({ query: e.metadata?.query, results: typeof e.metadata?.results === 'number' ? e.metadata.results : null, at: e.timestamp })));
+    return {
+      period: range.label,
+      data: {
+        searches: report.searches,
+        distinct_terms: report.terms,
+        gaps: report.gaps.slice(0, limit),
+        most_searched: report.top.slice(0, limit),
+        note: 'A gap is a term searched at least twice where half or more of the recorded searches returned nothing. Searches before result counts were recorded are counted in "searches" but not judged.',
+      },
+    };
+  }
+
+  // ── Catalogue quality ─────────────────────────────────────────────────────
+
+  private async catalogueQuality(args: any) {
+    const limit = this.clamp(args.limit, 15, 40);
+    const now = new Date();
+    const products = await this.productModel
+      .find({ status: 'active' })
+      .select('kind status business base_price size_guide createdAt clothing fabric accessory')
+      .limit(5000)
+      .lean();
+    const issueCounts: Record<string, number> = {};
+    const perVendor = new Map<string, { products: number; with_issues: number; issues: number }>();
+    let withIssues = 0;
+    for (const p of products as any[]) {
+      const issues = catalogueIssues(p, now).filter((i) => i !== 'no_views_30d' && i !== 'stale_draft');
+      const v = perVendor.get(String(p.business)) ?? { products: 0, with_issues: 0, issues: 0 };
+      v.products++;
+      if (issues.length) {
+        withIssues++;
+        v.with_issues++;
+        v.issues += issues.length;
+        for (const i of issues) issueCounts[i] = (issueCounts[i] ?? 0) + 1;
+      }
+      perVendor.set(String(p.business), v);
+    }
+    const names = await this.businessNames([...perVendor.keys()]);
+    const vendors = [...perVendor.entries()]
+      .filter(([, v]) => v.products >= 3 && v.with_issues > 0)
+      .map(([id, v]) => ({ business_id: id, vendor: names.get(id) ?? id, products: v.products, with_issues: v.with_issues, share: Math.round((v.with_issues / v.products) * 100) }))
+      .sort((a, b) => b.share - a.share || b.with_issues - a.with_issues)
+      .slice(0, limit);
+    return {
+      snapshot: now.toISOString(),
+      data: {
+        active_products: products.length,
+        with_issues: withIssues,
+        complete_share: products.length ? Math.round(((products.length - withIssues) / products.length) * 100) : null,
+        issue_counts: Object.fromEntries(Object.entries(issueCounts).map(([k, n]) => [CATALOGUE_ISSUE_LABEL[k] ?? k, n]).sort((a, b) => (b[1] as number) - (a[1] as number))),
+        vendors_most_incomplete: vendors,
+        note: 'Audience, colours and sizes are what search and the AI stylist match on; a product missing them is rarely shown. nudge_vendor sends a vendor the fix-your-listings notification.',
       },
     };
   }

@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { stuckOrdersFrom, vendorHealth } from './admin-ops.helpers';
+import { searchGaps, stuckOrdersFrom, vendorHealth } from './admin-ops.helpers';
 
 const NOW = new Date('2026-10-14T12:00:00Z');
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
@@ -88,5 +88,24 @@ describe('vendorHealth', () => {
     expect(r.rows[0].late_rate).toBeNull();
     expect(r.rows[0].dispute_rate).toBeNull();
     expect(r.medians.rating).toBeNull();
+  });
+});
+
+describe('searchGaps', () => {
+  it('groups terms case-insensitively, judges only events that recorded a count, and lists the unmet demand first', () => {
+    const r = searchGaps([
+      { query: 'Agbada', results: 12, at: '2026-10-10T10:00:00Z' },
+      { query: 'agbada ', results: 9, at: '2026-10-11T10:00:00Z' },
+      { query: 'Senator wear', results: 0, at: '2026-10-10T10:00:00Z' },
+      { query: 'senator  wear', results: 0, at: '2026-10-12T10:00:00Z' },
+      { query: 'senator wear', at: '2026-10-13T10:00:00Z' }, // old event, no count
+      { query: 'boubou', results: 0, at: '2026-10-12T10:00:00Z' }, // searched once: not a gap yet
+      { query: '', results: 0, at: '2026-10-12T10:00:00Z' },
+    ]);
+    expect(r.terms).toBe(3);
+    expect(r.gaps.map((g) => g.term)).toEqual(['senator wear']);
+    expect(r.gaps[0]).toMatchObject({ searches: 3, judged: 2, zero_results: 2, zero_share: 100, last_searched_at: '2026-10-13T10:00:00.000Z' });
+    expect(r.top[0]).toMatchObject({ term: 'senator wear', searches: 3 });
+    expect(r.top.find((t) => t.term === 'agbada')?.zero_share).toBe(0);
   });
 });

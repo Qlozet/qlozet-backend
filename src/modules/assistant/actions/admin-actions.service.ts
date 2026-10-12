@@ -11,6 +11,10 @@ import { BusinessStatus } from '../../business/schemas/business.schema';
 import { TicketService } from '../../ticket/ticket.service';
 import { DisputesService } from '../../disputes/disputes.service';
 import { DisputeResolution } from '../../disputes/dto/resolve-dispute.dto';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { VendorRecipientsService } from '../../notifications/vendor-recipients.service';
+import { VendorRole } from '../../ums/schemas/role.schema';
+import { NotificationCategory, NotificationType } from '../../notifications/schemas/notification.schema';
 import { escapeRegex, naira, pickByName, productName } from './vendor-actions.helpers';
 import {
   ADMIN_ACTION_KINDS,
@@ -30,6 +34,7 @@ const KIND_HELP: Record<AdminActionKind, string> = {
   assign_ticket: 'assign_ticket: ticket_id, assignee ("me", or a team member\'s name or id).',
   reply_to_ticket: 'reply_to_ticket: ticket_id, reply (the text, as the admin), mark_resolved (optional).',
   resolve_dispute: 'resolve_dispute: dispute (id or order reference), resolution (full_refund | partial_refund | release_to_vendor), refund_amount (for partial), notes.',
+  nudge_vendor: 'nudge_vendor: business (name or id), topic (listings | fulfilment | general), message (what you want them to do, in plain words; the vendor reads it) - sends an in-app notification to the right people at the vendor.',
 };
 
 /**
@@ -58,6 +63,8 @@ export class AdminActionsService {
     private readonly businessService: BusinessService,
     private readonly ticketService: TicketService,
     private readonly disputesService: DisputesService,
+    private readonly notifications: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
   /** Empty when the role may prepare nothing - then the model never hears of actions. */
@@ -89,6 +96,7 @@ export class AdminActionsService {
             resolution: { type: 'string', enum: ['full_refund', 'partial_refund', 'release_to_vendor'] },
             refund_amount: { type: 'number' },
             notes: { type: 'string' },
+            topic: { type: 'string', enum: ['listings', 'fulfilment', 'general'] },
           },
         },
       },
@@ -117,6 +125,7 @@ export class AdminActionsService {
         case 'assign_ticket': prepared = await this.prepareAssignTicket(input, adminId); break;
         case 'reply_to_ticket': prepared = await this.prepareReplyToTicket(input); break;
         case 'resolve_dispute': prepared = await this.prepareResolveDispute(input); break;
+        case 'nudge_vendor': prepared = await this.prepareNudgeVendor(input); break;
       }
     } catch (err: any) {
       this.logger.warn(`admin propose ${kind} failed: ${err?.message}`);
@@ -355,6 +364,33 @@ export class AdminActionsService {
     };
   }
 
+  private async prepareNudgeVendor(input: any): Promise<PrepareOutcome> {
+    const typed = String(input?.business ?? '').trim();
+    if (!typed) return { error: 'Which vendor? Give business (name or id).' };
+    const topic = ['listings', 'fulfilment', 'general'].includes(input?.topic) ? input.topic : 'general';
+    const message = String(input?.message ?? '').replace(/\s+/g, ' ').trim();
+    if (message.length < 10) return { error: 'What should the vendor do? Give message (at least 10 characters) - they read it as written.' };
+    if (message.length > 600) return { error: 'The message is too long (max 600 characters).' };
+    const pick = await this.findBusiness(typed);
+    if ('none' in pick) return { error: `No vendor matching "${typed}".` };
+    if ('ambiguous' in pick) return { error: `Several vendors match: ${pick.ambiguous.join(', ')}. Which one?` };
+    const b: any = pick.match;
+    const roles = topic === 'listings' ? ['operations', 'marketing'] : topic === 'fulfilment' ? ['operations', 'tailor'] : ['operations'];
+    const recipients = await this.vendorRecipients.resolve(String(b._id), roles as VendorRole[]);
+    const title = topic === 'listings' ? 'A note from Qlozet about your listings' : topic === 'fulfilment' ? 'A note from Qlozet about your orders' : 'A note from Qlozet';
+    return {
+      title: `Nudge ${b.business_name}`,
+      summary: `Send ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'} at ${b.business_name} an in-app notification titled "${title}" with your message. They can open the assistant from it.`,
+      details: [
+        { label: 'Vendor', value: b.business_name },
+        { label: 'Topic', value: topic },
+        { label: 'Recipients', value: `${recipients.length} (${roles.join(', ')} + owner)` },
+        { label: 'Message', value: message.length > 300 ? `${message.slice(0, 300)}…` : message },
+      ],
+      params: { business_id: String(b._id), business_name: b.business_name, topic, title, message, recipient_ids: recipients.map((r: any) => String(r.userId)) },
+    };
+  }
+
   // ── Decide ────────────────────────────────────────────────────────────────
 
   async get(adminId: string, actionId: string): Promise<AssistantActionCard> {
@@ -433,6 +469,28 @@ export class AdminActionsService {
           ...(p.notes ? { admin_notes: p.notes } : {}),
         } as any);
         return { result: { dispute_id: p.dispute_id, resolution: p.resolution, refund_amount: p.refund_amount }, text: `Dispute on ${p.order_reference} resolved: ${String(p.resolution).replace(/_/g, ' ')}` };
+      }
+      case 'nudge_vendor': {
+        let sent = 0;
+        for (const userId of p.recipient_ids as string[]) {
+          try {
+            await this.notifications.create({
+              recipient: userId,
+              recipient_business: p.business_id,
+              category: NotificationCategory.SYSTEM,
+              type: NotificationType.ANNOUNCEMENT,
+              title: p.title,
+              body: p.message,
+              metadata: { from_admin: String(adminId), topic: p.topic, nudge: true },
+              action_url: p.topic === 'listings' ? '/products' : p.topic === 'fulfilment' ? '/orders' : '/dashboard',
+            } as any);
+            sent++;
+          } catch (err: any) {
+            this.logger.warn(`nudge to ${userId} failed: ${err?.message}`);
+          }
+        }
+        if (!sent) throw new Error('No notification could be sent.');
+        return { result: { business_id: p.business_id, sent }, text: `Nudge sent to ${sent} ${sent === 1 ? 'person' : 'people'} at ${p.business_name}` };
       }
       default:
         throw new Error(`Unknown action kind ${doc.kind}`);

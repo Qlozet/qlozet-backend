@@ -22,6 +22,7 @@ import { AssistantDigestService } from './assistant-digest.service';
 import { ChatDto } from './dto/chat.dto';
 import { VendorActionsService } from './actions/vendor-actions.service';
 import { AdminActionsService } from './actions/admin-actions.service';
+import { AssistantBriefService } from './assistant-brief.service';
 
 @ApiTags('Assistant')
 @ApiBearerAuth('access-token')
@@ -34,6 +35,7 @@ export class AssistantController {
     private readonly digestService: AssistantDigestService,
     private readonly actionsService: VendorActionsService,
     private readonly adminActions: AdminActionsService,
+    private readonly briefs: AssistantBriefService,
   ) {}
 
   // Dual vendor/platform route: vendors get their store analyst, platform
@@ -138,6 +140,29 @@ export class AssistantController {
   @ApiOperation({ summary: 'Generate weekly digests for all active vendors (admin)' })
   async runDigests() {
     return this.digestService.generateAll();
+  }
+
+  // ── Admin morning brief ───────────────────────────────────────────────────
+
+  @Roles(UserType.PLATFORM)
+  @Get('admin-brief/latest')
+  @ApiOperation({ summary: 'Latest platform morning brief + whether this admin has read it' })
+  async latestBrief(@Req() req: any) {
+    return this.briefs.latest(req.user?.id ?? '');
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Patch('admin-brief/:id/read')
+  @ApiOperation({ summary: 'Mark the morning brief read for this admin' })
+  async markBriefRead(@Req() req: any, @Param('id') id: string) {
+    return this.briefs.markRead(req.user?.id ?? '', id);
+  }
+
+  @Roles(UserType.ADMIN)
+  @Post('admin-brief/run')
+  @ApiOperation({ summary: "Write today's brief now (admin)" })
+  async runBrief() {
+    return this.briefs.generate();
   }
 
   // ── Prepared actions ──────────────────────────────────────────────────────

@@ -193,3 +193,52 @@ export function vendorHealth(inputs: VendorHealthInput[], thresholds = HEALTH_TH
   const flagged = rows.filter((r) => r.flags.length).sort((a, b) => b.flags.length - a.flags.length || b.orders - a.orders);
   return { medians, flagged, rows, vendors_assessed: assessed.length, min_orders: thresholds.minOrders };
 }
+
+// ── Search gaps ───────────────────────────────────────────────────────────
+
+export interface SearchEventRow {
+  query: string;
+  /** Results the shopper saw; null/undefined when the event predates the field. */
+  results?: number | null;
+  at: Date | string;
+}
+
+export interface SearchGapTerm {
+  term: string;
+  searches: number;
+  /** Searches that returned nothing; only events that recorded a count are judged. */
+  zero_results: number;
+  judged: number;
+  zero_share: number | null;
+  last_searched_at: string | null;
+}
+
+const normaliseTerm = (q: string) => String(q ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Terms shoppers search for and do not find: demand the catalogue is not
+ * supplying. Grouped case-insensitively; a term must be searched at least
+ * `minSearches` times to count, so one typo does not make the list.
+ */
+export function searchGaps(rows: SearchEventRow[], minSearches = 2): { gaps: SearchGapTerm[]; top: SearchGapTerm[]; terms: number; searches: number } {
+  const byTerm = new Map<string, SearchGapTerm>();
+  for (const r of rows) {
+    const term = normaliseTerm(r.query);
+    if (!term) continue;
+    const row = byTerm.get(term) ?? { term, searches: 0, zero_results: 0, judged: 0, zero_share: null, last_searched_at: null };
+    row.searches++;
+    if (typeof r.results === 'number') {
+      row.judged++;
+      if (r.results === 0) row.zero_results++;
+    }
+    const at = r.at instanceof Date ? r.at : new Date(r.at);
+    if (!Number.isNaN(at.getTime()) && (!row.last_searched_at || at.toISOString() > row.last_searched_at)) row.last_searched_at = at.toISOString();
+    byTerm.set(term, row);
+  }
+  const terms = [...byTerm.values()].map((t) => ({ ...t, zero_share: t.judged ? Math.round((t.zero_results / t.judged) * 100) : null }));
+  const gaps = terms
+    .filter((t) => t.searches >= minSearches && t.zero_share !== null && t.zero_share >= 50)
+    .sort((a, b) => b.searches - a.searches || (b.zero_share ?? 0) - (a.zero_share ?? 0));
+  const top = [...terms].sort((a, b) => b.searches - a.searches).slice(0, 15);
+  return { gaps, top, terms: terms.length, searches: rows.length };
+}

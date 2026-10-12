@@ -14,6 +14,7 @@ export const ASSISTANT_ACTION_KINDS = [
   'assign_ticket',
   'reply_to_ticket',
   'resolve_dispute',
+  'nudge_vendor',
 ] as const;
 export type AssistantActionKind = (typeof ASSISTANT_ACTION_KINDS)[number];
 

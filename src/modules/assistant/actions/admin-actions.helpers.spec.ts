@@ -2,9 +2,9 @@ import { permittedAdminActionKinds, validateRefundAmount } from './admin-actions
 
 describe('permittedAdminActionKinds', () => {
   it('gives a super admin everything and a role only the kinds its modules cover', () => {
-    expect(permittedAdminActionKinds(null)).toHaveLength(6);
+    expect(permittedAdminActionKinds(null)).toHaveLength(7);
     expect(permittedAdminActionKinds(new Set(['support_management']))).toEqual(['assign_ticket', 'reply_to_ticket', 'resolve_dispute']);
-    expect(permittedAdminActionKinds(new Set(['product_management', 'vendor_management']))).toEqual(['approve_product', 'reject_product', 'decide_vendor_application']);
+    expect(permittedAdminActionKinds(new Set(['product_management', 'vendor_management']))).toEqual(['approve_product', 'reject_product', 'decide_vendor_application', 'nudge_vendor']);
     expect(permittedAdminActionKinds(new Set(['analytics']))).toEqual([]);
   });
 });

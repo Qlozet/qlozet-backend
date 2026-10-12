@@ -10,6 +10,7 @@ export const ADMIN_ACTION_KINDS = [
   'assign_ticket',
   'reply_to_ticket',
   'resolve_dispute',
+  'nudge_vendor',
 ] as const;
 export type AdminActionKind = (typeof ADMIN_ACTION_KINDS)[number];
 
@@ -20,6 +21,7 @@ export const ADMIN_ACTION_MODULES: Record<AdminActionKind, string[]> = {
   assign_ticket: ['support_management'],
   reply_to_ticket: ['support_management'],
   resolve_dispute: ['support_management'],
+  nudge_vendor: ['vendor_management', 'product_management'],
 };
 
 /** `null` modules = super admin (no role assigned): everything. */
