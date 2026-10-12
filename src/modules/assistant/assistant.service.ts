@@ -27,6 +27,7 @@ import { buildSystemPrompt, buildAdminSystemPrompt } from './assistant.prompt';
 import { TokenService } from '../wallets/token.service';
 import type { Response } from 'express';
 import { VendorActionsService } from './actions/vendor-actions.service';
+import { AdminActionsService } from './actions/admin-actions.service';
 
 // How many prior turns to replay as context. Fresh numbers always come from
 // tool re-fetch, so we don't need deep history.
@@ -46,6 +47,7 @@ export class AssistantService {
     private readonly tokenService: TokenService,
     private readonly config: ConfigService,
     private readonly actions: VendorActionsService,
+    private readonly adminActions: AdminActionsService,
   ) {}
 
   private get smartModel(): string {
@@ -479,6 +481,8 @@ export class AssistantService {
     name?: string;
     roleName: string | null;
     allowed: Set<string> | null;
+    /** Permission modules of the role; null = super admin. Gates the actions. */
+    modules: Set<string> | null;
     allowedAreas: string[];
     restrictedAreas: string[];
   }> {
@@ -499,6 +503,7 @@ export class AssistantService {
         name,
         roleName: role?.name ?? null,
         allowed: null,
+        modules: null,
         allowedAreas: Object.values(AssistantService.MODULE_AREAS),
         restrictedAreas: [],
       };
@@ -524,6 +529,7 @@ export class AssistantService {
       name,
       roleName: role?.name ?? null,
       allowed,
+      modules,
       allowedAreas,
       restrictedAreas,
     };
@@ -568,6 +574,7 @@ export class AssistantService {
     history.push({ role: 'user', content: text });
 
     const charts: Record<string, any>[] = [];
+    const actions: Record<string, any>[] = [];
 
     const result = await this.llm.runToolLoop({
       system: buildAdminSystemPrompt({
@@ -577,8 +584,11 @@ export class AssistantService {
         restrictedAreas: ctx.restrictedAreas,
       }),
       messages: history,
-      tools: this.adminTools.getToolDefs(ctx.allowed),
-      onToolCall: (name, input) => {
+      tools: [...this.adminTools.getToolDefs(ctx.allowed), ...this.adminActions.toolDefs(ctx.modules)],
+      onToolCall: async (name, input) => {
+        if (name === 'propose_action') {
+          return this.proposeAdminAction(adminId, ctx.modules, conversation, input, actions);
+        }
         if (name === 'render_chart') {
           charts.push(this.sanitizeChart(input));
           return Promise.resolve({ ok: true, note: 'Chart shown.' });
@@ -605,6 +615,7 @@ export class AssistantService {
       content: answer,
       tools_used: result.toolsUsed,
       charts,
+      actions,
       createdAt: new Date(),
     } as AssistantMessage);
     conversation.last_message_at = new Date();
@@ -617,6 +628,7 @@ export class AssistantService {
       conversation_id: (conversation._id as any).toString(),
       answer,
       charts,
+      actions,
       tools_used: result.toolsUsed,
     };
   }
@@ -642,6 +654,7 @@ export class AssistantService {
     const send = (obj: any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
     const charts: Record<string, any>[] = [];
+    const actions: Record<string, any>[] = [];
 
     try {
       const ctx = await this.loadAdminContext(adminId);
@@ -655,7 +668,10 @@ export class AssistantService {
         .map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: 'user', content: text });
 
-      const onToolCall = (name: string, input: any) => {
+      const onToolCall = async (name: string, input: any) => {
+        if (name === 'propose_action') {
+          return this.proposeAdminAction(adminId, ctx.modules, conversation, input, actions, send);
+        }
         if (name === 'render_chart') {
           const spec = this.sanitizeChart(input);
           charts.push(spec);
@@ -673,7 +689,7 @@ export class AssistantService {
           restrictedAreas: ctx.restrictedAreas,
         }),
         messages: history,
-        tools: this.adminTools.getToolDefs(ctx.allowed),
+        tools: [...this.adminTools.getToolDefs(ctx.allowed), ...this.adminActions.toolDefs(ctx.modules)],
         onToolCall,
         model: this.smartModel,
         maxTokens: 1024,
@@ -710,6 +726,7 @@ export class AssistantService {
         content: answer,
         tools_used: result.toolsUsed,
         charts,
+        actions,
         createdAt: new Date(),
       } as AssistantMessage);
       conversation.last_message_at = new Date();
@@ -735,6 +752,35 @@ export class AssistantService {
       }
       res.end();
     }
+  }
+
+  /** The admin twin of proposeAction: validates, stores the card, tells the model it is NOT done. */
+  private async proposeAdminAction(
+    adminId: string,
+    modules: Set<string> | null,
+    conversation: any,
+    input: any,
+    actions: Record<string, any>[],
+    send?: (obj: any) => void,
+  ) {
+    const outcome = await this.adminActions.propose(
+      adminId,
+      modules,
+      conversation?._id ? String(conversation._id) : null,
+      input,
+    );
+    if ('error' in outcome) return { ok: false, error: outcome.error };
+    actions.push(outcome.card);
+    send?.({ type: 'action', action: outcome.card });
+    return {
+      ok: true,
+      action_id: outcome.card.action_id,
+      status: 'proposed',
+      note:
+        'Prepared and shown to the admin as a card with a Confirm button. NOT done yet. ' +
+        'Say in one or two lines what is ready and that they can confirm it on the card below. ' +
+        'Do not say it has been done, and do not repeat every detail - the card shows them.',
+    };
   }
 
   async adminListConversations(adminId: string, page = 1, size = 20) {

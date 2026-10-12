@@ -7,6 +7,13 @@ export const ASSISTANT_ACTION_KINDS = [
   'update_stock',
   'create_discount',
   'update_listing',
+  // Admin console actions (AdminActionsService)
+  'approve_product',
+  'reject_product',
+  'decide_vendor_application',
+  'assign_ticket',
+  'reply_to_ticket',
+  'resolve_dispute',
 ] as const;
 export type AssistantActionKind = (typeof ASSISTANT_ACTION_KINDS)[number];
 
@@ -34,8 +41,13 @@ export const ASSISTANT_ACTION_TTL_HOURS = 24;
  */
 @Schema({ timestamps: true, collection: 'assistant_actions' })
 export class AssistantAction extends Document {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true, index: true })
-  business: Types.ObjectId;
+  /** The vendor the card was offered to - null for admin console actions. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null, index: true })
+  business: Types.ObjectId | null;
+
+  /** The admin the card was offered to - null for vendor actions. Only they can confirm it. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null, index: true })
+  admin_user: Types.ObjectId | null;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'AssistantConversation', default: null })
   conversation: Types.ObjectId | null;

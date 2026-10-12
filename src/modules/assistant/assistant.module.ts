@@ -46,6 +46,10 @@ import { SystemCategory, SystemCategorySchema } from '../taxonomy/schemas/system
 import { OrdersModule } from '../orders/orders.module';
 import { ProductModule } from '../products/products.module';
 import { BespokeModule } from '../bespoke/bespoke.module';
+import { BusinessModule } from '../business/business.module';
+import { TicketModule } from '../ticket/ticket.module';
+import { DisputesModule } from '../disputes/disputes.module';
+import { AdminActionsService } from './actions/admin-actions.service';
 import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
 import { AdminOpsToolsService } from './tools/admin-ops-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
@@ -84,6 +88,9 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     OrdersModule,
     ProductModule,
     BespokeModule,
+    BusinessModule,
+    TicketModule,
+    DisputesModule,
   ],
   controllers: [AssistantController],
   providers: [
@@ -91,6 +98,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     AnalyticsToolsService,
     VendorOpsToolsService,
     VendorActionsService,
+    AdminActionsService,
     AdminAnalyticsToolsService,
     AdminOpsToolsService,
     AssistantDigestService,
