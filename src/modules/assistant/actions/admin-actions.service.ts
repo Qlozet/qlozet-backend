@@ -477,7 +477,14 @@ export class AdminActionsService {
             await this.notifications.create({
               recipient: userId,
               recipient_business: p.business_id,
-              category: NotificationCategory.SYSTEM,
+              // Filed where the vendor already looks for that topic: the
+              // Products tab for listings, Orders for fulfilment, System otherwise.
+              category:
+                p.topic === 'listings'
+                  ? NotificationCategory.PRODUCT
+                  : p.topic === 'fulfilment'
+                    ? NotificationCategory.ORDER
+                    : NotificationCategory.SYSTEM,
               type: NotificationType.ANNOUNCEMENT,
               title: p.title,
               body: p.message,
