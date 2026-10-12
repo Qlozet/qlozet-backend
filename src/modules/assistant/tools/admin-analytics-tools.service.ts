@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PERIOD_ENUM, resolveRange, type RangeArgs } from './date-range';
+import { AdminOpsToolsService } from './admin-ops-tools.service';
 
 // Orders that represent real, paid sales (matches the vendor toolset).
 const REVENUE_STATUSES = ['in_review', 'processing', 'in_transit', 'completed'];
@@ -40,6 +41,17 @@ const TOOL_MODULES: Record<string, string[] | null> = {
   get_vendor_stats: ['vendor_management', 'analytics'],
   get_moderation_queue: ['vendor_management', 'product_management'],
   get_support_overview: ['support_management'],
+  // Operations tools (AdminOpsToolsService). The work queue is baseline;
+  // it omits the sections the role cannot see.
+  get_work_queue: null,
+  search: null,
+  get_order: ['order_management', 'support_management'],
+  get_vendor: ['vendor_management', 'support_management'],
+  get_customer: ['support_management', 'order_management'],
+  get_ticket: ['support_management'],
+  get_dispute: ['support_management', 'order_management'],
+  get_stuck_orders: ['order_management', 'vendor_management'],
+  get_vendor_health: ['vendor_management', 'analytics'],
 };
 
 export function allowedToolNames(
@@ -78,6 +90,7 @@ export class AdminAnalyticsToolsService {
     @InjectModel('Wallet') private readonly walletModel: Model<any>,
     @InjectModel('TokenTransaction')
     private readonly tokenTxModel: Model<any>,
+    private readonly ops: AdminOpsToolsService,
   ) {}
 
   getToolDefs(allowed: Set<string> | null): any[] {
@@ -191,8 +204,9 @@ export class AdminAnalyticsToolsService {
         },
       },
     ];
-    if (allowed === null) return defs;
-    return defs.filter((d) => allowed.has(d.name));
+    const all = [...defs, ...this.ops.getToolDefs()];
+    if (allowed === null) return all;
+    return all.filter((d) => allowed.has(d.name));
   }
 
   async execute(
@@ -206,6 +220,7 @@ export class AdminAnalyticsToolsService {
       return { error: 'This tool is not available for your role.' };
     }
     try {
+      if (this.ops.handles(name)) return await this.ops.execute(name, args, allowed);
       switch (name) {
         case 'get_platform_summary':
           return await this.platformSummary(args);
