@@ -1,4 +1,5 @@
 import { Length } from 'class-validator';
+import { bucketSeries, DashboardRange, describeRange, resolveDashboardRange } from './dashboard-range';
 import {
   Injectable,
   BadRequestException,
@@ -6526,26 +6527,27 @@ export class OrderService {
     };
   }
 
-  async getBusinessChart(businessId: string): Promise<any> {
+  /**
+   * Everything on the vendor dashboard, over ONE window (`rangeKey`: 7d, 30d,
+   * 12w, 12m - see dashboard-range.ts). The cards compare the window to the
+   * equal-length one before it; the breakdowns count only orders inside it;
+   * the series is bucketed by day, week or month to suit it.
+   */
+  async getBusinessChart(businessId: string, rangeKey?: string): Promise<any> {
     const businessObjectId = new Types.ObjectId(businessId);
-
-    const now = new Date();
-    const currentStart = new Date(now);
-    currentStart.setDate(now.getDate() - 7);
-
-    const previousStart = new Date(now);
-    previousStart.setDate(now.getDate() - 14);
-
-    const previousEnd = new Date(now);
-    previousEnd.setDate(now.getDate() - 7);
+    const range = resolveDashboardRange(rangeKey);
+    const currentStart = range.start;
+    const currentEnd = range.end;
+    const previousStart = range.prevStart;
+    const previousEnd = range.prevEnd;
 
     const [ordersByGender, ordersByLocation, ordersByProduct, ordersByProductKind, orderCountByDay] =
       await Promise.all([
-        this.getBusinessOrdersByGenderChart(businessId),
-        this.getBusinessOrdersByLocationChart(businessId),
-        this.getBusinessOrdersByProductChart(businessId),
-        this.getBusinessOrdersByProductKindChart(businessId),
-        this.getBusinessOrderCountByDayChart(businessId),
+        this.getBusinessOrdersByGenderChart(businessId, range),
+        this.getBusinessOrdersByLocationChart(businessId, range),
+        this.getBusinessOrdersByProductChart(businessId, range),
+        this.getBusinessOrdersByProductKindChart(businessId, range),
+        this.getBusinessOrderCountByDayChart(businessId, range),
       ]);
 
     /* ===================== ORDERS STATS (SINGLE QUERY) ===================== */
@@ -6560,7 +6562,7 @@ export class OrderService {
       {
         $facet: {
           current: [
-            { $match: { createdAt: { $gte: currentStart } } },
+            { $match: { createdAt: { $gte: currentStart, $lt: currentEnd } } },
             {
               $group: {
                 _id: '$_id',
@@ -6625,7 +6627,7 @@ export class OrderService {
       {
         $facet: {
           current: [
-            { $match: { createdAt: { $gte: currentStart } } },
+            { $match: { createdAt: { $gte: currentStart, $lt: currentEnd } } },
             {
               $group: {
                 _id: null,
@@ -6678,6 +6680,7 @@ export class OrderService {
     };
 
     return {
+      range: describeRange(range),
       summary,
       charts: {
         ordersByGender: ordersByGender.data,
@@ -6689,14 +6692,24 @@ export class OrderService {
     };
   }
 
+  /** The $match every dashboard breakdown starts with: this vendor's items, inside the window. */
+  private dashboardItemsMatch(businessId: string, range?: DashboardRange) {
+    return {
+      $match: {
+        'items.business': new Types.ObjectId(businessId),
+        ...(range ? { createdAt: { $gte: range.start, $lt: range.end } } : {}),
+      },
+    };
+  }
+
   // "Sales by audience": which gender segment the vendor's SOLD items target,
   // taken from each product's taxonomy.audience (men/women/unisex). This is
   // reliably populated and meaningful — unlike the customer's profile gender,
   // which is almost always unset and doesn't say who the garment is for.
-  async getBusinessOrdersByGenderChart(businessId: string): Promise<any> {
+  async getBusinessOrdersByGenderChart(businessId: string, range?: DashboardRange): Promise<any> {
     const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
-      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      this.dashboardItemsMatch(businessId, range),
       {
         $lookup: {
           from: 'products',
@@ -6773,10 +6786,10 @@ export class OrderService {
     };
   }
 
-  async getBusinessOrdersByLocationChart(businessId: string): Promise<any> {
+  async getBusinessOrdersByLocationChart(businessId: string, range?: DashboardRange): Promise<any> {
     const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
-      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      this.dashboardItemsMatch(businessId, range),
       // Collapse an order's multiple vendor items back to one row so we count
       // ORDERS, not line items. Location = the ORDER's shipping state (reliable),
       // not the customer's profile address (usually unset).
@@ -6823,10 +6836,10 @@ export class OrderService {
     };
   }
 
-  async getBusinessOrdersByProductChart(businessId: string): Promise<any> {
+  async getBusinessOrdersByProductChart(businessId: string, range?: DashboardRange): Promise<any> {
     const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
-      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      this.dashboardItemsMatch(businessId, range),
       {
         $lookup: {
           from: 'users',
@@ -6896,10 +6909,10 @@ export class OrderService {
   /**
    * Orders by Product Kind — groups orders into Accessory, Custom, Fabric, Non-Custom
    */
-  async getBusinessOrdersByProductKindChart(businessId: string): Promise<any> {
+  async getBusinessOrdersByProductKindChart(businessId: string, range?: DashboardRange): Promise<any> {
     const data = await this.orderModel.aggregate([
       { $unwind: '$items' },
-      { $match: { 'items.business': new Types.ObjectId(businessId) } },
+      this.dashboardItemsMatch(businessId, range),
       {
         $lookup: {
           from: 'products',
@@ -6969,45 +6982,31 @@ export class OrderService {
   /**
    * Order Count by Day of Week — counts orders grouped by weekday (Sun–Sat)
    */
-  async getBusinessOrderCountByDayChart(businessId: string): Promise<any> {
-    const data = await this.orderModel.aggregate([
+  /**
+   * Orders per bucket over the dashboard window - by day, week or month as the
+   * range dictates. Counts ORDERS (an order with three of the vendor's items
+   * is one), zero-filled so the axis always shows the whole window.
+   */
+  async getBusinessOrderCountByDayChart(businessId: string, range?: DashboardRange): Promise<any> {
+    const r = range ?? resolveDashboardRange(undefined);
+    const rows = await this.orderModel.aggregate([
       { $unwind: '$items' },
-      { $match: { 'items.business': new Types.ObjectId(businessId) } },
-      {
-        $group: {
-          _id: '$_id',
-          createdAt: { $first: '$createdAt' },
-        },
-      },
-      {
-        $project: {
-          dayOfWeek: { $dayOfWeek: '$createdAt' }, // 1=Sun, 2=Mon, ... 7=Sat
-        },
-      },
-      {
-        $group: {
-          _id: '$dayOfWeek',
-          count: { $sum: 1 },
-        },
-      },
+      this.dashboardItemsMatch(businessId, r),
+      { $group: { _id: '$_id', createdAt: { $first: '$createdAt' } } },
+      { $project: { _id: 0, at: '$createdAt' } },
     ]);
-
-    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const ordersByDay = dayLabels.map((label, index) => {
-      const record = data.find((d) => d._id === index + 1);
-      return { label, value: record ? record.count : 0 };
-    });
 
     return {
       data: {
         chartType: 'bar',
         title: 'Order Count',
+        unit: r.unit,
         series: [
           {
             key: 'order_count',
             name: 'Order Count',
             color: '#c4b5a0',
-            data: ordersByDay,
+            data: bucketSeries(r, rows.map((x: any) => ({ at: x.at, value: 1 }))),
           },
         ],
       },

@@ -47,6 +47,7 @@ import {
   TokenTransactionDocument,
   TokenTransactionType,
 } from '../wallets/schema/token.schema';
+import { bucketSeries, describeRange, resolveDashboardRange } from '../orders/dashboard-range';
 
 /** Orderings the public vendor list accepts. */
 export type PublicVendorSort = 'active' | 'newest' | 'name';
@@ -2506,44 +2507,36 @@ export class BusinessService {
 
     return Utils.getPagingData({ count: totalCount, rows }, page, size);
   }
-  async getEarningsChart(businessId: string): Promise<any> {
-    const data = await this.businessEarningsModel.aggregate([
+  /**
+   * Net earnings per bucket over the dashboard window (`rangeKey`: 7d, 30d,
+   * 12w, 12m), zero-filled. Released and pending both count, so the chart is
+   * not blank during the release hold. Same window as /orders/chart, so the
+   * two charts on the page agree.
+   */
+  async getEarningsChart(businessId: string, rangeKey?: string): Promise<any> {
+    const range = resolveDashboardRange(rangeKey);
+    const rows = await this.businessEarningsModel.aggregate([
       {
         $match: {
           business: new Types.ObjectId(businessId),
-          // Show all earnings (released + pending) so the chart isn't empty
-          // during the 7-day release window.
+          createdAt: { $gte: range.start, $lt: range.end },
         },
       },
-      {
-        $project: {
-          dayOfWeek: { $dayOfWeek: '$createdAt' }, // 1=Sun, 2=Mon, ... 7=Sat
-          net_amount: 1,
-        },
-      },
-      {
-        $group: {
-          _id: '$dayOfWeek',
-          totalEarnings: { $sum: '$net_amount' },
-        },
-      },
+      { $project: { _id: 0, at: '$createdAt', value: { $ifNull: ['$net_amount', 0] } } },
     ]);
-    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const earningsByDay = dayLabels.map((label, index) => {
-      const record = data.find((d) => d._id === index + 1);
-      return { label, value: record ? record.totalEarnings : 0 };
-    });
 
     return {
       data: {
         chartType: 'bar',
         title: 'Earnings',
+        unit: range.unit,
+        range: describeRange(range),
         series: [
           {
             key: 'earnings',
             name: 'Earnings',
             color: '#c4b5a0',
-            data: earningsByDay,
+            data: bucketSeries(range, rows as { at: Date; value: number }[]),
           },
         ],
       },
