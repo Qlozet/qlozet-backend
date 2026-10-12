@@ -17,6 +17,7 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { Ticket, TicketSchema } from '../ticket/schema/ticket.schema';
+import { TicketReply, TicketReplySchema } from '../ticket/schema/reply-ticket.schema';
 import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
 import { Return, ReturnSchema } from '../returns/schemas/return.schema';
 import { BespokeQuote, BespokeQuoteSchema } from '../bespoke/schemas/bespoke-quote.schema';
@@ -45,7 +46,15 @@ import { SystemCategory, SystemCategorySchema } from '../taxonomy/schemas/system
 import { OrdersModule } from '../orders/orders.module';
 import { ProductModule } from '../products/products.module';
 import { BespokeModule } from '../bespoke/bespoke.module';
+import { BusinessModule } from '../business/business.module';
+import { TicketModule } from '../ticket/ticket.module';
+import { DisputesModule } from '../disputes/disputes.module';
+import { AdminActionsService } from './actions/admin-actions.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { AssistantBriefService } from './assistant-brief.service';
+import { AssistantBriefCron } from './assistant-brief.cron';
 import { AdminAnalyticsToolsService } from './tools/admin-analytics-tools.service';
+import { AdminOpsToolsService } from './tools/admin-ops-tools.service';
 import { AssistantDigestService } from './assistant-digest.service';
 import { AssistantDigestCron } from './assistant-digest.cron';
 import { ClaudeProvider } from './llm/claude.provider';
@@ -63,6 +72,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: User.name, schema: UserSchema },
       { name: Business.name, schema: BusinessSchema },
       { name: Ticket.name, schema: TicketSchema },
+      { name: TicketReply.name, schema: TicketReplySchema },
       { name: Dispute.name, schema: DisputeSchema },
       { name: Return.name, schema: ReturnSchema },
       { name: BespokeQuote.name, schema: BespokeQuoteSchema },
@@ -81,6 +91,10 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     OrdersModule,
     ProductModule,
     BespokeModule,
+    BusinessModule,
+    TicketModule,
+    DisputesModule,
+    NotificationsModule,
   ],
   controllers: [AssistantController],
   providers: [
@@ -88,7 +102,11 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
     AnalyticsToolsService,
     VendorOpsToolsService,
     VendorActionsService,
+    AdminActionsService,
+    AssistantBriefService,
+    AssistantBriefCron,
     AdminAnalyticsToolsService,
+    AdminOpsToolsService,
     AssistantDigestService,
     AssistantDigestCron,
     JwtService,

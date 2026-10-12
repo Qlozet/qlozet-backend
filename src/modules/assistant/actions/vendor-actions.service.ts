@@ -143,6 +143,7 @@ export class VendorActionsService {
         case 'update_stock': prepared = await this.prepareUpdateStock(bid, input); break;
         case 'create_discount': prepared = await this.prepareCreateDiscount(bid, input); break;
         case 'update_listing': prepared = await this.prepareUpdateListing(bid, input); break;
+        default: prepared = { error: `"${kind}" is not an action a vendor can prepare.` };
       }
     } catch (err: any) {
       this.logger.warn(`propose ${kind} failed: ${err?.message}`);
@@ -152,6 +153,7 @@ export class VendorActionsService {
 
     const doc = await this.actionModel.create({
       business: bid,
+      admin_user: null,
       conversation: conversationId && Types.ObjectId.isValid(conversationId) ? new Types.ObjectId(conversationId) : null,
       kind,
       ...prepared,

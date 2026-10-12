@@ -66,8 +66,17 @@ export const AssistantConversationSchema = SchemaFactory.createForClass(
  */
 @Schema({ timestamps: true, collection: 'assistant_digests' })
 export class AssistantDigest extends Document {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', required: true, index: true })
-  business: Types.ObjectId;
+  /** The vendor the digest is for; null for the platform-wide admin brief. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null, index: true })
+  business: Types.ObjectId | null;
+
+  /** 'vendor' (weekly, per business) or 'admin' (daily, platform-wide). */
+  @Prop({ type: String, enum: ['vendor', 'admin'], default: 'vendor', index: true })
+  scope: 'vendor' | 'admin';
+
+  /** Admin brief only: who has read it - the brief is shared, the read state is not. */
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'User', default: [] })
+  read_by: Types.ObjectId[];
 
   // Human summary paragraph.
   @Prop({ type: String, required: true })
@@ -81,11 +90,13 @@ export class AssistantDigest extends Document {
         detail: { type: String, default: '' },
         // Optional deep-link hint for the frontend (e.g. 'inventory', 'orders').
         action: { type: String, default: '' },
+        // Admin brief: the question "Ask assistant" sends about this item.
+        question: { type: String, default: '' },
       },
     ],
     default: [],
   })
-  recommendations: { label: string; detail: string; action: string }[];
+  recommendations: { label: string; detail: string; action: string; question?: string }[];
 
   // The raw metrics the summary was built from (for display / drill-down).
   @Prop({ type: Object, default: {} })
