@@ -76,10 +76,11 @@ export class VendorRecipientsService {
         .find({
           business: new Types.ObjectId(String(businessId)),
           role: { $in: roleIds },
-          is_active: true,
-          // An invited member who has not accepted has no user account yet,
-          // so there is nobody to put a notification against.
-          accepted: true,
+          // Tolerate rows from before these flags existed: a legacy owner row
+          // with no `is_active` or `accepted` field is still the owner. An
+          // invite sets both and links the user on creation, so the one
+          // condition that really decides is a linked account.
+          is_active: { $ne: false },
           user: { $ne: null },
         })
         .populate('role', 'name')
