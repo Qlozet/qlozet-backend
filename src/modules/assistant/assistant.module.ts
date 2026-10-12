@@ -41,6 +41,7 @@ import { AnalyticsToolsService } from './tools/analytics-tools.service';
 import { VendorOpsToolsService } from './tools/vendor-ops-tools.service';
 import { VendorActionsService } from './actions/vendor-actions.service';
 import { AssistantAction, AssistantActionSchema } from './schema/action.schema';
+import { SystemCategory, SystemCategorySchema } from '../taxonomy/schemas/system-category.schema';
 import { OrdersModule } from '../orders/orders.module';
 import { ProductModule } from '../products/products.module';
 import { BespokeModule } from '../bespoke/bespoke.module';
@@ -71,6 +72,7 @@ import { LLM_PROVIDER } from './llm/llm-provider.interface';
       { name: AssistantConversation.name, schema: AssistantConversationSchema },
       { name: AssistantDigest.name, schema: AssistantDigestSchema },
       { name: AssistantAction.name, schema: AssistantActionSchema },
+      { name: SystemCategory.name, schema: SystemCategorySchema },
     ]),
     HttpModule,
     WalletsModule, // provides TokenService (ai_ask metering)

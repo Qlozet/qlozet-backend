@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BespokeRemindersCron } from './bespoke-reminders.cron';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BespokeController } from './bespoke.controller';
 import { AdminBespokeController } from './admin-bespoke.controller';
@@ -50,7 +51,7 @@ import { SuggestedVendorsService } from './suggested-vendors.service';
     WalletsModule,       // provides WalletsService (wallet payment)
   ],
   controllers: [BespokeController, AdminBespokeController],
-  providers: [BespokeService, SuggestedVendorsService],
+  providers: [BespokeService, SuggestedVendorsService, BespokeRemindersCron],
   exports: [BespokeService],
 })
 export class BespokeModule {}

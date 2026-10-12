@@ -60,7 +60,7 @@ import { VendorRole } from '../ums/schemas/role.schema';
 
 // Who at a vendor hears about a quote: the tailor is the person who can
 // judge the work and price it. The owner is always included by the resolver.
-const QUOTE_ROLES = [VendorRole.TAILOR];
+export const QUOTE_ROLES = [VendorRole.TAILOR];
 import {
   NotificationCategory,
   NotificationType,
