@@ -2369,7 +2369,8 @@ export class OrderService {
 
     return Utils.getPagingData({ count: total, rows: orders }, page, size);
   }
-  async getAdminDashboardMetrics() {
+  async getAdminDashboardMetrics(rangeKey?: string) {
+    const range = this.dashboardRange(rangeKey);
     const [
       totalOrders,
       ordersDelivered,
@@ -2447,7 +2448,7 @@ export class OrderService {
         { $match: { payment_status: 'paid' } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      this.getRecentTrend(),
+      this.getRecentTrend(range),
     ]);
 
 
@@ -2462,7 +2463,8 @@ export class OrderService {
       gross_sales: grossSales[0]?.total ?? 0,
       must_purchase_products: topProducts,
       changes: {
-        period_days: OrderService.TREND_WINDOW_DAYS,
+        period_days: range.days,
+        period: { key: range.key, label: range.label },
         total_orders: percentageChange(...trend.orders),
         orders_delivered: percentageChange(...trend.delivered),
         orders_in_transit: percentageChange(...trend.inTransit),
@@ -2475,7 +2477,6 @@ export class OrderService {
   }
 
   /** How far back the stat cards' percentage badges compare. */
-  private static readonly TREND_WINDOW_DAYS = 30;
 
   /** `[current, previous]` counts for one metric over the trend window. */
   private static pair(
@@ -2498,7 +2499,7 @@ export class OrderService {
    * creation-based figures — total orders, vendors, customers, gross sales —
    * carry no such caveat.
    */
-  private async getRecentTrend(): Promise<{
+  private async getRecentTrend(range: DashboardRange): Promise<{
     orders: [number, number];
     delivered: [number, number];
     inTransit: [number, number];
@@ -2507,13 +2508,8 @@ export class OrderService {
     customers: [number, number];
     grossSales: [number, number];
   }> {
-    const days = OrderService.TREND_WINDOW_DAYS;
-    const now = Date.now();
-    const current = { $gte: new Date(now - days * 86_400_000) };
-    const previous = {
-      $gte: new Date(now - 2 * days * 86_400_000),
-      $lt: new Date(now - days * 86_400_000),
-    };
+    const current = { $gte: range.start, $lt: range.end };
+    const previous = { $gte: range.prevStart, $lt: range.prevEnd };
 
     const count = (match: Record<string, unknown>) => [
       { $match: match },
@@ -5425,159 +5421,132 @@ export class OrderService {
     };
   }
 
-  /** `$dayOfWeek` is 1=Sun … 7=Sat. */
-  private static readonly DAY_LABELS = [
-    'Sun',
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thu',
-    'Fri',
-    'Sat',
-  ];
+  /** The dashboard window for a request. Exposed so callers and tests build it the one way. */
+  dashboardRange(rangeKey?: string, now: Date = new Date()): DashboardRange {
+    return resolveDashboardRange(rangeKey, now);
+  }
 
-  /** Dense seven-point Sun–Sat series from a `{ _id: <1-7>, value }` roll-up. */
-  private static toWeekdaySeries(
-    rows: { _id: number; value: number }[],
-  ): { label: string; value: number }[] {
-    return OrderService.DAY_LABELS.map((label, index) => {
-      const row = rows.find((r) => r._id === index + 1);
-      return { label, value: row ? Math.round(row.value * 100) / 100 : 0 };
+  /** `{ $match }` on the window - the first stage of every windowed admin pipeline. */
+  private windowStage(range?: DashboardRange): { $match: Record<string, unknown> } {
+    return {
+      $match: range ? { createdAt: { $gte: range.start, $lt: range.end } } : {},
+    };
+  }
+
+  /**
+   * One platform series over the window: match, project `{ at, value }`,
+   * bucket in JS by the range's unit (day / week / month) in platform time,
+   * zero-filled so the axis always shows the whole window.
+   */
+  private async platformSeries(
+    range: DashboardRange,
+    opts: {
+      match: Record<string, unknown>;
+      value: unknown;
+      title: string;
+      key: string;
+      name: string;
+      color: string;
+    },
+  ): Promise<{ data: ChartDto & { unit: string } }> {
+    const rows = await this.orderModel.aggregate<{ at: Date; value: number }>([
+      { $match: { ...opts.match, createdAt: { $gte: range.start, $lt: range.end } } },
+      { $project: { _id: 0, at: '$createdAt', value: opts.value } },
+    ]);
+    return {
+      data: {
+        chartType: 'bar',
+        title: opts.title,
+        unit: range.unit,
+        series: [{ key: opts.key, name: opts.name, color: opts.color, data: bucketSeries(range, rows) }],
+      },
+    };
+  }
+
+  /** Revenue - paid order totals, gross - over the window. */
+  getPlatformRevenueSeries(range: DashboardRange) {
+    return this.platformSeries(range, {
+      match: { payment_status: 'paid' },
+      value: { $ifNull: ['$total', 0] },
+      title: 'Revenue',
+      key: 'revenue',
+      name: 'Revenue',
+      color: '#3d2817',
+    });
+  }
+
+  /** Order volume over the window - every order, paid or not. */
+  getPlatformOrderCountSeries(range: DashboardRange) {
+    return this.platformSeries(range, {
+      match: {},
+      value: 1,
+      title: 'Order Count',
+      key: 'order_count',
+      name: 'Orders',
+      color: '#c4b5a0',
+    });
+  }
+
+  /** What the platform itself earned - commission on paid orders - over the window. */
+  getPlatformCommissionSeries(range: DashboardRange) {
+    return this.platformSeries(range, {
+      match: { payment_status: 'paid' },
+      value: { $ifNull: ['$platform_commission', 0] },
+      title: 'Platform earnings',
+      key: 'platform_earnings',
+      name: 'Platform earnings',
+      color: '#c4b5a0',
     });
   }
 
   /**
-   * Revenue by day of the week, all-time. The weekly-rhythm counterpart to
-   * revenueByMonth — which day of the week the marketplace actually sells on.
-   * Same weekday bucketing the vendor dashboard uses for its Earnings card.
+   * The admin dashboard bundle over ONE window (`rangeKey`: 7d, 30d, 12w,
+   * 12m). The three series are bucketed to suit it; the distribution charts
+   * (status / audience / location / product kind) count only orders inside
+   * it. Expected earnings is forward-looking - commission awaiting release -
+   * and does not depend on the window.
    */
-  async getPlatformEarningsByDayChart(): Promise<{ data: ChartDto }> {
-    const rows = await this.orderModel.aggregate<{
-      _id: number;
-      value: number;
-    }>([
-      { $match: { payment_status: 'paid' } },
-      {
-        $group: {
-          _id: {
-            $dayOfWeek: {
-              date: '$createdAt',
-              timezone: OrderService.PLATFORM_TZ,
-            },
-          },
-          value: { $sum: '$total' },
-        },
-      },
-    ]);
-
-    return {
-      data: {
-        chartType: 'bar',
-        title: 'Earnings',
-        series: [
-          {
-            key: 'earnings',
-            name: 'Earnings',
-            color: '#c4b5a0',
-            data: OrderService.toWeekdaySeries(rows),
-          },
-        ],
-      },
-    };
-  }
-
-  /** Order volume by day of the week, all-time. Every order, paid or not. */
-  async getPlatformOrderCountByDayChart(): Promise<{ data: ChartDto }> {
-    const rows = await this.orderModel.aggregate<{
-      _id: number;
-      value: number;
-    }>([
-      {
-        $group: {
-          _id: {
-            $dayOfWeek: {
-              date: '$createdAt',
-              timezone: OrderService.PLATFORM_TZ,
-            },
-          },
-          value: { $sum: 1 },
-        },
-      },
-    ]);
-
-    return {
-      data: {
-        chartType: 'bar',
-        title: 'Order Count',
-        series: [
-          {
-            key: 'order_count',
-            name: 'Orders',
-            color: '#c4b5a0',
-            data: OrderService.toWeekdaySeries(rows),
-          },
-        ],
-      },
-    };
-  }
-
-  /**
-   * The admin dashboard bundle. `year` scopes every time series; the
-   * distribution charts (audience / location / status / product kind) are
-   * all-time, matching the counters on GET /admin/dashboard.
-   */
-  async getAdminChart(year?: number): Promise<AdminDashboardChartsDto> {
-    // Default to the latest year that actually has an order, not the wall
-    // clock: a staging database whose newest order is from last year would
-    // otherwise render twelve empty months.
-    const resolvedYear = year ?? (await this.latestOrderYear());
+  async getAdminChart(rangeKey?: string, now: Date = new Date()): Promise<AdminDashboardChartsDto> {
+    const range = this.dashboardRange(rangeKey, now);
 
     const [
-      revenueByMonth,
-      orderCountByMonth,
-      earningsByDay,
-      orderCountByDay,
+      revenue,
+      orderCount,
+      platformEarnings,
       ordersByStatus,
       ordersByAudience,
       ordersByLocation,
       ordersByProductKind,
       expectedEarnings,
     ] = await Promise.all([
-      this.getPlatformRevenueByMonthChart(resolvedYear),
-      this.getPlatformOrderCountByMonthChart(resolvedYear),
-      this.getPlatformEarningsByDayChart(),
-      this.getPlatformOrderCountByDayChart(),
-      this.getPlatformOrdersByStatusChart(),
-      this.getPlatformOrdersByAudienceChart(),
-      this.getPlatformOrdersByLocationChart(),
-      this.getPlatformOrdersByProductKindChart(),
+      this.getPlatformRevenueSeries(range),
+      this.getPlatformOrderCountSeries(range),
+      this.getPlatformCommissionSeries(range),
+      this.getPlatformOrdersByStatusChart(range),
+      this.getPlatformOrdersByAudienceChart(range),
+      this.getPlatformOrdersByLocationChart(range),
+      this.getPlatformOrdersByProductKindChart(range),
       this.getPlatformExpectedEarningsChart(),
     ]);
 
     // Headline figures the charts are annotated with, so the client never has
     // to re-sum a series to render the number above it.
-    const revenueSeries = revenueByMonth.data.series[0].data;
-    const totalRevenue = revenueSeries.reduce(
-      (sum, point) => sum + point.value,
-      0,
-    );
+    const sum = (points: { value: number }[]) =>
+      Math.round(points.reduce((acc, point) => acc + point.value, 0) * 100) / 100;
 
     return {
-      year: resolvedYear,
+      range: describeRange(range),
       currency: 'NGN',
       summary: {
-        revenueThisYear: Math.round(totalRevenue * 100) / 100,
-        ordersThisYear: orderCountByMonth.data.series[0].data.reduce(
-          (sum, point) => sum + point.value,
-          0,
-        ),
+        revenue: sum(revenue.data.series[0].data),
+        orders: sum(orderCount.data.series[0].data),
+        platformEarnings: sum(platformEarnings.data.series[0].data),
         expectedEarnings: expectedEarnings.data.total,
       },
       charts: {
-        revenueByMonth: revenueByMonth.data,
-        orderCountByMonth: orderCountByMonth.data,
-        earningsByDay: earningsByDay.data,
-        orderCountByDay: orderCountByDay.data,
+        revenue: revenue.data,
+        orderCount: orderCount.data,
+        platformEarnings: platformEarnings.data,
         ordersByStatus: ordersByStatus.data,
         ordersByAudience: ordersByAudience.data,
         ordersByLocation: ordersByLocation.data,
@@ -5606,84 +5575,14 @@ export class OrderService {
   }
 
   /**
-   * Revenue per month from orders the customer actually paid for. Gross: taken
-   * before refunds, commission and payouts, so it agrees with `gross_sales` on
-   * GET /admin/dashboard.
-   */
-  async getPlatformRevenueByMonthChart(
-    year: number,
-  ): Promise<{ data: ChartDto }> {
-    const rows = await this.orderModel.aggregate<{
-      _id: number;
-      value: number;
-    }>([
-      {
-        $match: {
-          payment_status: 'paid',
-          createdAt: OrderService.yearRange(year),
-        },
-      },
-      {
-        $group: {
-          _id: { $month: '$createdAt' },
-          value: { $sum: '$total' },
-        },
-      },
-    ]);
-
-    return {
-      data: {
-        chartType: 'bar',
-        title: 'Revenue by Month',
-        series: [
-          {
-            key: 'revenue',
-            name: 'Revenue',
-            color: '#3d2817',
-            data: OrderService.toMonthlySeries(rows),
-          },
-        ],
-      },
-    };
-  }
-
-  /** Order volume per month — every order, paid or not. */
-  async getPlatformOrderCountByMonthChart(
-    year: number,
-  ): Promise<{ data: ChartDto }> {
-    const rows = await this.orderModel.aggregate<{
-      _id: number;
-      value: number;
-    }>([
-      { $match: { createdAt: OrderService.yearRange(year) } },
-      { $group: { _id: { $month: '$createdAt' }, value: { $sum: 1 } } },
-    ]);
-
-    return {
-      data: {
-        chartType: 'bar',
-        title: 'Order Count by Month',
-        series: [
-          {
-            key: 'order_count',
-            name: 'Orders',
-            color: '#c4b5a0',
-            data: OrderService.toMonthlySeries(rows),
-          },
-        ],
-      },
-    };
-  }
-
-  /**
    * Every order grouped by delivery status, highest first. All seven statuses
    * are emitted even at zero so the legend is stable between refreshes.
    */
-  async getPlatformOrdersByStatusChart(): Promise<{ data: ChartDto }> {
+  async getPlatformOrdersByStatusChart(range?: DashboardRange): Promise<{ data: ChartDto }> {
     const rows = await this.orderModel.aggregate<{
       _id: string;
       count: number;
-    }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]);
+    }>([this.windowStage(range), { $group: { _id: '$status', count: { $sum: 1 } } }]);
 
     const STATUS_COLORS: Record<string, string> = {
       [OrderStatus.PENDING]: '#d4c5b9',
@@ -5722,8 +5621,9 @@ export class OrderService {
    * rather than the buyer's profile gender. Platform-wide twin of
    * getBusinessOrdersByGenderChart.
    */
-  async getPlatformOrdersByAudienceChart(): Promise<{ data: ChartDto }> {
+  async getPlatformOrdersByAudienceChart(range?: DashboardRange): Promise<{ data: ChartDto }> {
     const data = await this.orderModel.aggregate([
+      this.windowStage(range),
       { $unwind: '$items' },
       {
         $lookup: {
@@ -5807,8 +5707,9 @@ export class OrderService {
    * the customer's profile address. Platform-wide twin of
    * getBusinessOrdersByLocationChart.
    */
-  async getPlatformOrdersByLocationChart(): Promise<{ data: ChartDto }> {
+  async getPlatformOrdersByLocationChart(range?: DashboardRange): Promise<{ data: ChartDto }> {
     const data = await this.orderModel.aggregate([
+      this.windowStage(range),
       {
         $group: {
           // Normalise: trim, and treat null/missing/blank state as 'Unknown'
@@ -5848,8 +5749,9 @@ export class OrderService {
   }
 
   /** Accessory / Custom / Fabric / Non-Custom split, platform-wide. */
-  async getPlatformOrdersByProductKindChart(): Promise<{ data: ChartDto }> {
+  async getPlatformOrdersByProductKindChart(range?: DashboardRange): Promise<{ data: ChartDto }> {
     const data = await this.orderModel.aggregate([
+      this.windowStage(range),
       { $unwind: '$items' },
       {
         $lookup: {

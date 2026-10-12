@@ -78,91 +78,63 @@ export class ExpectedEarningsChartDto extends ChartDto {
 }
 
 export class AdminDashboardChartsSummaryDto {
-  @ApiProperty({
-    example: 1560221.99,
-    description: 'Sum of the revenue series — paid order totals for `year`',
-  })
-  revenueThisYear: number;
-
-  @ApiProperty({
-    example: 131,
-    description: 'Sum of the order-count series for `year`',
-  })
-  ordersThisYear: number;
-
-  @ApiProperty({
-    example: 412500,
-    description: 'Mirrors charts.expectedEarnings.total',
-  })
+  @ApiProperty({ example: 1560221.99, description: 'Sum of the revenue series - paid order totals inside the window' })
+  revenue: number;
+  @ApiProperty({ example: 131, description: 'Sum of the order-count series inside the window' })
+  orders: number;
+  @ApiProperty({ example: 156022.2, description: 'Sum of the platform-earnings series - commission on paid orders inside the window' })
+  platformEarnings: number;
+  @ApiProperty({ example: 412500, description: 'Mirrors charts.expectedEarnings.total' })
   expectedEarnings: number;
 }
-
+export class DashboardRangeDto {
+  @ApiProperty({ example: '7d', enum: ['7d', '30d', '12w', '12m'] })
+  key: string;
+  @ApiProperty({ example: 'day', enum: ['day', 'week', 'month'], description: 'How the series are bucketed' })
+  unit: string;
+  @ApiProperty({ example: 'Last 7 days' })
+  label: string;
+  @ApiProperty({ example: '2026-10-07T23:00:00.000Z', description: 'Window start (Lagos midnight), ISO' })
+  start: string;
+  @ApiProperty({ example: '2026-10-14T15:30:00.000Z', description: 'Window end (now), ISO' })
+  end: string;
+  @ApiProperty({ example: 7 })
+  days: number;
+}
 export class AdminDashboardChartsBundleDto {
-  @ApiProperty({ type: ChartDto, description: 'Twelve points, Jan–Dec' })
-  revenueByMonth: ChartDto;
-
-  @ApiProperty({ type: ChartDto, description: 'Twelve points, Jan–Dec' })
-  orderCountByMonth: ChartDto;
-
-  @ApiProperty({
-    type: ChartDto,
-    description:
-      'Seven points, Sun–Sat in Africa/Lagos. All-time revenue by day of the week — the weekly-rhythm counterpart to revenueByMonth. Paid orders only.',
-  })
-  earningsByDay: ChartDto;
-
-  @ApiProperty({
-    type: ChartDto,
-    description:
-      'Seven points, Sun–Sat in Africa/Lagos. All-time order volume by day of the week, paid or not.',
-  })
-  orderCountByDay: ChartDto;
-
-  @ApiProperty({
-    type: ChartDto,
-    description: 'All-time. Every status is emitted, including at zero.',
-  })
+  @ApiProperty({ type: ChartDto, description: 'Revenue per bucket over the window - paid orders only, gross' })
+  revenue: ChartDto;
+  @ApiProperty({ type: ChartDto, description: 'Orders per bucket over the window, paid or not' })
+  orderCount: ChartDto;
+  @ApiProperty({ type: ChartDto, description: 'Platform commission per bucket over the window - paid orders only' })
+  platformEarnings: ChartDto;
+  @ApiProperty({ type: ChartDto, description: 'Inside the window. Every status is emitted, including at zero.' })
   ordersByStatus: ChartDto;
-
   @ApiProperty({
     type: ChartDto,
-    description:
-      "All-time. Read from the product's taxonomy audience (who the garment is for), not the buyer's profile gender.",
+    description: "Inside the window. Read from the product's taxonomy audience (who the garment is for), not the buyer's profile gender.",
   })
   ordersByAudience: ChartDto;
-
   @ApiProperty({
     type: ChartDto,
-    description:
-      "All-time, top 6 states. Read from the ORDER's shipping address, not the customer's profile address.",
+    description: "Inside the window, top 6 states. Read from the ORDER's shipping address, not the customer's profile address.",
   })
   ordersByLocation: ChartDto;
-
-  @ApiProperty({ type: ChartDto, description: 'All-time' })
+  @ApiProperty({ type: ChartDto, description: 'Inside the window' })
   ordersByProductKind: ChartDto;
-
-  @ApiProperty({ type: ExpectedEarningsChartDto })
+  @ApiProperty({ type: ExpectedEarningsChartDto, description: 'Forward-looking; independent of the window' })
   expectedEarnings: ExpectedEarningsChartDto;
 }
-
 export class AdminDashboardChartsDto {
-  @ApiProperty({
-    example: 2026,
-    description:
-      'The year the time series cover. Echoes the `year` query parameter, or the year of the most recent order when it was omitted.',
-  })
-  year: number;
-
+  @ApiProperty({ type: DashboardRangeDto, description: 'The window every chart but expectedEarnings covers' })
+  range: DashboardRangeDto;
   @ApiProperty({ example: 'NGN' })
   currency: string;
-
   @ApiProperty({ type: AdminDashboardChartsSummaryDto })
   summary: AdminDashboardChartsSummaryDto;
-
   @ApiProperty({ type: AdminDashboardChartsBundleDto })
   charts: AdminDashboardChartsBundleDto;
 }
-
 export class AdminDashboardChartsWrapperDto extends BaseResponseDto {
   @ApiProperty({ type: AdminDashboardChartsDto })
   data: AdminDashboardChartsDto;

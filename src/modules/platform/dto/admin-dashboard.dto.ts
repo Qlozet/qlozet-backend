@@ -55,6 +55,9 @@ export class AdminDashboardChangesDto {
   })
   period_days: number;
 
+  @ApiProperty({ required: false, example: { key: '7d', label: 'Last 7 days' }, description: 'The window the changes compare - the request\'s `range`' })
+  period?: { key: string; label: string };
+
   @ApiProperty({
     example: 2.5,
     nullable: true,
