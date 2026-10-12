@@ -547,11 +547,12 @@ export class PlatformController {
   @ApiOperation({
     summary: 'Get admin dashboard metrics',
     description:
-      'Platform-wide overview counters for the admin console. Takes no request payload and no query parameters: every figure is all-time and cannot be narrowed to a period.',
+      'Platform-wide overview counters for the admin console. The counters are all-time; `changes` compares the selected window (`range`: 7d, 30d, 12w, 12m; default 7d) with the equal-length window before it.',
   })
+  @ApiQuery({ name: 'range', required: false, enum: ['7d', '30d', '12w', '12m'] })
   @ApiOkResponse({ type: AdminDashboardMetricsWrapperDto })
-  async getAdminDashboard() {
-    return this.orderService.getAdminDashboardMetrics();
+  async getAdminDashboard(@Query('range') range?: string) {
+    return this.orderService.getAdminDashboardMetrics(range);
   }
 
   /** ---------------- Admin Dashboard Charts ---------------- */
@@ -564,31 +565,12 @@ export class PlatformController {
   @ApiOperation({
     summary: 'Get admin dashboard chart series',
     description:
-      'Platform-wide chart data for the admin console, in the same `{ chartType, title, series }` envelope the vendor dashboard uses at GET /orders/chart. The time series (revenueByMonth, orderCountByMonth) are scoped to `year`; the distribution charts are all-time, matching the counters on GET /admin/dashboard.',
+      'Platform-wide chart data for the admin console, in the same `{ chartType, title, series }` envelope the vendor dashboard uses at GET /orders/chart. Everything is scoped to one window (`range`: 7d and 30d by day, 12w by week, 12m by month; default 7d) except expectedEarnings, which is forward-looking. Unknown values fall back to 7d.',
   })
-  @ApiQuery({
-    name: 'year',
-    type: Number,
-    required: false,
-    description:
-      'Calendar year for the monthly series. Defaults to the year of the most recent order — not the current year, so a database whose newest order is older still renders a populated chart.',
-  })
+  @ApiQuery({ name: 'range', required: false, enum: ['7d', '30d', '12w', '12m'] })
   @ApiOkResponse({ type: AdminDashboardChartsWrapperDto })
-  async getAdminDashboardCharts(@Query('year') year?: string) {
-    // ValidationPipe({ transform: true }) only coerces DTO-typed bodies and
-    // params, not a bare @Query scalar, so `year` arrives as a string. An
-    // unparseable or out-of-range value falls back to the default rather than
-    // producing a NaN date range that matches nothing.
-    const parsed = Number(year);
-    const resolved =
-      year !== undefined &&
-      Number.isInteger(parsed) &&
-      parsed >= 2000 &&
-      parsed <= 2100
-        ? parsed
-        : undefined;
-
-    return this.orderService.getAdminChart(resolved);
+  async getAdminDashboardCharts(@Query('range') range?: string) {
+    return this.orderService.getAdminChart(range);
   }
 
   /** ---------------- Vendor Dashboard ---------------- */

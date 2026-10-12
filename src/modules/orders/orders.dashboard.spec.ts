@@ -120,7 +120,8 @@ describe('OrderService.getAdminDashboardMetrics', () => {
       // rather than null here because this fixture's window is empty on both
       // sides, which is a genuine "no movement".
       changes: {
-        period_days: 30,
+        period_days: 7,
+        period: { key: '7d', label: 'Last 7 days' },
         total_orders: 0,
         orders_delivered: 0,
         orders_in_transit: 0,
@@ -219,10 +220,12 @@ describe('OrderService.getAdminDashboardMetrics — stat-card changes', () => {
       trend: facet({ ordersCurrent: 41, ordersPrevious: 40 }),
     });
 
-    const metrics = await service.getAdminDashboardMetrics();
+    const metrics = await service.getAdminDashboardMetrics('30d');
 
     expect(metrics.changes.total_orders).toBe(2.5);
+    // The badge window is the dashboard's selected range, not a fixed month.
     expect(metrics.changes.period_days).toBe(30);
+    expect(metrics.changes.period).toEqual({ key: '30d', label: 'Last 30 days' });
   });
 
   it('reports a fall as a negative number', async () => {
@@ -282,7 +285,8 @@ describe('OrderService.getAdminDashboardMetrics — stat-card changes', () => {
     const { changes } = await service.getAdminDashboardMetrics();
 
     expect(changes).toEqual({
-      period_days: 30,
+      period_days: 7,
+      period: { key: '7d', label: 'Last 7 days' },
       total_orders: 2.5,
       orders_delivered: -20,
       orders_in_transit: 50,
@@ -301,7 +305,7 @@ describe('OrderService.getAdminDashboardMetrics — stat-card changes', () => {
       trend: facet({ ordersCurrent: 5, ordersPrevious: 4 }),
     });
 
-    const metrics = await service.getAdminDashboardMetrics();
+    const metrics = await service.getAdminDashboardMetrics('30d');
 
     // The headline stays all-time; only the badge is windowed.
     expect(metrics.total_orders).toBe(131);
@@ -315,9 +319,10 @@ describe('OrderService.getAdminDashboardMetrics — stat-card changes', () => {
 
     // The two windows abut rather than overlap, so nothing is counted twice.
     expect(previousEnd.getTime()).toBe(currentFrom.getTime());
-    expect(
-      Math.round((Date.now() - currentFrom.getTime()) / 86_400_000),
-    ).toBe(30);
+    // Thirty platform days back from now, give or take the partial day today.
+    const daysBack = (Date.now() - currentFrom.getTime()) / 86_400_000;
+    expect(daysBack).toBeGreaterThanOrEqual(29);
+    expect(daysBack).toBeLessThan(31);
   });
 
   it('measures orders by creation but delivered/in-transit by updatedAt', async () => {
