@@ -89,6 +89,20 @@ export function findContactDetail(text: string): string | null {
   return null;
 }
 
+/** The text a shopper reads: tags gone, entities decoded, spaces collapsed. */
+export function visibleText(html: string | null | undefined): string {
+  return (html ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export interface ListingCandidate {
   title?: string | null;
   description?: string | null;
@@ -123,7 +137,10 @@ export function findListingViolations(listing: ListingCandidate): string[] {
     problems.push('Remove emoji from the title.');
   }
 
-  const description = (listing.description ?? '').trim();
+  // Descriptions arrive as HTML from the rich-text editor. Measure what a
+  // shopper reads, not the markup - a paragraph of tags around twenty
+  // characters of text used to pass.
+  const description = visibleText(listing.description);
   if (description.length < DESCRIPTION_MIN) {
     problems.push(
       `The description needs at least ${DESCRIPTION_MIN} characters — cover the fabric, the fit and the care.`,

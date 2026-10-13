@@ -50,6 +50,13 @@ describe('listing rules', () => {
   });
 
   describe('description', () => {
+    it('measures the text a shopper reads, not the HTML around it', () => {
+      const padded = `<p><strong>${'x'.repeat(20)}</strong></p>${'<br/>'.repeat(60)}`;
+      expect(findListingViolations({ ...good, description: padded })).toHaveLength(1);
+      const wrapped = `<p>${good.description}</p>`;
+      expect(findListingViolations({ ...good, description: wrapped })).toEqual([]);
+    });
+
     it('rejects a token keystroke', () => {
       expect(
         findListingViolations({ ...good, description: 'Nice kaftan' }),
