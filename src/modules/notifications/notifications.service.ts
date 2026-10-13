@@ -151,6 +151,32 @@ export class NotificationsService {
   /**
    * Get paginated notifications for a user, optionally filtered by category
    */
+  /**
+   * The store a vendor is looking at. A person can sit on several stores'
+   * teams (and the same account can own one store and be operations at
+   * another); the notification list used to be per USER, so a nudge or an
+   * order for store A appeared while they were working in store B - it read
+   * as the message going to the wrong vendor. User.business is rewritten on
+   * every store switch, so it is the active store. Customers have none, and
+   * see everything addressed to them.
+   */
+  private async activeBusinessScope(userId: string): Promise<Record<string, any>> {
+    try {
+      const user: any = await this.userModel
+        .findById(userId)
+        .select('business type')
+        .lean();
+      const bid = user?.business ? new Types.ObjectId(String(user.business)) : null;
+      if (!bid) return {};
+      // null also matches notifications that carry no store at all (account
+      // level: team invites, system notices, anything written before the
+      // field existed).
+      return { recipient_business: { $in: [bid, null] } };
+    } catch {
+      return {};
+    }
+  }
+
   async getForUser(
     userId: string,
     query: { page?: number; limit?: number; category?: string },
@@ -158,7 +184,10 @@ export class NotificationsService {
     const { page = 1, limit = 20, category } = query;
     const skip = (page - 1) * limit;
 
-    const filter: any = { recipient: new Types.ObjectId(userId) };
+    const filter: any = {
+      recipient: new Types.ObjectId(userId),
+      ...(await this.activeBusinessScope(userId)),
+    };
     if (category && Object.values(NotificationCategory).includes(category as NotificationCategory)) {
       filter.category = category;
     }
@@ -188,9 +217,10 @@ export class NotificationsService {
    */
   async getUnreadCount(userId: string) {
     const recipientId = new Types.ObjectId(userId);
+    const scope = await this.activeBusinessScope(userId);
 
     const counts = await this.notificationModel.aggregate([
-      { $match: { recipient: recipientId, is_read: false } },
+      { $match: { recipient: recipientId, is_read: false, ...scope } },
       {
         $group: {
           _id: '$category',
