@@ -4585,6 +4585,254 @@ export class OrderService {
     }
   }
 
+  // ==================== CRON: Abandoned Fulfilment ====================
+
+  /**
+   * Runs every hour at :45. The late penalty above stops growing at its cap,
+   * and nothing else ever closes a confirmed order the vendor simply never
+   * ships: the customer is left waiting with no refund and no way out (they
+   * can cancel before shipment, but only if they think to). This stage ends
+   * it: once a confirmed, unshipped shipment is `abandon_after_days` past its
+   * fulfilment deadline it is failed on the vendor's behalf - the customer is
+   * refunded the vendor's items plus that leg's shipping (compensation already
+   * credited by the late penalty stays theirs), the vendor's earnings for the
+   * order are reversed, the stock goes back, and both sides are told.
+   *
+   * Idempotent across overlapping runs / instances: the shipment is claimed
+   * with one atomic update (rejected + refunded flipped together) before any
+   * money moves, exactly like the auto-reject cron.
+   */
+  @Cron('45 * * * *', { timeZone: 'Africa/Lagos' })
+  async cancelAbandonedShipments() {
+    try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const abandonAfterDays = Number(
+        (settings as any)?.abandon_after_days ?? 7,
+      );
+      if (!(abandonAfterDays > 0)) return; // stage switched off
+
+      const now = new Date();
+      const cutoff = new Date(
+        now.getTime() - abandonAfterDays * 24 * 60 * 60 * 1000,
+      );
+
+      const orders = await this.orderModel.find({
+        status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+        shipments: {
+          $elemMatch: {
+            confirmed: true,
+            rejected: { $ne: true },
+            fulfillment_deadline: { $lte: cutoff },
+          },
+        },
+      });
+      if (orders.length === 0) return;
+
+      this.logger.log(
+        `[Abandoned] Checking ${orders.length} order(s) with shipments ${abandonAfterDays}+ day(s) past deadline`,
+      );
+
+      for (const order of orders) {
+        let orderChanged = false;
+
+        for (const shipment of order.shipments) {
+          if (!shipment.confirmed || shipment.rejected) continue;
+          if (!shipment.fulfillment_deadline) continue;
+          if (shipment.fulfillment_deadline > cutoff) continue;
+          if (
+            shipment.status === ShipmentStatus.SHIPPED ||
+            shipment.status === ShipmentStatus.IN_TRANSIT ||
+            shipment.status === ShipmentStatus.DELIVERED
+          ) continue;
+          // A confirmed fabric transfer that never moved is unwound by the
+          // auto-reject path's helper when it is unconfirmed; a confirmed one
+          // sits with the tailor's garment and is closed with that garment's
+          // own shipment, so it is not failed on its own here.
+          if (shipment.shipment_type === ShipmentType.FABRIC_TRANSFER) continue;
+
+          const businessId = shipment.business.toString();
+          const daysPast = Math.floor(
+            (now.getTime() - shipment.fulfillment_deadline.getTime()) /
+              (24 * 60 * 60 * 1000),
+          );
+          const reason = `Abandoned: vendor did not ship within ${abandonAfterDays} day(s) of the fulfilment deadline`;
+
+          // Atomically CLAIM the shipment: reject + mark refunded in one write
+          // so a second instance loading the same order cannot refund twice.
+          const claim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: {
+                  _id: (shipment as any)._id,
+                  rejected: { $ne: true },
+                  refunded: { $ne: true },
+                },
+              },
+            },
+            {
+              $set: {
+                'shipments.$.rejected': true,
+                'shipments.$.rejected_at': now,
+                'shipments.$.rejection_reason': reason,
+                'shipments.$.status': ShipmentStatus.FAILED,
+                'shipments.$.refunded': true,
+              },
+            },
+          );
+          if (claim.modifiedCount !== 1) {
+            this.logger.warn(
+              `[Abandoned] Shipment ${(shipment as any)._id} on order ${order.reference} already claimed - skipping.`,
+            );
+            continue;
+          }
+
+          shipment.rejected = true;
+          shipment.rejected_at = now;
+          shipment.rejection_reason = reason;
+          shipment.status = ShipmentStatus.FAILED;
+          (shipment as any).refunded = true;
+          orderChanged = true;
+
+          // Refund this vendor's live items + their leg's shipping. Items the
+          // vendor already rejected individually were refunded then.
+          const vendorItems = order.items.filter(
+            (i) =>
+              i.business?.toString() === businessId && !(i as any).rejected,
+          );
+          const vendorItemsTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).total_price || 0),
+            0,
+          );
+          const vendorShippingFee = shipment.shipping_fee || 0;
+          const refundAmount = vendorItemsTotal + vendorShippingFee;
+
+          order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+          order.shipping_fee = Math.max(
+            0,
+            (order.shipping_fee || 0) - vendorShippingFee,
+          );
+          order.total = Math.max(0, (order.total || 0) - refundAmount);
+
+          const business = await this.businessModel.findById(businessId);
+          const businessName = business?.business_name || 'The vendor';
+
+          this.logger.log(
+            `[Abandoned] ${businessName} never shipped order ${order.reference} (${daysPast}d past deadline). Cancelling their part; refund ₦${refundAmount}`,
+          );
+
+          const refundResult = await this.processPartialRefund(
+            order as OrderDocument,
+            refundAmount,
+            `Abandoned: ${businessName} did not ship within ${abandonAfterDays} day(s) of the deadline`,
+          ).catch((err) => {
+            this.logger.error(
+              `[Abandoned] Refund failed for ${order.reference}: ${err.message}`,
+            );
+            return { success: false, reason: 'exception' as string };
+          });
+
+          await this.reverseBusinessEarnings(
+            order as OrderDocument,
+            businessId,
+          ).catch((err) =>
+            this.logger.error(
+              `[Abandoned] Earnings reversal failed for ${order.reference}: ${err.message}`,
+            ),
+          );
+
+          await this.productService
+            .restoreInventory(order._id, businessId)
+            .catch((err) =>
+              this.logger.error(
+                `[Abandoned] Inventory restore failed for ${order.reference}: ${err.message}`,
+              ),
+            );
+
+          // Customer: say what was cancelled and whether the money has landed.
+          const refunded = refundResult?.success === true;
+          this.notificationsService
+            .create({
+              recipient: order.customer.toString(),
+              category: NotificationCategory.ORDER,
+              type: NotificationType.ORDER_CANCELLED,
+              title: 'Order Not Fulfilled',
+              body: refunded
+                ? `${businessName} did not ship your order #${order.reference} within ${abandonAfterDays} days of their deadline, so their items were cancelled. ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`
+                : `${businessName} did not ship your order #${order.reference} within ${abandonAfterDays} days of their deadline, so their items were cancelled. A refund of ₦${refundAmount.toLocaleString()} is being processed.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                business_name: businessName,
+                refund_amount: refundAmount,
+                days_past_deadline: daysPast,
+                reason: 'abandoned_by_vendor',
+              },
+              action_url: `/orders`,
+            })
+            .catch((err) =>
+              this.logger.error(
+                `[Abandoned] Failed to notify customer: ${err.message}`,
+              ),
+            );
+
+          // Vendor: whoever runs fulfilment (owner always included).
+          const recipients = await this.vendorRecipients
+            .resolve(businessId, OPERATIONS_ROLES)
+            .catch(() => []);
+          for (const member of recipients) {
+            this.notificationsService
+              .create({
+                recipient: member.userId,
+                recipient_business: businessId,
+                category: NotificationCategory.ORDER,
+                type: NotificationType.ORDER_CANCELLED,
+                title: 'Order Cancelled - Not Shipped',
+                body: `Order #${order.reference} was ${daysPast} day(s) past its fulfilment deadline and still not shipped, so it has been cancelled and the customer refunded. Your earnings for it have been reversed.`,
+                metadata: {
+                  order_id: order._id,
+                  order_reference: order.reference,
+                  refund_amount: refundAmount,
+                  days_past_deadline: daysPast,
+                  abandon_after_days: abandonAfterDays,
+                  reason: 'abandoned_by_vendor',
+                },
+                action_url: `/orders`,
+              })
+              .catch((err) =>
+                this.logger.error(
+                  `[Abandoned] Failed to notify vendor: ${err.message}`,
+                ),
+              );
+          }
+        }
+
+        if (!orderChanged) continue;
+
+        // Same status derivation as the auto-reject cron: every shipment gone
+        // means the order is cancelled; otherwise it keeps moving on the
+        // shipments that are still live.
+        const allRejected = order.shipments.every((s) => s.rejected);
+        if (allRejected) {
+          order.status = OrderStatus.CANCELLED;
+        } else {
+          const active = order.shipments.filter((s) => !s.rejected);
+          if (active.every((s) => s.confirmed)) {
+            order.status = OrderStatus.PROCESSING;
+          }
+        }
+        await order.save();
+      }
+
+      this.logger.log(`[Abandoned] Finished checking abandoned fulfilments`);
+    } catch (error) {
+      this.logger.error(
+        `[Abandoned] Cron failed: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   /**
    * Checkout preview: split cart by vendor, fetch rates per vendor.
    * Returns per-vendor courier options for the customer to select.
