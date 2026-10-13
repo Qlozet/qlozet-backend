@@ -50,6 +50,7 @@ export class AdminOpsToolsService {
     @InjectModel('Wallet') private readonly walletModel: Model<any>,
     @InjectModel('Transaction') private readonly transactionModel: Model<any>,
     @InjectModel('Event') private readonly eventModel: Model<any>,
+    @InjectModel('TeamMember') private readonly teamMemberModel: Model<any>,
   ) {}
 
   getToolDefs(): LlmToolDef[] {
@@ -75,7 +76,7 @@ export class AdminOpsToolsService {
       {
         name: 'get_vendor',
         description:
-          'One vendor in full: status and verification, profile, catalogue size, all-time orders and fulfilment record, open disputes and tickets, money owed to them (unreleased earnings, wallet balances), and their five most recent orders. Takes a business id or a (partial) business name.',
+          'One vendor in full: status and verification, profile, the team (who holds which role, accepted or not - this is who notifications and nudges reach), catalogue size, all-time orders and fulfilment record, open disputes and tickets, money owed to them (unreleased earnings, wallet balances), and their five most recent orders. Takes a business id or a (partial) business name.',
         input_schema: { type: 'object', required: ['business'], properties: { business: { type: 'string' } } },
       },
       {
@@ -427,7 +428,7 @@ export class AdminOpsToolsService {
     const bid = b._id;
     const now = new Date();
 
-    const [products, orders, openDisputes, openTickets, unreleased, wallet, recent, fulfilment] = await Promise.all([
+    const [products, orders, openDisputes, openTickets, unreleased, wallet, recent, fulfilment, team] = await Promise.all([
       this.productModel.aggregate([{ $match: { business: bid } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
       this.orderModel.countDocuments({ 'items.business': bid, status: { $ne: 'pending' } }),
       this.disputeModel.countDocuments({ business: bid, status: { $in: ['open', 'under_review'] } }),
@@ -448,6 +449,7 @@ export class AdminOpsToolsService {
           },
         },
       ]),
+      this.teamMemberModel.find({ business: bid }).populate({ path: 'role', select: 'name' }).select('user full_name email role accepted is_active is_owner createdAt').lean(),
     ]);
     const w: any = wallet;
     const f: any = fulfilment[0] ?? {};
@@ -468,6 +470,19 @@ export class AdminOpsToolsService {
         location: [b.city, b.state, b.country].filter(Boolean).join(', ') || null,
         joined_at: b.createdAt,
         accepts_bespoke: b.accepts_bespoke !== false,
+        // Who notifications reach: a nudge about listings goes to owner +
+        // operations + marketing; about orders to owner + operations + tailor.
+        // A member not accepted, not active, or in another role gets nothing.
+        team: (team as any[]).map((m) => ({
+          name: m.full_name ?? null,
+          email: m.email ?? null,
+          role: (m.role as any)?.name ?? null,
+          owner: !!m.is_owner,
+          accepted: !!m.accepted,
+          active: m.is_active !== false,
+          has_account: !!m.user,
+          user_id: m.user ? String(m.user) : null,
+        })),
         verification: {
           submitted_at: b.verification_submitted_at ?? null,
           decided_at: b.verification_decided_at ?? null,

@@ -117,14 +117,17 @@ describe('Vendor notification recipients', () => {
     expect(idsOf(rows)).toEqual([String(OWNER_USER)]);
   });
 
-  it('asks only for active, accepted members with a user account', async () => {
+  it('asks only for members with a user account who are not deactivated', async () => {
     await service.resolve(BUSINESS, [VendorRole.TAILOR]);
     const f = teamMemberModel.lastFilter;
 
-    expect(f.is_active).toBe(true);
-    // An invited member who has not accepted has no user yet, so there is
-    // nobody to put a notification against.
-    expect(f.accepted).toBe(true);
+    // Not `true`: a row from before the flag existed has no is_active at all,
+    // and that owner still owns the store. Only an explicit false deactivates.
+    expect(f.is_active).toEqual({ $ne: false });
+    // Likewise no `accepted` condition: an invite links the user and marks
+    // accepted on creation, so the linked account is the real test - and a
+    // legacy owner row without the field must not vanish from every fan-out.
+    expect(f.accepted).toBeUndefined();
     expect(f.user).toEqual({ $ne: null });
     expect(f.business).toBeInstanceOf(Types.ObjectId);
   });
