@@ -446,6 +446,12 @@ export class Order {
   @Prop({ type: Boolean, default: false })
   inventory_deducted?: boolean; // idempotency: guards double stock deduction on webhook retries
 
+  // Claimed once by the cancelled-order reconciliation cron so a cancelled
+  // order is swept exactly once (earnings reversed, stock restored, customer
+  // refunded if the payment landed after the cancellation).
+  @Prop({ type: Boolean, default: false })
+  cancellation_reconciled?: boolean;
+
   @Prop({ type: Date, default: null })
   payout_eligible_at?: Date; // completedAt + payout_delay_days
 

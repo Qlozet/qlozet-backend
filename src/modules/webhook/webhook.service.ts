@@ -315,6 +315,68 @@ export class WebhookService {
    * are each individually idempotent; the bespoke side effects (which are not)
    * only run on the FIRST finalisation, i.e. when the order wasn't already paid.
    */
+  /**
+   * The charge for an already-cancelled order settled: credit it back to the
+   * customer's wallet, record the REFUND, mark the order refunded and tell
+   * them. Never throws - the webhook must still be acknowledged.
+   */
+  private async refundPaymentOnCancelledOrder(
+    order: any,
+    transaction: TransactionDocument,
+  ): Promise<void> {
+    const amount = transaction.amount || 0;
+    const customerId = order.customer?.toString();
+    try {
+      if (!customerId || amount <= 0) {
+        throw new Error(customerId ? 'non-positive amount' : 'order has no customer');
+      }
+      const wallet = await this.walletsService.getOrCreateWallet({ customer: customerId });
+      const walletId = String((wallet as any)._id);
+      await this.walletsService.creditWallet(walletId, amount);
+      await this.transactionService.create({
+        initiator: order.customer,
+        order: order._id,
+        wallet: (wallet as any)._id,
+        type: TransactionType.REFUND,
+        amount,
+        status: TransactionStatus.SUCCESS,
+        description: `Refund for cancelled order ${order.reference}: payment settled after cancellation`,
+        channel: 'refund',
+        metadata: {
+          order_reference: order.reference,
+          original_transaction: transaction.reference,
+          refund_type: 'wallet_from_paystack',
+          reason: 'paid_after_cancel',
+        },
+      });
+      await this.orderModel.updateOne(
+        { _id: order._id },
+        { $set: { refund_status: 'refunded' } },
+      );
+      this.logger.warn(
+        `[Finalize] Order ${order.reference} was paid AFTER being cancelled - ₦${amount} credited back to the customer's wallet.`,
+      );
+      await this.notificationsService.create({
+        recipient: customerId,
+        category: NotificationCategory.ORDER,
+        type: NotificationType.ORDER_CANCELLED,
+        title: 'Payment Refunded',
+        body: `Your payment for order #${order.reference} arrived after you cancelled it. ₦${amount.toLocaleString()} has been refunded to your wallet.`,
+        metadata: {
+          order_id: order._id,
+          order_reference: order.reference,
+          refund_amount: amount,
+          reason: 'paid_after_cancel',
+        },
+        action_url: `/orders`,
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `[Finalize] Order ${order.reference} was paid after cancellation but the refund did not complete: ${error?.message} - the reconciliation cron will retry.`,
+      );
+    }
+  }
+
   async finalizeCheckoutOrder(transaction: TransactionDocument): Promise<void> {
     if (transaction.channel !== 'checkout' || transaction.order == null) return;
 
@@ -324,6 +386,25 @@ export class WebhookService {
 
     const isBespoke = (order as any)?.type === 'bespoke';
     const alreadyPaid = (order as any)?.payment_status === 'paid';
+
+    // The customer cancelled BEFORE the payment settled (a card checkout
+    // creates the order first; cancelling a pending order is allowed, and at
+    // that moment there was no successful charge to refund). The status
+    // guard below already kept such an order cancelled, but earnings were
+    // still recorded, stock still deducted and the money kept - the vendor
+    // showed held earnings on a cancelled order and the customer was never
+    // refunded. Record the payment, send it straight back, and do nothing
+    // else. Claimed atomically so a webhook + verify race cannot refund twice.
+    if ((order as any)?.status === OrderStatus.CANCELLED) {
+      const claim = await this.orderModel.updateOne(
+        { _id: orderId, status: OrderStatus.CANCELLED, payment_status: { $ne: 'paid' } },
+        { $set: { payment_status: 'paid' } },
+      );
+      if (claim.modifiedCount === 1) {
+        await this.refundPaymentOnCancelledOrder(order as any, transaction);
+      }
+      return;
+    }
 
     // Bespoke: finalise the quote acceptance now that payment succeeded — accept
     // the winning quote, decline the alternatives and mark the design accepted.

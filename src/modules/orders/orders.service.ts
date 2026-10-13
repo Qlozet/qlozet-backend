@@ -14,7 +14,6 @@ import {
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import {
-  ALLOWED_STATUSES,
   CAPACITY_OCCUPYING_STATUSES,
   Order,
   OrderDocument,
@@ -1574,28 +1573,13 @@ export class OrderService {
         filter.customer = customer;
       }
       if (business) {
-        // A vendor's orders include (a) those where they sell an item, AND
-        // (b) those where they are the SOURCE of a shipment — specifically a
-        // fabric vendor shipping their fabric to a tailor for a cross-vendor
-        // "use my own fabric" order. The fabric vendor is only on the
-        // fabric_transfer shipment, never on an order item, so filtering by
-        // items.business alone hid those orders from them entirely.
-        filter['$or'] = [
-          { 'items.business': business },
-          { 'shipments.business': business },
-        ];
-        // Reservation FEE orders reference the fabric vendor on their item but
-        // are platform revenue with nothing to fulfil — showing them to the
-        // vendor reads as an unpaid order they can never action. Claims
-        // (type 'reservation_claim') DO show: the vendor hands over those yards.
-        filter.type = { $ne: 'reservation' };
-        // Hide abandoned checkouts: an order is created BEFORE the customer
-        // pays (card/Stripe redirect), so an abandoned payment leaves a
-        // pending+unpaid order behind. Vendors must never see (or confirm)
-        // an order nobody paid for. $ne (a query, so schema defaults don't
-        // apply) keeps legacy orders that PREDATE the payment_status field
-        // visible — they simply have no stored value to match 'unpaid'.
-        filter.payment_status = { $ne: 'unpaid' };
+        // The one definition of "this vendor's order" (see vendorOrderScope):
+        // sells an item on it or ships a leg of it, paid for, not a
+        // reservation fee. Claims (type 'reservation_claim') DO show: the
+        // vendor hands over those yards. $ne (a query, so schema defaults
+        // don't apply) keeps legacy orders that predate payment_status
+        // visible - they have no stored value to match 'unpaid'.
+        Object.assign(filter, this.vendorOrderScope(business));
       }
       if (status && status !== 'all') {
         filter.status = status;
@@ -2602,7 +2586,12 @@ export class OrderService {
     };
   }
 
-  async getVendorDashboardMetrics(businessId: Types.ObjectId) {
+  async getVendorDashboardMetrics(businessId: Types.ObjectId | string) {
+    // req.business.id arrives as a string: countDocuments casts it, but the
+    // aggregations below never did, so "Most purchased" and gross sales were
+    // empty for every vendor. Cast once, scope once.
+    const bid = new Types.ObjectId(String(businessId));
+    const scope = this.vendorOrderScope(bid);
     const [
       totalOrders,
       ordersDelivered,
@@ -2612,27 +2601,33 @@ export class OrderService {
       totalProducts,
       totalCustomers,
     ] = await Promise.all([
-        this.orderModel.countDocuments({ 'items.business': businessId }), // total orders for this business
+        this.orderModel.countDocuments(scope), // total orders for this business
         this.orderModel.countDocuments({
-          'items.business': businessId,
+          ...scope,
           status: OrderStatus.COMPLETED,
         }), // delivered
         this.orderModel.countDocuments({
-          'items.business': businessId,
+          ...scope,
           status: 'processing',
         }), // in transit
         this.orderModel.aggregate([
+          { $match: scope },
           { $unwind: '$items' },
-          { $match: { 'items.business': businessId } },
+          { $match: { 'items.business': bid } },
           {
             $group: {
               _id: '$items.product',
               totalOrdered: {
+                // Units live inside the selection arrays, so each is summed on
+                // its own first - `$sum` over array-valued expressions skips
+                // them as non-numeric and yields 0. (The field is
+                // color_variant_selections; the old `variant_selections` name
+                // matched nothing.)
                 $sum: {
-                  $sum: [
-                    '$items.variant_selections.quantity',
-                    '$items.fabric_selections.quantity',
-                    '$items.accessory_selections.quantity',
+                  $add: [
+                    { $sum: '$items.color_variant_selections.quantity' },
+                    { $sum: '$items.fabric_selections.quantity' },
+                    { $sum: '$items.accessory_selections.quantity' },
                   ],
                 },
               },
@@ -2676,15 +2671,13 @@ export class OrderService {
         // commission and payouts — the same definition the platform-wide
         // gross_sales uses.
         this.orderModel.aggregate<{ _id: null; total: number }>([
-          { $match: { 'items.business': businessId, payment_status: 'paid' } },
+          { $match: { ...scope, payment_status: 'paid' } },
           { $group: { _id: null, total: { $sum: '$total' } } },
         ]),
-        this.productModel.countDocuments({ business: businessId }),
+        this.productModel.countDocuments({ business: bid }),
         // Distinct buyers, not orders: a customer who ordered five times is one
         // customer.
-        this.orderModel.distinct('customer', {
-          'items.business': businessId,
-        }),
+        this.orderModel.distinct('customer', scope),
       ]);
 
     return {
@@ -4104,6 +4097,142 @@ export class OrderService {
       failure: `unknown_channel_${paymentChannel}`,
     });
     return { success: false, reason: 'unknown_channel' };
+  }
+
+  // ==================== CRON: Cancelled-order reconciliation ====================
+
+  /**
+   * Runs every hour at :15 and sweeps each cancelled order ONCE (claimed via
+   * `cancellation_reconciled`). It exists for the orders that were paid AFTER
+   * the customer cancelled them (card checkout: order first, charge later;
+   * cancelling a pending order is allowed) - before the finalisation guard
+   * above, those still had earnings recorded, stock deducted and the money
+   * kept. For such an order: the vendor's held earnings are reversed, the
+   * deducted stock goes back, and the customer gets the payment credited to
+   * their wallet. Each step is conditional on evidence, so an order that was
+   * cancelled the normal way (refunded, reversed, restored at the time) is
+   * only flagged and left alone:
+   *  - earnings rows still exist      -> reverse them (and restore stock: the
+   *                                      cancel-time restore ran before the
+   *                                      deduction, as a no-op)
+   *  - paid, no successful REFUND row -> refund the order total to the wallet
+   */
+  @Cron('15 * * * *', { timeZone: 'Africa/Lagos' })
+  async reconcileCancelledOrders() {
+    try {
+      const orders = await this.orderModel
+        .find({
+          status: OrderStatus.CANCELLED,
+          cancellation_reconciled: { $ne: true },
+        })
+        .sort({ createdAt: -1 })
+        .limit(500);
+      if (orders.length === 0) return;
+
+      let touched = 0;
+      for (const order of orders) {
+        const claim = await this.orderModel.updateOne(
+          {
+            _id: order._id,
+            status: OrderStatus.CANCELLED,
+            cancellation_reconciled: { $ne: true },
+          },
+          { $set: { cancellation_reconciled: true } },
+        );
+        if (claim.modifiedCount !== 1) continue;
+
+        const hadEarnings = await this.businessEarningsModel.exists({
+          order: order._id,
+        });
+        if (hadEarnings) {
+          touched++;
+          this.logger.warn(
+            `[CancelReconcile] Cancelled order ${order.reference} still holds vendor earnings - reversing.`,
+          );
+          await this.reverseBusinessEarnings(order as OrderDocument).catch(
+            (err) =>
+              this.logger.error(
+                `[CancelReconcile] Earnings reversal failed for ${order.reference}: ${err.message}`,
+              ),
+          );
+          if ((order as any).inventory_deducted) {
+            await this.productService
+              .restoreInventory(order._id as Types.ObjectId)
+              .catch((err) =>
+                this.logger.error(
+                  `[CancelReconcile] Inventory restore failed for ${order.reference}: ${err.message}`,
+                ),
+              );
+          }
+        }
+
+        const paid = (order as any).payment_status === 'paid';
+        if (paid && (order.total || 0) > 0) {
+          const refunded = await this.transactionService
+            .hasSuccessfulRefund(order._id as Types.ObjectId)
+            .catch(() => true); // on doubt, do not pay out
+          if (!refunded) {
+            touched++;
+            this.logger.warn(
+              `[CancelReconcile] Cancelled order ${order.reference} was paid (₦${order.total}) and never refunded - refunding.`,
+            );
+            const result = await this.processPartialRefund(
+              order as OrderDocument,
+              order.total,
+              'Payment settled after the order was cancelled',
+            ).catch((err) => {
+              this.logger.error(
+                `[CancelReconcile] Refund failed for ${order.reference}: ${err.message}`,
+              );
+              return { success: false, reason: 'exception' as string };
+            });
+            if (result?.success) {
+              await this.orderModel.updateOne(
+                { _id: order._id },
+                { $set: { refund_status: 'refunded' } },
+              );
+              this.notificationsService
+                .create({
+                  recipient: order.customer.toString(),
+                  category: NotificationCategory.ORDER,
+                  type: NotificationType.ORDER_CANCELLED,
+                  title: 'Payment Refunded',
+                  body: `Your payment for cancelled order #${order.reference} was still held. ₦${order.total.toLocaleString()} has been refunded to your wallet.`,
+                  metadata: {
+                    order_id: order._id,
+                    order_reference: order.reference,
+                    refund_amount: order.total,
+                    reason: 'paid_after_cancel',
+                  },
+                  action_url: `/orders`,
+                })
+                .catch((err) =>
+                  this.logger.error(
+                    `[CancelReconcile] Failed to notify customer: ${err.message}`,
+                  ),
+                );
+            } else {
+              // Leave it claimable again so the next run retries.
+              await this.orderModel.updateOne(
+                { _id: order._id },
+                { $set: { cancellation_reconciled: false } },
+              );
+            }
+          }
+        }
+      }
+
+      if (touched > 0) {
+        this.logger.log(
+          `[CancelReconcile] Swept ${orders.length} cancelled order(s); ${touched} correction(s) applied`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `[CancelReconcile] Cron failed: ${error.message}`,
+        error.stack,
+      );
+    }
   }
 
   // ==================== CRON: 24h Auto-Reject ====================
@@ -6701,14 +6830,13 @@ export class OrderService {
       ]);
 
     /* ===================== ORDERS STATS (SINGLE QUERY) ===================== */
+    // Same orders the vendor's list shows (vendorOrderScope) - every status,
+    // so "Total Orders" here, the orders page and the list agree. It used to
+    // count only processing/completed/returned, which left out every order
+    // still awaiting confirmation and every cancelled one, while counting
+    // paid reservation fees as completed orders.
     const ordersAgg = await this.orderModel.aggregate([
-      { $unwind: '$items' },
-      {
-        $match: {
-          'items.business': businessObjectId,
-          status: { $in: [...ALLOWED_STATUSES, OrderStatus.RETURNED] },
-        },
-      },
+      { $match: this.vendorOrderScope(businessObjectId) },
       {
         $facet: {
           current: [
@@ -6754,15 +6882,11 @@ export class OrderService {
       (o) => o.status === OrderStatus.RETURNED,
     ).length;
 
-    const calcAvgPerDay = (orders: any[]) => {
-      if (!orders.length) return 0;
-
-      const days = new Set(
-        orders.map((o) => o.createdAt.toISOString().slice(0, 10)),
-      );
-
-      return Math.round(orders.length / days.size);
-    };
+    // Orders per day over the WHOLE window (to one decimal), not per day that
+    // happened to have an order - that version read "2 a day" for a vendor
+    // with three orders in a year.
+    const calcAvgPerDay = (orders: any[]) =>
+      Math.round((orders.length / Math.max(1, range.days)) * 10) / 10;
 
     const averageOrdersPerDay = calcAvgPerDay(currentOrders);
     const previousAverageOrdersPerDay = calcAvgPerDay(previousOrders);
@@ -6842,11 +6966,35 @@ export class OrderService {
     };
   }
 
-  /** The $match every dashboard breakdown starts with: this vendor's items, inside the window. */
+  /**
+   * What "one of this vendor's orders" means, everywhere the vendor (or an
+   * admin looking at the vendor) sees a count: an order they sell an item on
+   * OR ship a leg of (a fabric vendor on a cross-vendor transfer has no item),
+   * that was actually paid for (an abandoned card checkout leaves a
+   * pending+unpaid order behind), and that is not a reservation FEE order
+   * (platform revenue with nothing to fulfil - it carries the fabric vendor's
+   * item and is marked completed when the fee settles, so without this it
+   * counted as a delivery). The orders list, the orders-page cards, the
+   * dashboard cards and the charts all start from this, so they cannot
+   * disagree with each other. Accepts a string because req.business.id is one
+   * and an aggregation $match never casts it.
+   */
+  private vendorOrderScope(businessId: string | Types.ObjectId) {
+    const bid = new Types.ObjectId(String(businessId));
+    return {
+      $or: [{ 'items.business': bid }, { 'shipments.business': bid }],
+      type: { $ne: 'reservation' },
+      payment_status: { $ne: 'unpaid' },
+    };
+  }
+
+  /** The $match every dashboard breakdown starts with (after $unwind items): this vendor's items on in-scope orders, inside the window. */
   private dashboardItemsMatch(businessId: string, range?: DashboardRange) {
     return {
       $match: {
         'items.business': new Types.ObjectId(businessId),
+        type: { $ne: 'reservation' },
+        payment_status: { $ne: 'unpaid' },
         ...(range ? { createdAt: { $gte: range.start, $lt: range.end } } : {}),
       },
     };
@@ -7140,9 +7288,12 @@ export class OrderService {
   async getBusinessOrderCountByDayChart(businessId: string, range?: DashboardRange): Promise<any> {
     const r = range ?? resolveDashboardRange(undefined);
     const rows = await this.orderModel.aggregate([
-      { $unwind: '$items' },
-      this.dashboardItemsMatch(businessId, r),
-      { $group: { _id: '$_id', createdAt: { $first: '$createdAt' } } },
+      {
+        $match: {
+          ...this.vendorOrderScope(businessId),
+          createdAt: { $gte: r.start, $lt: r.end },
+        },
+      },
       { $project: { _id: 0, at: '$createdAt' } },
     ]);
 

@@ -285,6 +285,16 @@ export class TransactionService {
     });
   }
 
+  /** Whether the customer has already been credited back anything on this order. */
+  async hasSuccessfulRefund(orderId: string | Types.ObjectId): Promise<boolean> {
+    const found = await this.transactionModel.exists({
+      ...ObjectIdUtils.refMatch('order', String(orderId)),
+      type: TransactionType.REFUND,
+      status: TransactionStatus.SUCCESS,
+    });
+    return !!found;
+  }
+
   async refundPaystackPayment(reference: string) {
     const transaction = await this.transactionModel.findOne({ reference });
     if (!transaction) throw new NotFoundException('Transaction not found');

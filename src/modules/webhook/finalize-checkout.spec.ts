@@ -15,6 +15,10 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
   let service: WebhookService;
   let recordEarnings: jest.Mock;
   let updateInventory: jest.Mock;
+  let creditWallet: jest.Mock;
+  let createTxn: jest.Mock;
+  let notify: jest.Mock;
+  const WALLET_ID = new Types.ObjectId();
 
   beforeAll(async () => {
     await mongo.start();
@@ -29,6 +33,9 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
     await orderModel.deleteMany({});
     recordEarnings = jest.fn().mockResolvedValue(undefined);
     updateInventory = jest.fn().mockResolvedValue(undefined);
+    creditWallet = jest.fn().mockResolvedValue(undefined);
+    createTxn = jest.fn().mockResolvedValue({});
+    notify = jest.fn().mockResolvedValue({});
 
     // Real model + stubbed collaborators: the service is built without its
     // constructor so only the fields these flows touch need to exist.
@@ -42,7 +49,12 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
       fabricClaimModel: { updateOne: jest.fn().mockResolvedValue({}) },
       // Token reward reads settings; a missing doc means "reward off".
       platformSettingsModel: { findOne: () => ({ lean: async () => null }) },
-      transactionService: {},
+      transactionService: { create: createTxn },
+      walletsService: {
+        getOrCreateWallet: jest.fn().mockResolvedValue({ _id: WALLET_ID }),
+        creditWallet,
+      },
+      notificationsService: { create: notify },
       paymentService: {},
       stripeProvider: {},
     });
@@ -116,6 +128,49 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
     expect(saved.status).toBe('cancelled');
     // The money WAS taken — it must stay visible for refund handling.
     expect(saved.payment_status).toBe('paid');
+  });
+
+  it('a payment that lands on a cancelled order is refunded, and records neither earnings nor stock', async () => {
+    // Card checkout: the order exists before the charge settles, and the
+    // customer may cancel it in between. The status guard kept it cancelled,
+    // but earnings were still recorded, stock deducted and the money kept -
+    // a vendor showed ₦36,000 held on three cancelled orders.
+    const order = await makeOrder({ status: 'cancelled' });
+    await service.finalizeCheckoutOrder({
+      ...checkoutTxn(order),
+      amount: 85_000,
+      reference: 'PSK-1',
+    } as any);
+
+    const saved = await orderModel.findById(order._id).lean();
+    expect(saved.status).toBe('cancelled');
+    expect(saved.payment_status).toBe('paid');
+    expect(saved.refund_status).toBe('refunded');
+    expect(recordEarnings).not.toHaveBeenCalled();
+    expect(updateInventory).not.toHaveBeenCalled();
+    expect(creditWallet).toHaveBeenCalledWith(WALLET_ID.toString(), 85_000);
+    expect(createTxn).toHaveBeenCalledTimes(1);
+    expect(createTxn.mock.calls[0][0]).toMatchObject({
+      amount: 85_000,
+      channel: 'refund',
+      metadata: { reason: 'paid_after_cancel', original_transaction: 'PSK-1' },
+    });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0].recipient).toBe(order.customer.toString());
+  });
+
+  it('webhook + verify racing on a cancelled order refund once', async () => {
+    const order = await makeOrder({ status: 'cancelled' });
+    const txn = { ...checkoutTxn(order), amount: 85_000 } as any;
+
+    await Promise.all([
+      service.finalizeCheckoutOrder(txn),
+      service.finalizeCheckoutOrder(txn),
+    ]);
+    await service.finalizeCheckoutOrder(txn);
+
+    expect(creditWallet).toHaveBeenCalledTimes(1);
+    expect(createTxn).toHaveBeenCalledTimes(1);
   });
 
   it('ignores non-checkout transactions entirely', async () => {
