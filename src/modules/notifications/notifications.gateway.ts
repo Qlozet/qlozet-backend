@@ -63,6 +63,11 @@ export class NotificationsGateway implements OnGatewayConnection {
       title: notification.title,
       body: notification.body,
       action_url: notification.action_url,
+      // The store it is for, so a vendor app showing another of this
+      // person's stores can skip the toast (the list is scoped server-side).
+      recipient_business: (notification as any).recipient_business
+        ? String((notification as any).recipient_business)
+        : null,
       created_at: (notification as any).createdAt,
     });
   }
