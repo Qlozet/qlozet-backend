@@ -258,24 +258,23 @@ export class ReturnsService {
 
     returnReq.refund_amount = refundAmount;
 
-    // Issue refund
+    // Refund the returned items - and only them - to the customer's wallet,
+    // however they paid. The gateway refund used here before sent back the
+    // WHOLE original charge, so a one-item return on a multi-vendor card
+    // order refunded the entire order while only this vendor's earning was
+    // reversed.
     if (refundAmount > 0) {
-      const originalTransaction = await this.transactionService.findByOrderId(
-        (order._id as any).toString(),
+      await this.walletsService.refundToCustomerWallet({
+        order,
+        amount: refundAmount,
+        reason: 'return_refund',
+        description: `Refund for returned items on order ${order.reference}`,
+        metadata: { return_id: (returnReq._id as any).toString() },
+      });
+      await this.orderModel.updateOne(
+        { _id: order._id, refund_status: { $ne: 'refunded' } },
+        { $set: { refund_status: 'partial' } },
       );
-
-      if (originalTransaction?.channel === 'wallet_checkout' && originalTransaction.wallet) {
-        await this.walletsService.creditWallet(
-          originalTransaction.wallet.toString(),
-          refundAmount,
-        );
-      } else if (originalTransaction) {
-        await this.transactionService
-          .refundPaystackPayment(originalTransaction.reference)
-          .catch((err) =>
-            this.logger.error(`[Return] Paystack refund failed: ${err.message}`),
-          );
-      }
     }
 
     // Reverse vendor earnings and keep the wallet ledger in sync.

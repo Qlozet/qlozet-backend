@@ -3219,12 +3219,16 @@ export class OrderService {
       // Mirror the claw-back in the vendor ledger as a REFUND debit so their
       // transaction history stays consistent with their wallet balance (the
       // release earlier wrote a matching CREDIT).
-      if (vendorWallet && clawedAmount > 0) {
+      // Book only what actually left the balance; a shortfall is now carried
+      // as owed_balance and booked when it is recovered from a later release.
+      const shortfall = (vendorWallet as any)?.shortfall ?? 0;
+      const taken = clawedAmount - shortfall;
+      if (vendorWallet && taken > 0) {
         await this.transactionService.create({
           wallet: vendorWallet._id as any,
           order: order._id as any,
           type: TransactionType.REFUND,
-          amount: clawedAmount,
+          amount: taken,
           status: TransactionStatus.SUCCESS,
           channel: 'refund',
           payment_method: 'wallet',
@@ -3312,7 +3316,13 @@ export class OrderService {
     // Schedule the earnings release that courier delivery would normally
     // trigger — same payout-delay window as delivered shipments.
     const settings = await this.platformSettingsModel.findOne().lean();
-    const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+    // Never release before the customer's return window has closed - a
+    // release on day 3 of a 7-day window let a vendor withdraw money a
+    // return on day 6 then could not claw back.
+    const payoutDelayDays = Math.max(
+      (settings as any)?.payout_delay_days ?? 3,
+      (settings as any)?.return_window_days ?? 7,
+    );
     const releaseDate = new Date(
       Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
     );

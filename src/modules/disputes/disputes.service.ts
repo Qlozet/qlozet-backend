@@ -235,13 +235,24 @@ export class DisputesService {
 
     switch (dto.resolution) {
       case DisputeResolution.FULL_REFUND: {
-        // Calculate total vendor amount for this business
+        // A full refund is what the customer PAID for this vendor's items -
+        // not the vendor's net earnings, which left the platform keeping its
+        // commission on an order it had just refunded and the customer short
+        // by that much. Items are the source; legacy orders without item
+        // prices fall back to the gross recorded on the earnings.
         const earnings = await this.businessEarningsModel.find({
           order: dispute.order,
           business: businessId,
           released: false,
         });
-        const totalRefund = earnings.reduce((sum, e) => sum + (e.net_amount || 0), 0);
+        const itemsGross = (order.items || [])
+          .filter(
+            (i: any) => i.business?.toString() === businessId && !i.rejected,
+          )
+          .reduce((sum: number, i: any) => sum + (i.total_price || 0), 0);
+        const earningsGross = earnings.reduce((sum, e) => sum + (e.amount || 0), 0);
+        const earningsNet = earnings.reduce((sum, e) => sum + (e.net_amount || 0), 0);
+        const totalRefund = itemsGross > 0 ? itemsGross : earningsGross > 0 ? earningsGross : earningsNet;
 
         dispute.status = DisputeStatus.RESOLVED_REFUND;
         dispute.refund_amount = totalRefund;
@@ -374,26 +385,18 @@ export class DisputesService {
    */
   private async processDisputeRefund(order: OrderDocument, amount: number, reason: string) {
     if (amount <= 0) return;
-
-    const originalTransaction = await this.transactionService.findByOrderId(
-      (order._id as any).toString(),
+    // Exact amount, to the customer's wallet, however they paid. The gateway
+    // refund used here before sent back the WHOLE original charge for a
+    // partial (or single-vendor) resolution.
+    await this.walletsService.refundToCustomerWallet({
+      order,
+      amount,
+      reason: 'dispute_refund',
+      description: `${reason} - order ${order.reference}`,
+    });
+    await this.orderModel.updateOne(
+      { _id: order._id, refund_status: { $ne: 'refunded' } },
+      { $set: { refund_status: 'partial' } },
     );
-    if (!originalTransaction) {
-      this.logger.error(`[Dispute] No transaction found for order ${order.reference}`);
-      return;
-    }
-
-    if (originalTransaction.channel === 'wallet_checkout' && originalTransaction.wallet) {
-      await this.walletsService.creditWallet(
-        originalTransaction.wallet.toString(),
-        amount,
-      );
-    } else {
-      await this.transactionService
-        .refundPaystackPayment(originalTransaction.reference)
-        .catch((err) =>
-          this.logger.error(`[Dispute] Paystack refund failed: ${err.message}`),
-        );
-    }
   }
 }
