@@ -10,6 +10,18 @@ import { OrderStatus } from './schemas/orders.schema';
  */
 const BUSINESS = new Types.ObjectId();
 
+/**
+ * Every vendor-facing figure starts from the same scope the orders list uses:
+ * the vendor sells an item on the order or ships a leg of it, it was paid
+ * for, and it is not a reservation-fee order.
+ */
+const scopedTo = (query: Record<string, any> | undefined) => {
+  expect(query?.$or?.[0]?.['items.business']).toEqual(BUSINESS);
+  expect(query?.$or?.[1]?.['shipments.business']).toEqual(BUSINESS);
+  expect(query?.type).toEqual({ $ne: 'reservation' });
+  expect(query?.payment_status).toEqual({ $ne: 'unpaid' });
+};
+
 const buildService = (overrides: {
   counts?: number[];
   grossSales?: { total: number }[];
@@ -93,7 +105,7 @@ describe('OrderService.getVendorDashboardMetrics', () => {
     const metrics = await service.getVendorDashboardMetrics(BUSINESS);
 
     expect(getDistinctArgs()?.[0]).toBe('customer');
-    expect(getDistinctArgs()?.[1]).toEqual({ 'items.business': BUSINESS });
+    scopedTo(getDistinctArgs()?.[1]);
     expect(metrics.total_customers).toBe(2);
   });
 
@@ -104,7 +116,7 @@ describe('OrderService.getVendorDashboardMetrics', () => {
     await service.getVendorDashboardMetrics(BUSINESS);
 
     for (const query of orderCountQueries) {
-      expect(query['items.business']).toEqual(BUSINESS);
+      scopedTo(query);
     }
     expect(getProductQuery()).toEqual({ business: BUSINESS });
 
@@ -115,7 +127,69 @@ describe('OrderService.getVendorDashboardMetrics', () => {
         ),
       ) as Record<string, any>[]
     ).find((stage) => stage.$match)!.$match;
-    expect(grossMatch['items.business']).toEqual(BUSINESS);
+    expect(grossMatch.$or[0]['items.business']).toEqual(BUSINESS);
+    expect(grossMatch.type).toEqual({ $ne: 'reservation' });
+  });
+
+  it('hides unpaid checkouts and reservation-fee orders from every count, like the list does', async () => {
+    // "Total Orders 8" above a list of 4: the card counted abandoned card
+    // checkouts (pending + unpaid) and reservation FEE orders (platform
+    // revenue, marked completed when the fee settles - so one read as a
+    // delivery) that the list deliberately hides.
+    const { service, orderCountQueries, aggregations } = buildService({});
+
+    await service.getVendorDashboardMetrics(BUSINESS);
+
+    expect(orderCountQueries).toHaveLength(3);
+    for (const query of orderCountQueries) {
+      expect(query.payment_status).toEqual({ $ne: 'unpaid' });
+      expect(query.type).toEqual({ $ne: 'reservation' });
+    }
+    const topProducts = aggregations.find((pipeline) =>
+      (pipeline as Record<string, any>[]).some(
+        (stage) => stage.$group?._id === '$items.product',
+      ),
+    ) as Record<string, any>[];
+    // Scoped at the ORDER level before the items are unwound.
+    expect(Object.keys(topProducts[0])).toEqual(['$match']);
+    scopedTo(topProducts[0].$match);
+    expect(Object.keys(topProducts[1])).toEqual(['$unwind']);
+  });
+
+  it('accepts the string id the request carries and still matches as an ObjectId', async () => {
+    // req.business.id is a string. countDocuments casts it; an aggregation
+    // $match never does, which is why "Most purchased" was empty.
+    const { service, aggregations } = buildService({});
+
+    await service.getVendorDashboardMetrics(BUSINESS.toHexString());
+
+    for (const pipeline of aggregations as Record<string, any>[][]) {
+      const match = pipeline.find((stage) => stage.$match)!.$match;
+      const id = match.$or[0]['items.business'];
+      expect(id).toBeInstanceOf(Types.ObjectId);
+      expect(id.equals(BUSINESS)).toBe(true);
+    }
+  });
+
+  it('sums colour-variant units under their real field name', async () => {
+    // The schema field is color_variant_selections; `variant_selections`
+    // matched nothing, so clothing never counted towards "Most purchased".
+    const { service, aggregations } = buildService({});
+
+    await service.getVendorDashboardMetrics(BUSINESS);
+
+    const topProducts = aggregations.find((pipeline) =>
+      (pipeline as Record<string, any>[]).some(
+        (stage) => stage.$group?._id === '$items.product',
+      ),
+    ) as Record<string, any>[];
+    const total = JSON.stringify(
+      topProducts.find((stage) => stage.$group)!.$group.totalOrdered,
+    );
+    expect(total).toContain('$items.color_variant_selections.quantity');
+    expect(total).not.toContain('$items.variant_selections');
+    // Each array is summed on its own, then the three are added.
+    expect(total).toContain('"$add"');
   });
 
   it('counts gross sales over paid orders only', async () => {

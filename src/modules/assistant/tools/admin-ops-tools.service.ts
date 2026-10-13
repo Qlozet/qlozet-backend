@@ -428,12 +428,17 @@ export class AdminOpsToolsService {
     const bid = b._id;
     const now = new Date();
 
-    const [products, orders, openDisputes, openTickets, unreleased, wallet, recent, fulfilment, team] = await Promise.all([
+    const [products, orders, openDisputes, openTickets, unreleased, lifetimeEarned, wallet, recent, fulfilment, team] = await Promise.all([
       this.productModel.aggregate([{ $match: { business: bid } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
       this.orderModel.countDocuments({ 'items.business': bid, status: { $ne: 'pending' } }),
       this.disputeModel.countDocuments({ business: bid, status: { $in: ['open', 'under_review'] } }),
       this.ticketModel.countDocuments({ business: bid, status: { $in: ['open', 'in_progress'] } }),
       this.earningModel.aggregate([{ $match: { business: bid, released: false } }, { $group: { _id: null, amount: { $sum: '$net_amount' }, n: { $sum: 1 } } }]),
+      // Everything ever credited to the vendor that still stands (held or
+      // released; reversed earnings are deleted). The business record's
+      // lifetime_earned counter is never written, so it always read 0 and
+      // was flagged as a ledger gap it is not.
+      this.earningModel.aggregate([{ $match: { business: bid } }, { $group: { _id: null, amount: { $sum: '$net_amount' } } }]),
       this.walletModel.findOne({ business: bid }).select('balance available_balance pending_balance').lean(),
       this.orderModel.find({ 'items.business': bid, status: { $ne: 'pending' } }).sort({ createdAt: -1 }).limit(5).select('reference status createdAt items shipments').lean(),
       this.orderModel.aggregate([
@@ -506,7 +511,7 @@ export class AdminOpsToolsService {
           unreleased_items: unreleased[0]?.n ?? 0,
           wallet_available: w?.available_balance ?? w?.balance ?? null,
           wallet_pending: w?.pending_balance ?? null,
-          lifetime_earned: b.lifetime_earned ?? null,
+          lifetime_earned: Math.round((lifetimeEarned[0]?.amount ?? 0) * 100) / 100,
           lifetime_paid_out: b.lifetime_paid_out ?? null,
           last_payout_at: b.last_payout_date ?? null,
         },
