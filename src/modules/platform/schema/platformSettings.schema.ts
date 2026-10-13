@@ -30,6 +30,13 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 24 })
   auto_reject_hours: number;
 
+  // A confirmed order the vendor still has not shipped this many days past its
+  // fulfilment deadline is cancelled on their behalf (full refund, earnings
+  // reversed, stock restored). 0 turns the stage off; the late penalty keeps
+  // accruing to its cap but nothing ever closes the order.
+  @Prop({ type: Number, default: 7 })
+  abandon_after_days: number;
+
   @Prop({ type: Number, default: 7 })
   return_window_days: number;
 

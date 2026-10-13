@@ -187,6 +187,16 @@ export class UpdatePlatformSettingsDto {
   auto_reject_hours?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Cancel a confirmed order the vendor has not shipped N days past its fulfilment deadline (0 = never)',
+    example: 7,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  abandon_after_days?: number;
+
+  @ApiPropertyOptional({
     description: 'Late-fulfilment penalty accrual per day (%)',
     example: 5,
   })
