@@ -73,6 +73,16 @@ export class CreateProductDto {
   product_id?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Size guide to link this product to: its chart is what shoppers see and its sizes are the ones on offer. null unlinks. Guides also attach themselves by their own conditions.',
+    example: '677f5c19c918d2e4a8c55123',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsMongoId()
+  size_guide?: string | null;
+
+  @ApiPropertyOptional({
     description: 'The base starting price of the product',
     example: 5000,
   })
