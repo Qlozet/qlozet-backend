@@ -6,6 +6,8 @@ import { Wallet, WalletSchema } from './schema/wallet.schema';
 import { Token, TokenSchema, TokenTransaction, TokenTransactionSchema } from './schema/token.schema';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { PlatformSettings, PlatformSettingsSchema } from '../platform/schema/platformSettings.schema';
+import { Return, ReturnSchema } from '../returns/schemas/return.schema';
+import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
 import { JwtService } from '@nestjs/jwt';
 import { TokenService } from './token.service';
 import { TokenController } from './token.controller';
@@ -24,6 +26,9 @@ import { PlatformModule } from '../platform/platform.module';
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       { name: Business.name, schema: BusinessSchema },
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      // Withdrawal hold: money under an open return stays in the wallet.
+      { name: Return.name, schema: ReturnSchema },
+      { name: BusinessEarning.name, schema: BusinessEarningSchema },
     ]),
     TransactionsModule,  // provides TransactionService
     PaymentModule,       // provides PaymentService

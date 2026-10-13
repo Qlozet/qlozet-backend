@@ -150,6 +150,39 @@ export class BusinessEarningsCron {
     });
   }
 
+  private async recoverOwed(wallet: WalletDocument) {
+    const owed = (wallet as any).owed_balance || 0;
+    const take = Math.min(owed, wallet.balance || 0);
+    if (take <= 0) return;
+    const updated = await this.businessWalletModel.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: take }, owed_balance: { $gte: take } },
+      { $inc: { balance: -take, owed_balance: -take } },
+      { new: true },
+    );
+    if (!updated) return;
+    const reference = await generateUniqueQlozetReference(
+      this.transactionModel,
+      'TRX',
+    );
+    await this.transactionModel.create({
+      wallet: updated._id,
+      type: TransactionType.DEBIT,
+      amount: take,
+      reference,
+      status: TransactionStatus.SUCCESS,
+      channel: 'debt_recovery',
+      payment_method: 'wallet',
+      description: 'Recovered money owed from a refunded order',
+      metadata: {
+        business_id: (updated.business as any)?.toString?.() ?? updated.business,
+        debt_recovery: true,
+      },
+    });
+    this.logger.warn(
+      `Recovered ₦${take} owed from business ${updated.business} out of this release → balance=${updated.balance} owed=${(updated as any).owed_balance}`,
+    );
+  }
+
   @Cron(CronExpression.EVERY_30_MINUTES)
   async releaseFunds() {
     const now = new Date();
@@ -216,6 +249,12 @@ export class BusinessEarningsCron {
             this.logger.warn(`recordEarningCredit failed: ${e.message}`),
           );
           await this.notifyPayout(earning).catch(() => undefined);
+
+          // Money the vendor owes back (a refund their balance could not
+          // cover) comes out of this release before they can withdraw it.
+          await this.recoverOwed(updatedWallet).catch((e) =>
+            this.logger.warn(`recoverOwed failed: ${e.message}`),
+          );
 
           this.logger.log(
             `Released ₦${earning.net_amount} to business ${earning.business} → wallet=${updatedWallet.balance}`,

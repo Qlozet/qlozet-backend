@@ -17,6 +17,14 @@ export class Wallet {
   @Prop({ type: Number, default: 0 })
   pending_balance: number;
 
+  // Money the vendor owes the platform back: a refund (return, cancellation
+  // after an upfront release, late penalty) that the spendable balance could
+  // not cover because it had already been withdrawn. Netted off the next
+  // release and blocks withdrawals until cleared. Before this the shortfall
+  // was floored to zero and simply lost.
+  @Prop({ type: Number, default: 0 })
+  owed_balance: number;
+
   @Prop({ required: true, default: 'NGN' })
   currency: string;
 

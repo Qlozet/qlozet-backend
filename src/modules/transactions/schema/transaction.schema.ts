@@ -63,6 +63,7 @@ export class Transaction extends Document {
       'payout',
       'earning',
       'reservation',
+      'debt_recovery', // money a vendor owed back, recovered from a later release
     ],
     default: 'checkout',
   })

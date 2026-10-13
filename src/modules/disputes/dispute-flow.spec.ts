@@ -63,8 +63,17 @@ describe('DisputesService', () => {
       // Who at the vendor hears about a dispute. These tests are about the
       // money, so an empty team keeps the fan-out out of the way.
       vendorRecipients: { resolve: jest.fn().mockResolvedValue([]) },
-      transactionService: { findByOrderId, refundPaystackPayment: jest.fn() },
-      walletsService: { creditWallet },
+      transactionService: { findByOrderId },
+      // Refunds go to the customer's wallet by exact amount; the helper is
+      // stubbed to the same shape the old direct credit had so the money
+      // assertions below stay readable.
+      walletsService: {
+        creditWallet,
+        refundToCustomerWallet: jest.fn(async ({ amount }: { amount: number }) => {
+          await creditWallet('customer-wallet', amount);
+          return { walletId: 'customer-wallet' };
+        }),
+      },
     });
   });
 
@@ -170,9 +179,11 @@ describe('DisputesService', () => {
 
       const saved = await disputeModel.findById(dispute._id).lean();
       expect(saved.status).toBe(DisputeStatus.RESOLVED_REFUND);
-      expect(saved.refund_amount).toBe(54_000);
+      // What the customer paid (the earning's gross), not the vendor's net:
+      // the platform does not keep its commission on an order it refunded.
+      expect(saved.refund_amount).toBe(60_000);
       expect(await earningsModel.countDocuments({ order: order._id })).toBe(0);
-      expect(creditWallet).toHaveBeenCalledWith(expect.any(String), 54_000);
+      expect(creditWallet).toHaveBeenCalledWith(expect.any(String), 60_000);
     });
 
     it('partial refund: reduces the earning, unfreezes the rest, refunds the amount', async () => {

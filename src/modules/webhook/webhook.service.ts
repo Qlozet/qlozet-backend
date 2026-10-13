@@ -904,9 +904,15 @@ export class WebhookService {
         `All shipments delivered for order ${order.reference} — marking COMPLETED`,
       );
 
-      // Set delivery-gated payout: release_date = now + payout_delay_days
+      // Set delivery-gated payout: release_date = now + the longer of the
+      // payout delay and the return window. Releasing on day 3 of a 7-day
+      // return window let a vendor withdraw money a day-6 return then could
+      // not claw back.
       const settings = await this.platformSettingsModel.findOne().lean();
-      const payoutDelayDays = (settings as any)?.payout_delay_days ?? 3;
+      const payoutDelayDays = Math.max(
+        (settings as any)?.payout_delay_days ?? 3,
+        (settings as any)?.return_window_days ?? 7,
+      );
       const releaseDate = new Date(
         Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
       );

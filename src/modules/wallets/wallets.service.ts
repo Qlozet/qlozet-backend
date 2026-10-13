@@ -11,6 +11,11 @@ import { TransactionService } from '../transactions/transactions.service';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { PaymentService } from '../payment/payment.service';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
+import { Return, ReturnDocument, ReturnStatus } from '../returns/schemas/return.schema';
+import {
+  BusinessEarning,
+  BusinessEarningDocument,
+} from '../business/schemas/business-earnings.schema';
 import {
   PlatformSettings,
   PlatformSettingsDocument,
@@ -28,6 +33,10 @@ export class WalletsService {
     private readonly businessModel: Model<BusinessDocument>,
     @InjectModel(PlatformSettings.name)
     private readonly platformSettingsModel: Model<PlatformSettingsDocument>,
+    @InjectModel(Return.name)
+    private readonly returnModel: Model<ReturnDocument>,
+    @InjectModel(BusinessEarning.name)
+    private readonly businessEarningsModel: Model<BusinessEarningDocument>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
   ) {}
@@ -166,19 +175,182 @@ export class WalletsService {
       return null;
     }
 
-    wallet.pending_balance = Math.max(
-      0,
-      (wallet.pending_balance || 0) + pendingDelta,
-    );
-    wallet.balance = Math.max(0, (wallet.balance || 0) + balanceDelta);
+    // Pending is bookkeeping (it mirrors the unreleased earning rows), so a
+    // shortfall there is drift, not money: floor it and say so.
+    const newPending = (wallet.pending_balance || 0) + pendingDelta;
+    if (newPending < 0) {
+      this.logger.warn(
+        `[WalletReconcile] business=${businessId} pending would go to ${newPending}; flooring at 0 (earning rows and pending_balance have drifted)`,
+      );
+    }
+    wallet.pending_balance = Math.max(0, newPending);
+
+    // Spendable balance is real money. Taking more than it holds means the
+    // vendor already withdrew it: book the difference as owed, so the next
+    // release pays it back and withdrawals stay blocked until it is cleared.
+    // Crediting pays owed money down first, for the same reason.
+    let shortfall = 0;
+    let recovered = 0;
+    const before = wallet.balance || 0;
+    if (balanceDelta < 0) {
+      const take = Math.min(before, -balanceDelta);
+      shortfall = -balanceDelta - take;
+      wallet.balance = before - take;
+      if (shortfall > 0) {
+        wallet.owed_balance = (wallet.owed_balance || 0) + shortfall;
+        this.logger.warn(
+          `[WalletReconcile] business=${businessId} owed ₦${-balanceDelta} but held ₦${before}; ₦${shortfall} booked as owed (now ₦${wallet.owed_balance})`,
+        );
+      }
+    } else if (balanceDelta > 0) {
+      wallet.balance = before + balanceDelta;
+      recovered = Math.min(wallet.balance, wallet.owed_balance || 0);
+      if (recovered > 0) {
+        wallet.balance -= recovered;
+        wallet.owed_balance = (wallet.owed_balance || 0) - recovered;
+      }
+    }
     wallet.last_transaction_at = new Date();
     await wallet.save();
+    if (recovered > 0) {
+      await this.recordDebtRecovery(wallet, recovered);
+    }
 
     this.logger.log(
-      `[WalletReconcile] business=${businessId} pending${pendingDelta >= 0 ? '+' : ''}${pendingDelta} balance${balanceDelta >= 0 ? '+' : ''}${balanceDelta} → pending=${wallet.pending_balance} balance=${wallet.balance}`,
+      `[WalletReconcile] business=${businessId} pending${pendingDelta >= 0 ? '+' : ''}${pendingDelta} balance${balanceDelta >= 0 ? '+' : ''}${balanceDelta} → pending=${wallet.pending_balance} balance=${wallet.balance} owed=${wallet.owed_balance || 0}`,
     );
 
+    // Callers that mirror the claw-back in the vendor's ledger book only what
+    // actually left the balance; the rest is booked when it is recovered.
+    (wallet as any).shortfall = shortfall;
     return wallet;
+  }
+
+  /**
+   * Pay down what the vendor owes from their spendable balance. Called before
+   * a withdrawal and by the release cron after a credit lands, so owed money
+   * is always settled before the vendor can take anything out.
+   */
+  async settleOwed(businessId: string | Types.ObjectId): Promise<number> {
+    const wallet = await this.walletModel.findOne(
+      ObjectIdUtils.refMatch('business', businessId),
+    );
+    if (!wallet) return 0;
+    const owed = wallet.owed_balance || 0;
+    const take = Math.min(owed, wallet.balance || 0);
+    if (take <= 0) return 0;
+    const updated = await this.walletModel.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: take }, owed_balance: { $gte: take } },
+      { $inc: { balance: -take, owed_balance: -take }, $set: { last_transaction_at: new Date() } },
+      { new: true },
+    );
+    if (!updated) return 0;
+    await this.recordDebtRecovery(updated, take);
+    this.logger.log(
+      `[WalletReconcile] business=${businessId} recovered ₦${take} owed → balance=${updated.balance} owed=${updated.owed_balance}`,
+    );
+    return take;
+  }
+
+  private async recordDebtRecovery(wallet: WalletDocument, amount: number) {
+    try {
+      await this.transactionService.create({
+        wallet: wallet._id as any,
+        type: TransactionType.DEBIT,
+        amount,
+        status: TransactionStatus.SUCCESS,
+        channel: 'debt_recovery',
+        payment_method: 'wallet',
+        description: 'Recovered money owed from a refunded order',
+        metadata: {
+          business_id: wallet.business?.toString(),
+          debt_recovery: true,
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`[WalletReconcile] Could not record debt recovery: ${err.message}`);
+    }
+  }
+
+  /**
+   * Refund a customer for (part of) an order, into their wallet: instant,
+   * in-app and re-spendable, and no gateway refund API in the loop. Every
+   * refund path (cancellation, return, dispute) lands here with the EXACT
+   * amount; the gateway-side helper refunded the whole original charge, so a
+   * one-item return on a multi-vendor card order sent the entire order back.
+   */
+  async refundToCustomerWallet(opts: {
+    order: { _id: any; reference?: string; customer?: any };
+    amount: number;
+    reason: string;
+    description?: string;
+    metadata?: Record<string, any>;
+  }): Promise<{ walletId: string } | null> {
+    const { order, amount, reason } = opts;
+    if (!(amount > 0)) return null;
+    const customerId = order.customer?.toString?.() ?? String(order.customer ?? '');
+    if (!customerId) {
+      this.logger.error(
+        `[Refund] Order ${order.reference ?? order._id} has no customer; cannot refund ₦${amount}`,
+      );
+      return null;
+    }
+    const wallet = await this.getOrCreateWallet({ customer: customerId });
+    const walletId = String((wallet as any)._id);
+    await this.creditWallet(walletId, amount);
+    await this.transactionService.create({
+      initiator: new Types.ObjectId(customerId),
+      order: order._id,
+      wallet: (wallet as any)._id,
+      type: TransactionType.REFUND,
+      amount,
+      status: TransactionStatus.SUCCESS,
+      description:
+        opts.description ?? `Refund for order ${order.reference ?? ''}: ${reason}`,
+      channel: 'refund',
+      metadata: {
+        order_reference: order.reference,
+        refund_type: 'wallet',
+        reason,
+        ...(opts.metadata ?? {}),
+      },
+    });
+    this.logger.log(
+      `[Refund] ₦${amount} credited to customer ${customerId}'s wallet for order ${order.reference ?? order._id} (${reason})`,
+    );
+    return { walletId };
+  }
+
+  /**
+   * Money that must stay in the wallet while a return is open on one of the
+   * vendor's orders: the released earnings on those orders are what a
+   * completed return claws back, so they cannot be withdrawn first.
+   */
+  async withdrawalHold(businessId: string | Types.ObjectId): Promise<number> {
+    const bid = new Types.ObjectId(String(businessId));
+    const open = await this.returnModel
+      .find({
+        business: bid,
+        status: {
+          $in: [
+            ReturnStatus.REQUESTED,
+            ReturnStatus.VENDOR_APPROVED,
+            ReturnStatus.RETURN_SHIPPED,
+            ReturnStatus.RECEIVED,
+          ],
+        },
+      })
+      .select('order')
+      .lean();
+    if (!open.length) return 0;
+    const orderIds = [...new Set(open.map((r: any) => String(r.order)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const rows = await this.businessEarningsModel.aggregate<{ _id: null; amount: number }>([
+      { $match: { business: bid, order: { $in: orderIds }, released: true } },
+      { $group: { _id: null, amount: { $sum: '$net_amount' } } },
+    ]);
+    return Math.max(0, rows[0]?.amount ?? 0);
   }
 
   // Get wallet balance
@@ -210,9 +382,25 @@ export class WalletsService {
       throw new NotFoundException('Vendor wallet not found');
     }
 
-    if (wallet.balance < amount) {
+    // Owed money is settled before anything can leave, and the released
+    // earnings on orders with an open return stay put until it closes.
+    const recovered = await this.settleOwed(businessId);
+    if (recovered > 0) {
+      wallet.balance = (wallet.balance || 0) - recovered;
+      wallet.owed_balance = (wallet.owed_balance || 0) - recovered;
+    }
+    if ((wallet.owed_balance || 0) > 0) {
       throw new BadRequestException(
-        `Insufficient wallet balance. Available: ₦${wallet.balance.toLocaleString()}`,
+        `₦${(wallet.owed_balance || 0).toLocaleString()} from refunded orders is still owed; it is taken from your next earnings release before withdrawals reopen.`,
+      );
+    }
+    const hold = await this.withdrawalHold(businessId);
+    const available = Math.max(0, (wallet.balance || 0) - hold);
+    if (available < amount) {
+      throw new BadRequestException(
+        hold > 0
+          ? `Insufficient available balance. ₦${hold.toLocaleString()} is held while a return is open; available now: ₦${available.toLocaleString()}`
+          : `Insufficient wallet balance. Available: ₦${available.toLocaleString()}`,
       );
     }
 
