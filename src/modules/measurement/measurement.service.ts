@@ -18,6 +18,7 @@ import { buildMetadataFromConfig } from './util/metadata-builder';
 import { buildPrompt } from './util/constructionBuilder';
 import { StyleLibraryService } from '../style-library/style-library.service';
 import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
+import { applyBodyShape, hasBodyShape } from './body-shape';
 import {
   AutoMaskPredictBodyDto,
   AutoMaskSwaggerDto,
@@ -116,20 +117,22 @@ export class MeasurementService {
   async runPrediction(body: RunPredictBodyDto) {
     const { business, customer } = body;
     try {
-      const [settings, tokenBalance] = await Promise.all([
-        this.platformService.getSettings(),
-        this.tokenService.balance(business, customer),
-      ]);
-
-      if (tokenBalance < settings.run_prediction_token_price) {
-        throw new BadRequestException(
-          'Insufficient tokens, please fund your wallet',
-        );
+      const settings = await this.platformService.getSettings();
+      // This is the no-photo estimate: a tabular model that costs nothing to
+      // run. Its price is a platform setting; at 0 nobody is asked for tokens
+      // for the one path that is meant to be the easy way in.
+      const price = Number(settings.run_prediction_token_price ?? 0);
+      if (price > 0) {
+        const tokenBalance = await this.tokenService.balance(business, customer);
+        if (tokenBalance < price) {
+          throw new BadRequestException(
+            'Insufficient tokens, please fund your wallet',
+          );
+        }
+        // Pre-deduct tokens BEFORE the Gradio call.
+        // MongoDB connection is fresh now; after Gradio it may go stale.
+        await this.tokenService.spend('prediction', business, customer);
       }
-
-      // Pre-deduct tokens BEFORE the Gradio call.
-      // MongoDB connection is fresh now; after Gradio it may go stale.
-      await this.tokenService.spend('prediction', business, customer);
 
       const client = await this.gradio.getClient(this.hbm);
 
@@ -158,7 +161,16 @@ export class MeasurementService {
       // //run_predict returns [DataFrame, File]: the rich { cm, in, derived }
       // payload arrives as a DOWNLOADABLE FILE component — fetch and parse it,
       // falling back to the DataFrame output.
-      return this.extractPrediction(result?.data, 0);
+      const payload = await this.extractPrediction(result?.data, 0);
+      // The model knows height, weight and gender; the person knows where
+      // their weight sits. Nudge the output by their own description.
+      const shape = {
+        build: body.build,
+        stomach: body.stomach,
+        shoulders: body.shoulders,
+        legs: body.legs,
+      };
+      return hasBodyShape(shape) ? applyBodyShape(payload, shape) : payload;
     } catch (error) {
       // Re-throw known NestJS exceptions with correct HTTP status
       if (error instanceof BadRequestException) throw error;

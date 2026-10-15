@@ -281,7 +281,11 @@ export class UpdatePlatformSettingsDto {
   @Min(0)
   edit_garment_token_price?: number;
 
-  @ApiPropertyOptional({ description: 'Run prediction cost (tokens)', example: 45 })
+  @ApiPropertyOptional({
+    description:
+      'Tokens charged for the no-photo measurement estimate (height, weight, gender and body shape). The model costs nothing to run; 0 makes it free.',
+    example: 0,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)

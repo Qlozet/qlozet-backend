@@ -1,6 +1,8 @@
 import { ApiBody, ApiConsumes, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsOptional, IsNumber, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsNumber, IsString } from 'class-validator';
+import { BODY_SHAPE_VALUES } from '../body-shape';
+import type { BodyBuild, Legs, Shoulders, Stomach } from '../body-shape';
 
 export class RunPredictBodyDto {
   @ApiProperty({ description: 'User height in cm', required: false })
@@ -24,6 +26,29 @@ export class RunPredictBodyDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // Body shape, in the person's own words. Optional; the model runs on
+  // height/weight/gender and these nudge its output - see body-shape.ts.
+  @ApiProperty({ required: false, enum: BODY_SHAPE_VALUES.build })
+  @IsOptional()
+  @IsIn([...BODY_SHAPE_VALUES.build])
+  build?: BodyBuild;
+
+  @ApiProperty({ required: false, enum: BODY_SHAPE_VALUES.stomach })
+  @IsOptional()
+  @IsIn([...BODY_SHAPE_VALUES.stomach])
+  stomach?: Stomach;
+
+  @ApiProperty({ required: false, enum: BODY_SHAPE_VALUES.shoulders })
+  @IsOptional()
+  @IsIn([...BODY_SHAPE_VALUES.shoulders])
+  shoulders?: Shoulders;
+
+  @ApiProperty({ required: false, enum: BODY_SHAPE_VALUES.legs })
+  @IsOptional()
+  @IsIn([...BODY_SHAPE_VALUES.legs])
+  legs?: Legs;
+
   business?: string;
   customer?: string;
 }
