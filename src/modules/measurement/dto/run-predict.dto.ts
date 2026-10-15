@@ -2,7 +2,13 @@ import { ApiBody, ApiConsumes, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsOptional, IsNumber, IsString } from 'class-validator';
 import { BODY_SHAPE_VALUES } from '../body-shape';
-import type { BodyBuild, Legs, Shoulders, Stomach, Thighs } from '../body-shape';
+import type {
+  BodyBuild,
+  Legs,
+  Shoulders,
+  Stomach,
+  Thighs,
+} from '../body-shape';
 
 export class RunPredictBodyDto {
   @ApiProperty({ description: 'User height in cm', required: false })
