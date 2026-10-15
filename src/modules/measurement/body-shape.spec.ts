@@ -34,6 +34,12 @@ describe('bodyShapeDeltas', () => {
     expect(bodyShapeDeltas({ build: 'broad', shoulders: 'broad' }).shoulder_breadth).toBe(3);
   });
 
+  it('full thighs move the thigh most, the hip and calf a little', () => {
+    expect(bodyShapeDeltas({ thighs: 'full' })).toEqual({ thigh: 3.5, hip: 1.5, calf: 0.5 });
+    // Broad build + full thighs stack on the thigh.
+    expect(bodyShapeDeltas({ build: 'broad', thighs: 'full' }).thigh).toBe(5.5);
+  });
+
   it('long legs lengthen the inseam and shorten the torso by less', () => {
     expect(bodyShapeDeltas({ legs: 'long' })).toEqual({ leg_length: 2.5, shoulder_to_crotch: -1.5 });
   });

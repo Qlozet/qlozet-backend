@@ -15,12 +15,14 @@ export type BodyBuild = 'slim' | 'average' | 'broad';
 export type Stomach = 'flat' | 'average' | 'slightly_protruding' | 'protruding';
 export type Shoulders = 'narrow' | 'average' | 'broad';
 export type Legs = 'short' | 'average' | 'long';
+export type Thighs = 'slim' | 'average' | 'full';
 
 export interface BodyShape {
   build?: BodyBuild;
   stomach?: Stomach;
   shoulders?: Shoulders;
   legs?: Legs;
+  thighs?: Thighs;
 }
 
 export const BODY_SHAPE_VALUES = {
@@ -28,6 +30,7 @@ export const BODY_SHAPE_VALUES = {
   stomach: ['flat', 'average', 'slightly_protruding', 'protruding'],
   shoulders: ['narrow', 'average', 'broad'],
   legs: ['short', 'average', 'long'],
+  thighs: ['slim', 'average', 'full'],
 } as const;
 
 /** Centimetre deltas per body part for a given shape. Unlisted parts: 0. */
@@ -53,6 +56,12 @@ export function bodyShapeDeltas(shape: BodyShape | null | undefined): Record<str
 
   if (shape.legs === 'short') { add('leg_length', -2.5); add('shoulder_to_crotch', 1.5); }
   else if (shape.legs === 'long') { add('leg_length', 2.5); add('shoulder_to_crotch', -1.5); }
+
+  // Thighs vary most between people of the same weight, and trousers forgive
+  // it least; the model predicts them from weight alone. Full thighs usually
+  // come with fuller hips and calves, so those follow by a little.
+  if (shape.thighs === 'slim') { add('thigh', -2.5); add('hip', -1); }
+  else if (shape.thighs === 'full') { add('thigh', 3.5); add('hip', 1.5); add('calf', 0.5); }
 
   for (const k of Object.keys(d)) if (d[k] === 0) delete d[k];
   return d;
