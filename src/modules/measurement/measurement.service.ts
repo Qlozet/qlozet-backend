@@ -169,6 +169,7 @@ export class MeasurementService {
         stomach: body.stomach,
         shoulders: body.shoulders,
         legs: body.legs,
+        thighs: body.thighs,
       };
       return hasBodyShape(shape) ? applyBodyShape(payload, shape) : payload;
     } catch (error) {
