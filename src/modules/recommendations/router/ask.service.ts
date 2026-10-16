@@ -12,7 +12,7 @@ import { RankersService, RankingContext } from '../rankers/rankers.service';
 import { CatalogItem } from '../catalog/schemas/catalog-item.schema';
 import { Product, ProductDocument } from '../../products/schemas/product.schema';
 import { User, UserDocument } from '../../ums/schemas/user.schema';
-import { classifyBodyType } from 'src/common/utils/body-type-classifier';
+import { classifyBodyType, CLASSIFIER_VERSION } from 'src/common/utils/body-type-classifier';
 import { normalizeAudience, productFacts } from '../catalog/product-facts';
 import { buildProductContext, PromptProduct } from './ask-product-context';
 import { FilterSpec } from '../filters/dto/filter-spec.dto';
@@ -123,8 +123,12 @@ export class AskService {
             }
           }
 
-          // If we have measurements but no classification, classify on-the-fly
-          if (measurements && (!btc?.bodyType || btc.bodyType === 'unclassified')) {
+          // Classify on the fly when there is no classification, or when the
+          // cached one was computed from a set that is no longer the default.
+          const staleCache =
+            (!!btc?.from_set && !!activeSet && btc.from_set !== activeSet.name) ||
+            (!!btc && (btc.classifier_version ?? 1) !== CLASSIFIER_VERSION);
+          if (measurements && (!btc?.bodyType || btc.bodyType === 'unclassified' || staleCache)) {
             try {
               const measObj =
                 measurements instanceof Map

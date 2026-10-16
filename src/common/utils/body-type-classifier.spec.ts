@@ -26,7 +26,7 @@ describe('classifyBodyType', () => {
   /* ─── Confidence Levels ──────────────────────────────────── */
 
   describe('confidence scoring', () => {
-    it('returns high confidence with 4 measurements', () => {
+    it('returns high confidence with chest, waist and hip (shoulder breadth does not count)', () => {
       const result = classifyBodyType(
         { chest: 100, waist: 80, hip: 95, shoulder_breadth: 48 },
         'male',
@@ -39,12 +39,12 @@ describe('classifyBodyType', () => {
       expect(result.confidence).toBe('medium');
     });
 
-    it('returns medium confidence with 3 measurements', () => {
+    it('returns high confidence with bust, waist and hip', () => {
       const result = classifyBodyType(
         { bust: 90, waist: 68, hip: 100 },
         'female',
       );
-      expect(result.confidence).toBe('medium');
+      expect(result.confidence).toBe('high');
     });
   });
 
@@ -61,17 +61,17 @@ describe('classifyBodyType', () => {
       expect(result.flattering_fits).toContain('slim');
     });
 
-    it('classifies round: waist ≥ shoulders', () => {
+    it('classifies round: waist close to the chest', () => {
       const result = classifyBodyType(
-        { shoulder_breadth: 48, waist: 48, hip: 46 },
+        { chest: 110, waist: 108, hip: 104 },
         'male',
       );
       expect(result.bodyType).toBe('round');
     });
 
-    it('classifies triangle: hips wider than shoulders', () => {
+    it('classifies triangle: hips wider than the chest', () => {
       const result = classifyBodyType(
-        { shoulder_breadth: 42, waist: 36, hip: 48 },
+        { chest: 96, waist: 84, hip: 104 },
         'male',
       );
       expect(result.bodyType).toBe('triangle');
@@ -79,18 +79,29 @@ describe('classifyBodyType', () => {
 
     it('classifies rectangle: uniform proportions', () => {
       const result = classifyBodyType(
-        { shoulder_breadth: 46, waist: 42, hip: 44 },
+        { chest: 100, waist: 88, hip: 98 },
         'male',
       );
       expect(result.bodyType).toBe('rectangle');
     });
 
-    it('classifies trapezoid: slightly broader shoulders', () => {
+    it('classifies trapezoid: slightly broader chest than hips', () => {
       const result = classifyBodyType(
-        { shoulder_breadth: 48, waist: 40, hip: 44 },
+        { chest: 104, waist: 86, hip: 97 },
         'male',
       );
       expect(result.bodyType).toBe('trapezoid');
+    });
+
+    it('an AI-estimated set with its shoulder breadth is read from the circumferences', () => {
+      // A real height-and-weight estimate: shoulder breadth 47.6 is a width.
+      // Before, waist / shoulder = 2.1 made this (and every such man) "round".
+      const result = classifyBodyType(
+        { chest: 107.2, waist: 100, hip: 104, shoulder_breadth: 47.6, thigh: 61, calf: 40 },
+        'male',
+      );
+      expect(result.bodyType).toBe('rectangle');
+      expect(result.confidence).toBe('high');
     });
 
     it('two-measurement fallback: chest + waist (athletic)', () => {
@@ -218,14 +229,12 @@ describe('classifyBodyType', () => {
       expect(result.bodyType).toBe('pear');
     });
 
-    it('accepts "shoulder" as alias for "shoulder_breadth"', () => {
-      // shoulder is used as alias for shoulder_breadth, which becomes "upper"
-      // upper/lower >= 1.1 and waist/upper < 0.8 → athletic
-      const result = classifyBodyType(
-        { shoulder: 110, waist: 78, hip: 95 },
-        'male',
-      );
-      expect(result.bodyType).toBe('athletic');
+    it('a shoulder width on its own is not enough to classify', () => {
+      // Widths and circumferences are not comparable; the shape needs two of
+      // chest, waist and hip.
+      const result = classifyBodyType({ shoulder: 47, waist: 78 }, 'male');
+      expect(result.bodyType).toBe('unclassified');
+      expect(result.confidence).toBe('low');
     });
   });
 

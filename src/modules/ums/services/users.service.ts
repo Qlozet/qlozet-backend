@@ -41,7 +41,7 @@ import type { AdminCustomerMeasurementsDto } from 'src/modules/platform/dto/admi
 import type { AdminCustomerReviewsPageDto } from 'src/modules/platform/dto/admin-customer-reviews.dto';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
-import { classifyBodyType } from 'src/common/utils/body-type-classifier';
+import { classifyBodyType, CLASSIFIER_VERSION } from 'src/common/utils/body-type-classifier';
 import { SizeGuideService } from 'src/modules/size-guide/size-guide.service';
 
 @Injectable()
@@ -515,7 +515,7 @@ export class UserService {
     activeSet: { name: string; measurements: Record<string, number> } | null,
   ): AdminCustomerMeasurementsDto['body_type'] {
     const cached = customer.body_type_classification;
-    if (cached?.bodyType) {
+    if (cached?.bodyType && this.cacheIsCurrent(cached, activeSet)) {
       return {
         type: cached.bodyType,
         confidence: cached.confidence,
@@ -1013,6 +1013,18 @@ export class UserService {
         { $set: dto },
         { new: true },
       );
+      // The body type depends on gender as much as on the tape: the same
+      // numbers read "athletic" on a man and "inverted triangle" on a woman.
+      if (data && dto.gender !== undefined) {
+        const activeSet = (data.measurementSets || []).find((s) => s.active);
+        if (activeSet) {
+          await this.recomputeBodyType(data, {
+            name: activeSet.name,
+            measurements: this.plainMeasurements(activeSet.measurements),
+          });
+          await data.save();
+        }
+      }
       return data?.toJSON();
     } catch (error) {
       // MongoDB duplicate key error (E11000) — username already taken
@@ -1583,6 +1595,19 @@ export class UserService {
     if (!found)
       throw new BadRequestException(`Measurement set "${setName}" not found`);
 
+    // The body type Ask and the tailor read belongs to the default set.
+    // Switching sets must not leave the previous set's shape cached.
+    const nowActive = user.measurementSets.find((s) => s.active);
+    if (nowActive) {
+      await this.recomputeBodyType(user, {
+        name: nowActive.name,
+        measurements: this.plainMeasurements(nowActive.measurements),
+      });
+      this.recomputeFittingProducts(userId).catch((e) =>
+        this.logger.warn('Background fitting products cache refresh failed', e),
+      );
+    }
+
     await user.save();
 
     return user.measurementSets.find((s) => s.active);
@@ -1730,6 +1755,14 @@ export class UserService {
     // If the deleted set was active and there are remaining sets, activate the first one
     if (wasActive && user.measurementSets.length > 0) {
       user.measurementSets[0].active = true;
+      const promoted = user.measurementSets[0];
+      await this.recomputeBodyType(user, {
+        name: promoted.name,
+        measurements: this.plainMeasurements(promoted.measurements),
+      });
+    } else if (wasActive) {
+      // Nothing left to read a shape from.
+      (user as any).body_type_classification = null;
     }
 
     await user.save();
@@ -1761,6 +1794,7 @@ export class UserService {
         style_advice: result.styleAdvice,
         computed_at: new Date(),
         from_set: measurementSet.name,
+        classifier_version: CLASSIFIER_VERSION,
       };
       this.logger.log(
         `Body type classified for user ${user._id}: ${result.bodyType} (${result.confidence})`,
@@ -1768,6 +1802,35 @@ export class UserService {
     } catch (error) {
       this.logger.error(`Body type classification failed for user ${user._id}`, error);
     }
+  }
+
+  /** Mongoose stores measurements as a Map; the classifier wants a plain object. */
+  private plainMeasurements(m: unknown): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (m instanceof Map) {
+      m.forEach((v: number, k: string) => {
+        out[k] = v;
+      });
+    } else if (m && typeof m === 'object') {
+      Object.assign(out, m as Record<string, number>);
+    }
+    return out;
+  }
+
+  /**
+   * A cached classification answers for the set it was computed from. Once a
+   * different set is the default (activate, delete) it is stale and must be
+   * recomputed; a cache that never recorded its set is trusted. A cache
+   * from an older classifier is stale regardless of its set.
+   */
+  private cacheIsCurrent(
+    cached: { from_set?: string | null; classifier_version?: number | null } | null | undefined,
+    activeSet: { name: string } | null | undefined,
+  ): boolean {
+    if (!cached) return false;
+    if ((cached.classifier_version ?? 1) !== CLASSIFIER_VERSION) return false;
+    if (!activeSet || !cached.from_set) return true;
+    return cached.from_set === activeSet.name;
   }
 
   /**
@@ -1780,16 +1843,18 @@ export class UserService {
       .lean();
     if (!user) throw new NotFoundException('User not found');
 
-    // If already classified, return cached
-    if (user.body_type_classification?.bodyType) {
+    const activeSet = (user.measurementSets || []).find((s) => s.active);
+
+    // Cached, and still about the set that is the default now.
+    const cached = user.body_type_classification;
+    if (cached?.bodyType && this.cacheIsCurrent(cached, activeSet)) {
       return {
-        ...user.body_type_classification,
+        ...cached,
         body_fit_preferences: user.body_fit || [],
       };
     }
 
     // Try to classify from active measurement set
-    const activeSet = (user.measurementSets || []).find((s) => s.active);
     if (!activeSet) {
       return {
         bodyType: 'unclassified',
@@ -1820,6 +1885,7 @@ export class UserService {
           style_advice: result.styleAdvice,
           computed_at: new Date(),
           from_set: activeSet.name,
+          classifier_version: CLASSIFIER_VERSION,
         },
       },
     );

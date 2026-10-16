@@ -198,6 +198,7 @@ export class User extends Document {
       style_advice: { type: [String], default: [] },
       computed_at: { type: Date },
       from_set: { type: String },
+      classifier_version: { type: Number },
     },
     default: null,
   })
@@ -209,6 +210,7 @@ export class User extends Document {
     style_advice: string[];
     computed_at: Date;
     from_set: string;
+    classifier_version?: number;
   };
 
   @Prop({
