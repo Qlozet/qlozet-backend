@@ -22,6 +22,14 @@ export type BodyType =
 
 export type Confidence = 'high' | 'medium' | 'low';
 
+/**
+ * Stamped on every cached classification. Bump it when the rules change so
+ * cached results from the old rules are recomputed on their next read.
+ *   1  shoulder breadth stood in for the chest (every AI set read "round")
+ *   2  shape read from chest, waist and hip only
+ */
+export const CLASSIFIER_VERSION = 2;
+
 export interface BodyTypeResult {
   bodyType: BodyType;
   confidence: Confidence;
@@ -138,16 +146,19 @@ export function classifyBodyType(
   const isMale = normalizedGender === 'male' || normalizedGender === 'm';
   const isFemale = normalizedGender === 'female' || normalizedGender === 'f';
 
-  // Extract key measurements (normalize names)
+  // Extract key measurements (normalize names). The shape is read from three
+  // circumferences. Shoulder breadth is deliberately NOT one of them: it is a
+  // width (bone to bone, 40-50 cm) and every AI-estimated set carries it, so
+  // using it in place of the chest made waist / shoulder land above 2 and
+  // classified every such man as "round".
   const chest = measurements['chest'] ?? measurements['bust'] ?? null;
   const waist = measurements['waist'] ?? null;
   const hip = measurements['hip'] ?? measurements['hips'] ?? null;
-  const shoulder = measurements['shoulder_breadth'] ?? measurements['shoulder'] ?? null;
 
   // Count available key measurements for confidence
-  const available = [chest, waist, hip, shoulder].filter((v) => v !== null).length;
+  const available = [chest, waist, hip].filter((v) => v !== null).length;
   const confidence: Confidence =
-    available >= 4 ? 'high' : available >= 2 ? 'medium' : 'low';
+    available >= 3 ? 'high' : available >= 2 ? 'medium' : 'low';
 
   // Need at least 2 measurements to classify
   if (available < 2) {
@@ -163,12 +174,12 @@ export function classifyBodyType(
   let bodyType: BodyType;
 
   if (isMale) {
-    bodyType = classifyMale(chest, waist, hip, shoulder);
+    bodyType = classifyMale(chest, waist, hip);
   } else if (isFemale) {
-    bodyType = classifyFemale(chest, waist, hip, shoulder);
+    bodyType = classifyFemale(chest, waist, hip);
   } else {
     // Default to a unisex approach (use female logic since it covers more types)
-    bodyType = classifyFemale(chest, waist, hip, shoulder);
+    bodyType = classifyFemale(chest, waist, hip);
   }
 
   const adviceMap = isMale ? MALE_ADVICE : FEMALE_ADVICE;
@@ -191,10 +202,8 @@ function classifyMale(
   chest: number | null,
   waist: number | null,
   hip: number | null,
-  shoulder: number | null,
 ): BodyType {
-  // Use shoulder as primary upper metric, fall back to chest
-  const upper = shoulder ?? chest;
+  const upper = chest;
   const lower = hip;
 
   if (upper !== null && waist !== null && lower !== null) {
@@ -241,10 +250,8 @@ function classifyFemale(
   chest: number | null,
   waist: number | null,
   hip: number | null,
-  shoulder: number | null,
 ): BodyType {
   const bust = chest;
-  const upper = shoulder ?? bust;
 
   if (bust !== null && waist !== null && hip !== null) {
     const bustToHip = bust / hip;

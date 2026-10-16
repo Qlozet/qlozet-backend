@@ -141,6 +141,7 @@ describe('UserService.getCustomerMeasurements', () => {
         style_advice: ['Fitted shirts'],
         computed_at: new Date('2026-08-25T09:12:00.000Z'),
         from_set: 'default',
+        classifier_version: 2,
       },
     });
 
@@ -150,6 +151,54 @@ describe('UserService.getCustomerMeasurements', () => {
     expect(result.body_type?.computed_at).toEqual(
       new Date('2026-08-25T09:12:00.000Z'),
     );
+    expect(userModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('recomputes when the cached classification came from a set that is no longer active', async () => {
+    const { service, userModel } = buildService({
+      full_name: 'John Doe',
+      gender: 'male',
+      measurementSets: [SET],
+      body_type_classification: {
+        bodyType: 'round',
+        confidence: 'high',
+        flattering_fits: [],
+        avoid_fits: [],
+        style_advice: [],
+        computed_at: new Date('2026-08-01T00:00:00.000Z'),
+        from_set: 'old set, since deleted',
+      },
+    });
+
+    const result = await service.getCustomerMeasurements(CUSTOMER);
+
+    // SET is chest 108 / waist 80 / hip 94: athletic, not the cached "round".
+    expect(result.body_type?.type).toBe('athletic');
+    expect(result.body_type?.from_set).toBe('default');
+    expect(result.body_type?.computed_at).toBeNull();
+    expect(userModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('recomputes a cache written by the old classifier, whatever set it names', async () => {
+    const { service, userModel } = buildService({
+      full_name: 'John Doe',
+      gender: 'male',
+      measurementSets: [SET],
+      body_type_classification: {
+        bodyType: 'round',
+        confidence: 'high',
+        flattering_fits: [],
+        avoid_fits: [],
+        style_advice: [],
+        computed_at: new Date('2026-09-01T00:00:00.000Z'),
+        from_set: 'default',
+        // no classifier_version: written before the shoulder-breadth fix
+      },
+    });
+
+    const result = await service.getCustomerMeasurements(CUSTOMER);
+
+    expect(result.body_type?.type).toBe('athletic');
     expect(userModel.updateOne).not.toHaveBeenCalled();
   });
 
