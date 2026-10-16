@@ -49,7 +49,11 @@ describe('derivedDeltas', () => {
   it("a nudged part carries its derived rows with it, by the Space's own rules", () => {
     // Sleeve length is centre back neck to wrist; the Space fits it on
     // shoulder breadth (0.7) and arm length. Broad shoulders reach the sleeve.
-    expect(derivedDeltas({ shoulder_breadth: 2 })).toEqual({ sleeve_length: 1.4 });
+    expect(derivedDeltas({ shoulder_breadth: 2 })).toEqual({
+      sleeve_length: 1.4,
+      across_back: 0.9,
+      shoulder_width: 2,
+    });
     // belly waist = waist + 0.30 (hip - waist); top hip uses 0.40.
     expect(derivedDeltas({ waist: 6, hip: 1 })).toEqual({ belly_waist: 4.5, top_hip: 4 });
     // Inseam is leg length minus a fixed ankle height, so it moves one to one.
@@ -68,7 +72,7 @@ describe('applyBodyShape', () => {
     expect(by.sleeve_length.value_cm).toBe(89.4);
     expect(by.sleeve_length.method).toBe('ANSUR II fit (n=6068)+shape');
     expect(out.inputs.body_shape_deltas_cm).toEqual({ shoulder_breadth: 2 });
-    expect(out.inputs.body_shape_derived_deltas_cm).toEqual({ sleeve_length: 1.4 });
+    expect(out.inputs.body_shape_derived_deltas_cm).toEqual({ sleeve_length: 1.4, across_back: 0.9, shoulder_width: 2 });
   });
 
   it('moves the parts the shape names, in every place the payload carries them', () => {
