@@ -14,6 +14,7 @@ import { BusinessModule } from '../business/business.module';
 import { OrdersModule } from '../orders/orders.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { ProductModule } from '../products/products.module';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ProductModule } from '../products/products.module';
     forwardRef(() => OrdersModule),  // forwardRef: OrdersModule → PaymentModule → PlatformModule
     TransactionsModule,  // provides TransactionService (vendor ledger for the admin console)
     ProductModule,      // provides ProductService (product notes / escalation resolve the vendor)
+    forwardRef(() => WalletsModule), // provides WalletsService (admin vendor wallet); WalletsModule imports this module back
   ],
   controllers: [PlatformController, PublicConfigController],
   providers: [PlatformService, JwtService],

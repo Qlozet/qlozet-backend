@@ -212,6 +212,55 @@ export class TransactionService {
     return Utils.getPagingData({ count: total, rows }, page, size);
   }
 
+  /**
+   * Payouts to one vendor, by status. Withdrawals are linked to the vendor's
+   * wallet; automatic payouts carry the business id as initiator. Both are
+   * matched, as a string as well as an ObjectId (legacy rows stored strings).
+   */
+  async payoutSummary(
+    businessId: string,
+    walletId?: Types.ObjectId | string | null,
+  ): Promise<{
+    by_status: Record<string, { amount: number; count: number }>;
+    last: {
+      amount: number;
+      status: string;
+      reference: string;
+      created_at: Date;
+    } | null;
+  }> {
+    const or: Record<string, unknown>[] = [
+      { $expr: { $eq: [{ $toString: '$initiator' }, String(businessId)] } },
+    ];
+    if (walletId) {
+      or.push({ $expr: { $eq: [{ $toString: '$wallet' }, String(walletId)] } });
+    }
+    const match = { channel: 'payout', $or: or };
+
+    const [groups, last] = await Promise.all([
+      this.transactionModel.aggregate<{ _id: string; amount: number; count: number }>([
+        { $match: match },
+        { $group: { _id: '$status', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+      ]),
+      this.transactionModel
+        .find(match)
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .select('amount status reference createdAt')
+        .lean(),
+    ]);
+
+    const by_status: Record<string, { amount: number; count: number }> = {};
+    for (const g of groups) by_status[String(g._id)] = { amount: g.amount, count: g.count };
+    const l: any = last[0];
+    return {
+      by_status,
+      last: l
+        ? { amount: l.amount, status: l.status, reference: l.reference, created_at: l.createdAt }
+        : null,
+    };
+  }
+
   async findByCustomer(
     customerId: string,
     page = 1,

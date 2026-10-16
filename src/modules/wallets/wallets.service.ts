@@ -353,6 +353,140 @@ export class WalletsService {
     return Math.max(0, rows[0]?.amount ?? 0);
   }
 
+  /**
+   * Everything the admin console's vendor wallet panel shows, in one read.
+   * Read-only on purpose: it never creates a wallet (getOrCreateWallet would)
+   * and never settles debt, so looking at a vendor does not change them.
+   * Money is a number including 0; only a genuinely absent value is null.
+   */
+  async getAdminVendorWallet(businessId: string) {
+    if (!Types.ObjectId.isValid(businessId)) {
+      throw new NotFoundException('Vendor not found');
+    }
+    const bid = new Types.ObjectId(businessId);
+    const business: any = await this.businessModel
+      .findById(bid)
+      .select(
+        'business_name payout_rail payout_bank_name payout_account_name payout_account_number transfer_recipient_code',
+      )
+      .lean();
+    if (!business) throw new NotFoundException('Vendor not found');
+
+    const wallet: any = await this.walletModel
+      .findOne(ObjectIdUtils.refMatch('business', businessId))
+      .lean();
+    const earningsMatch = ObjectIdUtils.refMatch('business', businessId);
+
+    const [hold, earnings, firstDue, settings, payouts] = await Promise.all([
+      this.withdrawalHold(bid),
+      this.businessEarningsModel.aggregate<{
+        _id: { released: boolean; scheduled: boolean };
+        net: number;
+        gross: number;
+        commission: number;
+        rows: number;
+      }>([
+        { $match: earningsMatch },
+        {
+          $group: {
+            _id: {
+              released: '$released',
+              scheduled: { $ne: [{ $ifNull: ['$release_date', null] }, null] },
+            },
+            net: { $sum: '$net_amount' },
+            gross: { $sum: '$amount' },
+            commission: { $sum: '$commission' },
+            rows: { $sum: 1 },
+          },
+        },
+      ]),
+      this.businessEarningsModel
+        .find({ ...earningsMatch, released: false, release_date: { $ne: null } })
+        .sort({ release_date: 1 })
+        .limit(1)
+        .select('release_date')
+        .lean(),
+      this.platformSettingsModel.findOne().select('minimum_payout').lean(),
+      this.transactionService.payoutSummary(businessId, wallet?._id ?? null),
+    ]);
+
+    const sum = (pick: (g: (typeof earnings)[number]) => boolean, key: 'net' | 'gross' | 'commission') =>
+      earnings.filter(pick).reduce((t, g) => t + (g[key] || 0), 0);
+    const lifetimeNet = sum(() => true, 'net');
+    const lifetimeGross = sum(() => true, 'gross');
+    const lifetimeCommission = sum(() => true, 'commission');
+    const releasedNet = sum((g) => g._id.released === true, 'net');
+    const unreleasedNet = sum((g) => g._id.released !== true, 'net');
+    const awaitingDelivery = sum((g) => g._id.released !== true && !g._id.scheduled, 'net');
+
+    // The next release is every scheduled row due on the earliest due day.
+    let nextRelease: { date: Date; amount: number } | null = null;
+    const first: any = firstDue[0];
+    if (first?.release_date) {
+      const day = new Date(first.release_date);
+      const end = new Date(day);
+      end.setUTCHours(23, 59, 59, 999);
+      const due = await this.businessEarningsModel.aggregate<{ amount: number }>([
+        { $match: { ...earningsMatch, released: false, release_date: { $ne: null, $lte: end } } },
+        { $group: { _id: null, amount: { $sum: '$net_amount' } } },
+      ]);
+      nextRelease = { date: day, amount: due[0]?.amount ?? 0 };
+    }
+
+    const balance = Number(wallet?.balance ?? 0);
+    const pending = Number(wallet?.pending_balance ?? 0);
+    const owed = Number(wallet?.owed_balance ?? 0);
+    const paid = payouts.by_status;
+    const accountNumber: string = business.payout_account_number || '';
+
+    return {
+      business_id: businessId,
+      business_name: business.business_name ?? null,
+      has_wallet: !!wallet,
+      currency: wallet?.currency ?? 'NGN',
+      status: wallet?.status ?? null,
+      last_transaction_at: wallet?.last_transaction_at ?? null,
+
+      balance,
+      pending_balance: pending,
+      owed_balance: owed,
+      withdrawal_hold: hold,
+      // Owed money is settled before anything can leave, so a debt blocks
+      // withdrawals outright; otherwise the open-return hold is kept back.
+      available_to_withdraw: owed > 0 ? 0 : Math.max(0, balance - hold),
+      minimum_payout: Number((settings as any)?.minimum_payout ?? 2000),
+
+      lifetime: {
+        gross: lifetimeGross,
+        commission: lifetimeCommission,
+        net: lifetimeNet,
+        released: releasedNet,
+      },
+      unreleased_earnings: unreleasedNet,
+      awaiting_delivery: awaitingDelivery,
+      // pending_balance is a running total; the earnings rows are the truth.
+      // A difference means the two drifted and is worth a look.
+      pending_drift: Math.round((pending - unreleasedNet) * 100) / 100,
+      next_release: nextRelease,
+
+      payouts: {
+        total_withdrawn: paid.success?.amount ?? 0,
+        in_flight: paid.pending?.amount ?? 0,
+        failed_count: (paid.failed?.count ?? 0) + (paid.reversed?.count ?? 0),
+        count: Object.values(paid).reduce((t, g) => t + g.count, 0),
+        last: payouts.last,
+      },
+
+      payout_account: {
+        linked: !!business.transfer_recipient_code,
+        rail: business.payout_rail ?? 'paystack',
+        bank_name: business.payout_bank_name ?? null,
+        account_name: business.payout_account_name ?? null,
+        account_number: accountNumber ? `******${accountNumber.slice(-4)}` : null,
+      },
+    };
+  }
+
   // Get wallet balance
   async getWallet(customerId?: string, businessId?: string) {
     const wallet = await this.getOrCreateWallet({ business: businessId, customer: customerId });

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   NotFoundException,
   Param,
   Patch,
@@ -13,6 +14,7 @@ import {
   UseGuards,
   UsePipes,
   ValidationPipe,
+  forwardRef,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -63,6 +65,7 @@ import {
 import { PlatformService } from './platform.service';
 import { TransactionService } from '../transactions/transactions.service';
 import { ProductService } from '../products/products.service';
+import { WalletsService } from '../wallets/wallets.service';
 import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
 
 @ApiTags('Admin')
@@ -80,6 +83,8 @@ export class PlatformController {
     private readonly transactionService: TransactionService,
     private readonly vendorNotesService: VendorNotesService,
     private readonly productService: ProductService,
+    @Inject(forwardRef(() => WalletsService))
+    private readonly walletsService: WalletsService,
   ) {}
 
   // ------------------------------------------------------
@@ -399,6 +404,19 @@ export class PlatformController {
       throw new BadRequestException('Invalid business id');
     }
     return this.orderService.getBusinessChart(id);
+  }
+
+  @Roles(UserType.PLATFORM)
+  @Get('businesses/:id/wallet')
+  @ApiOperation({
+    summary: "One vendor's wallet, earnings and payouts (admin)",
+    description:
+      "Everything the console's vendor wallet panel shows in one read: balance, pending and owed, the open-return withdrawal hold and what is actually withdrawable, lifetime gross / commission / net from the earnings rows, the next scheduled release, payout totals by status with the last payout, and the linked payout account (number masked). Read-only: it never creates a wallet or settles debt. `pending_drift` is pending_balance minus the unreleased earnings rows; anything but 0 means the running total and the ledger disagree.",
+  })
+  @ApiParam({ name: 'id', description: 'Business id', type: String })
+  @ApiResponse({ status: 404, description: 'No vendor with that id' })
+  async getBusinessWallet(@Param('id') id: string) {
+    return this.walletsService.getAdminVendorWallet(id);
   }
 
   @Get('businesses/:id/transactions')
