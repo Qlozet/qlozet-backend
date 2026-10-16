@@ -88,6 +88,10 @@ const DERIVED_RULES: Record<string, Record<string, number>> = {
   top_hip: { waist: 0.6, hip: 0.4 }, // waist + 0.40 x (hip - waist)
   inseam: { leg_length: 1 }, // leg length - ankle height
   under_bust: { chest: 1 }, // chest - 9
+  // Added to the Space 2026-10-16 (derived_coeffs.json refit).
+  across_back: { chest: 0.203, shoulder_breadth: 0.429 }, // ANSUR fit (interscye I)
+  nape_to_waist: { chest: 0.047 }, // ANSUR fit; height and weight are not nudged
+  shoulder_width: { shoulder_breadth: 1 }, // shoulder breadth + 3.5 cm, rough
 };
 
 /** Deltas for the derived tailoring rows implied by the base-part deltas. */
