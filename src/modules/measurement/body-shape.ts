@@ -67,6 +67,41 @@ export function bodyShapeDeltas(shape: BodyShape | null | undefined): Record<str
   return d;
 }
 
+/**
+ * The Space derives the tailoring rows from the 14 predicted parts
+ * (hybrid_body_measurement_mask/src/derived.py; fitted coefficients in
+ * outputs/models/derived_coeffs.json, read 2026-10-15) BEFORE our nudge
+ * exists, so a moved part would leave its derived rows behind: broad
+ * shoulders would never reach the sleeve. Every rule there is linear, so the
+ * derived row moves by the same rule applied to the deltas. Fitted rules
+ * keep their ANSUR II coefficients; the rest are the Space's ratios. Keep in
+ * step with derived.py when the Space refits.
+ */
+const DERIVED_RULES: Record<string, Record<string, number>> = {
+  sleeve_length: { shoulder_breadth: 0.7, arm_length: 0.755 }, // centre back neck to wrist (ANSUR fit)
+  neck: { chest: 0.064 }, // ANSUR fit
+  neck_base: { chest: 0.061 }, // ANSUR fit
+  lower_thigh: { thigh: 0.234, calf: 0.41 }, // ANSUR fit
+  knee: { calf: 1.03 },
+  mid_thigh: { thigh: 0.85 },
+  belly_waist: { waist: 0.7, hip: 0.3 }, // waist + 0.30 x (hip - waist)
+  top_hip: { waist: 0.6, hip: 0.4 }, // waist + 0.40 x (hip - waist)
+  inseam: { leg_length: 1 }, // leg length - ankle height
+  under_bust: { chest: 1 }, // chest - 9
+};
+
+/** Deltas for the derived tailoring rows implied by the base-part deltas. */
+export function derivedDeltas(base: Record<string, number>): Record<string, number> {
+  const d: Record<string, number> = {};
+  for (const [row, rule] of Object.entries(DERIVED_RULES)) {
+    let cm = 0;
+    for (const [part, w] of Object.entries(rule)) cm += (base[part] ?? 0) * w;
+    cm = Math.round(cm * 10) / 10;
+    if (cm !== 0) d[row] = cm;
+  }
+  return d;
+}
+
 export const hasBodyShape = (shape: BodyShape | null | undefined): boolean =>
   !!shape && Object.values(shape).some((v) => v && v !== 'average');
 
@@ -84,8 +119,11 @@ const normalise = (name: unknown) =>
  */
 export function applyBodyShape<T extends Record<string, any>>(prediction: T, shape: BodyShape | null | undefined): T {
   if (!prediction || typeof prediction !== 'object' || !hasBodyShape(shape)) return prediction;
-  const deltas = bodyShapeDeltas(shape);
-  if (!Object.keys(deltas).length) return prediction;
+  const base = bodyShapeDeltas(shape);
+  if (!Object.keys(base).length) return prediction;
+  const derived = derivedDeltas(base);
+  // A base part wins if a name ever appears in both.
+  const deltas: Record<string, number> = { ...derived, ...base };
 
   const out: any = { ...prediction };
   const bump = (name: string, value: number) => {
@@ -136,6 +174,11 @@ export function applyBodyShape<T extends Record<string, any>>(prediction: T, sha
     out.cm = cm;
     if (inch) out.in = inch;
   }
-  out.inputs = { ...(out.inputs ?? {}), body_shape: { ...shape }, body_shape_deltas_cm: deltas };
+  out.inputs = {
+    ...(out.inputs ?? {}),
+    body_shape: { ...shape },
+    body_shape_deltas_cm: base,
+    body_shape_derived_deltas_cm: derived,
+  };
   return out as T;
 }

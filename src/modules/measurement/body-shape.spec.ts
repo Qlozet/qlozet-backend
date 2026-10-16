@@ -1,4 +1,4 @@
-import { applyBodyShape, bodyShapeDeltas, hasBodyShape } from './body-shape';
+import { applyBodyShape, bodyShapeDeltas, derivedDeltas, hasBodyShape } from './body-shape';
 
 /**
  * The descriptors move the height/weight model's output; they never invent a
@@ -45,7 +45,32 @@ describe('bodyShapeDeltas', () => {
   });
 });
 
+describe('derivedDeltas', () => {
+  it("a nudged part carries its derived rows with it, by the Space's own rules", () => {
+    // Sleeve length is centre back neck to wrist; the Space fits it on
+    // shoulder breadth (0.7) and arm length. Broad shoulders reach the sleeve.
+    expect(derivedDeltas({ shoulder_breadth: 2 })).toEqual({ sleeve_length: 1.4 });
+    // belly waist = waist + 0.30 (hip - waist); top hip uses 0.40.
+    expect(derivedDeltas({ waist: 6, hip: 1 })).toEqual({ belly_waist: 4.5, top_hip: 4 });
+    // Inseam is leg length minus a fixed ankle height, so it moves one to one.
+    expect(derivedDeltas({ leg_length: 2.5, shoulder_to_crotch: -1.5 })).toEqual({ inseam: 2.5 });
+    expect(derivedDeltas({})).toEqual({});
+  });
+});
+
 describe('applyBodyShape', () => {
+  it('broad shoulders reach the sleeve the Space derived from the shoulder', () => {
+    const p = v2();
+    p.measurements.push({ name: 'sleeve_length', value_cm: 88.0, tier: 'estimated', mae_cm: 1.3, method: 'ANSUR II fit (n=6068)' });
+    const out = applyBodyShape(p, { shoulders: 'broad' });
+    const by = Object.fromEntries(out.measurements.map((m: any) => [m.name, m]));
+    expect(by.shoulder_breadth.value_cm).toBe(49.6);
+    expect(by.sleeve_length.value_cm).toBe(89.4);
+    expect(by.sleeve_length.method).toBe('ANSUR II fit (n=6068)+shape');
+    expect(out.inputs.body_shape_deltas_cm).toEqual({ shoulder_breadth: 2 });
+    expect(out.inputs.body_shape_derived_deltas_cm).toEqual({ sleeve_length: 1.4 });
+  });
+
   it('moves the parts the shape names, in every place the payload carries them', () => {
     const out = applyBodyShape(v2(), { stomach: 'slightly_protruding', shoulders: 'narrow' });
     const by = Object.fromEntries(out.measurements.map((m: any) => [m.name, m]));
