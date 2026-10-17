@@ -48,9 +48,55 @@ import {
   TokenTransactionType,
 } from '../wallets/schema/token.schema';
 import { bucketSeries, describeRange, resolveDashboardRange } from '../orders/dashboard-range';
+import {
+  classifyBodyType,
+  CLASSIFIER_VERSION,
+} from '../../common/utils/body-type-classifier';
 
 /** Orderings the public vendor list accepts. */
 export type PublicVendorSort = 'active' | 'newest' | 'name';
+
+/**
+ * The body type a vendor sees for a customer: the stored classification when
+ * it is about the customer's default set and from the current classifier,
+ * otherwise worked out from the default set right now (not written back; a
+ * vendor looking at a customer must not change their record).
+ */
+export function vendorBodyType(
+  cached: any,
+  defaultSet: { name?: string; measurements?: Record<string, number> } | null | undefined,
+  gender?: string | null,
+): {
+  type: string;
+  confidence: string;
+  flattering_fits: string[];
+  avoid_fits: string[];
+  computed_at: Date | null;
+} | null {
+  const measurements = defaultSet?.measurements;
+  if (!measurements || !Object.keys(measurements).length) return null;
+  const current =
+    cached?.bodyType &&
+    (cached.classifier_version ?? 1) === CLASSIFIER_VERSION &&
+    (!cached.from_set || cached.from_set === defaultSet?.name);
+  if (current) {
+    return {
+      type: cached.bodyType,
+      confidence: cached.confidence,
+      flattering_fits: cached.flattering_fits ?? [],
+      avoid_fits: cached.avoid_fits ?? [],
+      computed_at: cached.computed_at ?? null,
+    };
+  }
+  const result = classifyBodyType(measurements, gender ?? undefined);
+  return {
+    type: result.bodyType,
+    confidence: result.confidence,
+    flattering_fits: result.flattering_fits,
+    avoid_fits: result.avoid_fits,
+    computed_at: null,
+  };
+}
 
 @Injectable()
 export class BusinessService {
@@ -2601,6 +2647,8 @@ export class BusinessService {
           phone_number: '$customer_info.phone_number',
           profile_picture: '$customer_info.profile_picture',
           status: '$customer_info.status',
+          gender: '$customer_info.gender',
+          body_type_classification: '$customer_info.body_type_classification',
           total_orders: 1,
           // Limit the orders array to ordersLimit
           orders: { $slice: ['$orders', ordersLimit] },
@@ -2642,7 +2690,15 @@ export class BusinessService {
 
     const result = await this.orderModel.aggregate(pipeline);
     const total = result[0]?.metadata[0]?.total || 0;
-    const data = result[0]?.data || [];
+    const rows: any[] = result[0]?.data || [];
+    const data = rows.map(({ body_type_classification, ...row }) => ({
+      ...row,
+      body_type: vendorBodyType(
+        body_type_classification,
+        row.default_measurement,
+        row.gender,
+      ),
+    }));
 
     return {
       data,
