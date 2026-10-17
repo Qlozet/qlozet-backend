@@ -20,8 +20,40 @@ import {
   TeamMemberDocument,
 } from '../../modules/ums/schemas/team.schema';
 import { UserType } from '../../modules/ums/schemas/user.schema';
-import { VendorRole } from '../../modules/ums/schemas/role.schema';
+import { PlatformRole, VendorRole } from '../../modules/ums/schemas/role.schema';
 import { VENDOR_ROLES_KEY } from '../decorators/vendor-roles.decorator';
+
+/** Every role name that marks a route as open to platform (staff) users. */
+const PLATFORM_ROLE_NAMES = new Set<string>([
+  ...Object.values(PlatformRole).map((r) => r.toLowerCase()),
+  UserType.PLATFORM.toLowerCase(),
+  'customer_support',
+]);
+
+/**
+ * Whether a platform user's role passes a route's @Roles() list.
+ *
+ * The role NAME only decides two things here: a super admin passes
+ * everything, and a route that names only the super admin stays theirs
+ * (deleting an administrator). Any other route open to staff passes any
+ * staff role, because what a role may actually do is the permission grid,
+ * enforced for the whole request by ConsoleAccessGuard. Before this, "admin"
+ * also skipped the super-admin-only check, and every other staff role was
+ * refused by name regardless of its grid.
+ */
+export function platformRoleVerdict(
+  roleName: string,
+  requiredRoles: string[],
+): 'allow' | 'super_admin_only' | 'not_for_staff' {
+  const name = (roleName || '').toLowerCase();
+  if (name === PlatformRole.SUPER_ADMIN) return 'allow';
+  const forStaff = requiredRoles.filter((r) => PLATFORM_ROLE_NAMES.has(r));
+  if (!forStaff.length) return 'not_for_staff';
+  if (forStaff.every((r) => r === PlatformRole.SUPER_ADMIN)) {
+    return 'super_admin_only';
+  }
+  return 'allow';
+}
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -85,22 +117,17 @@ export class RolesGuard implements CanActivate {
       if (!role) {
         throw new ForbiddenException('No role assigned to platform user');
       }
-
-      // Platform admins have full access to all endpoints
-      const adminRoles = ['admin', 'super_admin'];
-      if (adminRoles.includes(role.name.toLowerCase())) {
-        request.user = user;
-        return true;
-      }
-
-      const hasRole = normalizedRequiredRoles.includes(role.name.toLowerCase());
-      if (!hasRole) {
-        throw new ForbiddenException(
-          `Access denied — requires one of: ${requiredRoles.join(', ')}`,
-        );
-      }
-
-      return true;
+      request.user = user;
+      const verdict = platformRoleVerdict(
+        role.name,
+        normalizedRequiredRoles,
+      );
+      if (verdict === 'allow') return true;
+      throw new ForbiddenException(
+        verdict === 'super_admin_only'
+          ? 'Only a super admin can do this.'
+          : `Access denied — requires one of: ${requiredRoles.join(', ')}`,
+      );
     }
 
     // ✅ Step 3: Check Vendor roles (team members)

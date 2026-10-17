@@ -928,6 +928,9 @@ export class AuthService {
         data: {
           user: sanitizeUser(user),
           token,
+          // True while the emailed temporary password is in use; the console
+          // sends the person to set a new one before anything else.
+          must_change_password: Boolean(user.must_change_password),
         },
       };
     } catch (error) {

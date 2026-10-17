@@ -41,6 +41,10 @@ import type { AdminCustomerMeasurementsDto } from 'src/modules/platform/dto/admi
 import type { AdminCustomerReviewsPageDto } from 'src/modules/platform/dto/admin-customer-reviews.dto';
 import { AddMeasurementSetDto, UpdateMeasurementSetDto } from 'src/modules/measurement/dto/user-measurement.dto';
 import { UpdateUserDto } from '../dto/users.dto';
+import {
+  FULL_ACCESS_ROLES,
+  allConsolePermissionNames,
+} from '../../../common/access/console-access';
 import { classifyBodyType, CLASSIFIER_VERSION } from 'src/common/utils/body-type-classifier';
 import { SizeGuideService } from 'src/modules/size-guide/size-guide.service';
 
@@ -1831,6 +1835,43 @@ export class UserService {
     if ((cached.classifier_version ?? 1) !== CLASSIFIER_VERSION) return false;
     if (!activeSet || !cached.from_set) return true;
     return cached.from_set === activeSet.name;
+  }
+
+  /**
+   * The signed-in account's console access: role, grid permissions as names,
+   * and whether a temporary password is still in use. Full-access roles get
+   * every grid name so the client can gate on names alone.
+   */
+  async getMyAccess(userId: string) {
+    const user: any = await this.userModel
+      .findById(userId)
+      .select('type status role must_change_password')
+      .populate({
+        path: 'role',
+        select: 'name description type permissions',
+        populate: { path: 'permissions', select: 'name' },
+      })
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+
+    const role = user.role ?? null;
+    const roleName = String(role?.name ?? '').toLowerCase();
+    const fullAccess = user.type === UserType.PLATFORM && FULL_ACCESS_ROLES.has(roleName);
+    const granted: string[] = (role?.permissions ?? [])
+      .map((p: any) => p?.name)
+      .filter(Boolean);
+
+    return {
+      type: user.type,
+      status: user.status ?? null,
+      role: role
+        ? { _id: String(role._id), name: role.name, description: role.description ?? null, type: role.type }
+        : null,
+      is_super_admin: roleName === 'super_admin',
+      full_access: fullAccess,
+      permissions: fullAccess ? allConsolePermissionNames() : granted,
+      must_change_password: Boolean(user.must_change_password),
+    };
   }
 
   /**
