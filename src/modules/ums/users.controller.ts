@@ -513,6 +513,16 @@ export class UserController {
     return this.userService.getSanitizedUser(userId);
   }
 
+  @Get('me/access')
+  @ApiOperation({
+    summary: 'What the signed-in staff account may do in the console',
+    description:
+      "The role and the permission grid behind it, as `<resource>.<action>` names, so the console can hide what the person cannot use instead of showing it and failing. Super admins and admins get every name. `must_change_password` is true while the emailed temporary password is still in use; until it is changed the API refuses everything but the password routes.",
+  })
+  async getMyAccess(@Req() req) {
+    return this.userService.getMyAccess(req.user.id);
+  }
+
   @Patch('me/profile')
   async updateMyProfile(@Req() req, @Body() profileData: UpdateUserDto) {
     const userId = req.user.id;

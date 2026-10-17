@@ -8,7 +8,11 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module';
 import { DatabaseModule } from './database/database.module';
 import { APP_GUARD } from '@nestjs/core';
-import { JwtAuthGuard } from './common/guards';
+import { ConsoleAccessGuard, JwtAuthGuard } from './common/guards';
+import { MongooseModule } from '@nestjs/mongoose';
+import { User, UserSchema } from './modules/ums/schemas/user.schema';
+import { Role, RoleSchema } from './modules/ums/schemas/role.schema';
+import { Permission, PermissionSchema } from './modules/ums/schemas/permission.schema';
 import { join } from 'path';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProductModule } from './modules/products/products.module';
@@ -45,6 +49,13 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
 
 @Module({
   imports: [
+    // The root-level ConsoleAccessGuard reads users and roles; register the
+    // models here rather than relying on what an imported module re-exports.
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: Role.name, schema: RoleSchema },
+      { name: Permission.name, schema: PermissionSchema },
+    ]),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -139,6 +150,12 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    // After the JWT guard: enforces the admin console's permission grid for
+    // staff accounts and keeps customers and vendors out of /admin.
+    {
+      provide: APP_GUARD,
+      useClass: ConsoleAccessGuard,
     },
   ],
 })
