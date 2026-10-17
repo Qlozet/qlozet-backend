@@ -225,6 +225,12 @@ export class BusinessController {
   }
 
   @Roles(UserType.VENDOR)
+  @VendorRoles(
+    VendorRole.OWNER,
+    VendorRole.OPERATIONS,
+    VendorRole.DATA_ANALYST,
+    VendorRole.SALES,
+  )
   @Get('earnings/upcoming')
   async getUpcomingEarnings(@Req() req: any) {
     return this.businessService.getUpcomingEarnings(req.business.id);
@@ -235,6 +241,12 @@ export class BusinessController {
     return this.businessService.findBusinessById(req.business?.id);
   }
   @Roles(UserType.VENDOR)
+  @VendorRoles(
+    VendorRole.OWNER,
+    VendorRole.OPERATIONS,
+    VendorRole.DATA_ANALYST,
+    VendorRole.SALES,
+  )
   @Get('earnings-chart')
   async getEarningChart(@Req() req: any, @Query('range') range?: string) {
     return this.businessService.getEarningsChart(req.business?.id, range);

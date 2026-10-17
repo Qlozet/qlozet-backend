@@ -3,10 +3,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
+import {
+  ASSISTANT_ACTION_AREA,
+  vendorAreaAllows,
+  vendorAreaDeniedMessage,
+} from '../../../common/access/vendor-access';
 import { LlmToolDef } from '../llm/llm-provider.interface';
 import {
   ASSISTANT_ACTION_KINDS,
@@ -436,9 +442,21 @@ export class VendorActionsService {
     return toCard(doc);
   }
 
-  async confirm(businessId: string, userId: string | undefined, actionId: string): Promise<AssistantActionCard> {
+  async confirm(
+    businessId: string,
+    userId: string | undefined,
+    actionId: string,
+    member?: { role?: string | null; isOwner?: boolean | null },
+  ): Promise<AssistantActionCard> {
     const doc = await this.owned(businessId, actionId);
     if (doc.status !== 'proposed') throw new BadRequestException(`This action is already ${doc.status}.`);
+    // The assistant is not a side door: a member who could not call the
+    // route behind this action cannot confirm it either. The card stays
+    // proposed so someone who may can still confirm it.
+    const area = ASSISTANT_ACTION_AREA[doc.kind];
+    if (member && area && !vendorAreaAllows(area, member.role, member.isOwner)) {
+      throw new ForbiddenException(vendorAreaDeniedMessage(area));
+    }
     if (doc.expires_at.getTime() < Date.now()) {
       doc.status = 'expired';
       doc.decided_at = new Date();

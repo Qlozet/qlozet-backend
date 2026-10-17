@@ -114,6 +114,14 @@ export class WalletsController {
 
   // Get wallet balance
   @Roles(UserType.CUSTOMER, UserType.VENDOR)
+  // For a vendor team, the shop's money is for the people who run it; a
+  // tailor's app hides the wallet. Customers are unaffected by @VendorRoles.
+  @VendorRoles(
+    VendorRole.OWNER,
+    VendorRole.OPERATIONS,
+    VendorRole.DATA_ANALYST,
+    VendorRole.SALES,
+  )
   @Get('balance')
   @ApiOperation({ summary: 'Get wallet balance' })
   @ApiOkResponse({

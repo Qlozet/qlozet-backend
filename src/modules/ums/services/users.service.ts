@@ -45,6 +45,10 @@ import {
   FULL_ACCESS_ROLES,
   allConsolePermissionNames,
 } from '../../../common/access/console-access';
+import {
+  isVendorOwner,
+  vendorAreasFor,
+} from '../../../common/access/vendor-access';
 import { classifyBodyType, CLASSIFIER_VERSION } from 'src/common/utils/body-type-classifier';
 import { SizeGuideService } from 'src/modules/size-guide/size-guide.service';
 
@@ -1845,7 +1849,7 @@ export class UserService {
   async getMyAccess(userId: string) {
     const user: any = await this.userModel
       .findById(userId)
-      .select('type status role must_change_password')
+      .select('type status role business must_change_password')
       .populate({
         path: 'role',
         select: 'name description type permissions',
@@ -1861,6 +1865,42 @@ export class UserService {
       .map((p: any) => p?.name)
       .filter(Boolean);
 
+    // A vendor's role is per store: the team member record on the store they
+    // have open, falling back to the account's own role for an owner.
+    let vendor: {
+      business_id: string;
+      role: string | null;
+      is_owner: boolean;
+      areas: string[];
+    } | null = null;
+    if (user.type === UserType.VENDOR && user.business) {
+      const biz: any = await this.businessModel
+        .findById(user.business)
+        .select('team_members created_by')
+        .populate({
+          path: 'team_members',
+          select: 'user role is_owner',
+          populate: { path: 'role', select: 'name' },
+        })
+        .lean();
+      const member = (biz?.team_members ?? []).find(
+        (tm: any) => String(tm?.user) === String(user._id),
+      );
+      const memberRole: string | null =
+        member?.role?.name?.toLowerCase() ?? (roleName || null);
+      const owner = isVendorOwner(
+        memberRole,
+        Boolean(member?.is_owner) ||
+          (biz?.created_by && String(biz.created_by) === String(user._id)),
+      );
+      vendor = {
+        business_id: String(user.business),
+        role: memberRole,
+        is_owner: owner,
+        areas: vendorAreasFor(memberRole, owner),
+      };
+    }
+
     return {
       type: user.type,
       status: user.status ?? null,
@@ -1871,6 +1911,7 @@ export class UserService {
       full_access: fullAccess,
       permissions: fullAccess ? allConsolePermissionNames() : granted,
       must_change_password: Boolean(user.must_change_password),
+      vendor,
     };
   }
 

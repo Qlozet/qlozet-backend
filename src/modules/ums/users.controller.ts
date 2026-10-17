@@ -274,6 +274,10 @@ export class UserController {
   // ==============================
   // ROLES MANAGEMENT
   // ==============================
+  // Vendor roles are the platform's fixed set (owner, operations, tailor,
+  // marketing, sales, support, analyst): the routes enforce them by name, so a
+  // role a vendor invented would grant nothing but what every member has. Only
+  // the console creates or edits roles; vendors read them to invite staff.
 
   @Roles(UserType.VENDOR)
   @Get('roles/vendor')
@@ -334,8 +338,7 @@ export class UserController {
     return this.rolesService.findById(id);
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Post('roles')
   @ApiOperation({ summary: 'Create a new role' })
   @ApiBody({ type: CreateRoleDto })
@@ -344,8 +347,7 @@ export class UserController {
     return this.rolesService.createFromDto(dto);
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Patch('roles/:id')
   @ApiOperation({ summary: 'Update an existing role' })
   @ApiBody({ type: UpdateRoleDto })
@@ -356,8 +358,7 @@ export class UserController {
     return this.rolesService.updateFromDto(id, dto);
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Delete('roles/:id')
   @ApiOperation({
     summary: 'Delete a role by ID',
@@ -369,8 +370,7 @@ export class UserController {
     return { message: 'Role deleted successfully' };
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Put('roles/:id/permissions')
   @ApiOperation({
     summary: "Replace a role's permissions",
@@ -385,8 +385,7 @@ export class UserController {
     return this.rolesService.setPermissions(id, dto.permission_ids);
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Post('roles/:id/assign-permissions')
   @ApiOperation({ summary: 'Assign permissions to a role' })
   @ApiBody({ type: AssignPermissionsDto })
@@ -397,8 +396,7 @@ export class UserController {
     return this.rolesService.assignPermissionsToRole(id, dto.permission_ids);
   }
 
-  @Roles(UserType.VENDOR, PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Post('roles/:id/remove-permissions')
   @ApiOperation({ summary: 'Remove permissions from a role' })
   @ApiBody({ type: AssignPermissionsDto })
