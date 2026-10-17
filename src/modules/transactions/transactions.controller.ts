@@ -31,7 +31,12 @@ export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.DATA_ANALYST, VendorRole.SALES)
+  @VendorRoles(
+    VendorRole.OWNER,
+    VendorRole.OPERATIONS,
+    VendorRole.DATA_ANALYST,
+    VendorRole.SALES,
+  )
   @Get('vendor')
   @ApiOperation({ summary: 'Get paginated transactions by business ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })

@@ -72,6 +72,15 @@ export class TeamService {
 
       let isNewUser = false; // 👈 track user creation
 
+      // A customer (or staff) account cannot double as a vendor's team member:
+      // the roles guard reads the account type first, so they could never sign
+      // in to the vendor app. Say so instead of silently rewiring the account.
+      if (user && user.type !== UserType.VENDOR) {
+        throw new BadRequestException(
+          `${dto.email} belongs to a ${user.type} account. Invite a different email address.`,
+        );
+      }
+
       if (!user) {
         isNewUser = true; // 👈 mark as new
         tempPassword = randomBytes(6).toString('hex');
@@ -90,11 +99,12 @@ export class TeamService {
           profile_picture: 'https://default-profile-picture.png',
         });
         await user.save({ session });
-      } else {
-        if (!user.business || user.business.toString() !== business.id) {
-          user.business = ObjectIdUtils.toObjectId(business.id) as Types.ObjectId;
-          await user.save({ session });
-        }
+      } else if (!user.business) {
+        // Someone already on another vendor's team keeps that store open and
+        // switches to this one from the store picker; only an account with no
+        // store yet is pointed here.
+        user.business = ObjectIdUtils.toObjectId(business.id) as Types.ObjectId;
+        await user.save({ session });
       }
 
       // ✅ Check if user already a team member

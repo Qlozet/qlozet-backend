@@ -184,7 +184,11 @@ export class AssistantController {
   @ApiOperation({ summary: 'Confirm (execute) an action the assistant prepared' })
   async confirmAction(@Req() req: any, @Param('id') id: string) {
     return req.business?.id
-      ? this.actionsService.confirm(req.business.id, req.user?.id, id)
+      ? this.actionsService.confirm(req.business.id, req.user?.id, id, {
+          // Set by the roles guard for vendor callers.
+          role: req.vendorRole ?? null,
+          isOwner: req.currentMember?.is_owner ?? null,
+        })
       : this.adminActions.confirm(req.user?.id ?? '', id);
   }
 
