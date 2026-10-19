@@ -1154,9 +1154,12 @@ export class BusinessService {
    * carry no sold counter, so sales rank has to come from orders). Revenue
    * statuses only — cancelled/rejected orders don't count as sales.
    */
-  async getBusinessTopProducts(businessId: string, limit = 10) {
+  async getBusinessTopProducts(businessId: string, limit = 10, days?: number) {
     const bid = new Types.ObjectId(businessId);
     const capped = Math.min(Math.max(Number(limit) || 10, 1), 50);
+    // Optional window on when the order was placed; absent or 0 = all time.
+    const window = Math.min(Math.max(Math.floor(Number(days) || 0), 0), 3650);
+    const since = window ? new Date(Date.now() - window * 86_400_000) : null;
     const REVENUE_STATUSES = [
       'in_review',
       'processing',
@@ -1165,7 +1168,12 @@ export class BusinessService {
     ];
 
     const rows = await this.orderModel.aggregate([
-      { $match: { status: { $in: REVENUE_STATUSES } } },
+      {
+        $match: {
+          status: { $in: REVENUE_STATUSES },
+          ...(since ? { createdAt: { $gte: since } } : {}),
+        },
+      },
       { $unwind: '$items' },
       { $match: { 'items.business': bid, 'items.product': { $ne: null } } },
       {
