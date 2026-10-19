@@ -226,14 +226,25 @@ export class PlatformController {
   })
   @ApiParam({ name: 'id', description: 'Business ID', type: String })
   @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    example: 30,
+    description: 'Only orders placed in the last N days; omit or 0 for all time.',
+  })
   async getBusinessTopProducts(
     @Param('id') id: string,
     @Query('limit') limit = 10,
+    @Query('days') days?: string,
   ) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid business id');
     }
-    return this.businessService.getBusinessTopProducts(id, Number(limit));
+    return this.businessService.getBusinessTopProducts(
+      id,
+      Number(limit),
+      days ? Number(days) : undefined,
+    );
   }
 
   // ------------------------------------------------------
