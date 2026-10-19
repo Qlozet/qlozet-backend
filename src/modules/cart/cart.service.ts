@@ -18,6 +18,23 @@ export class CartService {
     private readonly priceCalculationService: PriceCalculationService,
   ) {}
 
+  /** A line's identity: the shop's key, or the product id for legacy lines. */
+  private keyOf(item: { line_key?: string | null; product_id: any }): string {
+    if (item.line_key) return item.line_key;
+    const pid = item.product_id?._id ?? item.product_id;
+    return String(pid);
+  }
+
+  private findLine(cart: CartDocument, lineId: string) {
+    const line = cart.items.find((i: any) => String(i._id) === String(lineId));
+    if (!line) {
+      throw new NotFoundException(
+        'That item is no longer in your cart. Refresh to see the current cart.',
+      );
+    }
+    return line;
+  }
+
   async getCart(userId: string): Promise<CartDocument> {
     let cart = await this.cartModel
       .findOne({ user: userId })
@@ -38,6 +55,12 @@ export class CartService {
     selections?: OrderItemSelectionsDto,
     // Trailing so existing positional callers are unaffected.
     appliedFabricSize?: string,
+    line?: {
+      lineKey?: string;
+      size?: string;
+      color?: string;
+      measurementSet?: string;
+    },
   ): Promise<CartDocument> {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
@@ -121,16 +144,19 @@ export class CartService {
     const totalPrice = unitPrice * quantity;
 
     const cart = await this.getCart(userId);
-    const existingItem = cart.items.find(
-      (i) => (i.product_id as any)?._id?.toString() === productId.toString() || i.product_id.toString() === productId.toString(),
-    );
+    // Same key = same line (more of it); a different size, colour, selection
+    // or measurement profile is its own line. Without a key, the product id is
+    // the key, which is what older clients send.
+    const key = line?.lineKey || String(productId);
+    const existingItem = cart.items.find((i) => this.keyOf(i) === key);
 
     if (existingItem) {
       existingItem.quantity += quantity;
       existingItem.total_price =
         existingItem.quantity * existingItem.unit_price;
-      // Replace selections when re-adding (customer re-configured)
-      if (selections) {
+      // A keyless (legacy) add replaces selections, as it always did; a keyed
+      // add matched on its selections, so there is nothing to replace.
+      if (selections && !line?.lineKey) {
         existingItem.selections = selections as any;
       }
       if (note !== undefined) {
@@ -147,12 +173,103 @@ export class CartService {
         unit_price: unitPrice,
         total_price: totalPrice,
         note,
+        line_key: line?.lineKey || null,
+        size: line?.size || null,
+        color: line?.color || null,
+        measurement_set: line?.measurementSet || null,
       });
     }
 
     this.calculateTotals(cart);
+    cart.markModified('items');
     await cart.save();
-    return cart;
+    return this.getCart(userId);
+  }
+
+  /** Set one line's quantity. Lines are addressed by their own id. */
+  async updateLine(
+    userId: string,
+    lineId: string,
+    quantity: number,
+  ): Promise<CartDocument> {
+    const cart = await this.getCart(userId);
+    const line = this.findLine(cart, lineId);
+    line.quantity = quantity;
+    line.total_price = quantity * line.unit_price;
+    this.calculateTotals(cart);
+    cart.markModified('items');
+    await cart.save();
+    return this.getCart(userId);
+  }
+
+  /**
+   * Remove one line. Removing a line that is already gone succeeds: the cart
+   * the caller wanted is the cart they get, and a retried request must not
+   * report an error.
+   */
+  async removeLine(userId: string, lineId: string): Promise<CartDocument> {
+    const cart = await this.getCart(userId);
+    const before = cart.items.length;
+    cart.items = cart.items.filter(
+      (i: any) => String(i._id) !== String(lineId),
+    ) as any;
+    if (cart.items.length !== before) {
+      this.calculateTotals(cart);
+      cart.markModified('items');
+      await cart.save();
+    }
+    return this.getCart(userId);
+  }
+
+  /**
+   * Move a guest cart into the account, once, at sign-in. A line the account
+   * already has (same key) is left as it is rather than added to, so a merge
+   * that runs twice cannot double anything. Items that cannot be added (a
+   * product since deleted) are skipped, and reported back.
+   */
+  async mergeGuestCart(
+    userId: string,
+    items: Array<{
+      productId: string;
+      quantity?: number;
+      appliedFabricId?: string;
+      appliedFabricYards?: number;
+      appliedFabricSize?: string;
+      note?: string;
+      selections?: OrderItemSelectionsDto;
+      lineKey?: string;
+      size?: string;
+      color?: string;
+      measurementSet?: string;
+    }>,
+  ): Promise<{ cart: CartDocument; skipped: string[] }> {
+    const skipped: string[] = [];
+    for (const item of items) {
+      const cart = await this.getCart(userId);
+      const key = item.lineKey || String(item.productId);
+      if (cart.items.some((i) => this.keyOf(i) === key)) continue;
+      try {
+        await this.addItem(
+          userId,
+          item.productId,
+          Math.max(1, item.quantity ?? 1),
+          item.appliedFabricId,
+          item.appliedFabricYards,
+          item.note,
+          item.selections,
+          item.appliedFabricSize,
+          {
+            lineKey: item.lineKey,
+            size: item.size,
+            color: item.color,
+            measurementSet: item.measurementSet,
+          },
+        );
+      } catch {
+        skipped.push(item.productId);
+      }
+    }
+    return { cart: await this.getCart(userId), skipped };
   }
 
   async removeItem(userId: string, productId: string): Promise<CartDocument> {
@@ -166,7 +283,7 @@ export class CartService {
     this.calculateTotals(cart);
     cart.markModified('items');
     await cart.save();
-    return cart;
+    return this.getCart(userId);
   }
 
   private calculateTotals(cart: CartDocument) {
@@ -178,5 +295,6 @@ export class CartService {
       { user: userId },
       { $set: { items: [], subtotal: 0, total: 0 } },
     );
+    return this.getCart(userId);
   }
 }

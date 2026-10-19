@@ -4,8 +4,12 @@ import {
   IsOptional,
   IsInt,
   Min,
+  Max,
+  MaxLength,
   IsNumber,
   IsMongoId,
+  IsArray,
+  ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -67,4 +71,55 @@ export class AddToCartDto {
   @ValidateNested()
   @Type(() => OrderItemSelectionsDto)
   selections?: OrderItemSelectionsDto;
+
+  @ApiPropertyOptional({
+    description:
+      "The line's identity as the shop computes it (product, size, colour, selections, applied fabric, measurement profile). Adding the same key again raises that line's quantity; a different key is a separate line. Omitted = keyed by product id, the old behaviour.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  lineKey?: string;
+
+  @ApiPropertyOptional({ description: 'Size shown on the line' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  size?: string;
+
+  @ApiPropertyOptional({ description: 'Colour shown on the line' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  color?: string;
+
+  @ApiPropertyOptional({ description: 'Saved measurement set the garment is sewn to' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  measurementSet?: string;
+
+  @IsOptional()
+  @IsString()
+  appliedFabricSize?: string;
+}
+
+export class UpdateCartLineDto {
+  @ApiProperty({ example: 2, minimum: 1, maximum: 999 })
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  quantity: number;
+}
+
+export class MergeCartDto {
+  @ApiProperty({
+    type: [AddToCartDto],
+    description: 'The guest cart to move into the account, once, at sign-in.',
+  })
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => AddToCartDto)
+  items: AddToCartDto[];
 }

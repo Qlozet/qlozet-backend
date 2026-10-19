@@ -62,6 +62,14 @@ export class Cart {
         unit_price: { type: Number, required: true },
         total_price: { type: Number, required: true },
         note: { type: String },
+        // A line's identity: product + size + colour + selections + applied
+        // fabric + who it is sewn for, as the shop computes it. Two sizes of
+        // one dress are two lines. Legacy lines have none and are keyed by
+        // their product id.
+        line_key: { type: String, default: null },
+        size: { type: String, default: null },
+        color: { type: String, default: null },
+        measurement_set: { type: String, default: null },
       },
     ],
     default: [],
@@ -101,6 +109,11 @@ export class Cart {
     unit_price: number;
     total_price: number;
     note?: string;
+    line_key?: string | null;
+    size?: string | null;
+    color?: string | null;
+    measurement_set?: string | null;
+    _id?: Types.ObjectId;
   }>;
 
   @Prop({ type: Number, default: 0 })
