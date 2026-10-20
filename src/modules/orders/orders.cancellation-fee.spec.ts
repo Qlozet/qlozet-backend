@@ -128,6 +128,28 @@ describe('cancellation fee: the quote', () => {
     expect(quote.refund_total).toBe(95_000);
   });
 
+  it('charges a custom item on an order stored without clothing_type (asks the product)', async () => {
+    // Order items had no clothing_type field in the schema until 2026-10-20,
+    // so every stored order lacks it. The product decides for those.
+    const order = makeOrder();
+    order.items = order.items.map(({ clothing_type, ...rest }: any) => rest);
+    const { service } = build(order);
+    (service as any).productModel = {
+      find: jest.fn(() => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve([
+              { _id: AGBADA, clothing: { name: 'Agbada', type: 'customize' } },
+              { _id: CAP, accessory: { name: 'Cap' } },
+            ]),
+        }),
+      })),
+    };
+    const quote = await service.getCustomerCancellationQuote('QLZ-1', String(CUSTOMER));
+    expect(quote.fee_total).toBe(30_000);
+    expect(quote.lines).toEqual([expect.objectContaining({ name: 'Agbada', fee: 30_000 })]);
+  });
+
   it('is free before the tailor confirms', async () => {
     const order = makeOrder({ shipments: [{ business: TAILOR, confirmed: false }, { business: SHOP, confirmed: true }] });
     const { service } = build(order);

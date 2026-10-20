@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Req,
+  Query,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -82,8 +83,8 @@ export class ReturnsController {
   @Roles(UserType.VENDOR)
   @Get('vendor')
   @ApiOperation({ summary: 'Get returns for my business (vendor)' })
-  async getVendorReturns(@Req() req: any) {
+  async getVendorReturns(@Req() req: any, @Query('status') status?: string) {
     const businessId = req.business?._id?.toString() || req.business?.id;
-    return this.returnsService.getVendorReturns(businessId);
+    return this.returnsService.getVendorReturns(businessId, status);
   }
 }

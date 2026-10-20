@@ -72,6 +72,10 @@ export class Return extends Document {
   @Prop({ type: String, default: null })
   vendor_rejection_reason?: string;
 
+  // Approved by the platform because the vendor did not answer in time.
+  @Prop({ type: Boolean, default: false })
+  auto_approved?: boolean;
+
   @Prop({ type: Date, default: null })
   received_at?: Date;
 

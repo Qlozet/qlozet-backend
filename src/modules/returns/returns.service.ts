@@ -19,6 +19,10 @@ import { VendorRole } from '../ums/schemas/role.schema';
 
 // A return is fulfilment work and a customer conversation at once.
 const RETURN_ROLES = [VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT];
+
+// After a rejection the customer can still dispute it; the payout is held at
+// least this long so that is possible.
+const REJECTION_DISPUTE_DAYS = 3;
 import {
   NotificationCategory,
   NotificationType,
@@ -26,6 +30,7 @@ import {
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { ProductService } from '../products/products.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class ReturnsService {
@@ -77,6 +82,39 @@ export class ReturnsService {
     if (Date.now() > returnDeadline) {
       throw new BadRequestException(
         `Return window has expired (${returnWindowDays} days from delivery)`,
+      );
+    }
+
+    // Pieces made to the customer's measurements cannot be returned; a
+    // problem with one is a dispute. The shop hid the button, but the API
+    // accepted them.
+    const requested = new Set((dto.item_ids || []).map(String));
+    const lines = (order.items || []).filter(
+      (i: any) =>
+        String(i.business) === String(dto.business_id) &&
+        requested.has(String(i.product)),
+    );
+    if (!lines.length) {
+      throw new BadRequestException('None of these items are from this vendor on this order');
+    }
+    let madeToFit =
+      (order as any).type === 'bespoke' ||
+      lines.some((i: any) => i.clothing_type === 'customize');
+    // Orders placed before order items stored clothing_type: ask the product.
+    const unknown = lines.filter((i: any) => !i.clothing_type && i.product);
+    if (!madeToFit && unknown.length) {
+      const Product: any = (this.orderModel.db as any).models?.Product;
+      if (Product) {
+        const custom = await Product.exists({
+          _id: { $in: unknown.map((i: any) => i.product) },
+          'clothing.type': 'customize',
+        });
+        madeToFit = Boolean(custom);
+      }
+    }
+    if (madeToFit) {
+      throw new BadRequestException(
+        'Pieces made to your measurements cannot be returned. If something is wrong with one, report a problem instead.',
       );
     }
 
@@ -167,8 +205,57 @@ export class ReturnsService {
     await returnReq.save();
 
     this.logger.log(`[Return] Vendor ${businessId} approved return ${returnId}`);
+    this.notifyCustomerApproved(returnReq);
+    return { message: 'Return approved. Customer has been notified.', data: returnReq };
+  }
 
-    // Notify customer
+  /**
+   * Hourly: a return the vendor has not answered within
+   * `return_auto_approve_days` is approved on their behalf, so the customer
+   * is never left waiting on silence. The claim is atomic (status still
+   * REQUESTED), so overlapping runs approve once.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async autoApproveStaleReturns() {
+    try {
+      const settings: any = await this.platformSettingsModel.findOne().lean();
+      const days = Number(settings?.return_auto_approve_days ?? 3);
+      if (!(days > 0)) return;
+      const cutoff = new Date(Date.now() - days * 86400000);
+      const stale = await this.returnModel
+        .find({ status: ReturnStatus.REQUESTED, createdAt: { $lte: cutoff } })
+        .limit(200);
+      for (const r of stale) {
+        const claim = await this.returnModel.updateOne(
+          { _id: r._id, status: ReturnStatus.REQUESTED },
+          { $set: { status: ReturnStatus.VENDOR_APPROVED, auto_approved: true } },
+        );
+        if (claim.modifiedCount !== 1) continue;
+        r.status = ReturnStatus.VENDOR_APPROVED;
+        this.logger.log(`[Return] Auto-approved return ${r._id} after ${days} day(s) unanswered`);
+        this.notifyCustomerApproved(r);
+        const team = await this.vendorRecipients.resolve(r.business, RETURN_ROLES);
+        for (const member of team) {
+          this.notificationsService
+            .create({
+              recipient: member.userId,
+              recipient_business: String(r.business),
+              category: NotificationCategory.ORDER,
+              type: NotificationType.RETURN_REQUESTED,
+              title: 'Return approved automatically',
+              body: `The return for order #${r.order_reference} was not answered within ${days} day(s), so it was approved. Mark it received when the items arrive back.`,
+              metadata: { order_reference: r.order_reference, return_id: r._id },
+              action_url: '/orders?tab=returns',
+            })
+            .catch((err) => this.logger.error(`Auto-approve vendor notice failed: ${err.message}`));
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`[Return] Auto-approve run failed: ${err?.message}`);
+    }
+  }
+
+  private notifyCustomerApproved(returnReq: any) {    // Notify customer
     this.notificationsService.create({
       recipient: returnReq.customer.toString(),
       category: NotificationCategory.ORDER,
@@ -183,8 +270,6 @@ export class ReturnsService {
     }).catch((err) =>
       this.logger.error(`Failed to notify customer about return approval: ${err.message}`),
     );
-
-    return { message: 'Return approved. Customer has been notified.', data: returnReq };
   }
 
   /**
@@ -199,15 +284,41 @@ export class ReturnsService {
     if (returnReq.status !== ReturnStatus.REQUESTED) {
       throw new BadRequestException('This return request cannot be rejected in its current state');
     }
+    const why = (reason ?? '').trim();
+    if (why.length < 3) {
+      throw new BadRequestException('Tell the customer why you are rejecting this return.');
+    }
 
     returnReq.status = ReturnStatus.VENDOR_REJECTED;
-    returnReq.vendor_rejection_reason = reason;
+    returnReq.vendor_rejection_reason = why;
     await returnReq.save();
 
-    // Unfreeze earnings since return was rejected
+    // The customer is told they can dispute a rejection, which is only
+    // possible while the payout is still held. Releasing at once let the
+    // payout go out within half an hour and the dispute was then refused.
+    // Re-hold until the later of the normal delivery schedule and three days
+    // from now.
+    const order = await this.orderModel.findById(returnReq.order).lean();
+    const settings: any = await this.platformSettingsModel.findOne().lean();
+    const holdDays = Math.max(
+      Number(settings?.payout_delay_days ?? 3),
+      Number(settings?.return_window_days ?? 7),
+    );
+    const delivered = Math.max(
+      0,
+      ...((order as any)?.shipments ?? []).map((s: any) =>
+        s.delivered_at ? new Date(s.delivered_at).getTime() : 0,
+      ),
+    );
+    const releaseAt = new Date(
+      Math.max(
+        delivered ? delivered + holdDays * 86400000 : 0,
+        Date.now() + REJECTION_DISPUTE_DAYS * 86400000,
+      ),
+    );
     await this.businessEarningsModel.updateMany(
       { order: returnReq.order, business: businessId, released: false },
-      { $set: { release_date: new Date() } },
+      { $set: { release_date: releaseAt } },
     );
 
     this.logger.log(`[Return] Vendor ${businessId} rejected return ${returnId}`);
@@ -218,7 +329,7 @@ export class ReturnsService {
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CANCELLED,
       title: 'Return Rejected',
-      body: `Your return for order #${returnReq.order_reference} was rejected. Reason: ${reason}. You may file a dispute if you disagree.`,
+      body: `Your return for order #${returnReq.order_reference} was rejected. Reason: ${why}. If you disagree, report a problem on the order within ${REJECTION_DISPUTE_DAYS} days.`,
       metadata: {
         order_reference: returnReq.order_reference,
         return_id: returnReq._id,
@@ -252,9 +363,17 @@ export class ReturnsService {
     if (!order) throw new NotFoundException('Order not found');
 
     const returnedItemIds = returnReq.items.map((id) => id.toString());
-    const refundAmount = order.items
-      .filter((i) => returnedItemIds.includes(i.product?.toString()))
-      .reduce((sum, i) => sum + ((i as any).total_price || 0), 0);
+    // This vendor's order lines being returned (return items are product ids).
+    const returnedLines = order.items.filter(
+      (i: any) =>
+        returnedItemIds.includes(i.product?.toString()) &&
+        String(i.business) === String(businessId) &&
+        !i.rejected,
+    );
+    const refundAmount = returnedLines.reduce(
+      (sum, i) => sum + ((i as any).total_price || 0),
+      0,
+    );
 
     returnReq.refund_amount = refundAmount;
 
@@ -277,36 +396,52 @@ export class ReturnsService {
       );
     }
 
-    // Reverse vendor earnings and keep the wallet ledger in sync.
-    // Returns usually happen after delivery, so earnings may already be
-    // released into the vendor's spendable balance — those must be clawed
-    // back from `balance`, while still-pending earnings come out of
-    // `pending_balance` before the record is deleted.
-    const vendorEarnings = await this.businessEarningsModel.find({
-      order: returnReq.order,
-      business: businessId,
-    });
+    // Reverse ONLY the returned items' share of this vendor's earnings, and
+    // keep the wallet ledger in sync. Every earning used to be reversed, so a
+    // one-item return on a three-item order took all three. Earnings are
+    // linked to their order line; legacy rows without a link give up the
+    // returned share of their value instead.
+    const clawedBack = await this.reverseReturnedEarnings(
+      order,
+      businessId,
+      returnedLines,
+      refundAmount,
+    );
 
-    for (const earning of vendorEarnings) {
-      const net = earning.net_amount || 0;
-      if (net <= 0) continue;
-
-      if (earning.released) {
-        await this.walletsService.reconcileBusinessWallet(earning.business, {
-          balance: -net,
-        });
-        earning.net_amount = 0;
-        await earning.save();
-      } else {
-        await this.walletsService.reconcileBusinessWallet(earning.business, {
-          pending: -net,
-        });
-        await this.businessEarningsModel.deleteOne({ _id: earning._id });
-      }
+    // Restock only what came back. Restoring by order put every item of the
+    // order back in stock, returned or not.
+    for (const line of returnedLines as any[]) {
+      if (!line._id) continue;
+      await this.productService
+        .restoreInventory(order._id as any, businessId, line._id)
+        .catch((e: any) =>
+          this.logger.error(`Restock failed for ${order.reference} line ${line._id}: ${e?.message}`),
+        );
     }
 
-    // Restore inventory
-    await this.productService.restoreInventory((returnReq.order as any).toString());
+    // Tell the vendor what the refund took from their earnings.
+    if (refundAmount > 0) {
+      const team = await this.vendorRecipients.resolve(businessId, RETURN_ROLES);
+      for (const member of team) {
+        this.notificationsService
+          .create({
+            recipient: member.userId,
+            recipient_business: String(businessId),
+            category: NotificationCategory.ORDER,
+            type: NotificationType.RETURN_REQUESTED,
+            title: 'Return refunded',
+            body: `The customer was refunded ₦${refundAmount.toLocaleString()} for the returned items on order #${order.reference}. ₦${clawedBack.toLocaleString()} came out of your earnings for those items.`,
+            metadata: {
+              order_reference: order.reference,
+              return_id: returnReq._id,
+              refund_amount: refundAmount,
+              earnings_reversed: clawedBack,
+            },
+            action_url: '/orders?tab=returns',
+          })
+          .catch((err) => this.logger.error(`Return refund vendor notice failed: ${err.message}`));
+      }
+    }
 
     returnReq.status = ReturnStatus.REFUND_PROCESSED;
     returnReq.refunded_at = new Date();
@@ -387,12 +522,75 @@ export class ReturnsService {
   }
 
   /**
-   * Get vendor's returns
+   * Reverse the returned lines' share of a vendor's earnings on an order.
+   * Item-linked earnings for those lines are reversed in full; legacy
+   * earnings with no item link lose the returned fraction of their value.
+   * Released money comes out of the balance (any shortfall becomes owed),
+   * held money out of pending. Returns the total reversed.
    */
-  async getVendorReturns(businessId: string) {
+  private async reverseReturnedEarnings(
+    order: any,
+    businessId: string,
+    returnedLines: any[],
+    refundAmount: number,
+  ): Promise<number> {
+    const lineIds = new Set(returnedLines.map((l: any) => String(l._id)));
+    const vendorItemsTotal = (order.items || [])
+      .filter((i: any) => String(i.business) === String(businessId) && !i.rejected)
+      .reduce((sum: number, i: any) => sum + (i.total_price || 0), 0);
+    const fraction =
+      vendorItemsTotal > 0 ? Math.min(1, refundAmount / vendorItemsTotal) : 0;
+
+    const earnings = await this.businessEarningsModel.find({
+      order: order._id,
+      business: businessId,
+      milestone: { $ne: 'cancellation_fee' },
+    });
+
+    let reversed = 0;
+    for (const earning of earnings as any[]) {
+      const net = earning.net_amount || 0;
+      if (net <= 0) continue;
+      const linked = earning.item ? lineIds.has(String(earning.item)) : null;
+      // Linked to another line: not part of this return.
+      if (linked === false) continue;
+      const take = linked ? net : Math.round(net * fraction);
+      if (take <= 0) continue;
+
+      if (earning.released) {
+        await this.walletsService.reconcileBusinessWallet(earning.business, {
+          balance: -take,
+        });
+        earning.net_amount = net - take;
+        await earning.save();
+      } else {
+        await this.walletsService.reconcileBusinessWallet(earning.business, {
+          pending: -take,
+        });
+        if (net - take <= 0) {
+          await this.businessEarningsModel.deleteOne({ _id: earning._id });
+        } else {
+          earning.net_amount = net - take;
+          await earning.save();
+        }
+      }
+      reversed += take;
+    }
+    return reversed;
+  }
+
+  /**
+   * Get vendor's returns, newest first, optionally one status.
+   */
+  async getVendorReturns(businessId: string, status?: string) {
+    const filter: Record<string, any> = { business: businessId };
+    if (status && Object.values(ReturnStatus).includes(status as ReturnStatus)) {
+      filter.status = status;
+    }
     return this.returnModel
-      .find({ business: businessId })
+      .find(filter)
       .sort({ createdAt: -1 })
+      .populate('customer', 'full_name email')
       .lean();
   }
 }

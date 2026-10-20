@@ -27,6 +27,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { Dispute, DisputeDocument, DisputeStatus } from '../disputes/schemas/dispute.schema';
+import { Return, ReturnDocument, ReturnStatus } from '../returns/schemas/return.schema';
 
 @Injectable()
 export class BusinessEarningsCron {
@@ -59,6 +60,9 @@ export class BusinessEarningsCron {
     @Optional()
     @InjectModel(Dispute.name)
     private readonly disputeModel?: Model<DisputeDocument>,
+    @Optional()
+    @InjectModel(Return.name)
+    private readonly returnModel?: Model<ReturnDocument>,
   ) {}
 
   /**
@@ -68,13 +72,31 @@ export class BusinessEarningsCron {
    * one place that actually pays checks too.
    */
   private async heldByDispute(earning: BusinessEarningDocument): Promise<boolean> {
-    if (!this.disputeModel) return false;
-    const open = await this.disputeModel.exists({
-      order: earning.order,
-      business: earning.business,
-      status: { $in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
-    });
-    return Boolean(open);
+    const dispute = this.disputeModel
+      ? await this.disputeModel.exists({
+          order: earning.order,
+          business: earning.business,
+          status: { $in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
+        })
+      : null;
+    if (dispute) return true;
+    // An open return holds the payout the same way: requesting one empties
+    // release_date, and the same two paths can fill it back in.
+    const openReturn = this.returnModel
+      ? await this.returnModel.exists({
+          order: earning.order,
+          business: earning.business,
+          status: {
+            $in: [
+              ReturnStatus.REQUESTED,
+              ReturnStatus.VENDOR_APPROVED,
+              ReturnStatus.RETURN_SHIPPED,
+              ReturnStatus.RECEIVED,
+            ],
+          },
+        })
+      : null;
+    return Boolean(openReturn);
   }
 
   /** Notify the vendor that a payout landed in their wallet. */

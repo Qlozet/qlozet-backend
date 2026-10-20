@@ -150,6 +150,16 @@ export class OrderItem {
   // the details). Standard order items always set this.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   product: Types.ObjectId;
+
+  // 'customize' for a made-to-fit garment. Order creation always passed it,
+  // but without a schema field Mongoose dropped it, so every check on a
+  // stored order's clothing_type was silently false. Orders placed before
+  // this have none; look the product up for those.
+  @Prop({ type: String, default: null })
+  clothing_type?: string | null;
+
+  @Prop({ type: String, default: null })
+  product_kind?: string | null;
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Business', default: null })
   business: Types.ObjectId;
 

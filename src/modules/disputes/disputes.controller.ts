@@ -7,6 +7,7 @@ import {
   Param,
   Req,
   Query,
+  BadRequestException,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -56,19 +57,24 @@ export class DisputesController {
   @ApiOperation({ summary: 'Vendor responds to a dispute with counter-evidence' })
   async respondToDispute(
     @Param('id') id: string,
-    @Body() body: { response: string; evidence_urls?: string[] },
+    @Body() body: { response?: string; vendor_response?: string; evidence_urls?: string[] },
     @Req() req: any,
   ) {
     const businessId = req.business?._id?.toString() || req.business?.id;
-    return this.disputesService.respondToDispute(id, businessId, body.response, body.evidence_urls);
+    // `vendor_response` is what older vendor apps send; it used to be dropped.
+    const text = (body.response ?? body.vendor_response ?? '').trim();
+    if (text.length < 10) {
+      throw new BadRequestException('Write at least a sentence explaining your side.');
+    }
+    return this.disputesService.respondToDispute(id, businessId, text, body.evidence_urls);
   }
 
   @Roles(UserType.VENDOR)
   @Get('vendor')
   @ApiOperation({ summary: 'Get disputes for my business (vendor)' })
-  async getVendorDisputes(@Req() req: any) {
+  async getVendorDisputes(@Req() req: any, @Query('status') status?: string) {
     const businessId = req.business?._id?.toString() || req.business?.id;
-    return this.disputesService.getVendorDisputes(businessId);
+    return this.disputesService.getVendorDisputes(businessId, status);
   }
 
   // ── Admin Endpoints ──

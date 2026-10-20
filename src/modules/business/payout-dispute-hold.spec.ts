@@ -43,6 +43,14 @@ describe('Payout is held by an open dispute', () => {
     ]);
   });
 
+  it('an open return holds the payout too', async () => {
+    const { cron, updates } = build(false);
+    cron.returnModel = { exists: async () => ({ _id: 'r1' }) };
+    await cron.releaseFunds();
+    expect(cron.businessWalletModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(updates[0].update).toEqual({ $set: { release_date: null } });
+  });
+
   it('releases as normal when there is no open dispute', async () => {
     const { cron, updates } = build(false);
     await cron.releaseFunds().catch(() => undefined);

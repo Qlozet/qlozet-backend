@@ -44,6 +44,12 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 3 })
   default_turnaround_days: number;
 
+  // A return request the vendor has not answered after this many days is
+  // approved automatically, so a customer is never left waiting on silence.
+  // 0 turns it off.
+  @Prop({ type: Number, default: 3 })
+  return_auto_approve_days: number;
+
   @Prop({ type: Number, default: 7 })
   return_window_days: number;
 

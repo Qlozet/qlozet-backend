@@ -32,6 +32,7 @@ import { LogisticsModule } from '../logistics/logistics.module';
 import { ProductModule } from '../products/products.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
+import { Return, ReturnSchema } from '../returns/schemas/return.schema';
 
 @Module({
   imports: [
@@ -50,6 +51,8 @@ import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
       // Read-only, for the payout cron: an open dispute holds a payout.
       { name: Dispute.name, schema: DisputeSchema },
+      // Read-only, for the payout cron: an open return holds a payout too.
+      { name: Return.name, schema: ReturnSchema },
     ]),
     LogisticsModule,   // provides LogisticsService
     ProductModule,     // provides ProductService

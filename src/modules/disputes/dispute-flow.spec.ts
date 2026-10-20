@@ -68,6 +68,7 @@ describe('DisputesService', () => {
       // stubbed to the same shape the old direct credit had so the money
       // assertions below stay readable.
       walletsService: {
+        reconcileBusinessWallet: jest.fn().mockResolvedValue(null),
         creditWallet,
         refundToCustomerWallet: jest.fn(async ({ amount }: { amount: number }) => {
           await creditWallet('customer-wallet', amount);
@@ -267,6 +268,23 @@ describe('DisputesService', () => {
       expect(earning.net_amount).toBe(40_000);
       expect(earning.release_date).not.toBeNull();
       expect(creditWallet).toHaveBeenCalledWith(expect.any(String), 14_000);
+    });
+
+    it('partial refund across two held rows takes the amount once, not per row', async () => {
+      const { order, dispute } = await openDispute();
+      // A second held row on the same order (e.g. an upfront milestone).
+      await makeEarning(order, { net_amount: 20_000, amount: 22_000, commission: 2_000, release_date: null });
+
+      await service.resolveDispute(dispute._id.toString(), adminId, {
+        resolution: DisputeResolution.PARTIAL_REFUND,
+        refund_amount: 14_000,
+      });
+
+      const rows = await earningsModel.find({ order: order._id }).lean();
+      const left = rows.reduce((sum: number, r: any) => sum + r.net_amount, 0);
+      // 54,000 + 20,000 held, 14,000 refunded: 60,000 left, not 46,000.
+      expect(left).toBe(60_000);
+      expect(rows.every((r: any) => r.net_amount >= 0)).toBe(true);
     });
 
     it('partial refund without an amount is rejected', async () => {
