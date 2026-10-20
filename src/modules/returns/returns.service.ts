@@ -60,10 +60,13 @@ export class ReturnsService {
    * Customer requests a return (within return window)
    */
   async requestReturn(customerId: string, dto: CreateReturnDto) {
+    // A vendor's items can be returned once THEIR parcel is delivered, even
+    // if another vendor's parcel on the same order is still on its way:
+    // payouts are per parcel, so the window has to be too.
     const order = await this.orderModel.findOne({
       reference: dto.order_reference,
       customer: customerId,
-      status: OrderStatus.COMPLETED,
+      status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT, OrderStatus.COMPLETED] },
     });
     if (!order) throw new BadRequestException('Order not found or not eligible for return');
 
@@ -71,14 +74,20 @@ export class ReturnsService {
     const settings = await this.platformSettingsModel.findOne().lean();
     const returnWindowDays = (settings as any)?.return_window_days ?? 7;
 
-    const latestDelivery = Math.max(
-      ...order.shipments.map((s) => (s as any).delivered_at?.getTime() || 0),
-    );
-    if (latestDelivery === 0) {
-      throw new BadRequestException('Order has not been delivered yet');
+    const vendorParcel = (order.shipments || []).find(
+      (s: any) =>
+        String(s.business) === String(dto.business_id) &&
+        s.shipment_type !== 'fabric_transfer',
+    ) as any;
+    // Older orders without a matching parcel fall back to the latest delivery.
+    const deliveredAt = vendorParcel
+      ? vendorParcel.delivered_at?.getTime?.() || 0
+      : Math.max(0, ...order.shipments.map((s) => (s as any).delivered_at?.getTime() || 0));
+    if (!deliveredAt) {
+      throw new BadRequestException('This vendor\'s items have not been delivered yet');
     }
 
-    const returnDeadline = latestDelivery + returnWindowDays * 86400000;
+    const returnDeadline = deliveredAt + returnWindowDays * 86400000;
     if (Date.now() > returnDeadline) {
       throw new BadRequestException(
         `Return window has expired (${returnWindowDays} days from delivery)`,

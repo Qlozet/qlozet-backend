@@ -915,16 +915,45 @@ export class WebhookService {
     const trackingNumber =
       order.shipments[shipmentIndex].tracking_number || candidates[0];
 
-    if (mappedStatus === ShipmentStatus.DELIVERED) {
-      order.shipments[shipmentIndex].delivered_at = new Date();
+    if (mappedStatus === ShipmentStatus.DELIVERED && previousStatus !== ShipmentStatus.DELIVERED) {
+      const deliveredAt = new Date();
+      order.shipments[shipmentIndex].delivered_at = deliveredAt;
+
+      // Per-parcel payout: THIS vendor's earnings start their countdown when
+      // THEIR parcel arrives. Waiting for the whole order made a vendor who
+      // delivered on time wait for every other vendor on the order. The
+      // countdown is the longer of the payout delay and the return window,
+      // and returns are now counted from this same delivery, so a return
+      // can never arrive after the money it would claw back was released.
+      // Upfront milestones are already scheduled; held (disputed) rows are
+      // re-held by the release job.
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const holdDays = Math.max(
+        (settings as any)?.payout_delay_days ?? 3,
+        (settings as any)?.return_window_days ?? 7,
+      );
+      const releaseDate = new Date(deliveredAt.getTime() + holdDays * 86400000);
+      const vendorId = (order.shipments[shipmentIndex] as any).business;
+      if (vendorId) {
+        const scheduled = await this.businessEarningsModel.updateMany(
+          { order: order._id, business: vendorId, released: false, release_date: null },
+          { $set: { release_date: releaseDate } },
+        );
+        this.logger.log(
+          `[DeliveryPayout] Parcel delivered on ${order.reference}: ${scheduled.modifiedCount} earning(s) for vendor ${vendorId} release ${releaseDate.toISOString()}`,
+        );
+      }
     }
 
-    // Check if ALL shipments are delivered → complete the order
+    // Check if ALL shipments are delivered → complete the order. A vendor
+    // who declined their part ships nothing, so their shipment never counts
+    // against completion (it used to hold the order open forever).
     const allDelivered = order.shipments.every(
-      (s, i) =>
-        i === shipmentIndex
+      (s: any, i) =>
+        s.rejected ||
+        (i === shipmentIndex
           ? mappedStatus === ShipmentStatus.DELIVERED
-          : s.status === ShipmentStatus.DELIVERED,
+          : s.status === ShipmentStatus.DELIVERED),
     );
 
     if (allDelivered) {
@@ -946,7 +975,9 @@ export class WebhookService {
         Date.now() + payoutDelayDays * 24 * 60 * 60 * 1000,
       );
 
-      // Update all unreleased earnings for this order with the release date
+      // Fallback: anything still undated on a fully delivered order (rows
+      // without a vendor shipment, older data). Each vendor's own rows were
+      // dated when their parcel arrived.
       const updateResult = await this.businessEarningsModel.updateMany(
         { order: order._id, released: false, release_date: null },
         { $set: { release_date: releaseDate } },

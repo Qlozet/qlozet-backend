@@ -196,6 +196,12 @@ describe('DisputesService', () => {
         ).rejects.toThrow(/compensated automatically/);
       });
 
+      it("other reasons are accepted once that vendor's parcel is delivered", async () => {
+        const order = await inTransit({ status: 'delivered', delivered_at: new Date() });
+        const { data: dispute } = await service.fileDispute(customerId.toString(), fileDto(order));
+        expect(dispute.status).toBe(DisputeStatus.OPEN);
+      });
+
       it('other reasons still need a delivered order', async () => {
         const order = await inTransit({
           status: 'in_transit',

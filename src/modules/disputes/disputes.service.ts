@@ -100,15 +100,25 @@ export class DisputesService {
     const order = await this.orderModel.findOne({
       reference: dto.order_reference,
       customer: customerId,
-      status: notReceived
-        ? { $in: [OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT, OrderStatus.COMPLETED] }
-        : OrderStatus.COMPLETED,
+      status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT, OrderStatus.COMPLETED] },
     });
     if (!order) {
       throw new BadRequestException('Order not found or not eligible for dispute');
     }
     if (notReceived) {
       await this.assertParcelOverdue(order, dto.business_id);
+    } else if ((order as any).status !== OrderStatus.COMPLETED) {
+      // Every other problem is about what arrived: allowed once THIS
+      // vendor's parcel is delivered (payouts are per parcel, so waiting for
+      // the whole order could let this vendor's money go first).
+      const parcel = (order.shipments || []).find(
+        (s: any) =>
+          String(s.business) === String(dto.business_id) &&
+          s.shipment_type !== 'fabric_transfer',
+      ) as any;
+      if (!parcel || parcel.status !== 'delivered') {
+        throw new BadRequestException('Order not found or not eligible for dispute');
+      }
     }
 
     // Check if payout has already been released
