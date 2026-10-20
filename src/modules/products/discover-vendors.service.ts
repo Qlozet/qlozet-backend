@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { BusinessStatus } from '../business/schemas/business.schema';
 import { ProductStatus } from './enums/product-status.enum';
+import { customerVisibleModeration } from './customer-visibility';
 
 export interface DiscoverVendorsQuery {
   kind: 'clothing' | 'accessory' | 'fabric';
@@ -183,7 +184,7 @@ export class DiscoverVendorsService {
   private productFilter(query: DiscoverVendorsQuery): Record<string, any> {
     const filter: Record<string, any> = {
       status: ProductStatus.ACTIVE,
-      'moderation.status': { $ne: 'rejected' },
+      'moderation.status': customerVisibleModeration(),
       kind: query.kind,
     };
 

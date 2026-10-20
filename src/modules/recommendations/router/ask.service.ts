@@ -19,6 +19,7 @@ import { FilterSpec } from '../filters/dto/filter-spec.dto';
 import { BusinessService } from '../../business/business.service';
 import { UserEmbeddingsService } from '../user-embeddings/user-embeddings.service';
 import { blendVectors } from './vectors';
+import { customerVisibleModeration } from '../../products/customer-visibility';
 
 /** How much of the retrieval vector is the customer's taste rather than the question. */
 const TASTE_WEIGHT = 0.2;
@@ -370,6 +371,7 @@ export class AskService {
           .find({
             _id: { $in: wishlistIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) },
             status: 'active',
+            'moderation.status': customerVisibleModeration(),
           })
           .select('kind clothing.name fabric.name accessory.name')
           .lean();
@@ -434,6 +436,7 @@ export class AskService {
       .find({
         _id: { $in: validIds.map((id) => new Types.ObjectId(id)) },
         status: 'active',
+        'moderation.status': customerVisibleModeration(),
       })
       .populate({
         path: 'business',

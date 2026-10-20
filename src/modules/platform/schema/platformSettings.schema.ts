@@ -123,6 +123,14 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 30 })
   custom_cancellation_fee_percent: number;
 
+  // ── Listing review ──
+  // How a newly published listing reaches the shop. 'review_first': hidden
+  // until an admin approves it. 'live_first': visible at once while it waits
+  // in the review queue; a rejection takes it down. Rejected listings are
+  // hidden either way. Read through products/customer-visibility.
+  @Prop({ type: String, enum: ['review_first', 'live_first'], default: 'review_first' })
+  listing_review_mode: 'review_first' | 'live_first';
+
   @Prop({ type: Number, default: 10 })
   reservation_fee_percent: number;
 

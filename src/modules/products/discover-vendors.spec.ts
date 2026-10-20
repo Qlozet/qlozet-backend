@@ -90,11 +90,11 @@ describe('Discover vendors by product kind', () => {
       expect(matchStage()['clothing.type']).toBe('non_customize');
     });
 
-    it('shows only active, unrejected products', async () => {
+    it('shows only active, approved products', async () => {
       await run();
       const m = matchStage();
       expect(m.status).toBe('active');
-      expect(m['moderation.status']).toEqual({ $ne: 'rejected' });
+      expect(m['moderation.status']).toEqual({ $in: ['approved', null] });
     });
 
     it('matches audience both ways, and keeps untagged products', async () => {
