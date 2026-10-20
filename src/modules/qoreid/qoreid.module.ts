@@ -5,6 +5,7 @@ import { VerificationController } from './verification.controller';
 import { QoreIdWebhookController } from './qoreid-webhook.controller';
 import { Business, BusinessSchema } from '../business/schemas/business.schema';
 import { UmsModule } from '../ums/ums.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { UmsModule } from '../ums/ums.module';
       { name: Business.name, schema: BusinessSchema },
     ]),
     UmsModule,
+    NotificationsModule, // VendorVerificationNotifier
   ],
   controllers: [VerificationController, QoreIdWebhookController],
   providers: [QoreIdService],

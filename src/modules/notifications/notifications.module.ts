@@ -16,6 +16,8 @@ import { BroadcastsService } from './broadcasts.service';
 import { Broadcast, BroadcastSchema } from './schemas/broadcast.schema';
 import { TeamMember, TeamMemberSchema } from '../ums/schemas/team.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
+import { VendorVerificationNotifier } from './vendor-verification-notifier.service';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { Role, RoleSchema } from '../ums/schemas/role.schema';
       { name: TeamMember.name, schema: TeamMemberSchema },
       { name: Role.name, schema: RoleSchema },
       { name: Broadcast.name, schema: BroadcastSchema },
+      // Read-only, for VendorVerificationNotifier: the store's name.
+      { name: Business.name, schema: BusinessSchema },
     ]),
   ],
   controllers: [NotificationsController],
@@ -38,9 +42,11 @@ import { Role, RoleSchema } from '../ums/schemas/role.schema';
     NotificationsGateway,
     VendorRecipientsService,
     BroadcastsService,
+    VendorVerificationNotifier,
   ],
   exports: [
     NotificationsService,
+    VendorVerificationNotifier,
     MailService,
     VendorRecipientsService,
     BroadcastsService,

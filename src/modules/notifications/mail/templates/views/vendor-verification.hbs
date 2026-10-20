@@ -1,0 +1,39 @@
+{{#if approved}}
+{{> header title="Your store is approved" subtitle="You can start selling" }}
+{{else if actionRequired}}
+{{> header title="Your verification needs attention" subtitle="One step before you can sell" }}
+{{else}}
+{{> header title="Your store was not approved" subtitle="About your verification" }}
+{{/if}}
+
+<p>Hello <strong>{{vendorName}}</strong>,</p>
+
+{{#if approved}}
+<p><strong>{{businessName}}</strong> has been reviewed and approved. You can now
+    take orders, and your listings reach the shop as described in your
+    Help Center.</p>
+
+{{> button url=dashboardUrl text="Go to your dashboard" }}
+{{else if actionRequired}}
+<p>We could not finish verifying <strong>{{businessName}}</strong> yet. Here is
+    what needs to change:</p>
+
+<div class="security-note" style="background: #fff8e1; border-left-color: #f59e0b;">
+    <p style="margin: 0;">{{message}}</p>
+</div>
+
+{{> button url=verificationUrl text="Open verification" }}
+{{else}}
+<p><strong>{{businessName}}</strong> was reviewed and was not approved to sell
+    on Qlozet.</p>
+
+<div class="security-note" style="background: #fff8e1; border-left-color: #f59e0b;">
+    <p style="margin: 0 0 6px; font-weight: 700;">Why</p>
+    <p style="margin: 0;">{{message}}</p>
+</div>
+
+<p>If you think this was a mistake, contact support and a person will look at
+    it again.</p>
+{{/if}}
+
+<p style="margin-top: 28px;">Thank you,<br>The {{companyName}} Team</p>

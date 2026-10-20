@@ -17,12 +17,19 @@ describe('Verification decision', () => {
   let saved: Record<string, any>;
   let statusCalls: string[];
   let service: any;
+  let notices: any[][];
 
   beforeEach(() => {
     saved = {};
     statusCalls = [];
+    notices = [];
     service = Object.create(BusinessService.prototype);
     Object.assign(service, {
+      verificationNotifier: {
+        notify: async (...args: any[]) => {
+          notices.push(args);
+        },
+      },
       businessModel: {
         findById: async () => ({ verification_attempts: 0 }),
         updateOne: async (_filter: any, update: any) => {
@@ -47,6 +54,15 @@ describe('Verification decision', () => {
     // Routed through updateBusinessStatus so the one-time signup reward still
     // fires on the first transition into a live state.
     expect(statusCalls).toEqual([BusinessStatus.VERIFIED]);
+  });
+
+  it('tells the owner about every decision, with the message they will see', async () => {
+    await decide('approved');
+    await decide('action_required', 'Link a payout account in your own name.');
+    await decide('rejected', 'This business sells counterfeit goods.');
+    expect(notices.map((n) => n[1])).toEqual(['approved', 'action_required', 'rejected']);
+    expect(notices[0][2]).toBeNull();
+    expect(notices[1][2]).toBe('Link a payout account in your own name.');
   });
 
   it('action required grants exactly one more attempt', async () => {

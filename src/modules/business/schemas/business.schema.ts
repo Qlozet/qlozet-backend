@@ -341,6 +341,23 @@ export class Business extends Document {
   @Prop({ type: Number, default: 1 })
   verification_attempts_allowed: number;
 
+  /**
+   * Whether the one automatic retry has been used. The first time the
+   * provider's checks fail, the vendor gets another attempt without waiting
+   * for support (most failures are an expired virtual NIN or a blurry
+   * video); after that, retries are an admin decision again.
+   */
+  @Prop({ type: Boolean, default: false })
+  verification_auto_retry_granted: boolean;
+
+  /**
+   * The attempt number whose failed run has already been flagged. Each new
+   * run spends an attempt, so a repeat delivery of the same run's completion
+   * event is recognised and ignored.
+   */
+  @Prop({ type: Number, default: null })
+  verification_failure_flagged_attempt?: number | null;
+
   @Prop({ type: Date, default: null })
   verification_submitted_at?: Date | null;
 

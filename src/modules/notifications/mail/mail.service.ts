@@ -21,6 +21,7 @@ interface EmailTemplates {
   orderDelivered: CompiledTemplate;
   payoutReleased: CompiledTemplate;
   productModerated: CompiledTemplate;
+  vendorVerification: CompiledTemplate;
   adminInvite: CompiledTemplate;
   teamAdded: CompiledTemplate;
   quoteRequest: CompiledTemplate;
@@ -117,6 +118,7 @@ export class MailService {
         orderDelivered: await this.loadTemplate('order-delivered'),
         payoutReleased: await this.loadTemplate('payout-released'),
         productModerated: await this.loadTemplate('product-moderated'),
+        vendorVerification: await this.loadTemplate('vendor-verification'),
         adminInvite: await this.loadTemplate('admin-invite'),
         teamAdded: await this.loadTemplate('team-added'),
         quoteRequest: await this.loadTemplate('quote-request'),
@@ -915,6 +917,49 @@ export class MailService {
       return true;
     } catch (error) {
       this.logger.error('❌ Failed to send product moderated email:', error);
+      throw error;
+    }
+  }
+
+  /** The outcome of a vendor's store verification, to the store owner. */
+  async sendVendorVerificationEmail(
+    to: string,
+    vendorName: string,
+    businessName: string,
+    outcome: 'approved' | 'action_required' | 'rejected',
+    message: string,
+  ) {
+    try {
+      if (!this.templates.vendorVerification)
+        throw new Error('Vendor verification template not loaded');
+
+      const subject =
+        outcome === 'approved'
+          ? `${businessName} is approved on Qlozet`
+          : outcome === 'action_required'
+            ? `${businessName}: your verification needs attention`
+            : `${businessName} was not approved`;
+      const base =
+        process.env.VENDOR_FRONTEND_URL ||
+        process.env.FRONTEND_URL ||
+        'https://qlozet.app';
+
+      const html = this.templates.vendorVerification({
+        vendorName,
+        businessName,
+        approved: outcome === 'approved',
+        actionRequired: outcome === 'action_required',
+        message,
+        companyName: process.env.COMPANY_NAME || 'Qlozet',
+        subject,
+        dashboardUrl: `${base}/dashboard`,
+        verificationUrl: `${base}/settings?tab=verification`,
+      });
+
+      await this.dispatch({ to, subject, html });
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Failed to send vendor verification email:', error);
       throw error;
     }
   }

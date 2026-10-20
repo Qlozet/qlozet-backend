@@ -53,6 +53,9 @@ export enum NotificationType {
   // Team
   TEAM_MEMBER_JOINED = 'team_member_joined',
 
+  // Store verification outcome (approved / needs attention / not approved)
+  VERIFICATION_DECISION = 'verification_decision',
+
   // System
   WELCOME = 'welcome',
   ANNOUNCEMENT = 'announcement',
