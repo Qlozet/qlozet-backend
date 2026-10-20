@@ -65,6 +65,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
 
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
@@ -574,6 +575,17 @@ export class BespokeService {
     const design = await this.designModel.findById(quote.design);
     if (!design) throw new NotFoundException('Design not found');
 
+    // The tailor sews from the measurement snapshot taken below. Without
+    // usable measurements the order reached them with a blank sheet, so
+    // refuse first, before any order, charge or rival checkout is touched.
+    const measuredFor = await this.buildBodyProfileSnapshot(
+      customer.id,
+      measurementSetName,
+    );
+    if (!hasUsableMeasurements(measuredFor?.measurements)) {
+      throw new BadRequestException(NO_MEASUREMENTS_MESSAGE);
+    }
+
     // Double-charge guard: if ANOTHER quote on this design has a checkout in
     // flight (pending order touched recently), block a second acceptance —
     // both payments could complete and put two tailors into production.
@@ -616,7 +628,6 @@ export class BespokeService {
       customer.id,
       measurementSetName,
     );
-
     if (order && bodyProfile) {
       // Retry of an earlier checkout — refresh the snapshot in case the
       // customer picked a different measurement set this time.

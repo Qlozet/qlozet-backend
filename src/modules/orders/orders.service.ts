@@ -122,6 +122,7 @@ import type { EventDocument } from '../recommendations/events/schemas/event.sche
 import type { AdminProfileOverviewDto } from '../platform/dto/admin-profile.dto';
 import { Ticket, TicketStatus } from '../ticket/schema/ticket.schema';
 import { isCustomerVisible } from '../products/customer-visibility';
+import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
 
 @Injectable()
 export class OrderService {
@@ -412,6 +413,18 @@ export class OrderService {
         throw new BadRequestException(
           'Please select a shipping option for each vendor before placing your order.',
         );
+      }
+
+      // A piece made to fit cannot be cut from nothing: refuse the order
+      // before anything is saved or charged when a custom item would carry
+      // no measurements (no saved set, or an empty one).
+      const customWithoutMeasurements = normalizedItems.some(
+        (it: any) =>
+          it.clothing_type === ClothingType.CUSTOMIZE &&
+          !hasUsableMeasurements(it.body_profile?.measurements),
+      );
+      if (customWithoutMeasurements) {
+        throw new BadRequestException(NO_MEASUREMENTS_MESSAGE);
       }
 
       // Check if any item is bespoke/customize to attach body profile
