@@ -230,6 +230,17 @@ export class UpdatePlatformSettingsDto {
   default_turnaround_days?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Approve a return request automatically when the vendor has not answered it after this many days (0 = never)',
+    example: 3,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  return_auto_approve_days?: number;
+
+  @ApiPropertyOptional({
     description: 'Late-fulfilment penalty accrual per day (%)',
     example: 5,
   })

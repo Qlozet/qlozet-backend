@@ -17,7 +17,9 @@ import { VendorRole } from '../ums/schemas/role.schema';
 // Who at a vendor hears about a dispute. The tailor made the garment being
 // disputed and is the only person who can say what was done; customer support
 // handles the correspondence. The owner is always included by the resolver.
-const DISPUTE_ROLES = [VendorRole.TAILOR, VendorRole.CUSTOMER_SUPPORT];
+// Operations can respond (see VENDOR_AREAS 'disputes.respond'), the tailor
+// knows what was made, support talks to the customer.
+const DISPUTE_ROLES = [VendorRole.OPERATIONS, VendorRole.TAILOR, VendorRole.CUSTOMER_SUPPORT];
 import {
   NotificationCategory,
   NotificationType,
@@ -236,10 +238,24 @@ export class DisputesService {
   /**
    * Vendor's disputes list
    */
-  async getVendorDisputes(businessId: string) {
+  async getVendorDisputes(businessId: string, status?: string) {
+    const filter: Record<string, any> = { business: businessId };
+    if (status === 'resolved') {
+      filter.status = {
+        $in: [
+          DisputeStatus.RESOLVED_REFUND,
+          DisputeStatus.RESOLVED_PARTIAL_REFUND,
+          DisputeStatus.RESOLVED_RELEASED,
+          DisputeStatus.CLOSED,
+        ],
+      };
+    } else if (status && Object.values(DisputeStatus).includes(status as DisputeStatus)) {
+      filter.status = status;
+    }
     return this.disputeModel
-      .find({ business: businessId })
+      .find(filter)
       .sort({ createdAt: -1 })
+      .populate('customer', 'full_name email')
       .lean();
   }
 
@@ -280,6 +296,8 @@ export class DisputesService {
     if (!order) throw new NotFoundException('Order not found');
 
     const businessId = dispute.business.toString();
+    // What the vendor gives up, for their notification.
+    let vendorLoses = 0;
 
     switch (dto.resolution) {
       case DisputeResolution.FULL_REFUND: {
@@ -304,13 +322,22 @@ export class DisputesService {
 
         dispute.status = DisputeStatus.RESOLVED_REFUND;
         dispute.refund_amount = totalRefund;
+        vendorLoses = earningsNet;
 
-        // Delete unreleased earnings
+        // Delete unreleased earnings, and take them out of the wallet's
+        // pending figure too, or "Pending Earnings" stays inflated.
         await this.businessEarningsModel.deleteMany({
           order: dispute.order,
           business: businessId,
           released: false,
         });
+        if (earningsNet > 0) {
+          await this.walletsService
+            .reconcileBusinessWallet(businessId as any, { pending: -earningsNet })
+            .catch((e: any) =>
+              this.logger.error(`Pending reconcile failed for dispute ${disputeId}: ${e?.message}`),
+            );
+        }
 
         // Issue refund to customer
         await this.processDisputeRefund(order, totalRefund, `Dispute resolved: full refund`);
@@ -325,11 +352,29 @@ export class DisputesService {
         dispute.status = DisputeStatus.RESOLVED_PARTIAL_REFUND;
         dispute.refund_amount = dto.refund_amount;
 
-        // Reduce earnings
-        await this.businessEarningsModel.updateMany(
-          { order: dispute.order, business: businessId, released: false },
-          { $inc: { net_amount: -dto.refund_amount } },
-        );
+        // Take the refund out of the held earnings ONCE, spread across the
+        // rows (an order paid in milestones has several). Reducing every row
+        // by the full amount took it once per row. Never below zero.
+        const held = await this.businessEarningsModel
+          .find({ order: dispute.order, business: businessId, released: false })
+          .sort({ createdAt: -1 });
+        let remaining = dto.refund_amount;
+        for (const e of held) {
+          if (remaining <= 0) break;
+          const take = Math.min(remaining, e.net_amount || 0);
+          if (take <= 0) continue;
+          e.net_amount = (e.net_amount || 0) - take;
+          await e.save();
+          remaining -= take;
+        }
+        vendorLoses = dto.refund_amount - Math.max(0, remaining);
+        if (vendorLoses > 0) {
+          await this.walletsService
+            .reconcileBusinessWallet(businessId as any, { pending: -vendorLoses })
+            .catch((e: any) =>
+              this.logger.error(`Pending reconcile failed for dispute ${disputeId}: ${e?.message}`),
+            );
+        }
 
         // Unfreeze remaining earnings
         await this.businessEarningsModel.updateMany(
@@ -395,7 +440,12 @@ export class DisputesService {
           // so a resolved dispute was counted as a confirmed order.
           type: NotificationType.DISPUTE_RESOLVED,
           title: 'Dispute Resolved',
-          body: `Dispute for order #${dispute.order_reference} has been resolved: ${dto.resolution.replace(/_/g, ' ')}.`,
+          body:
+            dto.resolution === DisputeResolution.RELEASE_TO_VENDOR
+              ? `The dispute on order #${dispute.order_reference} was settled in your favour. Your earnings for it are released.`
+              : dto.resolution === DisputeResolution.PARTIAL_REFUND
+                ? `The dispute on order #${dispute.order_reference} was settled with a partial refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. ₦${vendorLoses.toLocaleString()} came out of your earnings for it; the rest is released.`
+                : `The dispute on order #${dispute.order_reference} was settled with a full refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. Your earnings for it (₦${vendorLoses.toLocaleString()}) were cancelled.`,
           metadata: {
             order_reference: dispute.order_reference,
             dispute_id: dispute._id,

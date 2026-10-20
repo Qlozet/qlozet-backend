@@ -1740,6 +1740,53 @@ export class OrderService {
             return { ...r, payout_status };
           });
         }
+
+        // Earnings held by an open dispute or return on this vendor's part of
+        // the order. The order drawer shows "Earnings Frozen" from this; it
+        // read the flag before the backend ever sent one.
+        const pageIds = scopedRows.map((r: any) => r?._id).filter(Boolean);
+        const Dispute: any = (this.orderModel.db as any).models?.Dispute;
+        const ReturnModel: any = (this.orderModel.db as any).models?.Return;
+        if (pageIds.length && (Dispute || ReturnModel)) {
+          const [openDisputes, openReturns] = await Promise.all([
+            Dispute
+              ? Dispute.find({
+                  business,
+                  order: { $in: pageIds },
+                  status: { $in: ['open', 'under_review'] },
+                })
+                  .select('order status')
+                  .lean()
+              : [],
+            ReturnModel
+              ? ReturnModel.find({
+                  business,
+                  order: { $in: pageIds },
+                  status: { $in: ['requested', 'vendor_approved', 'return_shipped', 'received'] },
+                })
+                  .select('order status')
+                  .lean()
+              : [],
+          ]);
+          const disputeBy = new Map<string, string>(
+            (openDisputes as any[]).map((d) => [String(d.order), d.status]),
+          );
+          const returnBy = new Map<string, string>(
+            (openReturns as any[]).map((d) => [String(d.order), d.status]),
+          );
+          scopedRows = scopedRows.map((r: any) => {
+            const k = String(r?._id);
+            const ds = disputeBy.get(k);
+            const rs = returnBy.get(k);
+            if (!ds && !rs) return r;
+            return {
+              ...r,
+              earnings_frozen: true,
+              ...(ds ? { has_dispute: true, dispute_status: ds } : {}),
+              ...(rs ? { return_status: rs } : {}),
+            };
+          });
+        }
       }
 
       return Utils.getPagingData(
@@ -2735,6 +2782,7 @@ export class OrderService {
     // Order items keep a product ref, not a name; name the pieces for the
     // customer from their products (bespoke work has no catalogue product).
     const names = new Map<string, string>();
+    const customProducts = new Set<string>();
     if (percent > 0 && paidTotal > 0) {
       const ids = (order.items as any[])
         .map((i) => i?.product)
@@ -2742,18 +2790,22 @@ export class OrderService {
       if (ids.length) {
         const products: any[] = await this.productModel
           .find({ _id: { $in: ids } })
-          .select('clothing.name fabric.name accessory.name')
+          .select('clothing.name clothing.type fabric.name accessory.name')
           .lean();
         for (const p of products) {
           names.set(String(p._id), p.clothing?.name ?? p.fabric?.name ?? p.accessory?.name ?? '');
+          if (p.clothing?.type === 'customize') customProducts.add(String(p._id));
         }
       }
     }
     if (percent > 0 && paidTotal > 0) {
       for (const item of order.items as any[]) {
         if (item?.rejected) continue;
+        // Orders placed before items stored clothing_type: the product says.
         const custom =
-          (order as any).type === 'bespoke' || item?.clothing_type === 'customize';
+          (order as any).type === 'bespoke' ||
+          item?.clothing_type === 'customize' ||
+          (!item?.clothing_type && customProducts.has(String(item?.product)));
         if (!custom || !confirmed.has(String(item.business))) continue;
         const amount = Math.round(((item.total_price || 0) * percent) / 100);
         if (amount <= 0) continue;
