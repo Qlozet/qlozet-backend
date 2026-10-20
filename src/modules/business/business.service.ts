@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types, PipelineStage } from 'mongoose';
@@ -52,6 +53,7 @@ import {
   classifyBodyType,
   CLASSIFIER_VERSION,
 } from '../../common/utils/body-type-classifier';
+import { VendorVerificationNotifier } from '../notifications/vendor-verification-notifier.service';
 
 /** Orderings the public vendor list accepts. */
 export type PublicVendorSort = 'active' | 'newest' | 'name';
@@ -123,6 +125,9 @@ export class BusinessService {
     private tokenModel: Model<TokenDocument>,
     @InjectModel(TokenTransaction.name)
     private tokenTransactionModel: Model<TokenTransactionDocument>,
+    // Optional so specs that hand-build this service keep working.
+    @Optional()
+    private readonly verificationNotifier?: VendorVerificationNotifier,
   ) {}
 
   // The legacy non-sparse unique index migration that used to live here as
@@ -1341,6 +1346,14 @@ export class BusinessService {
           : BusinessStatus.PENDING;
 
     await this.updateBusinessStatus(businessId, tradingStatus);
+
+    // Tell the owner. Before this the only sign of a decision was the
+    // dashboard banner, so a vendor who did not log in never found out.
+    void this.verificationNotifier?.notify(
+      businessId,
+      decision,
+      update.verification_message,
+    );
 
     return {
       message: `Verification ${decision.replace('_', ' ')}`,

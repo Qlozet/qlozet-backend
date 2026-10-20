@@ -16,6 +16,7 @@ import {
 import { VerificationState } from '../business/schemas/business.schema';
 import { QoreIdService } from './qoreid.service';
 import { nextVerificationState } from './verification-state';
+import { VendorVerificationNotifier } from '../notifications/vendor-verification-notifier.service';
 
 /**
  * Event types that carry results.
@@ -101,6 +102,7 @@ export class QoreIdWebhookController {
     private readonly qoreid: QoreIdService,
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
+    private readonly verificationNotifier: VendorVerificationNotifier,
   ) {}
 
   @Public()
@@ -223,13 +225,27 @@ export class QoreIdWebhookController {
     // webhook rarely carries every check.
     const fresh = await this.businessModel
       .findById(business._id)
-      .select('verification verification_state')
+      .select(
+        'verification verification_state verification_attempts ' +
+          'verification_auto_retry_granted verification_failure_flagged_attempt',
+      )
       .lean();
 
-    const next = nextVerificationState(
-      (fresh as any)?.verification,
-      (fresh as any)?.verification_state,
-    );
+    // A failed run already flagged, with no new run started since (each new
+    // run spends an attempt, which moves the counter). A repeat delivery of
+    // that run must not move the vendor out of ACTION_REQUIRED, re-grant, or
+    // re-notify.
+    const attemptsSpent = Number((fresh as any)?.verification_attempts ?? 0);
+    const alreadyFlagged =
+      (fresh as any)?.verification_state === VerificationState.ACTION_REQUIRED &&
+      (fresh as any)?.verification_failure_flagged_attempt === attemptsSpent;
+
+    const next = alreadyFlagged
+      ? null
+      : nextVerificationState(
+          (fresh as any)?.verification,
+          (fresh as any)?.verification_state,
+        );
     if (next) {
       await this.businessModel.updateOne(
         { _id: business._id },
@@ -242,8 +258,11 @@ export class QoreIdWebhookController {
     // alternative is a vendor sitting on "in progress" forever, waiting for a
     // step that already failed.
     //
-    // No extra attempt is granted here: a retry costs a billed run, so it
-    // stays an admin decision. The message is what makes that decision quick.
+    // The FIRST failure grants one more attempt automatically: most failures
+    // are fixable on the vendor's side (an expired virtual NIN, a blurry
+    // video), and making them wait for support to reopen it lost vendors at
+    // the last step. After that a retry costs a billed run, so it is an admin
+    // decision again. The vendor is told either way.
     const workflowFinished =
       (body?.event ?? '') === 'workflow' &&
       eventType === 'verification_completed';
@@ -256,21 +275,47 @@ export class QoreIdWebhookController {
         VerificationState.APPROVED,
         VerificationState.REJECTED,
       ];
-      if (!settled.includes(state)) {
+      if (!settled.includes(state) && !alreadyFlagged) {
         const outstanding = failures.length
           ? failures.join(', ')
           : 'one or more checks';
-        await this.businessModel.updateOne(
-          { _id: business._id },
+        const autoRetry = !(fresh as any)?.verification_auto_retry_granted;
+        const message = autoRetry
+          ? `We could not confirm ${outstanding}. Check the tips on the ` +
+            'Verification page, then start verification again. You have one more attempt.'
+          : `We could not confirm ${outstanding}. ` +
+            'Contact support and we will reopen your verification.';
+
+        // Claimed atomically per run: QoreID can deliver the completion event
+        // more than once (even concurrently), and the vendor should get one
+        // retry and one message.
+        const claim = await this.businessModel.updateOne(
+          {
+            _id: business._id,
+            verification_state: { $nin: settled },
+            verification_failure_flagged_attempt: { $ne: attemptsSpent },
+          },
           {
             $set: {
               verification_state: VerificationState.ACTION_REQUIRED,
-              verification_message:
-                `We could not confirm ${outstanding}. ` +
-                'Contact support and we will reopen your verification.',
+              verification_message: message,
+              verification_failure_flagged_attempt: attemptsSpent,
+              ...(autoRetry
+                ? {
+                    verification_auto_retry_granted: true,
+                    verification_attempts_allowed: attemptsSpent + 1,
+                  }
+                : {}),
             },
           },
         );
+        if (claim.modifiedCount === 1) {
+          void this.verificationNotifier.notify(
+            String(business._id),
+            'action_required',
+            message,
+          );
+        }
       }
     }
 

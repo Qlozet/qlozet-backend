@@ -14,6 +14,7 @@ describe('QoreID webhook', () => {
   let saved: Record<string, any>;
   let stored: any;
   let controller: any;
+  let notified: any[][];
 
   const qoreid: any = Object.create(QoreIdService.prototype);
   Object.assign(qoreid, {
@@ -27,9 +28,15 @@ describe('QoreID webhook', () => {
       verification: {},
       verification_state: 'in_progress',
     };
+    notified = [];
     controller = Object.create(QoreIdWebhookController.prototype);
     Object.assign(controller, {
       qoreid,
+      verificationNotifier: {
+        notify: async (...args: any[]) => {
+          notified.push(args);
+        },
+      },
       logger: { warn: () => undefined, error: () => undefined },
       businessModel: {
         findById: () => ({ select: () => ({ lean: async () => stored }) }),
@@ -225,7 +232,38 @@ describe('QoreID webhook', () => {
     );
     expect(saved.verification_state).toBe('action_required');
     expect(saved.verification_message).toMatch(/CAC registration/i);
+    // The first failure grants one more attempt without waiting for support.
+    expect(saved.verification_message).toMatch(/one more attempt/i);
+    expect(saved.verification_auto_retry_granted).toBe(true);
+    expect(saved.verification_attempts_allowed).toBe(1);
+    // And the owner is told, once.
+    expect(notified).toHaveLength(1);
+    expect(notified[0][1]).toBe('action_required');
+  });
+
+  it('sends a second failure to support, with no further attempt', async () => {
+    stored.verification_auto_retry_granted = true;
+    stored.verification_attempts = 2;
+    await post(
+      payload({ nin_check: { status: 'NO_MATCH' } }, 'verification_completed'),
+    );
+    expect(saved.verification_state).toBe('action_required');
     expect(saved.verification_message).toMatch(/contact support/i);
+    expect(saved.verification_attempts_allowed).toBeUndefined();
+    expect(notified).toHaveLength(1);
+  });
+
+  it('does nothing more when the completion event is delivered twice', async () => {
+    const failed = payload({ cac_check: { status: 'NO_MATCH' } }, 'verification_completed');
+    await post(failed);
+    const message = stored.verification_message;
+    await post(failed);
+    // Same run, same attempt number: still action required, same message,
+    // no second grant, one notification.
+    expect(stored.verification_state).toBe('action_required');
+    expect(stored.verification_message).toBe(message);
+    expect(stored.verification_attempts_allowed).toBe(1);
+    expect(notified).toHaveLength(1);
   });
 
   it('does not flag action required when the workflow finishes clean', async () => {
