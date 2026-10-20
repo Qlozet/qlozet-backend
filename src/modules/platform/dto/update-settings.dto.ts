@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
@@ -216,6 +217,17 @@ export class UpdatePlatformSettingsDto {
   @IsNumber()
   @Min(0)
   abandon_after_days?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Days to ship an item with no turnaround of its own (fabric, accessories), counted from confirmation; also the window for auto-confirmed orders",
+    example: 3,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  default_turnaround_days?: number;
 
   @ApiPropertyOptional({
     description: 'Late-fulfilment penalty accrual per day (%)',
