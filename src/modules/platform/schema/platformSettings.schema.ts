@@ -116,6 +116,13 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 0 })
   tailored_order_upfront_percent: number;
 
+  // Share of a custom or bespoke item a customer forfeits by cancelling after
+  // the tailor has confirmed it (work has started). Paid to the tailor; the
+  // rest is refunded. Cancelling before confirmation, or any cancellation the
+  // vendor causes, is always free. 0 = cancellation is always free.
+  @Prop({ type: Number, default: 30 })
+  custom_cancellation_fee_percent: number;
+
   @Prop({ type: Number, default: 10 })
   reservation_fee_percent: number;
 

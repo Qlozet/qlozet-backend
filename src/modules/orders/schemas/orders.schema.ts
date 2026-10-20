@@ -452,6 +452,15 @@ export class Order {
   @Prop({ type: Boolean, default: false })
   cancellation_reconciled?: boolean;
 
+  // What a customer cancellation kept for the tailor(s), when it kept anything.
+  @Prop({ type: Object, default: null })
+  cancellation_fee?: {
+    percent: number;
+    total: number;
+    refunded: number;
+    lines: { item: string; business: string; amount: number }[];
+  } | null;
+
   @Prop({ type: Date, default: null })
   payout_eligible_at?: Date; // completedAt + payout_delay_days
 

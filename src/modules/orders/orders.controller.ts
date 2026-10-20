@@ -389,9 +389,22 @@ export class OrderController {
   }
 
   @Roles(UserType.CUSTOMER)
+  @Get('customer/cancel-preview/:reference')
+  @ApiOperation({
+    summary: 'What cancelling this order would refund and keep',
+    description:
+      "Custom and bespoke items whose tailor has confirmed them carry the cancellation fee (platform setting custom_cancellation_fee_percent), paid to that tailor; everything else is free to cancel until it ships. Returns paid_total, fee_total, refund_total and the lines that carry a fee.",
+  })
+  async cancelPreview(@Param('reference') reference: string, @Req() req: any) {
+    const customerId = req.user?.id || req.user?._id;
+    return this.orderService.getCustomerCancellationQuote(reference, customerId);
+  }
+
   @Patch('customer/cancel/:reference')
   @ApiOperation({
     summary: 'Customer cancels their own (not-yet-shipped) order + refund',
+    description:
+      'Refunds to the wallet. A custom or bespoke item whose tailor has confirmed it keeps the cancellation fee for that tailor; see GET customer/cancel-preview/:reference.',
   })
   async cancelOrderByCustomer(
     @Param('reference') reference: string,
