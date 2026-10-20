@@ -3114,6 +3114,19 @@ export class OrderService {
    * answer for them. Stock goods — fabric, accessories, ready-to-wear — are a
    * pick-and-pack, so the step is pure friction there.
    */
+  /** Platform setting default_turnaround_days (3 when unset or invalid). */
+  private async defaultTurnaroundDays(): Promise<number> {
+    try {
+      const s: any = await this.platformSettingsModel
+        .findOne({}, { default_turnaround_days: 1 })
+        .lean();
+      const days = Number(s?.default_turnaround_days);
+      return Number.isFinite(days) && days >= 1 ? Math.round(days) : 3;
+    } catch {
+      return 3;
+    }
+  }
+
   private async applyAutoConfirmation(shipments: any[], items: any[]) {
     if (!shipments?.length) return;
     const businessIds = [
@@ -3131,7 +3144,9 @@ export class OrderService {
     if (!optedIn.length) return;
 
     const autoIds = new Set((optedIn as any[]).map((b) => b._id.toString()));
-    const AUTO_TURNAROUND_DAYS = 3; // stock goods; same default as manual confirm
+    // Stock goods only (tailored items are skipped below), so the platform's
+    // default shipping window applies.
+    const AUTO_TURNAROUND_DAYS = await this.defaultTurnaroundDays();
 
     for (const shipment of shipments) {
       const businessId = shipment.business?.toString();
@@ -3579,21 +3594,25 @@ export class OrderService {
     shipment.confirmed = true;
     shipment.confirmed_at = new Date();
 
-    // Calculate fulfillment deadline based on product turnaround_days
-    const DEFAULT_TURNAROUND_DAYS = 3; // For fabrics/accessories
+    // Fulfilment deadline: the longest window among this vendor's items. An
+    // item with its own "days to make it" uses that; anything else (fabric,
+    // accessories) uses the platform default.
+    const DEFAULT_TURNAROUND_DAYS = await this.defaultTurnaroundDays();
     const vendorItems = order.items.filter(
       (i) => i.business?.toString() === businessId,
     );
     const productIds = vendorItems.map((i) => i.product);
     const products = await this.productModel.find({ _id: { $in: productIds } }).lean();
 
-    let maxTurnaroundDays = DEFAULT_TURNAROUND_DAYS;
+    let maxTurnaroundDays = 0;
     for (const product of products) {
-      const turnaround = (product as any).clothing?.turnaround_days ?? DEFAULT_TURNAROUND_DAYS;
+      const own = Number((product as any).clothing?.turnaround_days);
+      const turnaround = own > 0 ? own : DEFAULT_TURNAROUND_DAYS;
       if (turnaround > maxTurnaroundDays) {
         maxTurnaroundDays = turnaround;
       }
     }
+    if (maxTurnaroundDays <= 0) maxTurnaroundDays = DEFAULT_TURNAROUND_DAYS;
 
     const deadline = new Date(shipment.confirmed_at);
     deadline.setDate(deadline.getDate() + maxTurnaroundDays);

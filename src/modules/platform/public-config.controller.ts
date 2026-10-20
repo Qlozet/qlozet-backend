@@ -27,6 +27,9 @@ export class PublicConfigController {
       data: {
         delivery_transit_min_days: s?.delivery_transit_min_days ?? 2,
         delivery_transit_max_days: s?.delivery_transit_max_days ?? 5,
+        // Shipping window for items with no making time of their own, so the
+        // PDP estimate for fabric and accessories includes it.
+        default_turnaround_days: s?.default_turnaround_days ?? 3,
         max_quote_vendors_per_design: s?.max_quote_vendors_per_design ?? 5,
         // Image rules, so the vendor console can reject a bad photo at pick
         // time using the SAME numbers the upload endpoint enforces — rather

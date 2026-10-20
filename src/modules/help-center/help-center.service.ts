@@ -22,7 +22,11 @@ export class HelpCenterService {
    */
   private async interpolate(bodies: string[]): Promise<string[]> {
     if (!bodies.some((b) => b.includes('{{'))) return bodies;
-    const settings = (await this.settingsModel.findOne().lean()) ?? {};
+    // Hydrated, not lean: Mongoose fills schema defaults for fields the
+    // stored document predates, so a newly added setting interpolates its
+    // default instead of showing the raw placeholder.
+    const doc = await this.settingsModel.findOne();
+    const settings = doc ? doc.toObject() : {};
     return bodies.map((body) =>
       body.replace(/\{\{\s*([a-z0-9_.]+)\s*\}\}/gi, (match, key) => {
         const value = key

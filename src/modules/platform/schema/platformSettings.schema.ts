@@ -37,6 +37,13 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 7 })
   abandon_after_days: number;
 
+  // Days a vendor has to ship an item that has no "days to make it" of its
+  // own (fabric, accessories, clothing without one), counted from
+  // confirmation. Also the window an auto-confirmed order gets. An order's
+  // deadline is the longest of its items' windows.
+  @Prop({ type: Number, default: 3 })
+  default_turnaround_days: number;
+
   @Prop({ type: Number, default: 7 })
   return_window_days: number;
 
