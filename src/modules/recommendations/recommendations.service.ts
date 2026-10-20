@@ -25,6 +25,7 @@ import {
   computeAvailability,
   type StockThresholds,
 } from '../products/product-availability';
+import { CUSTOMER_VISIBLE_MODERATION } from '../products/customer-visibility';
 
 @Injectable()
 export class RecommendationsService {
@@ -746,6 +747,7 @@ export class RecommendationsService {
       .find({
         _id: { $in: itemIds.map((id) => new Types.ObjectId(id)) },
         status: 'active',
+        'moderation.status': CUSTOMER_VISIBLE_MODERATION,
       })
       .populate({
         path: 'business',

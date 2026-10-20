@@ -35,7 +35,9 @@ const build = (initial: any[] = []) => {
         Promise.resolve(
           id === 'gone'
             ? null
-            : { _id: id, base_price: 10000, discounted_price: null, kind: 'clothing' },
+            : id === 'pending'
+              ? { _id: id, base_price: 10000, kind: 'clothing', status: 'active', moderation: { status: 'pending' } }
+              : { _id: id, base_price: 10000, discounted_price: null, kind: 'clothing', status: 'active' },
         ),
       ),
     },
@@ -69,6 +71,11 @@ describe('cart lines', () => {
     await service.addItem('u1', P1, 2);
     expect(cart.items).toHaveLength(1);
     expect(cart.items[0].quantity).toBe(3);
+  });
+
+  it('refuses a listing that is still awaiting review', async () => {
+    const { service } = build();
+    await expect(service.addItem('u1', 'pending', 1)).rejects.toThrow('not available');
   });
 
   it('removing one line leaves the other size alone', async () => {

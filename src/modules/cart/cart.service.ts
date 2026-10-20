@@ -6,6 +6,7 @@ import { Product, ProductDocument } from '../products/schemas';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { OrderItemSelectionsDto } from '../orders/dto/selection.dto';
 import { PriceCalculationService } from '../orders/orders.price-calculation';
+import { isCustomerVisible } from '../products/customer-visibility';
 
 @Injectable()
 export class CartService {
@@ -64,6 +65,9 @@ export class CartService {
   ): Promise<CartDocument> {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
+    if (!isCustomerVisible(product)) {
+      throw new BadRequestException('This item is not available to buy right now.');
+    }
 
     // Component-inclusive per-unit price (base + selected styles/fabric/
     // accessories/addons/variants, with discount) so the cart subtotal matches

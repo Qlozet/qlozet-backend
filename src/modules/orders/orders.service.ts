@@ -121,6 +121,7 @@ import type {
 import type { EventDocument } from '../recommendations/events/schemas/event.schema';
 import type { AdminProfileOverviewDto } from '../platform/dto/admin-profile.dto';
 import { Ticket, TicketStatus } from '../ticket/schema/ticket.schema';
+import { isCustomerVisible } from '../products/customer-visibility';
 
 @Injectable()
 export class OrderService {
@@ -915,6 +916,11 @@ export class OrderService {
         if (!product) {
           throw new BadRequestException(
             `Product not found: ${item.product_id}`,
+          );
+        }
+        if (!isCustomerVisible(product)) {
+          throw new BadRequestException(
+            'An item in your cart is no longer available. Remove it and try again.',
           );
         }
         const rawSelections = await this.normalizeSelections(
@@ -5208,6 +5214,11 @@ export class OrderService {
       const qty = cartItem.quantity ?? 1;
       const flag = (reason: string) =>
         issues.push({ product_id: productId, product_name: name, reason });
+      // Withdrawn, unpublished or not (yet) approved: not for sale.
+      if (!isCustomerVisible(product)) {
+        flag('This item is no longer available. Remove it to continue.');
+        continue;
+      }
 
       if (product.kind === 'clothing') {
         if (product.clothing?.type === 'customize') continue; // made to order
