@@ -268,6 +268,29 @@ export class VendorShipment {
   @Prop({ type: String })
   label_url?: string;
 
+  // A public page where the customer can follow the parcel, when the courier
+  // aggregator gives us one (label response or tracking webhook).
+  @Prop({ type: String, default: null })
+  tracking_url?: string | null;
+
+  // Every courier update for this parcel, oldest first, so the customer sees
+  // a timeline rather than only the latest state. `status` is the courier's
+  // own word (booked, picked_up, in_transit, out_for_delivery, delivered,
+  // failed, cancelled); the shipment's `status` above stays the coarse one
+  // that payouts and order completion read.
+  @Prop({
+    type: [
+      {
+        _id: false,
+        status: { type: String, required: true },
+        at: { type: Date, required: true },
+        message: { type: String, default: null },
+      },
+    ],
+    default: [],
+  })
+  tracking_events?: { status: string; at: Date; message?: string | null }[];
+
   @Prop({
     type: String,
     enum: Object.values(ShipmentStatus),

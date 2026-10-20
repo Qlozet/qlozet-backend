@@ -5947,6 +5947,15 @@ export class OrderService {
       sb.tracking_number ?? sb.courier?.tracking_code ?? sb.tracking_code ?? null;
     order.shipments[shipmentIndex].label_url =
       sb.label_url ?? sb.waybill_document ?? null;
+    const trackingUrl = sb.tracking_url ?? sb.tracking?.url ?? null;
+    if (typeof trackingUrl === 'string' && /^https:\/\//i.test(trackingUrl)) {
+      order.shipments[shipmentIndex].tracking_url = trackingUrl;
+    }
+    // First entry on the customer's timeline: the courier is booked.
+    order.shipments[shipmentIndex].tracking_events = [
+      ...((order.shipments[shipmentIndex] as any).tracking_events ?? []),
+      { status: 'booked', at: new Date(), message: null },
+    ];
     if (!order.shipments[shipmentIndex].courier_name) {
       order.shipments[shipmentIndex].courier_name =
         typeof sb.courier === 'string' ? sb.courier : sb.courier?.name;

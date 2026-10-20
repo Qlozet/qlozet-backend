@@ -873,13 +873,42 @@ export class WebhookService {
       // 'pending' / 'confirmed' carry no shipment-status change for us.
     };
 
-    const mappedStatus = statusMap[String(newStatus).toLowerCase()] || null;
+    const rawStatus = String(newStatus ?? '').toLowerCase();
+    const mappedStatus = statusMap[rawStatus] || null;
 
     if (!mappedStatus) {
       this.logger.log(
         `Shipbubble webhook: no-op status "${newStatus}" for ${candidates[0]}`,
       );
       return { status: 'ignored', message: `Unhandled status: ${newStatus}` };
+    }
+
+    const shipment: any = order.shipments[shipmentIndex];
+    const previousStatus = shipment.status;
+    const events: any[] = shipment.tracking_events ?? [];
+    const lastEvent = events[events.length - 1];
+    // Couriers re-send the same state; the timeline and the customer's
+    // notifications only move when the state actually changes.
+    const isNewEvent = lastEvent?.status !== rawStatus;
+    if (isNewEvent) {
+      const when = new Date(
+        payload?.updated_at ?? payload?.data?.updated_at ?? payload?.timestamp ?? Date.now(),
+      );
+      const message =
+        payload?.description ?? payload?.data?.description ?? payload?.message ?? null;
+      shipment.tracking_events = [
+        ...events,
+        {
+          status: rawStatus,
+          at: isNaN(when.getTime()) ? new Date() : when,
+          message: typeof message === 'string' ? message.slice(0, 200) : null,
+        },
+      ];
+    }
+    const trackingUrl =
+      payload?.tracking_url ?? payload?.data?.tracking_url ?? payload?.shipment?.tracking_url;
+    if (typeof trackingUrl === 'string' && /^https:\/\//i.test(trackingUrl)) {
+      shipment.tracking_url = trackingUrl;
     }
 
     order.shipments[shipmentIndex].status = mappedStatus;
@@ -957,20 +986,43 @@ export class WebhookService {
 
     await order.save();
 
-    // ── Notify the vendor whose shipment moved ──
-    this.notifyVendorShippingUpdate(
-      order,
-      order.shipments[shipmentIndex],
-      mappedStatus,
-      trackingNumber,
-    ).catch((err) =>
-      this.logger.error('Failed to send vendor shipping notification', err),
-    );
+    // Notify only when something changed: a repeated "in_transit" used to
+    // send "Your order is on its way!" again every time.
+    if (mappedStatus !== previousStatus) {
+      // ── Notify the vendor whose shipment moved ──
+      this.notifyVendorShippingUpdate(
+        order,
+        order.shipments[shipmentIndex],
+        mappedStatus,
+        trackingNumber,
+      ).catch((err) =>
+        this.logger.error('Failed to send vendor shipping notification', err),
+      );
 
-    // ── Notify customer about delivery status ──
-    this.notifyCustomerShippingUpdate(order, mappedStatus, trackingNumber).catch((err) =>
-      this.logger.error('Failed to send customer shipping notification', err),
-    );
+      // ── Notify customer about delivery status ──
+      this.notifyCustomerShippingUpdate(order, mappedStatus, trackingNumber).catch((err) =>
+        this.logger.error('Failed to send customer shipping notification', err),
+      );
+    } else if (rawStatus === 'out_for_delivery' && isNewEvent) {
+      // The one in-transit step worth its own message.
+      this.notificationsService
+        .create({
+          recipient: order.customer?.toString(),
+          category: NotificationCategory.SHIPPING,
+          type: NotificationType.ORDER_STATUS_CHANGED,
+          title: 'Out for delivery today 📦',
+          body: `A parcel from order #${order.reference} is out for delivery.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            tracking_number: trackingNumber,
+          },
+          action_url: '/orders',
+        })
+        .catch((err) =>
+          this.logger.error('Failed to send out-for-delivery notification', err),
+        );
+    }
 
     return {
       status: 'success',
