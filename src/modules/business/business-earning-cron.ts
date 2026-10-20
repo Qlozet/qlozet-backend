@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 import { Model } from 'mongoose';
@@ -26,6 +26,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { Dispute, DisputeDocument, DisputeStatus } from '../disputes/schemas/dispute.schema';
 
 @Injectable()
 export class BusinessEarningsCron {
@@ -54,7 +55,27 @@ export class BusinessEarningsCron {
     private readonly businessModel: Model<BusinessDocument>,
     private readonly notificationsService: NotificationsService,
     private readonly mailService: MailService,
+    // Optional so specs that hand-build the cron keep working.
+    @Optional()
+    @InjectModel(Dispute.name)
+    private readonly disputeModel?: Model<DisputeDocument>,
   ) {}
+
+  /**
+   * A payout is held while the customer has an open dispute with this vendor
+   * on this order. Filing one empties release_date, but the delivery webhook
+   * and the stuck-earnings safety net both fill an empty date back in, so the
+   * one place that actually pays checks too.
+   */
+  private async heldByDispute(earning: BusinessEarningDocument): Promise<boolean> {
+    if (!this.disputeModel) return false;
+    const open = await this.disputeModel.exists({
+      order: earning.order,
+      business: earning.business,
+      status: { $in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
+    });
+    return Boolean(open);
+  }
 
   /** Notify the vendor that a payout landed in their wallet. */
   private async notifyPayout(earning: BusinessEarningDocument) {
@@ -213,6 +234,18 @@ export class BusinessEarningsCron {
           continue;
         }
 
+        if (await this.heldByDispute(earning)) {
+          // Put it back on hold; the dispute's resolution re-dates it.
+          await this.businessEarningsModel.updateOne(
+            { _id: earning._id, released: false },
+            { $set: { release_date: null } },
+          );
+          this.logger.warn(
+            `Earning ${earning._id} is held by an open dispute — not released.`,
+          );
+          continue;
+        }
+
         // Atomically CLAIM this earning's release BEFORE crediting. releaseFunds
         // runs on every backend instance every 30 min, so two runs both find the
         // same released:false earning and each credit the wallet — a duplicate
@@ -332,6 +365,8 @@ export class BusinessEarningsCron {
 
         const latestDispatch = Math.max(...dispatchAnchors);
         if (latestDispatch + windowMs > now) continue; // not old enough yet
+        // An empty date can also mean a dispute is holding it.
+        if (await this.heldByDispute(earning)) continue;
 
         await this.businessEarningsModel.updateOne(
           { _id: earning._id, released: false, release_date: null },

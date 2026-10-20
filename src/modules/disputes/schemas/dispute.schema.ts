@@ -18,6 +18,9 @@ export enum DisputeReason {
   NOT_AS_DESCRIBED = 'not_as_described',
   POOR_QUALITY = 'poor_quality',
   MISSING_ITEMS = 'missing_items',
+  // The parcel never arrived: allowed before the order completes, once the
+  // courier has had it longer than a normal delivery, or reported a failure.
+  NOT_RECEIVED = 'not_received',
   MEASUREMENT_ISSUE = 'measurement_issue', // vendor-raised: customer measurements look off
   OTHER = 'other',
 }
