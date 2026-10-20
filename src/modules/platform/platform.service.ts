@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   PlatformSettings,
   PlatformSettingsDocument,
@@ -8,9 +8,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { CurrencyService } from '../currency/currency.service';
 import { Cron } from '@nestjs/schedule';
 import { UpdatePlatformSettingsDto } from './dto/update-settings.dto';
+import { setListingReviewMode } from '../products/customer-visibility';
 
 @Injectable()
-export class PlatformService {
+export class PlatformService implements OnModuleInit {
+  private readonly logger = new Logger(PlatformService.name);
+
   constructor(
     @InjectModel(PlatformSettings.name)
     private readonly model: Model<PlatformSettingsDocument>,
@@ -57,17 +60,41 @@ export class PlatformService {
   }
 
   async getSettings(): Promise<PlatformSettingsDocument> {
-    const settings = await this.model.findOne();
-    return settings ?? this.create();
+    const settings = (await this.model.findOne()) ?? (await this.create());
+    setListingReviewMode(settings?.listing_review_mode);
+    return settings;
   }
 
   async update(
     dto: UpdatePlatformSettingsDto,
   ): Promise<PlatformSettingsDocument> {
-    return this.model.findOneAndUpdate({}, dto as Partial<PlatformSettings>, {
-      new: true,
-      upsert: true,
-    });
+    const settings = await this.model.findOneAndUpdate(
+      {},
+      dto as Partial<PlatformSettings>,
+      { new: true, upsert: true },
+    );
+    setListingReviewMode(settings?.listing_review_mode);
+    return settings;
+  }
+
+  // The listing review mode is read synchronously by every customer product
+  // query, so it is held in memory. Load it on boot and refresh it each
+  // minute, so a change saved on one machine reaches the others quickly.
+  async onModuleInit() {
+    await this.refreshListingReviewMode();
+  }
+
+  @Cron('0 * * * * *')
+  async refreshListingReviewMode() {
+    try {
+      const s = await this.model
+        .findOne({}, { listing_review_mode: 1 })
+        .lean<{ listing_review_mode?: string }>();
+      setListingReviewMode(s?.listing_review_mode);
+    } catch (err) {
+      // Keep the last known mode; review_first is the safe default.
+      this.logger.warn(`Could not refresh listing review mode: ${err?.message}`);
+    }
   }
 
   async compute(totalAmount: number) {

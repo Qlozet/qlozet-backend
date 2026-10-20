@@ -51,7 +51,7 @@ import {
 } from '../../../common/access/vendor-access';
 import { classifyBodyType, CLASSIFIER_VERSION } from 'src/common/utils/body-type-classifier';
 import { SizeGuideService } from 'src/modules/size-guide/size-guide.service';
-import { CUSTOMER_VISIBLE_MODERATION } from '../../products/customer-visibility';
+import { customerVisibleModeration } from '../../products/customer-visibility';
 
 @Injectable()
 export class UserService {
@@ -1231,7 +1231,7 @@ export class UserService {
         path: 'wishlist',
         match: {
           status: 'active',
-          'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+          'moderation.status': customerVisibleModeration(),
         },
       })
       .select('wishlist');

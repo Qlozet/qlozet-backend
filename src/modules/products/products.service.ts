@@ -73,7 +73,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
-import { CUSTOMER_VISIBLE_MODERATION, isApprovedForCustomers } from './customer-visibility';
+import { customerVisibleModeration, isApprovedForCustomers } from './customer-visibility';
 
 @Injectable()
 export class ProductService {
@@ -250,7 +250,7 @@ export class ProductService {
     if (!searchClause) return [];
     const ids = await this.productModel.distinct('business', {
       status: ProductStatus.ACTIVE,
-      'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+      'moderation.status': customerVisibleModeration(),
       ...searchClause,
     });
     const approved = new Set(
@@ -313,7 +313,7 @@ export class ProductService {
     const result = await this.productModel.distinct('business', {
       business: { $in: ids },
       status: ProductStatus.ACTIVE,
-      'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+      'moderation.status': customerVisibleModeration(),
       applied_discount: { $ne: null },
     });
     return result.map((r) => String(r));
@@ -720,7 +720,7 @@ export class ProductService {
     filter.business = { $in: await this.getApprovedBusinessIds() };
     // Review first: a listing reaches shoppers only once approved. Documents
     // that predate moderation have no field and stay visible.
-    filter['moderation.status'] = CUSTOMER_VISIBLE_MODERATION;
+    filter['moderation.status'] = customerVisibleModeration();
 
     if (kind) {
       filter.kind = kind;
@@ -1436,7 +1436,7 @@ export class ProductService {
           kind: 'clothing',
           'clothing.type': ClothingType.CUSTOMIZE,
           status: 'active',
-          'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+          'moderation.status': customerVisibleModeration(),
         },
       })
       .select('wishlist');
@@ -1461,7 +1461,7 @@ export class ProductService {
       {
         $match: {
           status: 'active', // only active products
-          'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+          'moderation.status': customerVisibleModeration(),
           createdAt: { $lte: new Date() },
         },
       },
@@ -2567,6 +2567,18 @@ export class ProductService {
    * sales-by-category breakdown from delivered order items (the donut had been
    * drawing a hard-coded four-way split).
    */
+  /**
+   * Published listings still waiting for review. These are visible in
+   * live-first mode and disappear from the shop if the admin switches to
+   * review-first, so the settings page shows this count before the switch.
+   */
+  async countLiveAwaitingReview(): Promise<number> {
+    return this.productModel.countDocuments({
+      status: ProductStatus.ACTIVE,
+      'moderation.status': ProductModerationStatus.PENDING,
+    });
+  }
+
   async adminStats(dto: AdminFindProductsDto) {
     // Counts ignore the status filter — the cards describe the whole catalogue
     // for this kind, not the slice the table happens to be showing.

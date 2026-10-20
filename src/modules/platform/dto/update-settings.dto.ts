@@ -111,6 +111,16 @@ export class UpdatePlatformSettingsDto {
   custom_cancellation_fee_percent?: number;
 
   @ApiPropertyOptional({
+    description:
+      "How new listings reach the shop. 'review_first': hidden until approved. 'live_first': visible at once while awaiting review; a rejection takes it down.",
+    enum: ['review_first', 'live_first'],
+    example: 'review_first',
+  })
+  @IsOptional()
+  @IsIn(['review_first', 'live_first'])
+  listing_review_mode?: 'review_first' | 'live_first';
+
+  @ApiPropertyOptional({
     description: 'Fabric reservation fee (%)',
     example: 10,
   })

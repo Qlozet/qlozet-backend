@@ -27,7 +27,7 @@ import {
   inchToCm,
 } from 'src/common/constants/body-parts.constant';
 import { OnEvent } from '@nestjs/event-emitter';
-import { CUSTOMER_VISIBLE_MODERATION } from '../products/customer-visibility';
+import { customerVisibleModeration } from '../products/customer-visibility';
 
 @Injectable()
 export class SizeGuideService {
@@ -423,7 +423,7 @@ export class SizeGuideService {
     // Fetch products tied to these guides
     const query: any = {
       status: 'active',
-      'moderation.status': CUSTOMER_VISIBLE_MODERATION,
+      'moderation.status': customerVisibleModeration(),
       size_guide: { $in: fittingGuides.map((g) => g.guideId) },
     };
     if (options?.category) {

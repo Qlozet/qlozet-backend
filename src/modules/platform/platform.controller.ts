@@ -1002,6 +1002,21 @@ export class PlatformController {
   async getSettings() {
     return this.platformService.getSettings();
   }
+
+  @Roles(UserType.PLATFORM)
+  @Get('settings/listing-review-impact')
+  @ApiOperation({
+    summary: 'Published listings awaiting review',
+    description:
+      'How many published listings are still waiting for review: the number that leave the shop when listing_review_mode is switched to review_first.',
+  })
+  async listingReviewImpact() {
+    const settings = await this.platformService.getSettings();
+    return {
+      mode: settings.listing_review_mode ?? 'review_first',
+      published_awaiting_review: await this.productService.countLiveAwaitingReview(),
+    };
+  }
   @Roles(UserType.PLATFORM)
   @ApiOperation({ summary: 'Update platform token price' })
   @Post('refresh-token-price')
