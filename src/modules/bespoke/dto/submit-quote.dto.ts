@@ -34,7 +34,7 @@ export class SubmitQuoteDto {
   @Min(0.1)
   required_fabric_yards: number;
 
-  @ApiProperty({ example: 14, description: 'Days from acceptance to delivery' })
+  @ApiProperty({ example: 14, description: 'Days the tailor needs before shipping, counted from payment. This is the ship-by deadline late penalties are measured against; delivery time is on top.' })
   @IsNumber()
   @Min(1)
   estimated_completion_days: number;
