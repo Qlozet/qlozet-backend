@@ -100,6 +100,17 @@ export class UpdatePlatformSettingsDto {
   tailored_order_upfront_percent?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Share of a custom or bespoke item kept (and paid to the tailor) when the customer cancels after the tailor confirmed it. Before confirmation, cancelling is free. 0 = always free.',
+    example: 30,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  custom_cancellation_fee_percent?: number;
+
+  @ApiPropertyOptional({
     description: 'Fabric reservation fee (%)',
     example: 10,
   })

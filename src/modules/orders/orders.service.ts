@@ -2693,6 +2693,90 @@ export class OrderService {
     };
   }
 
+  /**
+   * What a customer cancellation would keep and refund.
+   *
+   * Custom and bespoke items whose tailor has already confirmed them carry a
+   * fee (`custom_cancellation_fee_percent` of the item), paid to that tailor.
+   * Everything else is free to cancel. Declined items are never charged. The
+   * fee never exceeds what was actually paid.
+   */
+  private async quoteCancellation(order: OrderDocument, paidTotal: number) {
+    const settings: any = await this.platformSettingsModel.findOne().lean();
+    const percent = Math.min(
+      Math.max(Number(settings?.custom_cancellation_fee_percent ?? 30), 0),
+      100,
+    );
+    const confirmed = new Set(
+      (order.shipments ?? [])
+        .filter((s: any) => s?.confirmed && !s?.rejected)
+        .map((s: any) => String(s.business)),
+    );
+    const lines: { item: string; business: string; amount: number; name: string }[] = [];
+    if (percent > 0 && paidTotal > 0) {
+      for (const item of order.items as any[]) {
+        if (item?.rejected) continue;
+        const custom =
+          (order as any).type === 'bespoke' || item?.clothing_type === 'customize';
+        if (!custom || !confirmed.has(String(item.business))) continue;
+        const amount = Math.round(((item.total_price || 0) * percent) / 100);
+        if (amount <= 0) continue;
+        lines.push({
+          item: String(item._id),
+          business: String(item.business),
+          amount,
+          name: item.product_name ?? item.name ?? 'Custom item',
+        });
+      }
+    }
+    let total = lines.reduce((sum, l) => sum + l.amount, 0);
+    if (total > paidTotal) {
+      // Scale down so the fee never exceeds the payment.
+      const scale = paidTotal / total;
+      for (const l of lines) l.amount = Math.floor(l.amount * scale);
+      total = lines.reduce((sum, l) => sum + l.amount, 0);
+    }
+    return { percent, lines, total, refund: Math.max(0, paidTotal - total) };
+  }
+
+  /** GET /orders/customer/cancel-preview/:reference — what cancelling would cost. */
+  async getCustomerCancellationQuote(reference: string, customerId: string) {
+    const order = await this.orderModel.findOne({ reference });
+    if (!order || order.customer?.toString() !== String(customerId)) {
+      throw new NotFoundException('Order not found');
+    }
+    const blocked: OrderStatus[] = [
+      OrderStatus.CANCELLED,
+      OrderStatus.IN_TRANSIT,
+      OrderStatus.COMPLETED,
+      OrderStatus.RETURNED,
+    ];
+    const transaction = await this.transactionService.findByOrderId(
+      order._id.toString(),
+    );
+    const paid = transaction ? Number(transaction.amount) || 0 : 0;
+    const quote = await this.quoteCancellation(order, paid);
+    return {
+      reference: order.reference,
+      cancellable: !blocked.includes(order.status),
+      reason: blocked.includes(order.status)
+        ? order.status === OrderStatus.CANCELLED
+          ? 'This order is already cancelled.'
+          : 'This order has shipped. Request a return instead.'
+        : null,
+      paid_total: paid,
+      fee_percent: quote.percent,
+      fee_total: quote.total,
+      refund_total: quote.refund,
+      lines: quote.lines.map((l) => ({
+        item_id: l.item,
+        business_id: l.business,
+        name: l.name,
+        fee: l.amount,
+      })),
+    };
+  }
+
   async cancelOrder(reference: string, opts?: { customerId?: string }) {
     const order = await this.orderModel.findOne({ reference });
     if (!order) throw new BadRequestException('Order not found');
@@ -2730,13 +2814,32 @@ export class OrderService {
     // after the wallet had already been credited.
     order.status = OrderStatus.CANCELLED;
     await order.save();
-
     let refunded = false;
+    // A customer who cancels a custom piece after the tailor confirmed it
+    // forfeits the cancellation fee; anyone else's cancellation is free.
+    let fee: Awaited<ReturnType<OrderService['quoteCancellation']>> | null = null;
     try {
     // Find the original payment transaction
     const transaction = await this.transactionService.findByOrderId(
       order._id.toString(),
     );
+    if (opts?.customerId && transaction) {
+      // A failure to work out the fee must never cost the customer their
+      // refund: fall back to a full, free refund and log it.
+      try {
+        fee = await this.quoteCancellation(order, Number(transaction.amount) || 0);
+        if (!fee.total) fee = null;
+      } catch (feeErr: any) {
+        fee = null;
+        this.logger.error(
+          `[Cancel] Could not work out the cancellation fee for ${order.reference}: ${feeErr?.message} — refunding in full.`,
+        );
+      }
+    }
+    const refundAmount = fee ? fee.refund : transaction?.amount ?? 0;
+    const refundNote = fee
+      ? ` (₦${fee.total.toLocaleString()} kept as the cancellation fee for work already started)`
+      : '';
     if (!transaction) {
       this.logger.error(
         `[Cancel] No payment transaction found for order ${order.reference} — order cancelled; manual refund required.`,
@@ -2747,8 +2850,8 @@ export class OrderService {
     if (transaction && transaction.channel === 'wallet_checkout') {
       // Wallet refund: credit customer wallet back
       const walletId = transaction.wallet?.toString();
-      if (walletId) {
-        await this.walletsService.creditWallet(walletId, transaction.amount);
+      if (walletId && refundAmount > 0) {
+        await this.walletsService.creditWallet(walletId, refundAmount);
 
         // Create refund transaction record
         await this.transactionService.create({
@@ -2756,22 +2859,24 @@ export class OrderService {
           order: order._id as Types.ObjectId,
           wallet: transaction.wallet,
           type: TransactionType.REFUND,
-          amount: transaction.amount,
+          amount: refundAmount,
           status: TransactionStatus.SUCCESS,
-          description: `Full refund for cancelled order ${order.reference}`,
+          description: `${fee ? 'Refund' : 'Full refund'} for cancelled order ${order.reference}${refundNote}`,
           channel: 'refund',
           metadata: {
             order_reference: order.reference,
             original_transaction: transaction.reference,
             refund_type: 'wallet',
             reason: 'order_cancelled',
+            ...(fee ? { cancellation_fee: fee.total } : {}),
           },
         });
-
         this.logger.log(
-          `[Cancel] Wallet refund of ₦${transaction.amount} processed for order ${order.reference}`,
+          `[Cancel] Wallet refund of ₦${refundAmount} processed for order ${order.reference}`,
         );
         refunded = true;
+      } else if (walletId) {
+        refunded = true; // the whole payment was kept as the fee
       }
     } else if (transaction && transaction.channel === 'checkout') {
       // Paystack payment → refund to the customer's WALLET (instant, in-app and
@@ -2780,25 +2885,28 @@ export class OrderService {
         customer: order.customer.toString(),
       });
       const walletId = (wallet._id as any).toString();
-      await this.walletsService.creditWallet(walletId, transaction.amount);
-      await this.transactionService.create({
-        initiator: order.customer,
-        order: order._id as Types.ObjectId,
-        wallet: wallet._id as any,
-        type: TransactionType.REFUND,
-        amount: transaction.amount,
-        status: TransactionStatus.SUCCESS,
-        description: `Full refund for cancelled order ${order.reference}`,
-        channel: 'refund',
-        metadata: {
-          order_reference: order.reference,
-          original_transaction: transaction.reference,
-          refund_type: 'wallet_from_paystack',
-          reason: 'order_cancelled',
-        },
-      });
+      if (refundAmount > 0) {
+        await this.walletsService.creditWallet(walletId, refundAmount);
+        await this.transactionService.create({
+          initiator: order.customer,
+          order: order._id as Types.ObjectId,
+          wallet: wallet._id as any,
+          type: TransactionType.REFUND,
+          amount: refundAmount,
+          status: TransactionStatus.SUCCESS,
+          description: `${fee ? 'Refund' : 'Full refund'} for cancelled order ${order.reference}${refundNote}`,
+          channel: 'refund',
+          metadata: {
+            order_reference: order.reference,
+            original_transaction: transaction.reference,
+            refund_type: 'wallet_from_paystack',
+            reason: 'order_cancelled',
+            ...(fee ? { cancellation_fee: fee.total } : {}),
+          },
+        });
+      }
       this.logger.log(
-        `[Cancel] ₦${transaction.amount} credited to the customer's wallet for paystack order ${order.reference}`,
+        `[Cancel] ₦${refundAmount} credited to the customer's wallet for paystack order ${order.reference}`,
       );
       refunded = true;
     } else if (transaction) {
@@ -2813,12 +2921,73 @@ export class OrderService {
       );
     }
     if (refunded) {
-      (order as any).refund_status = 'refunded';
+      (order as any).refund_status = fee && fee.total > 0 ? 'partial' : 'refunded';
+      if (fee) {
+        (order as any).cancellation_fee = {
+          percent: fee.percent,
+          total: fee.total,
+          refunded: fee.refund,
+          lines: fee.lines.map(({ item, business, amount }) => ({ item, business, amount })),
+        };
+      }
       await order.save();
     }
-
+    // Commission share per item, read before the reversal deletes the rows,
+    // so the tailor's fee is net of the same commission as the sale was.
+    const commissionShare = new Map<string, number>();
+    if (fee && refunded) {
+      const rows = await this.businessEarningsModel
+        .find({ order: order._id })
+        .select('item amount commission')
+        .lean();
+      const byItem = new Map<string, { amount: number; commission: number }>();
+      for (const r of rows as any[]) {
+        const k = String(r.item);
+        const cur = byItem.get(k) ?? { amount: 0, commission: 0 };
+        cur.amount += r.amount || 0;
+        cur.commission += r.commission || 0;
+        byItem.set(k, cur);
+      }
+      for (const [k, v] of byItem) {
+        if (v.amount > 0) commissionShare.set(k, v.commission / v.amount);
+      }
+    }
     // Reverse business earnings (prevent vendor from getting paid)
     await this.reverseBusinessEarnings(order);
+    // Then pay each tailor their cancellation fee, released straight away.
+    if (fee && refunded) {
+      const settings: any = await this.platformSettingsModel.findOne().lean();
+      const fallbackShare =
+        (settings?.platform_commission_type ?? 'percent') === 'percent'
+          ? Number(settings?.platform_commission_percent ?? 10) / 100
+          : 0;
+      for (const line of fee.lines) {
+        const share = commissionShare.get(line.item) ?? fallbackShare;
+        const commission = Math.round(line.amount * share);
+        const net = line.amount - commission;
+        if (net <= 0) continue;
+        try {
+          await this.businessEarningsModel.create({
+            business: new Types.ObjectId(line.business),
+            order: order._id,
+            item: new Types.ObjectId(line.item),
+            amount: line.amount,
+            commission,
+            net_amount: net,
+            released: false,
+            release_date: new Date(),
+            milestone: 'cancellation_fee',
+          });
+          await this.walletsService.reconcileBusinessWallet(line.business, {
+            pending: net,
+          });
+        } catch (err: any) {
+          this.logger.error(
+            `[Cancel] Could not record the ₦${line.amount} cancellation fee for ${line.business} on ${order.reference}: ${err?.message}`,
+          );
+        }
+      }
+    }
 
     // Restore inventory
     try {
@@ -2837,8 +3006,15 @@ export class OrderService {
     );
 
     return {
-      message: 'Order cancelled and refunded successfully',
-      data: { order_reference: order.reference, status: order.status },
+      message: fee
+        ? `Order cancelled. ₦${fee.refund.toLocaleString()} refunded to your wallet; ₦${fee.total.toLocaleString()} kept as the cancellation fee.`
+        : 'Order cancelled and refunded successfully',
+      data: {
+        order_reference: order.reference,
+        status: order.status,
+        refunded: fee ? fee.refund : undefined,
+        cancellation_fee: fee ? fee.total : 0,
+      },
     };
   }
 
@@ -3171,7 +3347,9 @@ export class OrderService {
     businessId?: string,
     itemId?: string,
   ) {
-    const filter: any = { order: order._id };
+    // A tailor's cancellation fee is the outcome of a cancellation, never
+    // something a later cancellation sweep or rejection should take back.
+    const filter: any = { order: order._id, milestone: { $ne: 'cancellation_fee' } };
     if (businessId) filter.business = new Types.ObjectId(businessId);
     // Per-item reversal: only this item's earning (both the vendor's own and,
     // for an applied-fabric item, the fabric vendor's linked earning).
@@ -4153,6 +4331,7 @@ export class OrderService {
 
         const hadEarnings = await this.businessEarningsModel.exists({
           order: order._id,
+          milestone: { $ne: 'cancellation_fee' },
         });
         if (hadEarnings) {
           touched++;

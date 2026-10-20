@@ -39,7 +39,13 @@ export class BusinessEarning extends Document {
   @Prop({ default: null })
   released_at: Date;
 
-  @Prop({ type: String, enum: ['upfront', 'completion'], default: 'completion' })
+  // 'cancellation_fee': the share of a custom item the tailor keeps when the
+  // customer cancels after confirming. Never reversed by a cancellation.
+  @Prop({
+    type: String,
+    enum: ['upfront', 'completion', 'cancellation_fee'],
+    default: 'completion',
+  })
   milestone: string;
 }
 
