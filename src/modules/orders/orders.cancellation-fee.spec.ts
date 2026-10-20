@@ -12,13 +12,15 @@ import { OrderStatus } from './schemas/orders.schema';
 const TAILOR = new Types.ObjectId();
 const SHOP = new Types.ObjectId();
 const CUSTOMER = new Types.ObjectId();
+const AGBADA = new Types.ObjectId();
+const CAP = new Types.ObjectId();
 
 const lean = (v: unknown) => ({ lean: () => Promise.resolve(v), select: () => ({ lean: () => Promise.resolve(v) }) });
 
 const makeOrder = (patch: Record<string, unknown> = {}) => {
   const items = [
-    { _id: new Types.ObjectId(), business: TAILOR, total_price: 100_000, clothing_type: 'customize', product_name: 'Agbada' },
-    { _id: new Types.ObjectId(), business: SHOP, total_price: 20_000, clothing_type: 'ready_to_wear', product_name: 'Cap' },
+    { _id: new Types.ObjectId(), product: AGBADA, business: TAILOR, total_price: 100_000, clothing_type: 'customize' },
+    { _id: new Types.ObjectId(), product: CAP, business: SHOP, total_price: 20_000, clothing_type: 'ready_to_wear' },
   ];
   const order: any = {
     _id: new Types.ObjectId(),
@@ -95,6 +97,17 @@ const build = (order: any, opts: { percent?: number; paid?: number; channel?: st
       }),
     },
     productService: { restoreInventory: jest.fn().mockResolvedValue(undefined) },
+    productModel: {
+      find: jest.fn(() => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve([
+              { _id: AGBADA, clothing: { name: 'Agbada' } },
+              { _id: CAP, accessory: { name: 'Cap' } },
+            ]),
+        }),
+      })),
+    },
     reverseBusinessEarnings: jest.fn().mockResolvedValue(undefined),
     notifyVendorsOrderCancelled: jest.fn().mockResolvedValue(undefined),
   });

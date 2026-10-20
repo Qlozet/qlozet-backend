@@ -2713,6 +2713,23 @@ export class OrderService {
         .map((s: any) => String(s.business)),
     );
     const lines: { item: string; business: string; amount: number; name: string }[] = [];
+    // Order items keep a product ref, not a name; name the pieces for the
+    // customer from their products (bespoke work has no catalogue product).
+    const names = new Map<string, string>();
+    if (percent > 0 && paidTotal > 0) {
+      const ids = (order.items as any[])
+        .map((i) => i?.product)
+        .filter((id) => id && Types.ObjectId.isValid(String(id)));
+      if (ids.length) {
+        const products: any[] = await this.productModel
+          .find({ _id: { $in: ids } })
+          .select('clothing.name fabric.name accessory.name')
+          .lean();
+        for (const p of products) {
+          names.set(String(p._id), p.clothing?.name ?? p.fabric?.name ?? p.accessory?.name ?? '');
+        }
+      }
+    }
     if (percent > 0 && paidTotal > 0) {
       for (const item of order.items as any[]) {
         if (item?.rejected) continue;
@@ -2725,7 +2742,9 @@ export class OrderService {
           item: String(item._id),
           business: String(item.business),
           amount,
-          name: item.product_name ?? item.name ?? 'Custom item',
+          name:
+            names.get(String(item.product)) ||
+            ((order as any).type === 'bespoke' ? 'Bespoke design' : 'Custom piece'),
         });
       }
     }
