@@ -31,6 +31,7 @@ import { BusinessEarningsCron } from './business-earning-cron';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { ProductModule } from '../products/products.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { Dispute, DisputeSchema } from '../disputes/schemas/dispute.schema';
 
 @Module({
   imports: [
@@ -47,6 +48,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
       // Vendor signup token reward, granted on first approval.
       { name: Token.name, schema: TokenSchema },
       { name: TokenTransaction.name, schema: TokenTransactionSchema },
+      // Read-only, for the payout cron: an open dispute holds a payout.
+      { name: Dispute.name, schema: DisputeSchema },
     ]),
     LogisticsModule,   // provides LogisticsService
     ProductModule,     // provides ProductService

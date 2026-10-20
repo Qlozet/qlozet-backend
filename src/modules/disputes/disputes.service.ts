@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Dispute, DisputeDocument, DisputeStatus } from './schemas/dispute.schema';
+import { Dispute, DisputeDocument, DisputeReason, DisputeStatus } from './schemas/dispute.schema';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { DisputeResolution, ResolveDisputeDto } from './dto/resolve-dispute.dto';
 import { Order, OrderDocument, OrderStatus } from '../orders/schemas/orders.schema';
@@ -48,17 +48,65 @@ export class DisputesService {
   ) {}
 
   /**
+   * A "not received" report is accepted once this vendor's parcel is
+   * genuinely overdue: the courier reported a failed delivery, marked it
+   * delivered (the customer says otherwise), or has had it longer than the
+   * slowest normal delivery plus two days' grace. Before the courier has it
+   * at all, it is a late shipment, which is compensated automatically.
+   */
+  private async assertParcelOverdue(order: any, businessId: string) {
+    const shipment = (order.shipments ?? []).find(
+      (s: any) =>
+        String(s.business) === String(businessId) &&
+        s.shipment_type !== 'fabric_transfer',
+    );
+    if (!shipment) {
+      throw new BadRequestException('This vendor has no delivery on this order.');
+    }
+    if (['failed', 'delivered'].includes(shipment.status)) return;
+
+    const collected = shipment.shipped_at ? new Date(shipment.shipped_at) : null;
+    if (!collected || !['shipped', 'in_transit'].includes(shipment.status)) {
+      throw new BadRequestException(
+        'The vendor has not handed this parcel to the courier yet. If they are late, you are compensated automatically.',
+      );
+    }
+
+    const settings: any = await this.orderModel.db
+      .collection('platformsettings')
+      .findOne({}, { projection: { delivery_transit_max_days: 1 } })
+      .catch(() => null);
+    const transitMax = Number(settings?.delivery_transit_max_days) || 5;
+    const dueBy = new Date(collected.getTime() + (transitMax + 2) * 86400000);
+    if (Date.now() < dueBy.getTime()) {
+      const fmt = (d: Date) =>
+        d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      throw new BadRequestException(
+        `The courier collected this parcel on ${fmt(collected)}. If it has not arrived by ${fmt(dueBy)}, report it then.`,
+      );
+    }
+  }
+
+  /**
    * Customer files a dispute against a vendor for a delivered order.
    * Freezes the vendor's payout by setting release_date = null.
    */
   async fileDispute(customerId: string, dto: CreateDisputeDto) {
+    // Every other problem is about what arrived, so it needs a delivered
+    // order. "Not received" is the one that cannot wait for delivery.
+    const notReceived = dto.reason === DisputeReason.NOT_RECEIVED;
     const order = await this.orderModel.findOne({
       reference: dto.order_reference,
       customer: customerId,
-      status: OrderStatus.COMPLETED,
+      status: notReceived
+        ? { $in: [OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT, OrderStatus.COMPLETED] }
+        : OrderStatus.COMPLETED,
     });
     if (!order) {
       throw new BadRequestException('Order not found or not eligible for dispute');
+    }
+    if (notReceived) {
+      await this.assertParcelOverdue(order, dto.business_id);
     }
 
     // Check if payout has already been released

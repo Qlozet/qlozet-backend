@@ -137,6 +137,75 @@ describe('DisputesService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    describe('not received', () => {
+      const inTransit = (shipment: Record<string, any>) =>
+        orderModel.create({
+          customer: customerId,
+          items: [],
+          total: 60_000,
+          subtotal: 60_000,
+          status: 'in_transit',
+          payment_status: 'paid',
+          reference: `QLZ-${Math.random().toString(36).slice(2, 8)}`,
+          shipments: [{ business: businessId, ...shipment }],
+        });
+      const notReceived = (order: any) => ({
+        ...fileDto(order),
+        reason: 'not_received',
+        description: 'Tracking has not moved for a week.',
+      });
+
+      it('can be reported before delivery once the parcel is overdue', async () => {
+        const order = await inTransit({
+          status: 'in_transit',
+          shipped_at: new Date(Date.now() - 20 * 86_400_000),
+        });
+        await makeEarning(order, { release_date: null });
+        const { data: dispute } = await service.fileDispute(
+          customerId.toString(),
+          notReceived(order),
+        );
+        expect(dispute.status).toBe(DisputeStatus.OPEN);
+        expect(dispute.reason).toBe('not_received');
+      });
+
+      it('says when to come back if the courier only just collected it', async () => {
+        const order = await inTransit({
+          status: 'in_transit',
+          shipped_at: new Date(),
+        });
+        await expect(
+          service.fileDispute(customerId.toString(), notReceived(order)),
+        ).rejects.toThrow(/report it then/);
+      });
+
+      it('is accepted at once when the courier reported a failed delivery', async () => {
+        const order = await inTransit({ status: 'failed', shipped_at: new Date() });
+        const { data: dispute } = await service.fileDispute(
+          customerId.toString(),
+          notReceived(order),
+        );
+        expect(dispute.status).toBe(DisputeStatus.OPEN);
+      });
+
+      it('is refused before the vendor has shipped: that is a late shipment', async () => {
+        const order = await inTransit({ status: 'pending' });
+        await expect(
+          service.fileDispute(customerId.toString(), notReceived(order)),
+        ).rejects.toThrow(/compensated automatically/);
+      });
+
+      it('other reasons still need a delivered order', async () => {
+        const order = await inTransit({
+          status: 'in_transit',
+          shipped_at: new Date(Date.now() - 20 * 86_400_000),
+        });
+        await expect(
+          service.fileDispute(customerId.toString(), fileDto(order)),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
     it('rejects once the vendor payout has already been released', async () => {
       const order = await makeDeliveredOrder();
       await makeEarning(order, { released: true });
