@@ -292,3 +292,85 @@ describe('ReturnsService - requests, rejection and auto-approval', () => {
     expect(notices.filter((t) => t === 'Return approved automatically')).toHaveLength(1);
   });
 });
+
+describe('ReturnsService - per-parcel returns', () => {
+  const mongo = new MemoryMongo();
+  let returnModel: any;
+  let orderModel: any;
+  let earningsModel: any;
+  let service: any;
+  const customer = new Types.ObjectId();
+  const vendorA = new Types.ObjectId();
+  const vendorB = new Types.ObjectId();
+  const productA = new Types.ObjectId();
+  const productB = new Types.ObjectId();
+
+  beforeAll(async () => {
+    await mongo.start();
+    returnModel = mongo.model('Return', ReturnSchema);
+    orderModel = mongo.model('Order', OrderSchema);
+    earningsModel = mongo.model('BusinessEarning', BusinessEarningSchema);
+  }, 120_000);
+  afterAll(async () => {
+    await mongo.stop();
+  });
+
+  beforeEach(async () => {
+    await Promise.all([returnModel.deleteMany({}), orderModel.deleteMany({}), earningsModel.deleteMany({})]);
+    service = Object.create(ReturnsService.prototype);
+    Object.assign(service, {
+      logger: stubLogger,
+      returnModel,
+      orderModel,
+      businessEarningsModel: earningsModel,
+      platformSettingsModel: { findOne: () => ({ lean: async () => ({ return_window_days: 7 }) }) },
+      notificationsService: { create: jest.fn().mockResolvedValue({}) },
+      vendorRecipients: { resolve: jest.fn().mockResolvedValue([]) },
+    });
+  });
+
+  const order = (aDeliveredDaysAgo: number | null) =>
+    orderModel.create({
+      customer,
+      reference: 'QLZ-PP' + Math.floor(Math.random() * 1e6),
+      status: 'in_transit',
+      payment_status: 'paid',
+      items: [
+        { product: productA, business: vendorA, total_price: 5_000 },
+        { product: productB, business: vendorB, total_price: 8_000 },
+      ],
+      shipments: [
+        {
+          business: vendorA,
+          status: aDeliveredDaysAgo === null ? 'in_transit' : 'delivered',
+          ...(aDeliveredDaysAgo === null ? {} : { delivered_at: new Date(Date.now() - aDeliveredDaysAgo * 86400000) }),
+        },
+        { business: vendorB, status: 'in_transit' },
+      ],
+      subtotal: 13_000,
+      total: 13_000,
+    });
+
+  const ask = (o: any, business: any, product: any) =>
+    service.requestReturn(customer.toString(), {
+      order_reference: o.reference,
+      business_id: business.toString(),
+      item_ids: [product.toString()],
+      reason: 'wrong_size',
+    });
+
+  it('accepts a return on a delivered parcel while another is still on its way', async () => {
+    const o = await order(1);
+    await expect(ask(o, vendorA, productA)).resolves.toBeDefined();
+  });
+
+  it('refuses a return on the parcel still on its way', async () => {
+    const o = await order(1);
+    await expect(ask(o, vendorB, productB)).rejects.toThrow(/not been delivered/);
+  });
+
+  it('counts the window from that parcel\'s delivery', async () => {
+    const o = await order(8);
+    await expect(ask(o, vendorA, productA)).rejects.toThrow(/Return window has expired/);
+  });
+});

@@ -376,7 +376,13 @@ export class BusinessEarningsCron {
         // Anchor on the most recent DISPATCH among this order's shipments.
         // Prefer shipped_at; fall back to confirmed_at for older data. If the
         // order was never dispatched, don't auto-release.
-        const shipments = (order as any).shipments || [];
+        // This vendor's own parcel when it has one (payouts are per parcel),
+        // else the whole order for rows without a vendor shipment.
+        const allShipments = (order as any).shipments || [];
+        const own = allShipments.filter(
+          (s: any) => String(s.business) === String(earning.business),
+        );
+        const shipments = own.length ? own : allShipments;
         const dispatchAnchors = shipments
           .filter((s: any) => dispatchedStatuses.has(s.status))
           .map((s: any) => s.shipped_at ?? s.confirmed_at)

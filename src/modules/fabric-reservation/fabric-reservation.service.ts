@@ -508,9 +508,17 @@ export class FabricReservationService {
     // Calculate total
     const totalAmount = dto.yards * reservation.price_per_yard;
 
-    // ── Optional delivery: verify the quoted courier server-side and attach a
-    // real shipment + address, so the vendor's normal confirm→fulfill→courier
-    // pipeline applies. Without it the claim is an event-pickup handover.
+    // ── Delivery (required): verify the quoted courier server-side and
+    // attach a real shipment + address, so the vendor's normal
+    // confirm→fulfill→courier pipeline applies. Event pickup is no longer
+    // offered: nothing moved the fabric to the organizer, and a handover tap
+    // released the vendor's payout with no courier record. Pickup claims
+    // created before this keep working through Mark Handed Over.
+    if (!dto.courier || !dto.address_id) {
+      throw new BadRequestException(
+        'Choose a delivery address and courier. Fabric from a reservation is delivered to you.',
+      );
+    }
     let claimShipment: any = null;
     let shippingFee = 0;
     let deliveryAddress: any = null;

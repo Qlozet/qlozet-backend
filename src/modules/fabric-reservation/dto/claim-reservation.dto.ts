@@ -38,7 +38,7 @@ export class ClaimReservationDto {
 
   @ApiPropertyOptional({
     description:
-      'Delivery address id — omit for event pickup (organizer hands over the yards)',
+      'Delivery address id. Required: every claim is delivered (event pickup is no longer offered).',
   })
   @IsOptional()
   @IsString()
@@ -46,7 +46,7 @@ export class ClaimReservationDto {
 
   @ApiPropertyOptional({
     description:
-      'Courier selection from POST /reservations/:id/claim-preview — omit for event pickup',
+      'Courier selection from POST /reservations/:id/claim-preview. Required.',
     type: ClaimCourierSelectionDto,
   })
   @IsOptional()
