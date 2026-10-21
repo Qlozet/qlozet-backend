@@ -1642,7 +1642,12 @@ export class UserService {
       measurements: { ...dto.measurements },
       inputs: dto.inputs ?? null,
       tailoring_meta: dto.tailoring_meta ?? null,
-    };
+      // Told by the shop; otherwise an estimate leaves its inputs behind.
+      method:
+        dto.method ??
+        (dto.inputs || dto.tailoring_meta ? 'estimate' : 'manual'),
+      updated_at: new Date(),
+    } as any;
 
     user.measurementSets = user.measurementSets || [];
     user.measurementSets.push(newSet);
@@ -1678,9 +1683,14 @@ export class UserService {
     }
 
     if (dto.unit) set.unit = dto.unit;
+    const changed: string[] = [];
+    const previousMeta: Record<string, any> = { ...((set.tailoring_meta as any) ?? {}) };
     if (dto.measurements) {
       // measurements is a Mongoose Map — use .set() for each key
       for (const [key, value] of Object.entries(dto.measurements)) {
+        if (value === undefined || value === null) continue;
+        const before = (set.measurements as any).get?.(key) ?? (set.measurements as any)[key];
+        if (Number(before) !== Number(value)) changed.push(key);
         (set.measurements as any).set(key, value);
       }
     }
@@ -1690,6 +1700,37 @@ export class UserService {
         ...(set.tailoring_meta ?? {}),
         ...dto.tailoring_meta,
       };
+      user.markModified('measurementSets');
+    }
+    if (changed.length) {
+      // A value the customer typed over an estimate is now theirs: drop the
+      // estimate's tier for it, so the tailor isn't told to verify a number
+      // the customer measured (or told it's measured when it's a guess).
+      // The shop resends the old notes with a hand edit, so a note that
+      // came back unchanged for a changed value is stale; a new prediction
+      // sends new notes and keeps them.
+      if (set.tailoring_meta) {
+        const meta = { ...(set.tailoring_meta as any) };
+        const sent = (dto.tailoring_meta as any) ?? {};
+        for (const key of changed) {
+          const fresh =
+            sent[key] && JSON.stringify(sent[key]) !== JSON.stringify(previousMeta[key]);
+          if (!fresh) {
+            meta[key] = { tier: 'measured', mae_cm: null, method: 'customer_edit' };
+          }
+        }
+        set.tailoring_meta = meta;
+      }
+      const was =
+        (set as any).method ??
+        (set.inputs || Object.keys(previousMeta).length ? 'estimate' : null);
+      if (dto.method) (set as any).method = dto.method;
+      else if (was === 'estimate') (set as any).method = 'mixed';
+      else if (!was) (set as any).method = 'manual';
+      (set as any).updated_at = new Date();
+      user.markModified('measurementSets');
+    } else if (dto.method) {
+      (set as any).method = dto.method;
       user.markModified('measurementSets');
     }
 

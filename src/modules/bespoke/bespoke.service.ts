@@ -5,6 +5,10 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import {
+  chooseSet,
+  measurementSnapshot,
+} from '../../common/utils/measurement-snapshot';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Cron } from '@nestjs/schedule';
@@ -529,21 +533,29 @@ export class BespokeService {
       .findById(customerId)
       .select('measurementSets body_type_classification body_fit')
       .lean();
-    const sets: any[] = (user as any)?.measurementSets || [];
-    if (!sets.length) return null;
-    const chosen =
-      (setName && sets.find((s) => s.name === setName)) ||
-      sets.find((s) => s.active) ||
-      sets[0];
-    if (!chosen) return null;
-    return {
-      body_type: (user as any)?.body_type_classification?.bodyType || null,
-      confidence: (user as any)?.body_type_classification?.confidence || null,
-      measurements: chosen.measurements || {},
-      unit: chosen.unit || 'cm',
-      fit_preferences: (user as any)?.body_fit || [],
-      set_name: chosen.name || null,
-    };
+    // Same builder as orders: carries the estimate's per-value notes and
+    // how/when the set was taken, which bespoke snapshots used to drop.
+    return measurementSnapshot(
+      user,
+      chooseSet((user as any)?.measurementSets, setName, true),
+    );
+  }
+
+  /**
+   * What the tailor sees on a quote request before any order: the set the
+   * customer chose for this design (named in the design's saved selections),
+   * else their active set.
+   */
+  private async quoteMeasurementPreview(design: any, customerId: any) {
+    if (!customerId) return null;
+    let setName: string | undefined;
+    try {
+      setName = JSON.parse(design?.description || '')?.selections?.measurement_set || undefined;
+    } catch {
+      setName = undefined;
+    }
+    const id = String(customerId?._id ?? customerId);
+    return this.buildBodyProfileSnapshot(id, setName);
   }
 
   async acceptQuote(
@@ -1069,7 +1081,12 @@ export class BespokeService {
 
     if (!quote) throw new NotFoundException('Quote not found');
 
-    return { data: quote };
+    // The tailor needs the measurements to price the work, before any order.
+    const measurements = await this.quoteMeasurementPreview(
+      (quote as any).design,
+      (quote as any).customer,
+    );
+    return { data: { ...quote, measurements } };
   }
 
   async getQuoteDetailForCustomer(quoteId: string, customerId: string) {

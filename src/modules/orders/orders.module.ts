@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrderController } from './orders.controller';
 import { OrderService } from './orders.service';
+import { MeasurementQuestionsService } from './measurement-questions.service';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
 import { Order, OrderSchema } from './schemas/orders.schema';
@@ -59,6 +60,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
   ],
   controllers: [OrderController],
   providers: [
+    MeasurementQuestionsService,
     OrderService,
     OrderValidationService,
     PriceCalculationService,

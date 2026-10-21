@@ -246,6 +246,11 @@ export class OrderItem {
       string,
       { tier?: string; mae_cm?: number | null; method?: string }
     > | null;
+    /** manual | estimate | mixed | scan; null for older sets. */
+    method?: string | null;
+    measured_at?: Date | null;
+    /** Set when the customer corrected these numbers for this order. */
+    updated_by_customer_at?: Date | null;
   } | null;
 }
 
@@ -578,6 +583,10 @@ export class Order {
       unit: { type: String },
       fit_preferences: { type: [String], default: [] },
       set_name: { type: String, default: null },
+      tailoring_meta: { type: Object, default: null },
+      method: { type: String, default: null },
+      measured_at: { type: Date, default: null },
+      updated_by_customer_at: { type: Date, default: null },
     },
     default: null,
   })
@@ -589,7 +598,31 @@ export class Order {
     fit_preferences: string[];
     /** Which measurement set was chosen at order time (e.g. "For Tolu"). */
     set_name?: string | null;
+    tailoring_meta?: Record<string, { tier?: string; mae_cm?: number | null; method?: string }> | null;
+    method?: string | null;
+    measured_at?: Date | null;
+    updated_by_customer_at?: Date | null;
   };
+
+  /**
+   * A tailor's questions about the measurements this order is made to, and
+   * the customer's answers. An answer corrects the order's own copy.
+   */
+  @Prop({ type: [Object], default: [] })
+  measurement_questions?: {
+    _id: Types.ObjectId;
+    business: Types.ObjectId;
+    /** The made-to-order line asked about; null = the order's own copy (bespoke). */
+    item_id: Types.ObjectId | null;
+    body_parts: string[];
+    message: string;
+    status: 'open' | 'answered';
+    asked_by: Types.ObjectId;
+    asked_at: Date;
+    answered_at?: Date | null;
+    answer_message?: string | null;
+    changes?: { body_part: string; from: number | null; to: number }[];
+  }[];
 
   @Prop({ type: Boolean, default: false })
   customer_satisfied?: boolean;

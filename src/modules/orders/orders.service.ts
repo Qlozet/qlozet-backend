@@ -11,6 +11,10 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import {
+  chooseSet,
+  measurementSnapshot,
+} from '../../common/utils/measurement-snapshot';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import {
@@ -185,28 +189,13 @@ export class OrderService {
       // for DIFFERENT bodies (asoebi/family orders), so each item freezes the
       // set named on its cart line; item name > order-level name > active set.
       const rawItems: any[] = (orderData.items as any[]) || [];
-      const resolveBodyProfile = (setName?: string | null) => {
-        const sets: any[] = (fullCustomer as any)?.measurementSets || [];
-        if (!sets.length) return null;
-        const chosen =
-          (setName && sets.find((s) => s.name === setName)) ||
-          sets.find((s) => s.active);
-        if (!chosen) return null;
-        return {
-          body_type:
-            (fullCustomer as any)?.body_type_classification?.bodyType ?? null,
-          confidence:
-            (fullCustomer as any)?.body_type_classification?.confidence ??
-            null,
-          measurements: chosen.measurements || {},
-          unit: chosen.unit || 'cm',
-          fit_preferences: (fullCustomer as any)?.body_fit || [],
-          set_name: chosen.name || null,
-          // Per-measurement { tier, mae_cm, method } — lets the vendor's grid
-          // flag rough values ("verify with customer") on the frozen snapshot.
-          tailoring_meta: (chosen as any).tailoring_meta ?? null,
-        };
-      };
+      // The snapshot also carries how and when the set was taken, so the
+      // tailor can tell a tape measure from an estimate.
+      const resolveBodyProfile = (setName?: string | null) =>
+        measurementSnapshot(
+          fullCustomer,
+          chooseSet((fullCustomer as any)?.measurementSets, setName),
+        );
       const itemSetName = (idx: number, productId: any): string | undefined => {
         // Prefer positional match (raw and processed items are same-order);
         // fall back to product id if the pipeline ever reshapes the list.
@@ -433,33 +422,16 @@ export class OrderService {
         (item) => item.clothing_type === ClothingType.CUSTOMIZE,
       );
 
-      let customer_body_profile: {
-        body_type: string;
-        confidence: string;
-        measurements: Record<string, number>;
-        unit: string;
-        fit_preferences: string[];
-        set_name?: string | null;
-      } | undefined = undefined;
-      if (isBespoke && fullCustomer?.body_type_classification && fullCustomer?.measurementSets?.length) {
-        // The customer can order for someone else ("For Tolu") by naming one
-        // of their saved measurement sets; otherwise the active set is used.
-        const chosenSet =
-          (orderData.measurement_set_name &&
-            fullCustomer.measurementSets.find(
-              (s) => s.name === orderData.measurement_set_name,
-            )) ||
-          fullCustomer.measurementSets.find((s) => s.active);
-        if (chosenSet) {
-          customer_body_profile = {
-            body_type: fullCustomer.body_type_classification.bodyType,
-            confidence: fullCustomer.body_type_classification.confidence,
-            measurements: chosenSet.measurements,
-            unit: chosenSet.unit,
-            fit_preferences: fullCustomer.body_fit || [],
-            set_name: chosenSet.name || null,
-          };
-        }
+      // The customer can order for someone else ("For Tolu") by naming one
+      // of their saved measurement sets; otherwise the active set is used.
+      // (Used to be skipped when the customer had no body-type result yet.)
+      let customer_body_profile: any = undefined;
+      if (isBespoke && fullCustomer?.measurementSets?.length) {
+        customer_body_profile =
+          measurementSnapshot(
+            fullCustomer,
+            chooseSet(fullCustomer.measurementSets, orderData.measurement_set_name),
+          ) ?? undefined;
       }
 
       // Vendors who opted into auto-confirmation skip the manual confirm step
@@ -2073,7 +2045,7 @@ export class OrderService {
   ) {
     const order = await this.orderModel
       .findOne({ reference })
-      .select('customer items shipments customer_body_profile type')
+      .select('customer items shipments customer_body_profile type measurement_questions')
       .populate('items.product', 'name')
       .lean();
     if (!order) throw new NotFoundException('Order not found');
@@ -2135,11 +2107,33 @@ export class OrderService {
             String(i.business) === String(scopeBusinessId)),
       )
       .map((i) => ({
+        item_id: i._id ? String(i._id) : null,
         product_name: (i.product as any)?.name ?? null,
         set_name: i.body_profile.set_name ?? null,
         unit: i.body_profile.unit || 'cm',
         snapshot: true,
         measurements: i.body_profile.measurements,
+        tailoring_meta: i.body_profile.tailoring_meta ?? null,
+        method: i.body_profile.method ?? null,
+        measured_at: i.body_profile.measured_at ?? null,
+        updated_by_customer_at: i.body_profile.updated_by_customer_at ?? null,
+        body_type: i.body_profile.body_type ?? null,
+        fit_preferences: i.body_profile.fit_preferences ?? [],
+      }));
+
+    // This vendor's questions about the measurements, and the answers.
+    const questions = (((order as any).measurement_questions || []) as any[])
+      .filter((q) => !scopeBusinessId || String(q.business) === String(scopeBusinessId))
+      .map((q) => ({
+        _id: String(q._id),
+        item_id: q.item_id ? String(q.item_id) : null,
+        body_parts: q.body_parts ?? [],
+        message: q.message,
+        status: q.status,
+        asked_at: q.asked_at,
+        answered_at: q.answered_at ?? null,
+        answer_message: q.answer_message ?? null,
+        changes: q.changes ?? [],
       }));
 
     // Prefer the ORDER-TIME snapshot: the customer may have ordered with a
@@ -2156,7 +2150,14 @@ export class OrderService {
           snapshot: true,
           updatedAt: null,
           measurements: snapshot.measurements,
+          tailoring_meta: snapshot.tailoring_meta ?? null,
+          method: snapshot.method ?? null,
+          measured_at: snapshot.measured_at ?? null,
+          updated_by_customer_at: snapshot.updated_by_customer_at ?? null,
+          body_type: snapshot.body_type ?? null,
+          fit_preferences: snapshot.fit_preferences ?? [],
           items: itemProfiles,
+          questions,
         },
       };
     }
@@ -2173,7 +2174,14 @@ export class OrderService {
           snapshot: true,
           updatedAt: null,
           measurements: first.measurements,
+          tailoring_meta: first.tailoring_meta,
+          method: first.method,
+          measured_at: first.measured_at,
+          updated_by_customer_at: first.updated_by_customer_at,
+          body_type: first.body_type,
+          fit_preferences: first.fit_preferences,
           items: itemProfiles,
+          questions,
         },
       };
     }
@@ -2332,51 +2340,16 @@ export class OrderService {
     return { data: this.buildProduction(shipment) };
   }
 
-  // Vendor flags a measurement problem on an order → files a dispute
-  // (reason=measurement_issue, initiated_by=vendor) so it lands on /disputes/admin.
+  // Kept for older vendor builds: a flag is now a question to the customer
+  // (see MeasurementQuestionsService), not a dispute nobody was told about.
   async flagMeasurement(
     reference: string,
     businessId: string,
     dto: { reason?: string; body_part?: string },
   ) {
-    const order = await this.orderModel
-      .findOne({ reference })
-      .select('customer items shipments reference')
-      .lean();
-    if (!order) throw new NotFoundException('Order not found');
-
-    const bid = String(businessId);
-    const owns =
-      ((order as any).shipments || []).some(
-        (s: any) => String(s.business) === bid,
-      ) ||
-      ((order as any).items || []).some((i: any) => String(i.business) === bid);
-    if (!owns) {
-      throw new ForbiddenException('This order does not belong to your business.');
-    }
-
-    const reason = (dto.reason || '').trim();
-    const bodyPart = (dto.body_part || '').trim();
-    if (!reason) throw new BadRequestException('A reason is required.');
-
-    const dispute = await this.disputeModel.create({
-      order: (order as any)._id,
-      order_reference: (order as any).reference,
-      customer: (order as any).customer,
-      business: new Types.ObjectId(bid),
-      reason: 'measurement_issue',
-      description: bodyPart
-        ? `Measurement flag — ${bodyPart}: ${reason}`
-        : `Measurement flag: ${reason}`,
-      body_part: bodyPart || null,
-      initiated_by: 'vendor',
-      status: 'open',
-    });
-
-    return {
-      message: 'Measurement issue flagged for admin review.',
-      data: dispute,
-    };
+    throw new BadRequestException(
+      'Use "Ask about these measurements" on the order to ask the customer.',
+    );
   }
 
   async findCustomerOrdersWithFilters(

@@ -172,6 +172,11 @@ export class User extends Document {
         // so the vendor's grid can badge rough values ("verify with customer")
         // and show expected error.
         tailoring_meta: { type: Object, default: null },
+        // How the set was taken: manual (tape), estimate (height & weight),
+        // mixed (an estimate the customer then corrected by hand), scan.
+        method: { type: String, default: null },
+        // Last time the numbers changed (createdAt never moves on an edit).
+        updated_at: { type: Date, default: null },
       },
     ],
     default: [],
@@ -187,6 +192,8 @@ export class User extends Document {
       string,
       { tier?: string; mae_cm?: number | null; method?: string }
     > | null;
+    method?: 'manual' | 'estimate' | 'mixed' | 'scan' | null;
+    updated_at?: Date | null;
   }[];
 
   @Prop({

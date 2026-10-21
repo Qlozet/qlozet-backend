@@ -25,6 +25,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
+import { MeasurementQuestionsService } from './measurement-questions.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import {
   CheckoutPreviewDto,
@@ -48,7 +49,10 @@ const VALID_STATUSES = Object.values(OrderStatus);
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UsePipes(new ValidationPipe({ transform: true }))
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly measurementQuestions: MeasurementQuestionsService,
+  ) {}
 
   /**
    * 🧾 Create a new order
@@ -475,6 +479,46 @@ export class OrderController {
       step,
       body?.completed !== false,
     );
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post(':reference/measurements/questions')
+  @ApiOperation({
+    summary: 'Ask the customer about the measurements this order is made to',
+    description:
+      'Body: { item_id? (a made-to-order line; omit for the order’s own copy), body_parts?: string[], message }. Notifies the customer in-app and by email.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async askMeasurementQuestion(
+    @Param('reference') reference: string,
+    @Body() body: { item_id?: string | null; body_parts?: string[]; message?: string },
+    @Req() req: any,
+  ) {
+    return this.measurementQuestions.ask(reference, req.business?.id, req.user?.id, body);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Get(':reference/measurements/questions')
+  @ApiOperation({ summary: "The tailor's questions about this order's measurements (customer)" })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async listMeasurementQuestions(@Param('reference') reference: string, @Req() req: any) {
+    return this.measurementQuestions.listForCustomer(reference, req.user?.id);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Post(':reference/measurements/questions/:questionId/answer')
+  @ApiOperation({
+    summary: "Answer the tailor: corrected numbers (the copy's own unit) and/or a note",
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  @ApiParam({ name: 'questionId', description: 'Question id' })
+  async answerMeasurementQuestion(
+    @Param('reference') reference: string,
+    @Param('questionId') questionId: string,
+    @Body() body: { measurements?: Record<string, number>; message?: string },
+    @Req() req: any,
+  ) {
+    return this.measurementQuestions.answer(reference, req.user?.id, questionId, body);
   }
 
   @Roles(UserType.VENDOR)
