@@ -118,11 +118,17 @@ export class OrderController {
     enum: OrderStatus,
     description: 'Optional order status filter',
   })
+  @ApiQuery({
+    name: 'reference',
+    required: false,
+    description: 'One order by its reference (a notification opening that order)',
+  })
   async findCustomerOrders(
     @Req() req,
     @Query('page') page = 1,
     @Query('size') size = 10,
     @Query('status') status?: string,
+    @Query('reference') reference?: string,
   ) {
     const userId = req.user?.id;
     if (!userId) throw new NotFoundException('User not found');
@@ -138,6 +144,7 @@ export class OrderController {
       Number(page),
       Number(size),
       status,
+      reference,
     );
   }
 
