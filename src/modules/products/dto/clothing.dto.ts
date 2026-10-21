@@ -210,7 +210,8 @@ export class ClothingDto {
   @ApiPropertyOptional({
     description:
       'How many yards of fabric this garment uses per size. Drives fabric ' +
-      'pricing (embedded + external/cross-vendor), inventory depletion and reservations.',
+      'pricing (embedded + external/cross-vendor), inventory depletion and reservations. ' +
+      "A size of '*' is the figure for one piece whatever the size (made-to-order cut from measurements).",
     example: [
       { size: 'M', yards: 4 },
       { size: 'L', yards: 4.5 },

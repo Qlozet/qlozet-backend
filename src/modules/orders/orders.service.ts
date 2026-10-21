@@ -3692,9 +3692,10 @@ export class OrderService {
     shipment.confirmed = true;
     shipment.confirmed_at = new Date();
 
-    // Fulfilment deadline: the longest window among this vendor's items. An
-    // item with its own "days to make it" uses that; anything else (fabric,
-    // accessories) uses the platform default.
+    // Fulfilment deadline: the longest window among this vendor's items. A
+    // made-to-order piece with its own "days to make it" uses that; anything
+    // else (ready to wear, fabric, accessories) uses the platform default.
+    // Ready-to-wear listings used to carry a hidden 2 from the form.
     const DEFAULT_TURNAROUND_DAYS = await this.defaultTurnaroundDays();
     const vendorItems = order.items.filter(
       (i) => i.business?.toString() === businessId,
@@ -3704,7 +3705,10 @@ export class OrderService {
 
     let maxTurnaroundDays = 0;
     for (const product of products) {
-      const own = Number((product as any).clothing?.turnaround_days);
+      const own =
+        (product as any).clothing?.type === 'customize'
+          ? Number((product as any).clothing?.turnaround_days)
+          : 0;
       const turnaround = own > 0 ? own : DEFAULT_TURNAROUND_DAYS;
       if (turnaround > maxTurnaroundDays) {
         maxTurnaroundDays = turnaround;
