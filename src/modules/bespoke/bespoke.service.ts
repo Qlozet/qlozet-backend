@@ -1245,8 +1245,14 @@ export class BespokeService {
       type: NotificationType.BESPOKE_QUOTE_RECEIVED,
       title: 'Quote Received!',
       body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${quote.total?.toLocaleString()} for your bespoke design.`,
-      metadata: { quote_id: quote._id, vendor_name: business?.business_name, total: quote.total },
-      action_url: `/bespoke`,
+      // design_id lets the shop open this design's quotes directly.
+      metadata: {
+        quote_id: quote._id,
+        design_id: String((quote.design as any)?._id ?? quote.design ?? ''),
+        vendor_name: business?.business_name,
+        total: quote.total,
+      },
+      action_url: `/bespoke?quotes=${String((quote.design as any)?._id ?? quote.design ?? '')}`,
     }).catch((err) => this.logger.warn(`Failed to create quote notification: ${err.message}`));
 
     this.logger.log(

@@ -63,6 +63,8 @@ export class NotificationsGateway implements OnGatewayConnection {
       title: notification.title,
       body: notification.body,
       action_url: notification.action_url,
+      // The ids a client needs to open the exact order, quote or ticket.
+      metadata: (notification as any).metadata ?? {},
       // The store it is for, so a vendor app showing another of this
       // person's stores can skip the toast (the list is scoped server-side).
       recipient_business: (notification as any).recipient_business

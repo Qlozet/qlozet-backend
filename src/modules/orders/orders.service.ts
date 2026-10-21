@@ -2357,6 +2357,7 @@ export class OrderService {
     page: number = 1,
     size: number = 10,
     status?: string,
+    reference?: string,
   ): Promise<{
     data: OrderDocument[];
     total_items: number;
@@ -2372,6 +2373,10 @@ export class OrderService {
     const query: any = { customer: new Types.ObjectId(customerId) };
     if (status) {
       query.status = status;
+    }
+    // Still scoped to this customer, so a reference never reads anyone else's.
+    if (reference) {
+      query.reference = String(reference);
     }
 
     const [orders, total] = await Promise.all([
