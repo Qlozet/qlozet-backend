@@ -21,6 +21,9 @@ export enum DisputeReason {
   // The parcel never arrived: allowed before the order completes, once the
   // courier has had it longer than a normal delivery, or reported a failure.
   NOT_RECEIVED = 'not_received',
+  // A piece made to the customer's measurements that doesn't fit them. Made
+  // -to-fit pieces can't be returned, so this is the customer's route.
+  POOR_FIT = 'poor_fit',
   MEASUREMENT_ISSUE = 'measurement_issue', // vendor-raised: customer measurements look off
   OTHER = 'other',
 }

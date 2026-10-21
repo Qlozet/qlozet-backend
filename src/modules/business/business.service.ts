@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { setMethod } from '../../common/utils/measurement-snapshot';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types, PipelineStage } from 'mongoose';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
@@ -2635,6 +2636,41 @@ export class BusinessService {
         $group: {
           _id: '$customer',
           total_orders: { $sum: 1 },
+          // Whether this vendor has ever made something to this customer's
+          // measurements (a bespoke order, or a made-to-order piece of
+          // theirs). Only then do they see the measurements here.
+          tailored: {
+            $max: {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: ['$type', 'bespoke'] },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ['$items', []] },
+                              as: 'i',
+                              cond: {
+                                $and: [
+                                  { $eq: ['$$i.business', businessObjectId] },
+                                  { $eq: ['$$i.clothing_type', 'customize'] },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
           orders: {
             $push: {
               _id: '$_id',
@@ -2671,6 +2707,7 @@ export class BusinessService {
           gender: '$customer_info.gender',
           body_type_classification: '$customer_info.body_type_classification',
           total_orders: 1,
+          tailored: 1,
           // Limit the orders array to ordersLimit
           orders: { $slice: ['$orders', ordersLimit] },
           // Get the default active measurement (first one that is active, or just the first)
@@ -2712,14 +2749,31 @@ export class BusinessService {
     const result = await this.orderModel.aggregate(pipeline);
     const total = result[0]?.metadata[0]?.total || 0;
     const rows: any[] = result[0]?.data || [];
-    const data = rows.map(({ body_type_classification, ...row }) => ({
-      ...row,
-      body_type: vendorBodyType(
-        body_type_classification,
-        row.default_measurement,
-        row.gender,
-      ),
-    }));
+    const data = rows.map(({ body_type_classification, tailored, ...row }) => {
+      // Measurements are for making to fit: a customer who only bought stock
+      // pieces or fabric from this vendor keeps them private. Weight and the
+      // other estimate inputs never leave the customer's profile.
+      const set = tailored ? row.default_measurement : null;
+      const default_measurement = set
+        ? {
+            name: set.name,
+            unit: set.unit,
+            measurements: set.measurements,
+            tailoring_meta: set.tailoring_meta ?? null,
+            method: setMethod(set),
+            createdAt: set.createdAt ?? null,
+            updated_at: set.updated_at ?? set.createdAt ?? null,
+            active: set.active,
+          }
+        : null;
+      return {
+        ...row,
+        default_measurement,
+        body_type: tailored
+          ? vendorBodyType(body_type_classification, set, row.gender)
+          : null,
+      };
+    });
 
     return {
       data,

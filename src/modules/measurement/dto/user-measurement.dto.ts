@@ -8,6 +8,7 @@ import {
   IsDate,
   ValidateNested,
   IsOptional,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -128,6 +129,14 @@ export class AddMeasurementSetDto {
     string,
     { tier?: string; mae_cm?: number | null; method?: string }
   >;
+
+  @ApiPropertyOptional({
+    enum: ['manual', 'estimate', 'scan'],
+    description: 'How the set was taken: tape measure (manual), estimate from height and weight, or scan.',
+  })
+  @IsOptional()
+  @IsIn(['manual', 'estimate', 'scan'])
+  method?: 'manual' | 'estimate' | 'scan';
 }
 
 export class UpdateMeasurementSetDto {
@@ -152,4 +161,12 @@ export class UpdateMeasurementSetDto {
     string,
     { tier?: string; mae_cm?: number | null; method?: string }
   >;
+
+  @ApiPropertyOptional({
+    enum: ['manual', 'estimate', 'scan'],
+    description: 'How the new numbers were taken, when the shop knows.',
+  })
+  @IsOptional()
+  @IsIn(['manual', 'estimate', 'scan'])
+  method?: 'manual' | 'estimate' | 'scan';
 }

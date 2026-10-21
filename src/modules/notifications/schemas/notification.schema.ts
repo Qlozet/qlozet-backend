@@ -19,6 +19,8 @@ export enum NotificationType {
   // Order
   NEW_ORDER = 'new_order',
   ORDER_CONFIRMED = 'order_confirmed',
+  MEASUREMENT_QUESTION = 'measurement_question',
+  MEASUREMENT_ANSWERED = 'measurement_answered',
   ORDER_CANCELLED = 'order_cancelled',
   ORDER_STATUS_CHANGED = 'order_status_changed',
   LATE_FULFILLMENT_PENALTY = 'late_fulfillment_penalty',
