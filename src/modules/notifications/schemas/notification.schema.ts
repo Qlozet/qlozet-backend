@@ -51,6 +51,7 @@ export enum NotificationType {
   PRODUCT_APPROVED = 'product_approved',
   PRODUCT_REJECTED = 'product_rejected',
   PRODUCT_STATUS_CHANGED = 'product_status_changed',
+  PRODUCT_EDITED_BY_ADMIN = 'product_edited_by_admin',
 
   // Team
   TEAM_MEMBER_JOINED = 'team_member_joined',

@@ -123,16 +123,17 @@ export class AdminProductsController {
   @Patch(':product_id')
   @Roles(UserType.PLATFORM)
   @ApiOperation({
-    summary: 'Edit a product (admin)',
+    summary: 'Edit a listing (admin)',
     description:
-      'Partial update. Only the keys sent are written, and only the kind sub-document matching the product is applied. Editing a rejected listing returns it to the review queue.',
+      'Name, description, category and taking photos down only, with a reason the vendor is told. Price, stock, sizes and options stay the vendor\u2019s; reject the listing to have them fixed. Editing a rejected listing returns it to the review queue.',
   })
   @ApiParam({ name: 'product_id', description: 'Product ID' })
   async update(
     @Param('product_id') productId: string,
     @Body() dto: AdminUpdateProductDto,
+    @Req() req: any,
   ) {
-    return this.productService.adminUpdate(productId, dto);
+    return this.productService.adminUpdate(productId, dto, req.user?.id);
   }
 
   @Patch(':product_id/status')

@@ -93,6 +93,20 @@ export class Product extends Document {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'SizeGuide', default: null })
   size_guide: Types.ObjectId;
 
+  /** Changes the Qlozet team made to this listing, and why (newest last). */
+  @Prop({
+    type: [
+      {
+        at: { type: Date, required: true },
+        by: { type: MongooseSchema.Types.ObjectId, ref: 'User', default: null },
+        reason: { type: String, required: true },
+        changes: { type: [String], default: [] },
+      },
+    ],
+    default: [],
+  })
+  admin_edits: { at: Date; by: Types.ObjectId | null; reason: string; changes: string[] }[];
+
   /**
    * Platform-side moderation, set from the admin catalogue. Independent of
    * `status`, which stays the vendor's own publish switch — a rejected product

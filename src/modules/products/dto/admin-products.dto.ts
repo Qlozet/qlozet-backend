@@ -11,6 +11,8 @@ import {
   IsString,
   MaxLength,
   Min,
+  IsArray,
+  MinLength,
 } from 'class-validator';
 
 import { ProductStatus } from '../enums/product-status.enum';
@@ -170,48 +172,68 @@ export class AdminModerateProductDto {
 }
 
 /**
- * Partial product update from the admin edit form.
+ * What the Qlozet team may change on a vendor's listing.
  *
- * The kind sub-documents are taken as plain objects rather than re-declaring
- * the three full create DTOs: an edit sends only the fields that changed, and
- * running the create validators over a partial would reject every one of them
- * for missing required keys. Only the keys present are written.
+ * Deliberately narrow. A listing belongs to the vendor: its price, stock,
+ * sizes, options and making time drive their money and their deadlines, so
+ * the team never sets those — a listing that gets them wrong is rejected with
+ * a reason and the vendor fixes it. What the team can do is keep the
+ * catalogue clean and safe: fix the name or description (a typo, contact
+ * details), file it under the right category, and take down a bad photo.
+ * Every edit carries a reason, which the vendor is told along with what
+ * changed. Publishing switches go through /status, approval through
+ * /approve and /reject.
  */
 export class AdminUpdateProductDto {
-  @ApiPropertyOptional({ description: 'SEO block, merged over the existing one' })
-  @IsOptional()
-  @IsObject()
-  seo?: Record<string, any>;
+  @ApiProperty({
+    description: 'Why the listing was changed. Shown to the vendor.',
+    minLength: 10,
+    maxLength: 500,
+  })
+  @IsString()
+  @MinLength(10, { message: 'Say why you changed the listing (at least 10 characters). The vendor sees it.' })
+  @MaxLength(500)
+  reason: string;
 
-  @ApiPropertyOptional({ description: 'Metafields, merged over the existing ones' })
+  @ApiPropertyOptional({ description: 'Listing name' })
   @IsOptional()
-  @IsObject()
-  metafields?: Record<string, any>;
+  @IsString()
+  @MinLength(3)
+  @MaxLength(120)
+  name?: string;
 
-  @ApiPropertyOptional({ description: 'Base price' })
+  @ApiPropertyOptional({ description: 'Description (HTML from the editor)' })
   @IsOptional()
-  @Transform(toNumber)
-  @IsNumber()
-  @Min(0)
-  base_price?: number;
+  @IsString()
+  @MaxLength(20000)
+  description?: string;
 
-  @ApiPropertyOptional({ enum: ProductStatus })
+  @ApiPropertyOptional({ description: 'Product type (clothing, accessory; for fabric, the material)' })
   @IsOptional()
-  @IsEnum(ProductStatus)
-  status?: ProductStatus;
+  @IsString()
+  @MaxLength(80)
+  product_type?: string;
 
-  @ApiPropertyOptional({ description: 'Clothing fields to overwrite' })
+  @ApiPropertyOptional({ type: [String], description: 'Categories (clothing, accessory)' })
   @IsOptional()
-  @IsObject()
-  clothing?: Record<string, any>;
+  @IsArray()
+  @IsString({ each: true })
+  categories?: string[];
 
-  @ApiPropertyOptional({ description: 'Accessory fields to overwrite' })
+  @ApiPropertyOptional({ description: 'Audience (clothing, accessory)' })
   @IsOptional()
-  @IsObject()
-  accessory?: Record<string, any>;
+  @IsString()
+  audience?: string;
 
-  @ApiPropertyOptional({ description: 'Fabric fields to overwrite' })
+  @ApiPropertyOptional({ description: 'Fabric type, e.g. Wax Print, Adire (fabric only)' })
   @IsOptional()
-  @IsObject()
-  fabric?: Record<string, any>;
+  @IsString()
+  @MaxLength(80)
+  pattern?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Photo URLs to take down. At least one photo always stays.' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  remove_images?: string[];
 }
