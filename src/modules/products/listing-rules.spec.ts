@@ -164,4 +164,40 @@ describe('listing rules', () => {
       }
     });
   });
+
+  describe('clothing kinds', () => {
+    it('asks a ready-to-wear piece for at least one colour with sizes', () => {
+      expect(
+        findListingViolations({
+          ...good,
+          variants: [],
+          clothing: { made_to_order: false, option_count: 0 },
+        }),
+      ).toContainEqual(expect.stringContaining('at least one colour'));
+    });
+
+    it('lets a made-to-order piece go without stock', () => {
+      expect(
+        findListingViolations({
+          ...good,
+          variants: [],
+          clothing: { made_to_order: true, turnaround_days: 7, option_count: 2 },
+        }),
+      ).toEqual([]);
+    });
+
+    it('asks a made-to-order piece for its making time and an option', () => {
+      const problems = findListingViolations({
+        ...good,
+        variants: [],
+        clothing: { made_to_order: true, turnaround_days: 0, option_count: 0 },
+      });
+      expect(problems).toContainEqual(expect.stringContaining('days you need to make it'));
+      expect(problems).toContainEqual(expect.stringContaining('at least one style'));
+    });
+
+    it('leaves fabric and accessories alone', () => {
+      expect(findListingViolations({ ...good, variants: [], clothing: null })).toEqual([]);
+    });
+  });
 });

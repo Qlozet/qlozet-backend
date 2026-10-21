@@ -103,17 +103,20 @@ export class OrderValidationService {
         accessory_selections,
       } = item.selections || {};
 
-      // Validation rules
+      // Validation rules. A made-to-order line may carry neither a fabric
+      // nor a size: it is cut from the customer's measurements, in the
+      // vendor's own cloth (priced into the garment) or in a fabric bought
+      // from another vendor (applied_fabric_id, billed on its own line).
       if (isCustomize) {
-        if (!fabric_selections?.length && !color_variant_selections?.length)
-          throw new BadRequestException(
-            'Customized clothing must include either fabric or variant selections',
-          );
         if (fabric_selections?.length && color_variant_selections?.length)
           throw new BadRequestException(
             'Customized clothing cannot include both fabric and variant selections',
           );
       } else {
+        if ((item as any).applied_fabric_id)
+          throw new BadRequestException(
+            'Only made-to-order pieces can be made in another vendor\'s fabric. Remove the fabric to buy this piece as it is.',
+          );
         if (!color_variant_selections?.length)
           throw new BadRequestException(
             'Non-customized clothing must include variant selections',

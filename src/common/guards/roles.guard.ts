@@ -163,7 +163,16 @@ export class RolesGuard implements CanActivate {
       const memberRoleName = memberRole?.name?.toLowerCase() || '';
 
       // Owner always has full access — never locked out
-      const isOwner = memberRoleName === VendorRole.OWNER.toLowerCase();
+      const isOwner =
+        memberRoleName === VendorRole.OWNER.toLowerCase() ||
+        Boolean((currentMember as any).is_owner);
+
+      // The owner turned this member's access off ("Deactivate user").
+      if (!isOwner && (currentMember as any).is_active === false) {
+        throw new ForbiddenException(
+          'The store owner has turned off your access to this store.',
+        );
+      }
 
       // Check @VendorRoles() for granular role enforcement
       const requiredVendorRoles = this.reflector.get<string[]>(

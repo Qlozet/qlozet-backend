@@ -553,11 +553,15 @@ export class PriceCalculationService {
         //  1) explicit yardage on the request,
         //  2) garment-level yardage_per_size (bill of materials, fabric-agnostic),
         //  3) legacy per-fabric variant yard_per_order.
+        //     A size of '*' is the one-piece figure, for a made-to-order
+        //     piece cut from measurements with no size of its own.
         let resolvedYardage = s.yardage;
-        if (!resolvedYardage && s.size) {
-          const gy = product.clothing?.yardage_per_size?.find(
-            (y) => y.size?.toLowerCase() === s.size!.toLowerCase(),
-          );
+        if (!resolvedYardage) {
+          const list = product.clothing?.yardage_per_size ?? [];
+          const gy =
+            (s.size
+              ? list.find((y) => y.size?.toLowerCase() === s.size!.toLowerCase())
+              : undefined) ?? list.find((y) => y.size === '*');
           if (gy?.yards) resolvedYardage = gy.yards;
         }
         if (!resolvedYardage && s.size && fabric.variants?.length) {

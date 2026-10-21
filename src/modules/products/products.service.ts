@@ -552,6 +552,18 @@ export class ProductService {
         variants: Array.isArray(detail.color_variants)
           ? detail.color_variants.flatMap((c: any) => c?.variants ?? [])
           : (detail.variants ?? []),
+        // Only when the payload says which kind of clothing it is.
+        clothing:
+          kind === 'clothing' && detail.type
+            ? {
+                made_to_order: detail.type === 'customize',
+                turnaround_days: detail.turnaround_days,
+                option_count: ['styles', 'fabrics', 'accessories', 'addons'].reduce(
+                  (n, k) => n + (Array.isArray(detail[k]) ? detail[k].length : 0),
+                  0,
+                ),
+              }
+            : null,
       });
     };
 
@@ -583,8 +595,11 @@ export class ProductService {
 
         await existing.save();
 
-        // Sync to recommendation catalog
-        this.eventEmitter.emit('product.upserted', existing.toObject());
+        // Sync to recommendation catalog. The second argument tells the size
+        // guide listener the vendor chose this listing's guide by hand.
+        this.eventEmitter.emit('product.upserted', existing.toObject(), {
+          size_guide_chosen: 'size_guide' in (dto as any),
+        });
 
         return {
           data: existing.toObject(),
@@ -605,8 +620,10 @@ export class ProductService {
       status,
     });
 
-    // Sync to recommendation catalog
-    this.eventEmitter.emit('product.upserted', created.toObject());
+    // Sync to recommendation catalog (see the edit branch for the second argument).
+    this.eventEmitter.emit('product.upserted', created.toObject(), {
+      size_guide_chosen: 'size_guide' in (dto as any),
+    });
 
     // New products land pending moderation (absent moderation reads as
     // pending) — put them in the admin review queue.
@@ -958,7 +975,7 @@ export class ProductService {
   async findById(id: string): Promise<ProductDocument> {
     const product = await this.productModel
       .findById(id)
-      .populate('business', 'business_name business_logo_url business_logo_svg_url cover_image_url theme_color description')
+      .populate('business', 'business_name business_logo_url business_logo_svg_url cover_image_url theme_color description accepts_external_fabric')
       .exec();
     if (!product) throw new NotFoundException('Product not found');
     return product;

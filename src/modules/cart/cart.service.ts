@@ -109,6 +109,13 @@ export class CartService {
       if (!fabricProduct.fabric) {
         throw new NotFoundException('Fabric data is missing from this product');
       }
+      // A ready-to-wear piece is already made; only a made-to-order one can
+      // be cut from a fabric the customer brings.
+      if (product.kind === 'clothing' && product.clothing?.type !== 'customize') {
+        throw new BadRequestException(
+          "Only made-to-order pieces can be made in another vendor's fabric. Remove the fabric to buy this piece as it is.",
+        );
+      }
 
       // ── Check if this is cross-vendor fabric ──
       const clothingBizId = product.business?.toString();

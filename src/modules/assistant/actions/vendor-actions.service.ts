@@ -203,8 +203,9 @@ export class VendorActionsService {
     const productIds = (orders as any[]).flatMap((o) => vendorItems(o, bid).map((i) => i.product).filter(Boolean));
     const turnaround = new Map<string, number>();
     if (productIds.length) {
-      const prods = await this.productModel.find({ _id: { $in: productIds } }).select('clothing.turnaround_days').lean();
-      for (const p of prods as any[]) turnaround.set(String(p._id), Number(p.clothing?.turnaround_days) || 0);
+      const prods = await this.productModel.find({ _id: { $in: productIds } }).select('clothing.type clothing.turnaround_days').lean();
+      // Only a made-to-order piece's own making time counts, as on confirm.
+      for (const p of prods as any[]) turnaround.set(String(p._id), p.clothing?.type === 'customize' ? Number(p.clothing?.turnaround_days) || 0 : 0);
     }
     const deadlineDays = (o: any) =>
       Math.max(3, ...vendorItems(o, bid).map((i) => turnaround.get(String(i.product)) ?? 0));

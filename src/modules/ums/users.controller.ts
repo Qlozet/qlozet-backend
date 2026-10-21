@@ -160,6 +160,19 @@ export class UserController {
 
   @Roles(UserType.VENDOR)
   @VendorRoles(VendorRole.OWNER)
+  @Post('team/members/:id/resend-invite')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Email a member who has not signed in yet a new temporary password',
+  })
+  @ApiParam({ name: 'id', description: 'Team member ID' })
+  async resendTeamInvite(@Param('id') id: string, @Req() req: any) {
+    this.businessIdOf(req);
+    return this.teamService.resendInvite(id, req.business);
+  }
+
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
   @Delete('team/members/:id')
   @ApiOperation({ summary: 'Remove a team member' })
   @ApiParam({ name: 'id', description: 'Team member ID' })

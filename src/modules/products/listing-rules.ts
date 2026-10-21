@@ -109,6 +109,16 @@ export interface ListingCandidate {
   images?: unknown[] | null;
   /** Colour/size rows, for the stock check. */
   variants?: { stock?: number | null }[] | null;
+  /**
+   * Clothing only: which kind of listing it is. Left out for fabric and
+   * accessories, and for a partial update that does not resend it.
+   */
+  clothing?: {
+    made_to_order: boolean;
+    turnaround_days?: number | null;
+    /** Styles, fabrics, accessories and add-ons offered together. */
+    option_count: number;
+  } | null;
 }
 
 /** Collect every violation. Empty means the listing may go live. */
@@ -165,6 +175,24 @@ ${description}`);
   }
 
   const variants = listing.variants ?? [];
+  const clothing = listing.clothing;
+  if (clothing && !clothing.made_to_order && variants.length === 0) {
+    problems.push(
+      'Add at least one colour with its sizes and stock — ready-to-wear pieces ship from stock.',
+    );
+  }
+  if (clothing?.made_to_order) {
+    if (!(Number(clothing.turnaround_days) >= 1)) {
+      problems.push(
+        'Set how many days you need to make it (1 or more). It sets your deadline and the delivery estimate customers see.',
+      );
+    }
+    if (clothing.option_count < 1) {
+      problems.push(
+        'Add at least one style, fabric, accessory or add-on for customers to choose from.',
+      );
+    }
+  }
   if (variants.length > 0 && !variants.some((v) => (v?.stock ?? 0) > 0)) {
     problems.push(
       'Every size is out of stock. Add stock, or save this as a draft.',

@@ -17,10 +17,7 @@ import {
 } from './dto/recommend-size.dto';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { User, UserDocument } from '../ums/schemas/user.schema';
-import {
-  evaluateCondition,
-  getNestedValue,
-} from 'src/common/utils/conditionUtils';
+import { listingMeetsCondition } from 'src/common/utils/conditionUtils';
 import {
   SUPPORTED_BODY_PARTS,
   cmToInch,
@@ -49,6 +46,7 @@ export class SizeGuideService {
   async create(dto: CreateSizeGuideDto, businessId: string) {
     // Validate body parts
     this.validateBodyParts(dto.body_parts);
+    this.validateRanges(dto.sizes);
 
     const guide = await this.sizeGuideModel.create({
       ...dto,
@@ -84,6 +82,7 @@ export class SizeGuideService {
 
   async update(id: string, dto: UpdateSizeGuideDto, businessId: string) {
     if (dto.body_parts) this.validateBodyParts(dto.body_parts);
+    if (dto.sizes) this.validateRanges(dto.sizes);
 
     const guide = await this.sizeGuideModel
       .findOneAndUpdate(
@@ -150,6 +149,12 @@ export class SizeGuideService {
       },
     );
 
+    // One guide holds a hand-picked listing at a time.
+    await this.sizeGuideModel.updateMany(
+      { business: guide.business, _id: { $ne: guideOid } },
+      { $pull: { manual_includes: productOid } },
+    );
+
     // Stamp the product
     await this.stampProduct(productOid, guideOid);
 
@@ -203,11 +208,17 @@ export class SizeGuideService {
       throw new NotFoundException('No size guide found for this product');
     }
 
-    return this.sizeGuideModel
-      .findById(product.size_guide)
+    // A guide the vendor switched off is hidden from shoppers everywhere it
+    // is attached, without detaching it.
+    const guide = await this.sizeGuideModel
+      .findOne({ _id: product.size_guide, is_active: { $ne: false } })
       .select('title description unit body_parts sizes fit_types')
       .lean()
       .exec();
+    if (!guide) {
+      throw new NotFoundException('No size guide found for this product');
+    }
+    return guide;
   }
 
   /** Return the list of supported body parts */
@@ -470,10 +481,31 @@ export class SizeGuideService {
     const toStamp: Types.ObjectId[] = [];
     const toUnstamp: Types.ObjectId[] = [];
 
+    // A listing is added by hand to one guide at a time: the guide that
+    // claims it last (here, or on the listing) takes it from the others.
+    if (guide.manual_includes?.length) {
+      await this.sizeGuideModel.updateMany(
+        { business: businessId, _id: { $ne: guideId } },
+        { $pull: { manual_includes: { $in: guide.manual_includes } } },
+      );
+    }
+
+    // Listings the vendor pinned to a different guide (chosen on the listing,
+    // or added by hand there). Rules here never take them over.
+    const others = await this.sizeGuideModel
+      .find({ business: businessId, _id: { $ne: guideId } })
+      .select('manual_includes')
+      .lean();
+    const pinnedElsewhere = new Set(
+      others.flatMap((g: any) => (g.manual_includes ?? []).map((id: any) => String(id))),
+    );
+
     for (const product of products) {
       const productOid = product._id as Types.ObjectId;
       const productGuide = product.size_guide as Types.ObjectId | null;
       const guideOid = guideId as Types.ObjectId;
+
+      if (pinnedElsewhere.has(String(productOid))) continue;
 
       // Skip manual excludes
       if (
@@ -550,76 +582,101 @@ export class SizeGuideService {
    * ═══════════════════════════════════════════════════════ */
 
   @OnEvent('product.upserted')
-  async handleProductUpserted(payload: { product: any }) {
+  async handleProductUpserted(
+    payload: any,
+    meta?: { size_guide_chosen?: boolean },
+  ) {
     try {
-      const product = payload.product;
-      if (!product?.business) return;
+      // The product itself is the payload; older emitters wrapped it.
+      const product = payload?.product ?? payload;
+      if (!product?.business || !product?._id) return;
 
       const businessId =
         typeof product.business === 'string'
           ? product.business
-          : product.business.toString();
+          : String(product.business?._id ?? product.business);
+      const businessOid = new Types.ObjectId(businessId);
+      const productOid = new Types.ObjectId(String(product._id));
 
-      // Find all active size guides for this vendor
-      const guides = await this.sizeGuideModel
-        .find({
-          business: new Types.ObjectId(businessId),
-          is_active: true,
-        })
-        .exec();
-
-      const productOid = new Types.ObjectId(product._id);
-      let stamped = false;
-
-      for (const guide of guides) {
-        // Skip manual excludes
-        if (
-          guide.manual_excludes?.some((id) => id.equals(productOid))
-        ) {
-          continue;
-        }
-
-        // Manual includes always match
-        const isManualInclude = guide.manual_includes?.some((id) =>
-          id.equals(productOid),
-        );
-        const matches =
-          isManualInclude ||
-          this.productMatchesConditions(product, guide);
-
-        if (matches && !stamped) {
-          await this.stampProduct(productOid, guide._id as Types.ObjectId);
-          stamped = true;
-        }
+      // The vendor picked a guide on the listing (or "No size guide"): that
+      // choice is pinned, so no guide's rules move it later.
+      if (meta?.size_guide_chosen) {
+        await this.pinChoice(productOid, businessOid, product.size_guide ?? null);
+        return;
       }
 
-      // If no guide matched and product currently has one from this business,
-      // clear it
-      if (!stamped) {
-        const currentProduct = await this.productModel
-          .findById(productOid)
-          .select('size_guide')
+      const guides = await this.sizeGuideModel
+        .find({ business: businessOid, is_active: true })
+        .sort({ updatedAt: -1 })
+        .exec();
+
+      const has = (ids: Types.ObjectId[] | undefined) =>
+        (ids ?? []).some((id) => id.equals(productOid));
+
+      // A guide that names this listing by hand wins over any rule; then the
+      // most recently saved guide whose rules it meets.
+      const chosen =
+        guides.find((g) => has(g.manual_includes)) ??
+        guides.find(
+          (g) => !has(g.manual_excludes) && this.productMatchesConditions(product, g),
+        );
+
+      if (chosen) {
+        if (String(product.size_guide ?? '') !== String(chosen._id)) {
+          await this.stampProduct(productOid, chosen._id as Types.ObjectId);
+        }
+        return;
+      }
+
+      // Nothing covers it any more: clear a guide of this vendor's, if set.
+      if (product.size_guide) {
+        const currentGuide = await this.sizeGuideModel
+          .findOne({ _id: product.size_guide, business: businessOid })
           .lean();
-
-        if (currentProduct?.size_guide) {
-          // Only clear if the current guide belongs to this business
-          const currentGuide = await this.sizeGuideModel
-            .findOne({
-              _id: currentProduct.size_guide,
-              business: new Types.ObjectId(businessId),
-            })
-            .lean();
-
-          if (currentGuide) {
-            await this.productModel.updateOne(
-              { _id: productOid },
-              { $set: { size_guide: null } },
-            );
-          }
+        if (currentGuide) {
+          await this.productModel.updateOne(
+            { _id: productOid },
+            { $set: { size_guide: null } },
+          );
         }
       }
     } catch (err) {
       this.logger.warn('Size guide auto-sync failed for product event', err);
+    }
+  }
+
+  /**
+   * Record the guide a vendor chose on the listing. A guide becomes this
+   * listing's manual include (and only that one's); "No size guide" excludes
+   * it from every guide so their rules leave it alone.
+   */
+  private async pinChoice(
+    productOid: Types.ObjectId,
+    businessOid: Types.ObjectId,
+    chosen: any,
+  ) {
+    await this.sizeGuideModel.updateMany(
+      { business: businessOid },
+      { $pull: { manual_includes: productOid } },
+    );
+    if (chosen) {
+      const chosenOid = new Types.ObjectId(String(chosen?._id ?? chosen));
+      await this.sizeGuideModel.updateOne(
+        { _id: chosenOid, business: businessOid },
+        {
+          $addToSet: { manual_includes: productOid },
+          $pull: { manual_excludes: productOid },
+        },
+      );
+      await this.sizeGuideModel.updateMany(
+        { business: businessOid, _id: { $ne: chosenOid } },
+        { $addToSet: { manual_excludes: productOid } },
+      );
+    } else {
+      await this.sizeGuideModel.updateMany(
+        { business: businessOid },
+        { $addToSet: { manual_excludes: productOid } },
+      );
     }
   }
 
@@ -631,12 +688,15 @@ export class SizeGuideService {
     product: any,
     guide: Pick<SizeGuide, 'conditions' | 'condition_match'>,
   ): boolean {
-    if (!guide.conditions || guide.conditions.length === 0) return true;
+    // A guide without rules covers only the listings added to it by hand.
+    const rules = (guide.conditions ?? []).filter(
+      (c) => c?.field && c?.operator && c?.value !== undefined && c?.value !== '',
+    );
+    if (rules.length === 0) return false;
 
-    const results = guide.conditions.map((cond) => {
-      const fieldValue = getNestedValue(product, cond.field);
-      return evaluateCondition(fieldValue, cond.operator, cond.value);
-    });
+    const results = rules.map((cond) =>
+      listingMeetsCondition(product, cond.field, cond.operator, cond.value),
+    );
 
     return guide.condition_match === 'all'
       ? results.every(Boolean)
@@ -651,6 +711,25 @@ export class SizeGuideService {
       { _id: productId },
       { $set: { size_guide: guideId } },
     );
+  }
+
+  /** Every range must run from small to large: "M chest 101–96" is a typo. */
+  private validateRanges(
+    sizes: { label?: string; measurements?: { body_part: string; min: number; max: number }[] }[] = [],
+  ) {
+    const bad: string[] = [];
+    for (const size of sizes ?? []) {
+      for (const m of size?.measurements ?? []) {
+        if (Number(m.min) > Number(m.max)) {
+          bad.push(`${size.label ?? 'a size'} ${String(m.body_part).replace(/_/g, ' ')}`);
+        }
+      }
+    }
+    if (bad.length) {
+      throw new BadRequestException(
+        `The smallest measurement is bigger than the largest for: ${bad.join(', ')}. Swap them round.`,
+      );
+    }
   }
 
   private validateBodyParts(parts: string[]) {
