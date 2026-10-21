@@ -33,6 +33,18 @@ export class Fabric {
   min_cut: number;
   @Prop({ required: true, min: 0 })
   price_per_yard: number;
+
+  // How the fabric is sold (see products/fabric-pieces.ts): 'yard' (default),
+  // 'piece' (whole pieces only) or 'both'. A piece is piece_yards long and
+  // costs piece_price. Stock stays in yards (yard_length).
+  @Prop({ type: String, enum: ['yard', 'piece', 'both'], default: 'yard' })
+  sold_by?: 'yard' | 'piece' | 'both';
+
+  @Prop({ type: Number, default: null, min: 0.5 })
+  piece_yards?: number | null;
+
+  @Prop({ type: Number, default: null, min: 1 })
+  piece_price?: number | null;
   @Prop({ type: [ProductImageSchema], default: [] })
   images?: ProductImage[];
   @Prop({ type: [VariantSchema], default: [] })

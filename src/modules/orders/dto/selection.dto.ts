@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import {
   IsString,
   IsNumber,
+  IsInt,
   IsOptional,
   IsArray,
   IsPositive,
@@ -56,6 +57,14 @@ export class FabricSelectionDto {
   @IsPositive()
   @IsOptional()
   quantity: number;
+
+  // Whole pieces of a fabric sold by the piece (see products/fabric-pieces).
+  // The backend derives yardage (piece length) and quantity (pieces) from it.
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pieces?: number;
+
   price: number;
   total_amount: number;
 }

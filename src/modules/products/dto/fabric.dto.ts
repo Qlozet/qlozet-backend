@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsIn,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -92,6 +93,28 @@ export class FabricDto {
   @IsNumber()
   @Min(0)
   price_per_yard: number;
+
+  @ApiPropertyOptional({
+    enum: ['yard', 'piece', 'both'],
+    description:
+      "How the fabric is sold: 'yard' (any length from the minimum cut), 'piece' (whole pieces only) or 'both'.",
+    example: 'both',
+  })
+  @IsOptional()
+  @IsIn(['yard', 'piece', 'both'])
+  sold_by?: 'yard' | 'piece' | 'both';
+
+  @ApiPropertyOptional({ description: 'Yards in one piece (piece / both)', example: 6 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  piece_yards?: number;
+
+  @ApiPropertyOptional({ description: 'Price of one piece in Naira (piece / both)', example: 24000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  piece_price?: number;
 
   @ApiPropertyOptional({
     type: [ProductImageDto],

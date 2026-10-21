@@ -74,6 +74,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { customerVisibleModeration, isApprovedForCustomers } from './customer-visibility';
+import { normaliseFabricPieces } from './fabric-pieces';
 
 @Injectable()
 export class ProductService {
@@ -475,8 +476,13 @@ export class ProductService {
     business: Types.ObjectId,
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
+    // Piece selling: validate, and for a piece-only fabric derive the
+    // per-yard price and minimum cut; listings then show the piece price.
+    const piecePrice =
+      kind === 'fabric' ? normaliseFabricPieces((dto as any).fabric) : null;
+
     // 1. Determine base price
-    let totalPrice = dto.base_price;
+    let totalPrice = piecePrice ?? dto.base_price;
     
     // Fallback if frontend hasn't updated to send base_price directly yet
     if (totalPrice === undefined || totalPrice === null) {
@@ -485,8 +491,11 @@ export class ProductService {
        } else if (kind === 'accessory') {
            totalPrice = (dto as any).accessory?.price || 0;
        } else if (kind === 'fabric') {
+           // One yard, as the vendor console sends it. This used to be the
+           // whole bolt's value (price × yards in stock), so an admin-created
+           // fabric listed at the price of every yard the vendor had.
            const f = (dto as any).fabric;
-           totalPrice = (f?.price_per_yard || 0) * Math.max(f?.yard_length || 0, f?.min_cut || 0);
+           totalPrice = f?.price_per_yard || 0;
        } else {
            totalPrice = 0; 
        }
@@ -2944,6 +2953,11 @@ export class ProductService {
       // `status` is top-level on the product; the sub-schema has no such path,
       // so a copy inside the kind document is a stray key at best.
       delete merged.status;
+
+      if (kind === 'fabric') {
+        const piecePrice = normaliseFabricPieces(merged);
+        if (piecePrice) (product as any).base_price = piecePrice;
+      }
 
       if (detail.color_variants) {
         merged.color_variants = ProductService.mergeColorVariants(

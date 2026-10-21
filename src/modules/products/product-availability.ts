@@ -150,11 +150,21 @@ export function computeAvailability(
       : yard < lowYards
         ? 'low_stock'
         : 'in_stock';
+    // Whole pieces left, when the fabric is sold by the piece.
+    const pieceYards = Number(fabric.piece_yards) || 0;
+    const sellsPieces =
+      (fabric.sold_by === 'piece' || fabric.sold_by === 'both') && pieceYards > 0;
     return {
       state,
       in_stock: available,
       low_stock: state === 'low_stock',
-      fabric: { yard_length: yard, min_cut: minCut, low_yards: lowYards, available },
+      fabric: {
+        yard_length: yard,
+        min_cut: minCut,
+        low_yards: lowYards,
+        available,
+        ...(sellsPieces ? { pieces_available: Math.floor(yard / pieceYards + 1e-9) } : {}),
+      },
     };
   }
 

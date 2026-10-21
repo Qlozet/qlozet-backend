@@ -123,6 +123,7 @@ import type { AdminProfileOverviewDto } from '../platform/dto/admin-profile.dto'
 import { Ticket, TicketStatus } from '../ticket/schema/ticket.schema';
 import { isCustomerVisible } from '../products/customer-visibility';
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
+import { resolveFabricPurchase, roundToSellable, sellsPieces } from '../products/fabric-pieces';
 
 @Injectable()
 export class OrderService {
@@ -800,6 +801,17 @@ export class OrderService {
    * order use (calculateItemTotal) — so the product page can display the real
    * price instead of a client-side estimate. Returns the per-unit price.
    */
+  /** Applied-fabric yards as they can be bought (whole pieces when piece-only). */
+  private async sellableAppliedYards(fabricId?: any, yards?: number) {
+    if (!fabricId || !yards) return yards;
+    const fab: any = await this.productModel
+      .findById(fabricId)
+      .select('fabric')
+      .lean()
+      .catch(() => null);
+    return fab?.fabric ? roundToSellable(fab.fabric, yards).yards : yards;
+  }
+
   async priceItem(dto: PriceItemDto): Promise<{ data: { price: number; breakdown: any } }> {
     const s = dto.selections as any;
     const normalized = {
@@ -841,7 +853,8 @@ export class OrderService {
         .findById(dto.applied_fabric_id)
         .lean();
       const ppy = fab?.fabric?.price_per_yard;
-      if (ppy) externalFabric = ppy * dto.applied_fabric_yards;
+      // Whole pieces for a piece-only fabric.
+      if (ppy) externalFabric = roundToSellable(fab.fabric, dto.applied_fabric_yards).cost;
     }
 
     const round = (n: number) => Math.round(n * 100) / 100;
@@ -1036,7 +1049,12 @@ export class OrderService {
           // the persisted order item (normalizedItems below reads these).
           applied_fabric_id: item.applied_fabric_id,
           applied_fabric_size: (item as any).applied_fabric_size,
-          applied_fabric_yards: item.applied_fabric_yards,
+          // Rounded up to whole pieces for a piece-only fabric, so stock and
+          // the fabric transfer cover what is actually bought.
+          applied_fabric_yards: await this.sellableAppliedYards(
+            item.applied_fabric_id,
+            item.applied_fabric_yards,
+          ),
           total_price: totalPrice,
           pricing,
           product_snapshot: this.sanitizeProductSnapshot(product),
@@ -1179,6 +1197,21 @@ export class OrderService {
       // here double-counted it (yardage²), which inflated the order total vs the
       // PDP/cart price AND raised false "not enough fabric" errors at checkout.
       const quantity = fs.quantity ?? 1;
+      // Bought by the piece: stored as yardage = piece length × quantity =
+      // pieces, so stock and restore stay yard-based; price is per piece.
+      const pieces = Number((fs as any).pieces);
+      if (pieces > 0 && sellsPieces(isFabricExist as any)) {
+        const bought = resolveFabricPurchase(isFabricExist as any, { pieces });
+        normalizedFabrics.push({
+          fabric_id: new Types.ObjectId(isFabricExist._id),
+          price: Number((isFabricExist as any).piece_price),
+          quantity: bought.quantity,
+          yardage: bought.yardage,
+          pieces: bought.pieces,
+          total_amount: bought.cost,
+        } as any);
+        continue;
+      }
       normalizedFabrics.push({
         fabric_id: new Types.ObjectId(isFabricExist._id),
         price: isFabricExist.price_per_yard,

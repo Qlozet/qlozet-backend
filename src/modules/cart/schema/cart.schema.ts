@@ -27,6 +27,8 @@ export class Cart {
                 yardage: Number,
                 size: String,
                 quantity: { type: Number, min: 1 },
+                // Whole pieces of a fabric sold by the piece.
+                pieces: { type: Number, min: 1 },
               },
             ],
             style_selections: [
