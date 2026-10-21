@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -752,9 +753,16 @@ export class AuthService {
         );
       }
 
-      // Build businesses array
-      const businesses = teamMemberships
-        .filter((tm: any) => tm.business) // filter out orphaned records
+      // Build businesses array. A store whose owner deactivated this member
+      // is left out: they can no longer work in it.
+      const usable = teamMemberships.filter((tm: any) => tm.business);
+      if (usable.length && usable.every((tm: any) => tm.is_active === false)) {
+        throw new UnauthorizedException(
+          'The store owner has turned off your access. Contact them to have it turned back on.',
+        );
+      }
+      const businesses = usable
+        .filter((tm: any) => tm.is_active !== false)
         .map((tm: any) => ({
           _id: tm.business._id,
           business_name: tm.business.business_name,
@@ -838,6 +846,11 @@ export class AuthService {
     if (!membership) {
       throw new UnauthorizedException(
         'You are not a member of this business.',
+      );
+    }
+    if ((membership as any).is_active === false && !(membership as any).is_owner) {
+      throw new ForbiddenException(
+        'The store owner has turned off your access to this store.',
       );
     }
 

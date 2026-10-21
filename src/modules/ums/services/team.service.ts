@@ -223,7 +223,7 @@ export class TeamService {
     // ObjectId-equality filter silently misses (empty "users & permissions").
     const members = await this.teamMemberModel
       .find({ $expr: { $eq: [{ $toString: '$business' }, String(businessId)] } })
-      .populate('user', 'full_name email')
+      .populate('user', 'full_name email must_change_password')
       .populate('role', 'name description');
     return members;
   }
@@ -256,7 +256,69 @@ export class TeamService {
     }
 
     await member.save();
+
+    // Deactivated while this store is the one they have open: move them to
+    // another store they still work in, so their next sign-in lands there.
+    if (dto.is_active === false && member.user) {
+      const user = await this.userModel.findById(member.user);
+      if (user && String(user.business) === String(member.business)) {
+        const next = await this.teamMemberModel.findOne({
+          user: member.user,
+          _id: { $ne: member._id },
+          is_active: { $ne: false },
+        });
+        await this.userModel.findByIdAndUpdate(member.user, {
+          business: next ? next.business : null,
+        });
+      }
+    }
+
     return { message: 'Team member updated successfully', data: member };
+  }
+
+  /**
+   * Send a fresh temporary password to a member who has not signed in and
+   * set their own yet (the first email was lost, or the password forgotten).
+   * Someone who already chose a password resets it from sign-in instead.
+   */
+  async resendInvite(teamId: string, business: BusinessDocument) {
+    const member = await this.teamMemberModel
+      .findOne({
+        _id: new Types.ObjectId(teamId),
+        ...ObjectIdUtils.refMatch('business', String(business.id)),
+      })
+      .populate('role', 'name');
+    if (!member) throw new NotFoundException('Team member not found');
+    if (member.is_owner) {
+      throw new BadRequestException('The business owner has no invite to resend.');
+    }
+    if (member.is_active === false) {
+      throw new BadRequestException(
+        'Reactivate this member before sending their invite again.',
+      );
+    }
+
+    const user = member.user ? await this.userModel.findById(member.user) : null;
+    if (!user) throw new NotFoundException('This member has no account yet.');
+    if (!user.must_change_password) {
+      throw new BadRequestException(
+        `${member.full_name} has already set their own password. They can use "Forgot password" on the sign-in page.`,
+      );
+    }
+
+    const tempPassword = randomBytes(6).toString('hex');
+    user.hashed_password = await bcrypt.hash(tempPassword, 10);
+    await user.save();
+
+    await this.mailService.sendTeamInviteEmail(
+      member.email,
+      member.full_name,
+      (member.role as any)?.name ?? 'team member',
+      business.business_name,
+      tempPassword,
+    );
+
+    return { message: `A new invite has been sent to ${member.email}.` };
   }
 
   async removeMember(teamId: string, scopeBusinessId?: string) {
