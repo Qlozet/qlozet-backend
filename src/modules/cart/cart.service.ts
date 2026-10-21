@@ -7,6 +7,7 @@ import { Business, BusinessDocument } from '../business/schemas/business.schema'
 import { OrderItemSelectionsDto } from '../orders/dto/selection.dto';
 import { PriceCalculationService } from '../orders/orders.price-calculation';
 import { isCustomerVisible } from '../products/customer-visibility';
+import { roundToSellable } from '../products/fabric-pieces';
 
 @Injectable()
 export class CartService {
@@ -134,13 +135,16 @@ export class CartService {
           );
         }
       }
+      // A fabric sold only by the piece is bought in whole pieces: round
+      // up first (a 4-yard need from 6-yard pieces is one piece).
+      const sellable = roundToSellable(fabricProduct.fabric as any, appliedFabricYards);
+      appliedFabricYards = sellable.yards;
       if (appliedFabricYards < fabricProduct.fabric.min_cut) {
         throw new BadRequestException(
           `Minimum yardage is ${fabricProduct.fabric.min_cut} for this fabric`,
         );
       }
-      const fabricCost =
-        fabricProduct.fabric.price_per_yard * appliedFabricYards;
+      const fabricCost = sellable.cost;
       unitPrice += fabricCost;
       fabricObjectId = new Types.ObjectId(appliedFabricId);
     }

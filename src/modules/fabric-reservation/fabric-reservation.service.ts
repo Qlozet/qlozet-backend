@@ -36,6 +36,13 @@ import {
 import { TransactionType } from '../transactions/schema/transaction.schema';
 import { ProductDocument } from '../products/schemas';
 import { Utils } from '../../common/utils/pagination';
+import { piecesOnly } from '../products/fabric-pieces';
+
+/** A yardage that is a whole number of pieces. */
+const wholePieces = (f: { piece_yards?: number | null }, yards: number) => {
+  const n = yards / Number(f.piece_yards);
+  return n >= 1 && Math.abs(n - Math.round(n)) < 1e-9;
+};
 
 @Injectable()
 export class FabricReservationService {
@@ -82,6 +89,13 @@ export class FabricReservationService {
       );
     }
 
+    // Sold only by the piece: reserve whole pieces.
+    if (piecesOnly(fabric as any) && !wholePieces(fabric as any, dto.totalYards)) {
+      throw new BadRequestException(
+        `This fabric is sold in ${fabric.piece_yards}-yard pieces. Reserve a whole number of pieces.`,
+      );
+    }
+
     // 3. Validate min_cut
     if (dto.totalYards < fabric.min_cut) {
       throw new BadRequestException(
@@ -98,7 +112,9 @@ export class FabricReservationService {
     // 5. Calculate reservation fee
     const settings = await this.platformService.getSettings();
     const feePercent = settings.reservation_fee_percent ?? 10;
-    const totalFabricValue = dto.totalYards * fabric.price_per_yard;
+    const totalFabricValue = piecesOnly(fabric as any)
+      ? (dto.totalYards / Number(fabric.piece_yards)) * Number(fabric.piece_price)
+      : dto.totalYards * fabric.price_per_yard;
     const reservationFee = Math.ceil((feePercent / 100) * totalFabricValue);
 
     // 6. Lock inventory — deduct from yard_length
@@ -505,8 +521,21 @@ export class FabricReservationService {
       );
     }
 
+    // Sold only by the piece: claim whole pieces, priced per piece.
+    const byPiece = piecesOnly(fabricProduct?.fabric as any);
+    if (byPiece && !wholePieces(fabricProduct!.fabric as any, dto.yards)) {
+      throw new BadRequestException(
+        `This fabric is sold in ${fabricProduct!.fabric!.piece_yards}-yard pieces. Claim a whole number of pieces.`,
+      );
+    }
+
     // Calculate total
-    const totalAmount = dto.yards * reservation.price_per_yard;
+    const totalAmount = byPiece
+      ? Math.round(
+          (dto.yards / Number(fabricProduct!.fabric!.piece_yards)) *
+            Number(fabricProduct!.fabric!.piece_price),
+        )
+      : dto.yards * reservation.price_per_yard;
 
     // ── Delivery (required): verify the quoted courier server-side and
     // attach a real shipment + address, so the vendor's normal

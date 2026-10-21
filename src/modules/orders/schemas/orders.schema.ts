@@ -81,6 +81,10 @@ class FabricSelection {
   @Prop({ type: Number, min: 1 })
   quantity: number;
 
+  // Bought by the piece: yardage is the piece length, quantity the pieces.
+  @Prop({ type: Number, default: null })
+  pieces?: number | null;
+
   @Prop({ type: Number, min: 1 })
   total_amount: number;
 }

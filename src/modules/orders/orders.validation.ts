@@ -9,6 +9,7 @@ import {
 } from '../business/schemas/business.schema';
 import { ProductKind, ClothingType } from './schemas/orders.interfaces';
 import { ProcessedOrderItemDto } from './dto/order-item.dto';
+import { resolveFabricPurchase } from '../products/fabric-pieces';
 
 @Injectable()
 export class OrderValidationService {
@@ -306,7 +307,8 @@ export class OrderValidationService {
         if (!fabric)
           throw new BadRequestException(`Fabric not found: ${f.fabric_id}`);
 
-        const price = (fabric.price_per_yard ?? 0) * (f.yardage ?? 0);
+        // Piece rules (whole pieces, piece-only fabrics) apply here too.
+        const price = resolveFabricPurchase(fabric as any, f as any).cost;
         totalPrice += price;
 
         breakdown.fabrics.push({

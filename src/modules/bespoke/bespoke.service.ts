@@ -66,6 +66,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
+import { roundToSellable } from '../products/fabric-pieces';
 
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
@@ -696,19 +697,18 @@ export class BespokeService {
       const fabricProduct = design.fabric
         ? await this.productModel.findById(design.fabric).lean()
         : null;
-      const fabricYards =
+      const neededYards =
         quote.required_fabric_yards ||
         (fabricProduct as any)?.fabric?.min_cut ||
         1;
       const fabricForeign =
         !!fabricProduct &&
         String((fabricProduct as any).business) !== String(quote.vendor);
-      const fabricCost = fabricForeign
-        ? Math.round(
-            (((fabricProduct as any)?.fabric?.price_per_yard as number) ||
-              0) * fabricYards,
-          )
-        : 0;
+      // Another vendor's piece-only fabric is bought in whole pieces: the
+      // yards (and so the transfer and stock) round up to the pieces bought.
+      const sellable = roundToSellable((fabricProduct as any)?.fabric, neededYards);
+      const fabricYards = fabricForeign ? sellable.yards : neededYards;
+      const fabricCost = fabricForeign ? Math.round(sellable.cost) : 0;
 
       const fabricTransferDeadline = new Date();
       fabricTransferDeadline.setDate(fabricTransferDeadline.getDate() + 3);

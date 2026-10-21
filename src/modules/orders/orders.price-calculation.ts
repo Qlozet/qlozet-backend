@@ -31,6 +31,7 @@ import {
   VariantSelectionDto,
   StyleSelectionDto,
 } from './dto/selection.dto';
+import { piecesOnly, resolveFabricPurchase, roundToSellable } from '../products/fabric-pieces';
 
 @Injectable()
 export class PriceCalculationService {
@@ -134,7 +135,8 @@ export class PriceCalculationService {
     const fab: any = await this.productModel.findById(fabricId).lean();
     const ppy = fab?.fabric?.price_per_yard;
     if (!ppy || ppy <= 0) return 0;
-    return this.round(ppy * yards);
+    // A piece-only fabric is bought in whole pieces.
+    return this.round(roundToSellable(fab.fabric, yards).cost);
   }
 
   private normalizeSelections(
@@ -506,6 +508,13 @@ export class PriceCalculationService {
           }
         }
         if (!resolvedYardage) resolvedYardage = 0;
+
+        // Piece selling: a selection naming `pieces` buys whole pieces (and a
+        // piece-only fabric must). Priced and stock-checked by the helper.
+        if (Number((s as any).pieces) > 0 || piecesOnly(fabric as any)) {
+          total += resolveFabricPurchase(fabric as any, s as any).cost;
+          continue;
+        }
 
         // min_cut is the MINIMUM order — reject requests below it, not above.
         // (The check was inverted, so any above-minimum order errored out.)
