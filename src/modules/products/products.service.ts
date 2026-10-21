@@ -2934,64 +2934,89 @@ export class ProductService {
    * leaving the rejection in place — the admin has just changed the thing that
    * was wrong with it.
    */
-  async adminUpdate(productId: string, dto: AdminUpdateProductDto) {
+  async adminUpdate(
+    productId: string,
+    dto: AdminUpdateProductDto,
+    adminId?: string,
+  ) {
     const product = await this.assertProduct(productId);
-
-    if (dto.seo) {
-      product.seo = { ...(product.seo ?? {}), ...dto.seo };
-    }
-    if (dto.metafields) {
-      product.metafields = { ...(product.metafields ?? {}), ...dto.metafields };
-    }
-    if (dto.base_price !== undefined) {
-      product.base_price = dto.base_price;
-    }
-    if (dto.status && dto.status !== product.status) {
-      // Only a genuine status change cancels a pending activation. Clearing it
-      // on any edit that merely echoes the current status back would silently
-      // unschedule a product because someone fixed a typo in its description.
-      product.status = dto.status;
-      product.scheduled_activation_date = undefined;
-    }
-
-    // Only the sub-document matching this product's own kind is applied — an
-    // accessory payload must not graft a `clothing` block onto a fabric.
     const kind = product.kind as 'clothing' | 'accessory' | 'fabric';
-    const detail = dto[kind];
-    if (detail && Object.keys(detail).length) {
-      const current = (product as any)[kind];
-      const plain =
-        current && typeof current.toObject === 'function'
-          ? current.toObject()
-          : (current ?? {});
+    const current = (product as any)[kind];
+    if (!current) throw new BadRequestException('This product has no details to edit.');
+    const detail: Record<string, any> =
+      typeof current.toObject === 'function' ? current.toObject() : { ...current };
+    const changes: string[] = [];
+    const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-      const merged: Record<string, any> = { ...plain, ...detail };
-
-      // `status` is top-level on the product; the sub-schema has no such path,
-      // so a copy inside the kind document is a stray key at best.
-      delete merged.status;
-
-      if (kind === 'fabric') {
-        const piecePrice = normaliseFabricPieces(merged);
-        if (piecePrice) (product as any).base_price = piecePrice;
-      }
-
-      if (detail.color_variants) {
-        merged.color_variants = ProductService.mergeColorVariants(
-          plain.color_variants,
-          detail.color_variants,
-        );
-      }
-      if (detail.variants) {
-        merged.variants = ProductService.mergeFlatVariants(
-          plain.variants,
-          detail.variants,
-        );
-      }
-
-      (product as any)[kind] = merged;
-      product.markModified(kind);
+    if (dto.name !== undefined && dto.name.trim() !== detail.name) {
+      detail.name = dto.name.trim();
+      changes.push(`name changed to "${detail.name}"`);
     }
+    if (dto.description !== undefined && dto.description !== (detail.description ?? '')) {
+      detail.description = dto.description;
+      changes.push('description edited');
+    }
+
+    if (kind === 'fabric') {
+      if (dto.product_type !== undefined && dto.product_type !== detail.product_type) {
+        detail.product_type = dto.product_type;
+        changes.push(`material set to ${dto.product_type}`);
+      }
+      if (dto.pattern !== undefined && dto.pattern !== detail.pattern) {
+        detail.pattern = dto.pattern;
+        changes.push(`fabric type set to ${dto.pattern}`);
+      }
+    } else {
+      const taxonomy = { ...(detail.taxonomy ?? {}) };
+      if (dto.product_type !== undefined && dto.product_type !== taxonomy.product_type) {
+        taxonomy.product_type = dto.product_type;
+        changes.push(`product type set to ${dto.product_type}`);
+      }
+      if (dto.categories !== undefined && !same(dto.categories, taxonomy.categories)) {
+        taxonomy.categories = dto.categories;
+        changes.push(`categories set to ${dto.categories.join(', ') || 'none'}`);
+      }
+      if (dto.audience !== undefined && dto.audience !== taxonomy.audience) {
+        taxonomy.audience = dto.audience;
+        changes.push(`audience set to ${dto.audience}`);
+      }
+      detail.taxonomy = taxonomy;
+    }
+
+    if (dto.remove_images?.length) {
+      const images: any[] = detail.images ?? [];
+      const drop = new Set(dto.remove_images);
+      const kept = images.filter((img) => !drop.has(img?.url));
+      const removed = images.length - kept.length;
+      if (removed > 0) {
+        if (kept.length === 0) {
+          throw new BadRequestException(
+            'A listing needs at least one photo. Reject it instead, so the vendor can replace them.',
+          );
+        }
+        detail.images = kept;
+        changes.push(`${removed} photo${removed === 1 ? '' : 's'} taken down`);
+      }
+    }
+
+    if (!changes.length) {
+      throw new BadRequestException('Nothing was changed.');
+    }
+
+    (product as any)[kind] = detail;
+    product.markModified(kind);
+    if (dto.name !== undefined && product.seo) {
+      product.seo = { ...product.seo, title: detail.name };
+    }
+    (product as any).admin_edits = [
+      ...((product as any).admin_edits ?? []),
+      {
+        at: new Date(),
+        by: adminId ? new Types.ObjectId(String(adminId)) : null,
+        reason: dto.reason.trim(),
+        changes,
+      },
+    ];
 
     if (product.moderation?.status === ProductModerationStatus.REJECTED) {
       product.moderation = {
@@ -3003,8 +3028,17 @@ export class ProductService {
     }
 
     await product.save();
+
+    // The vendor hears about every change the team makes to their listing.
+    await this.notifyVendorOfProduct(
+      product,
+      NotificationType.PRODUCT_EDITED_BY_ADMIN,
+      'The Qlozet team edited your listing',
+      `${ProductService.productName(product)}: ${changes.join('; ')}. Reason: ${dto.reason.trim()}`,
+    );
+
     return {
-      message: 'Product updated',
+      message: 'Product updated. The vendor has been told what changed.',
       data: product.toJSON(),
     };
   }
