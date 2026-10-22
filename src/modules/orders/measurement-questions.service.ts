@@ -146,6 +146,7 @@ export class MeasurementQuestionsService {
     const parts = question.body_parts.length ? ` (${question.body_parts.map(label).join(', ')})` : '';
     await this.notifications.create({
       recipient: String(order.customer),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.MEASUREMENT_QUESTION,
       title: 'Your tailor has a question about your measurements',

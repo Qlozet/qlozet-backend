@@ -332,6 +332,7 @@ export class TicketService {
               body: `"${dto.message.slice(0, 120)}"`,
               metadata: { ticket_id },
               action_url: member.isVendor ? '/support' : '/help/tickets',
+              audience: member.isVendor ? 'vendor' : 'customer',
             }),
           );
         }

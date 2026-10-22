@@ -421,6 +421,7 @@ export class DisputesService {
     // Notify customer
     this.notificationsService.create({
       recipient: dispute.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.DISPUTE_RESOLVED,
       title: 'Dispute Resolved',

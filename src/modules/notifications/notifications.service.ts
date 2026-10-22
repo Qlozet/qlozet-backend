@@ -18,7 +18,17 @@ export interface CreateNotificationDto {
   body: string;
   metadata?: Record<string, any>;
   action_url?: string;
+  /**
+   * 'customer' for anything sent to a shopper about their shopping. Left out,
+   * a notification for a store (recipient_business set) is 'vendor'.
+   */
+  audience?: NotificationAudience;
 }
+
+export type NotificationAudience = 'customer' | 'vendor';
+
+const audienceOf = (data: CreateNotificationDto): NotificationAudience | null =>
+  data.audience ?? (data.recipient_business ? 'vendor' : null);
 
 @Injectable()
 export class NotificationsService {
@@ -77,6 +87,7 @@ export class NotificationsService {
         body: data.body,
         metadata: data.metadata || {},
         action_url: data.action_url,
+        audience: audienceOf(data),
       });
 
       const saved = await notification.save();
@@ -137,6 +148,7 @@ export class NotificationsService {
         body: data.body,
         metadata: data.metadata || {},
         action_url: data.action_url,
+        audience: audienceOf(data),
       }));
 
       const saved = await this.notificationModel.insertMany(docs);
@@ -160,18 +172,53 @@ export class NotificationsService {
    * every store switch, so it is the active store. Customers have none, and
    * see everything addressed to them.
    */
-  private async activeBusinessScope(userId: string): Promise<Record<string, any>> {
+  /**
+   * What one app's inbox shows: the shop asks for 'customer', the vendor app
+   * for 'vendor'. Without one, the account's own type decides (older apps).
+   *
+   * One login can shop and work on a vendor's team, so neither side may leak
+   * into the other: the shop shows shopper notifications only; the vendor app
+   * shows its open store's notifications and account-level ones, never a
+   * shopper's. Notifications from before `audience` existed are read by the
+   * old rule (no store → the account's own side).
+   */
+  private async inboxScope(
+    userId: string,
+    requested?: string,
+  ): Promise<Record<string, any>> {
     try {
       const user: any = await this.userModel
         .findById(userId)
         .select('business type')
         .lean();
+      const type = String(user?.type ?? '');
+      if (type === 'platform') return {};
+      const side: NotificationAudience =
+        requested === 'customer' || requested === 'vendor'
+          ? requested
+          : type === 'vendor'
+            ? 'vendor'
+            : 'customer';
+
+      if (side === 'customer') {
+        return {
+          $or: [
+            { audience: 'customer' },
+            // Older, untagged: a shopper's own notifications carried no store.
+            ...(type === 'vendor'
+              ? []
+              : [{ audience: null, recipient_business: null }]),
+          ],
+        };
+      }
+
       const bid = user?.business ? new Types.ObjectId(String(user.business)) : null;
-      if (!bid) return {};
-      // null also matches notifications that carry no store at all (account
-      // level: team invites, system notices, anything written before the
-      // field existed).
-      return { recipient_business: { $in: [bid, null] } };
+      return {
+        audience: { $ne: 'customer' },
+        // null also matches account-level notifications (team invites,
+        // system notices, anything written before stores were recorded).
+        ...(bid ? { recipient_business: { $in: [bid, null] } } : {}),
+      };
     } catch {
       return {};
     }
@@ -179,14 +226,14 @@ export class NotificationsService {
 
   async getForUser(
     userId: string,
-    query: { page?: number; limit?: number; category?: string },
+    query: { page?: number; limit?: number; category?: string; audience?: string },
   ) {
     const { page = 1, limit = 20, category } = query;
     const skip = (page - 1) * limit;
 
     const filter: any = {
       recipient: new Types.ObjectId(userId),
-      ...(await this.activeBusinessScope(userId)),
+      ...(await this.inboxScope(userId, query.audience)),
     };
     if (category && Object.values(NotificationCategory).includes(category as NotificationCategory)) {
       filter.category = category;
@@ -215,9 +262,9 @@ export class NotificationsService {
   /**
    * Get unread notification count — total + per category
    */
-  async getUnreadCount(userId: string) {
+  async getUnreadCount(userId: string, audience?: string) {
     const recipientId = new Types.ObjectId(userId);
-    const scope = await this.activeBusinessScope(userId);
+    const scope = await this.inboxScope(userId, audience);
 
     const counts = await this.notificationModel.aggregate([
       { $match: { recipient: recipientId, is_read: false, ...scope } },
@@ -263,9 +310,15 @@ export class NotificationsService {
   /**
    * Mark all notifications as read for a user
    */
-  async markAllAsRead(userId: string) {
+  async markAllAsRead(userId: string, audience?: string) {
+    // Only this app's inbox: marking the shop's notifications read must not
+    // clear the vendor app's (and the other way round).
     const result = await this.notificationModel.updateMany(
-      { recipient: new Types.ObjectId(userId), is_read: false },
+      {
+        recipient: new Types.ObjectId(userId),
+        is_read: false,
+        ...(await this.inboxScope(userId, audience)),
+      },
       { is_read: true },
     );
 

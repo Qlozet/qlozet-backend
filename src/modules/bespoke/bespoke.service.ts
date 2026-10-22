@@ -1241,6 +1241,7 @@ export class BespokeService {
     const quoteCustomer = quote.customer as any;
     this.notificationsService.create({
       recipient: quoteCustomer._id?.toString() || quoteCustomer.id?.toString(),
+      audience: 'customer',
       category: NotificationCategory.BESPOKE,
       type: NotificationType.BESPOKE_QUOTE_RECEIVED,
       title: 'Quote Received!',

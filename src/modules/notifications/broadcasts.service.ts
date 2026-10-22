@@ -219,6 +219,11 @@ export class BroadcastsService {
           body,
           metadata: { broadcast_id: String(broadcast._id) },
           action_url: '/',
+          // Customer broadcasts belong in the shop, vendor ones in the app.
+          audience:
+            AUDIENCE_USER_TYPE[broadcast.audience] === UserType.VENDOR
+              ? 'vendor'
+              : 'customer',
         })),
         // One malformed row must not lose the whole batch.
         { ordered: false },

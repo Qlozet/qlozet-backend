@@ -267,6 +267,7 @@ export class ReturnsService {
   private notifyCustomerApproved(returnReq: any) {    // Notify customer
     this.notificationsService.create({
       recipient: returnReq.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CONFIRMED,
       title: 'Return Approved ✅',
@@ -335,6 +336,7 @@ export class ReturnsService {
     // Notify customer
     this.notificationsService.create({
       recipient: returnReq.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CANCELLED,
       title: 'Return Rejected',
@@ -510,6 +512,7 @@ export class ReturnsService {
     // Notify customer
     this.notificationsService.create({
       recipient: returnReq.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CONFIRMED,
       title: 'Return Completed & Refunded 💰',
