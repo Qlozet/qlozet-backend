@@ -88,17 +88,25 @@ export class NotificationsController {
     enum: ['order', 'shipping', 'payment', 'bespoke', 'product', 'team', 'system'],
     description: 'Filter by notification category',
   })
+  @ApiQuery({
+    name: 'audience',
+    required: false,
+    enum: ['customer', 'vendor'],
+    description: "Which app's inbox: the shop sends customer, the vendor app vendor. Defaults from the account type.",
+  })
   async getNotifications(
     @Req() req: any,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('category') category?: string,
+    @Query('audience') audience?: string,
   ) {
     const userId = req.user.id || req.user._id;
     const result = await this.notificationsService.getForUser(userId, {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
       category,
+      audience,
     });
 
     return {
@@ -116,9 +124,15 @@ export class NotificationsController {
 
   @Get('unread-count')
   @ApiOperation({ summary: 'Get unread notification count (total + per category)' })
-  async getUnreadCount(@Req() req: any) {
+  @ApiQuery({
+    name: 'audience',
+    required: false,
+    enum: ['customer', 'vendor'],
+    description: "Which app's inbox: the shop sends customer, the vendor app vendor. Defaults from the account type.",
+  })
+  async getUnreadCount(@Req() req: any, @Query('audience') audience?: string) {
     const userId = req.user.id || req.user._id;
-    const counts = await this.notificationsService.getUnreadCount(userId);
+    const counts = await this.notificationsService.getUnreadCount(userId, audience);
 
     return {
       success: true,
@@ -145,9 +159,15 @@ export class NotificationsController {
   @Patch('mark-all-read')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark all notifications as read' })
-  async markAllAsRead(@Req() req: any) {
+  @ApiQuery({
+    name: 'audience',
+    required: false,
+    enum: ['customer', 'vendor'],
+    description: "Which app's inbox: the shop sends customer, the vendor app vendor. Defaults from the account type.",
+  })
+  async markAllAsRead(@Req() req: any, @Query('audience') audience?: string) {
     const userId = req.user.id || req.user._id;
-    const result = await this.notificationsService.markAllAsRead(userId);
+    const result = await this.notificationsService.markAllAsRead(userId, audience);
 
     return {
       success: true,

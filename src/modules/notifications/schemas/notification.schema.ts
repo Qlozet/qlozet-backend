@@ -108,6 +108,15 @@ export class Notification {
 
   @Prop()
   action_url?: string;
+
+  /**
+   * Which side of Qlozet it is for: the shop ('customer') or a store in the
+   * vendor app ('vendor'). One login can be both a shopper and a member of a
+   * vendor's team, so the inbox in each app asks for its own side. Null on
+   * notifications written before this existed.
+   */
+  @Prop({ type: String, enum: ['customer', 'vendor', null], default: null })
+  audience?: 'customer' | 'vendor' | null;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);

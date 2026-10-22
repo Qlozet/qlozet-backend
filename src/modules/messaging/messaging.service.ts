@@ -234,6 +234,7 @@ export class MessagingService {
       await this.notifications.createUnique(
         {
           recipient: String(order.customer),
+          audience: 'customer',
           category: NotificationCategory.BESPOKE,
           type: NotificationType.NEW_MESSAGE,
           title: `Your tailor replied about ${reference}`,

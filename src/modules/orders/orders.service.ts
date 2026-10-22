@@ -3336,6 +3336,7 @@ export class OrderService {
     this.notificationsService
       .create({
         recipient: order.customer.toString(),
+        audience: 'customer',
         category: NotificationCategory.ORDER,
         type: NotificationType.PRESHIP_REVIEW,
         title: 'Your outfit is ready — take a look 👀',
@@ -4196,6 +4197,7 @@ export class OrderService {
     const businessName = (business as any).business_name || 'A vendor';
     await this.notificationsService.create({
       recipient: order.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CONFIRMED,
       title: 'Order Confirmed by Vendor',
@@ -4216,6 +4218,7 @@ export class OrderService {
     const businessName = (business as any).business_name || 'A vendor';
     await this.notificationsService.create({
       recipient: order.customer.toString(),
+      audience: 'customer',
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CANCELLED,
       title: 'Vendor Declined Order',
@@ -4507,6 +4510,7 @@ export class OrderService {
               this.notificationsService
                 .create({
                   recipient: order.customer.toString(),
+                  audience: 'customer',
                   category: NotificationCategory.ORDER,
                   type: NotificationType.ORDER_CANCELLED,
                   title: 'Payment Refunded',
@@ -4615,6 +4619,7 @@ export class OrderService {
             this.notificationsService
               .create({
                 recipient: order.customer.toString(),
+                audience: 'customer',
                 category: NotificationCategory.ORDER,
                 type: NotificationType.ORDER_CANCELLED,
                 title: orderCancelled ? 'Order Cancelled' : 'Item Cancelled',
@@ -4732,6 +4737,7 @@ export class OrderService {
           // Notify customer
           this.notificationsService.create({
             recipient: order.customer.toString(),
+            audience: 'customer',
             category: NotificationCategory.ORDER,
             type: NotificationType.ORDER_CANCELLED,
             title: 'Vendor Did Not Respond',
@@ -4963,6 +4969,7 @@ export class OrderService {
             // Notify customer — only when the compensation truly reached them
             this.notificationsService.create({
               recipient: order.customer.toString(),
+              audience: 'customer',
               category: NotificationCategory.ORDER,
               type: NotificationType.LATE_FULFILLMENT_PENALTY,
               title: 'Late Fulfillment Compensation',
@@ -5196,6 +5203,7 @@ export class OrderService {
           this.notificationsService
             .create({
               recipient: order.customer.toString(),
+              audience: 'customer',
               category: NotificationCategory.ORDER,
               type: NotificationType.ORDER_CANCELLED,
               title: 'Order Not Fulfilled',

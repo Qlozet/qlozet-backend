@@ -494,6 +494,7 @@ export class AuthService {
       const isVendor = user.type === UserType.VENDOR;
       await this.notificationsService.create({
         recipient: (user._id as Types.ObjectId).toString(),
+        audience: isVendor ? 'vendor' : 'customer',
         category: NotificationCategory.SYSTEM,
         type: NotificationType.WELCOME,
         title: isVendor ? 'Welcome to Qlozet!' : 'Welcome to Qlozet!',

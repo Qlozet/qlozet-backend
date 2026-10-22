@@ -67,10 +67,12 @@ describe('NotificationsService - active-store scoping', () => {
     expect(counts.byCategory).toEqual({ order: 1, team: 1 });
   });
 
-  it('a customer (no store) sees everything addressed to them', async () => {
+  it('a customer (no store) sees their own notifications, never a store’s', async () => {
+    // Store notifications belong in the vendor app; the shop shows the
+    // shopper's own (see notification-audience.spec).
     userDoc = { _id: person, type: 'customer' };
     const result = await service.getForUser(person.toString(), {});
-    expect(result.total).toBe(3);
+    expect(result.data.map((n: any) => n.title)).toEqual(['account-level']);
   });
 
   it('a failed user lookup falls back to the unscoped list rather than hiding everything', async () => {

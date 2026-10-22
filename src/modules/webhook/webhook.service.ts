@@ -358,6 +358,7 @@ export class WebhookService {
       );
       await this.notificationsService.create({
         recipient: customerId,
+        audience: 'customer',
         category: NotificationCategory.ORDER,
         type: NotificationType.ORDER_CANCELLED,
         title: 'Payment Refunded',
@@ -1039,6 +1040,7 @@ export class WebhookService {
       this.notificationsService
         .create({
           recipient: order.customer?.toString(),
+          audience: 'customer',
           category: NotificationCategory.SHIPPING,
           type: NotificationType.ORDER_STATUS_CHANGED,
           title: 'Out for delivery today 📦',
@@ -1100,6 +1102,7 @@ export class WebhookService {
 
     await this.notificationsService.create({
       recipient: customerId,
+      audience: 'customer',
       category: NotificationCategory.SHIPPING,
       type,
       title,
