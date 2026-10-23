@@ -15,6 +15,7 @@ import { Role, RoleSchema } from './modules/ums/schemas/role.schema';
 import { Permission, PermissionSchema } from './modules/ums/schemas/permission.schema';
 import { join } from 'path';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PushModule } from './modules/push/push.module';
 import { ProductModule } from './modules/products/products.module';
 import { UmsModule } from './modules/ums/ums.module';
 import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
@@ -112,6 +113,7 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
     AuthModule,
     ProductModule,
     NotificationsModule,
+    PushModule,
     UmsModule,
     CloudinaryModule,
     BusinessModule,
