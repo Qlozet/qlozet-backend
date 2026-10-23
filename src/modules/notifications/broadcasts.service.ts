@@ -1,9 +1,10 @@
-import {
+import { Optional,
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
@@ -62,6 +63,8 @@ export class BroadcastsService {
     private readonly notificationModel: Model<NotificationDocument>,
     @InjectModel('User') private readonly userModel: Model<any>,
     private readonly mailService: MailService,
+    // Announcements also go out as one topic push (PushDispatcher).
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   async create(input: CreateBroadcastInput, admin: { id: string; name?: string }) {
@@ -170,6 +173,12 @@ export class BroadcastsService {
       await broadcast.save();
 
       await this.createNotifications(broadcast, recipients);
+      this.events?.emit('broadcast.sent', {
+        audience: AUDIENCE_USER_TYPE[broadcast.audience] === UserType.VENDOR ? 'vendors' : 'customers',
+        title: broadcast.subject,
+        body: broadcast.body.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(),
+        broadcast_id: String(broadcast._id),
+      });
 
       if (broadcast.send_email) {
         await this.sendEmails(broadcast, recipients);
