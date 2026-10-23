@@ -6,6 +6,7 @@ import { DeviceToken, DeviceTokenSchema } from './schemas/device-token.schema';
 import { DeviceTokenService } from './device-token.service';
 import { PushService } from './push.service';
 import { PushController } from './push.controller';
+import { PushPreferencesController } from './push-preferences.controller';
 import { PushDispatcher, PushProcessor, PUSH_QUEUE } from './push.queue';
 import { firebaseProvider } from './firebase.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -21,7 +22,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     BullModule.registerQueue({ name: PUSH_QUEUE }),
     NotificationsModule, // NotificationsService (badge counts) + the Notification and User models
   ],
-  controllers: [PushController],
+  controllers: [PushController, PushPreferencesController],
   // JwtService: the sign-in guard on the token routes resolves here.
   providers: [JwtService, firebaseProvider, DeviceTokenService, PushService, PushDispatcher, PushProcessor],
   exports: [PushService, DeviceTokenService],

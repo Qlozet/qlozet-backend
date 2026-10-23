@@ -147,3 +147,31 @@ describe('push notifications', () => {
     });
   });
 });
+
+describe('push preferences', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { pushAllowed, preferencesView, switchFor } = require('./push-preferences');
+
+  it('never lets orders, money or account notices be switched off', () => {
+    const prefs = { customer: { orders: false, payments: false, announcements: false } };
+    expect(pushAllowed(prefs, 'customer', { type: 'order_shipped', category: 'shipping' })).toBe(true);
+    expect(pushAllowed(prefs, 'customer', { type: 'order_cancelled', category: 'payment' })).toBe(true);
+    expect(pushAllowed(prefs, 'customer', { type: 'announcement', category: 'system' })).toBe(false);
+  });
+
+  it('keeps each app’s switches apart', () => {
+    const prefs = { vendor: { messages: false } };
+    expect(pushAllowed(prefs, 'vendor', { type: 'new_message', category: 'bespoke' })).toBe(false);
+    expect(pushAllowed(prefs, 'customer', { type: 'new_message', category: 'bespoke' })).toBe(true);
+  });
+
+  it('treats a tailor’s measurement question as an order notice', () => {
+    expect(switchFor({ type: 'measurement_question', category: 'order' })).toBe('orders');
+  });
+
+  it('shows locked switches as on', () => {
+    const view = preferencesView({ customer: { orders: false, product: false } }, 'customer');
+    expect(view.find((s: any) => s.key === 'orders')).toMatchObject({ locked: true, enabled: true });
+    expect(view.find((s: any) => s.key === 'product')).toMatchObject({ locked: false, enabled: false });
+  });
+});

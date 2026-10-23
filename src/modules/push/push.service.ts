@@ -6,6 +6,7 @@ import { FIREBASE_APP } from './firebase.provider';
 import { DEAD_TOKEN_CODES, DeviceTokenService } from './device-token.service';
 import { PushApp } from './schemas/device-token.schema';
 import { notificationRoute } from './notification-route';
+import { pushAllowed } from './push-preferences';
 import { NotificationsService } from '../notifications/notifications.service';
 
 /** FCM's multicast limit per call. */
@@ -81,25 +82,36 @@ export class PushService {
   }
 
   /** Which app a notification is for; null = no phone app (staff). */
-  async appFor(n: { recipient: unknown; audience?: string | null }): Promise<PushApp | null> {
+  async appFor(
+    n: { recipient: unknown; audience?: string | null },
+    user?: { type?: string } | null,
+  ): Promise<PushApp | null> {
     if (n.audience === 'customer') return PushApp.SHOP;
     if (n.audience === 'vendor') return PushApp.VENDOR;
-    const user = await this.userModel.findById(n.recipient).select('type').lean();
-    const type = (user as any)?.type;
+    const type = (user ?? (await this.recipient(n.recipient)))?.type;
     if (type === 'customer') return PushApp.SHOP;
     if (type === 'vendor') return PushApp.VENDOR;
     return null;
   }
 
+  private recipient(id: unknown) {
+    return this.userModel.findById(id).select('type push_preferences').lean() as Promise<any>;
+  }
+
   async sendForNotification(n: any): Promise<PushOutcome> {
     if (!this.app) return { sent: 0, failed: 0, removed: 0, skipped: 'firebase not configured' };
-    const app = await this.appFor(n);
+    const user = await this.recipient(n.recipient);
+    const app = await this.appFor(n, user);
     if (!app) return { sent: 0, failed: 0, removed: 0, skipped: 'no app for this recipient' };
+    const audience = app === PushApp.SHOP ? 'customer' : 'vendor';
+    // Turned off by the person (never for orders, money or account notices).
+    if (!pushAllowed(user?.push_preferences, audience, n)) {
+      return { sent: 0, failed: 0, removed: 0, skipped: 'turned off in preferences' };
+    }
     const userId = String(n.recipient);
     const tokens = await this.tokens.tokensFor(userId, app);
     if (!tokens.length) return { sent: 0, failed: 0, removed: 0, skipped: 'no devices' };
 
-    const audience = app === PushApp.SHOP ? 'customer' : 'vendor';
     const badge = await this.notifications
       .getUnreadCount(userId, audience)
       .then((c) => c.total)

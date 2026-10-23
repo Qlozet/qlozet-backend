@@ -153,6 +153,14 @@ export class User extends Document {
 
   @Prop({ type: Boolean, default: false })
   is_email_preference_selected: boolean;
+
+  /**
+   * Push switches turned off, per app: { customer: { announcements: false },
+   * vendor: { team: false } }. Missing = on; locked switches are always on
+   * (modules/push/push-preferences.ts).
+   */
+  @Prop({ type: Object, default: {} })
+  push_preferences?: Record<string, Record<string, boolean>>;
   @Prop({
     type: [
       {
