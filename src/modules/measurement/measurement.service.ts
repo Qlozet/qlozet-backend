@@ -82,7 +82,11 @@ export class MeasurementService {
       this.logger.log(`  image_inputs: ${allReferenceUrls.join(',') || '(empty)'}`);
       this.logger.log(`  image_uploads: ${imageUploads.length} file(s)`);
       this.logger.log(`  metadata_json_str: ${metadataJson.slice(0, 200)}...`);
-      this.logger.log(`  provider: openai, model: gpt-image-1`);
+      // gpt-image-1 was shut down by OpenAI on 23 Oct 2026. The Space only
+      // accepts the models in its dropdown (gpt-image-2 is its default), so
+      // the next change is a secret, not a deploy: OUTFIT_IMAGE_MODEL.
+      const imageModel = process.env.OUTFIT_IMAGE_MODEL || 'gpt-image-2';
+      this.logger.log(`  provider: openai, model: ${imageModel}`);
 
       const result = await client.predict('/generate_handler', {
         prompt,
@@ -91,7 +95,7 @@ export class MeasurementService {
         image_uploads: imageUploads,
         metadata_json_str: metadataJson,
         provider: 'openai',
-        model: 'gpt-image-1',
+        model: imageModel,
       });
 
       this.logger.log(`Gradio result keys: ${JSON.stringify(Object.keys(result))}`);
