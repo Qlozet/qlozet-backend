@@ -490,7 +490,8 @@ export class StyleLibraryService implements OnModuleInit {
       this.logger.log(`Generating image for "${name}"...`);
 
       const response = await this.openai.images.generate({
-        model: 'gpt-image-1',
+        // gpt-image-1 was shut down on 23 Oct 2026; STYLE_IMAGE_MODEL overrides.
+        model: process.env.STYLE_IMAGE_MODEL || 'gpt-image-2',
         prompt,
         n: 1,
         size: '1024x1024',
