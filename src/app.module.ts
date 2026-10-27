@@ -47,6 +47,8 @@ import { StyleLibraryModule } from './modules/style-library/style-library.module
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
 import { SizeGuideModule } from './modules/size-guide/size-guide.module';
+import { OnApplicationShutdown } from '@nestjs/common';
+import { closeSharedRedis, sharedRedis } from './common/redis/shared-redis';
 
 @Module({
   imports: [
@@ -61,11 +63,9 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    BullModule.forRoot({
-      connection: {
-        url: process.env.REDIS_URL,
-        connectTimeout: 30000,
-      },
+    // One shared connection for all queues (see shared-redis.ts).
+    BullModule.forRootAsync({
+      useFactory: () => ({ connection: sharedRedis() }),
     }),
 
     ScheduleModule.forRoot({}),
@@ -161,4 +161,8 @@ import { SizeGuideModule } from './modules/size-guide/size-guide.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements OnApplicationShutdown {
+  async onApplicationShutdown() {
+    await closeSharedRedis();
+  }
+}

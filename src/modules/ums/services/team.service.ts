@@ -150,29 +150,30 @@ export class TeamService {
       // password (resetting it would break their existing login), so they get a
       // "use your existing login" email instead — previously the temp password
       // was emailed to them too but never saved, so it never worked.
-      if (isNewUser && tempPassword) {
-        this.mailService
-          .sendTeamInviteEmail(
+      // Waited for, so the owner hears when it didn't go: a new member can't
+      // sign in without the temporary password in this email. Its own
+      // try/catch, because the transaction above is already committed.
+      let emailSent = true;
+      try {
+        if (isNewUser && tempPassword) {
+          await this.mailService.sendTeamInviteEmail(
             dto.email,
             dto.full_name,
             role.name,
             business.business_name,
             tempPassword,
-          )
-          .catch((err) =>
-            this.logger.warn(`Failed to send team invite email: ${err.message}`),
           );
-      } else {
-        this.mailService
-          .sendTeamAddedEmail(
+        } else {
+          await this.mailService.sendTeamAddedEmail(
             dto.email,
             dto.full_name,
             role.name,
             business.business_name,
-          )
-          .catch((err) =>
-            this.logger.warn(`Failed to send team added email: ${err.message}`),
           );
+        }
+      } catch (err: any) {
+        emailSent = false;
+        this.logger.warn(`Failed to send team invite email: ${err?.message}`);
       }
 
       // Deliberately owner-only: who is on the team is an owner's business,
@@ -200,9 +201,12 @@ export class TeamService {
       }
 
       return {
-        message: isNewUser
-          ? 'New user invited successfully.'
-          : 'Existing user has been added to the team successfully.',
+        message: !emailSent
+          ? `${dto.full_name} was added, but we couldn't send their invite email. Use Resend invite on their row.`
+          : isNewUser
+            ? 'New user invited successfully.'
+            : 'Existing user has been added to the team successfully.',
+        email_sent: emailSent,
         teamMember,
         user,
       };
