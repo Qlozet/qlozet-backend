@@ -649,6 +649,33 @@ export class AuthService {
   /**
    * Resend verification email
    */
+  /**
+   * Sign-in with the right password on an unverified account: send a new
+   * code (same rules as Resend: at most one a minute) and refuse the sign-in
+   * with a message saying what happened. Every message contains "verify your
+   * email"; the vendor app and the shop match that to open the code screen.
+   * Runs only after the password check, so nobody can learn an account is
+   * unverified, or trigger emails, from the email address alone.
+   */
+  private async refuseUnverifiedLogin(email: string): Promise<never> {
+    try {
+      await this.resendVerificationEmail(email);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw new UnauthorizedException(
+          "Please verify your email. We couldn't send a new code just now; tap Resend on the next screen.",
+        );
+      }
+      // The one-a-minute limit: a code went out moments ago.
+      throw new UnauthorizedException(
+        'Please verify your email. We sent you a code less than a minute ago; check your inbox and spam.',
+      );
+    }
+    throw new UnauthorizedException(
+      "Please verify your email. We've sent a new code to your inbox.",
+    );
+  }
+
   async resendVerificationEmail(email: string): Promise<{ message: string }> {
     const user = await this.userModel
       .findOne({ email: String(email ?? '').trim().toLowerCase() })
@@ -725,26 +752,6 @@ export class AuthService {
         throw new UnauthorizedException('Invalid credentials');
       }
 
-      // Check if email is verified
-      if (!vendor.email_verified) {
-        const now = new Date();
-        if (
-          vendor.email_verification_expires &&
-          vendor.email_verification_expires < now
-        ) {
-          // Best-effort resend (the 2-minute throttle may reject it) — but
-          // the login must FAIL loudly either way. Returning nothing here
-          // used to produce an empty 200 the client mistook for success.
-          await this.resendVerificationEmail(vendor.email).catch(() => {});
-          throw new UnauthorizedException(
-            "Your verification code expired — we've sent a new one to your email.",
-          );
-        }
-        throw new UnauthorizedException(
-          'Please verify your email address before logging in. Check your inbox for the verification code.',
-        );
-      }
-
       // Check if account is active
       if (vendor.status !== 'active') {
         throw new UnauthorizedException(
@@ -765,6 +772,11 @@ export class AuthService {
       );
       if (!validPassword) {
         throw new UnauthorizedException('Invalid credentials');
+      }
+
+      // Only after the password: an unverified account gets a fresh code.
+      if (!vendor.email_verified) {
+        await this.refuseUnverifiedLogin(vendor.email);
       }
 
       // Look up ALL businesses this user belongs to
@@ -1019,25 +1031,6 @@ export class AuthService {
         throw new UnauthorizedException('Invalid credentials');
       }
 
-      // Check if email is verified
-      if (!user.email_verified) {
-        const now = new Date();
-        if (
-          user.email_verification_expires &&
-          user.email_verification_expires < now
-        ) {
-          // Best-effort resend (throttle may reject) — login still fails
-          // loudly; the old bare `return` sent an empty 200 "success".
-          await this.resendVerificationEmail(user.email).catch(() => {});
-          throw new UnauthorizedException(
-            "Your verification code expired — we've sent a new one to your email.",
-          );
-        }
-        throw new UnauthorizedException(
-          'Please verify your email address before logging in. Check your inbox for the verification code.',
-        );
-      }
-
       // Check if account is active
       if (user.status !== 'active') {
         throw new UnauthorizedException(
@@ -1062,6 +1055,11 @@ export class AuthService {
       );
       if (!validPassword) {
         throw new UnauthorizedException('Invalid credentials');
+      }
+
+      // Only after the password: an unverified account gets a fresh code.
+      if (!user.email_verified) {
+        await this.refuseUnverifiedLogin(user.email);
       }
 
       const token = await this.generateToken({
