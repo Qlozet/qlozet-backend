@@ -357,11 +357,12 @@ export class MailService {
       if (!this.templates.verification)
         throw new Error('Verification template not loaded');
 
+      // The template reads {{name}} and {{verificationLink}}.
       const html = this.templates.verification({
-        userName: name,
-        verificationUrl: verificationLink,
+        name,
+        verificationLink,
         verificationCode,
-        expiryTime: '24 hours',
+        expiryTime: '30 minutes',
         subject: 'Verify Your Email Address',
       });
 
@@ -411,7 +412,7 @@ export class MailService {
         throw new Error('Password reset success template not loaded');
 
       const html = this.templates.passwordResetSuccess({
-        userName: name,
+        name, // the template reads {{name}}
         currentDate: new Date().toLocaleDateString('en-US', {
           weekday: 'long',
           year: 'numeric',
@@ -441,7 +442,7 @@ export class MailService {
         throw new Error('Password updated template not loaded');
 
       const html = this.templates.passwordUpdated({
-        userName: name,
+        name, // the template reads {{name}}
         updateDate: new Date().toLocaleDateString('en-US', {
           weekday: 'long',
           year: 'numeric',
@@ -847,6 +848,8 @@ export class MailService {
     subject: string,
     bodyHtml: string,
     recipientName?: string,
+    /** Where the "Open Qlozet" button goes; no button without one. */
+    actionUrl?: string,
   ): Promise<boolean> {
     try {
       if (!this.templates.announcement)
@@ -856,6 +859,7 @@ export class MailService {
         headline: subject,
         body: bodyHtml,
         recipientName: recipientName || '',
+        actionUrl: actionUrl || '',
         subject,
         // Stripped of markup so the inbox preview is readable text.
         preheader: bodyHtml

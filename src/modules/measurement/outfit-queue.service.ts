@@ -6,7 +6,6 @@ import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
 import { AutoMaskSwaggerDto } from './dto/auto-mask-predict.dto';
 import { GenerateOutfitRequestDto } from './dto/generate-outfit.dto';
 import { JobStatusService } from './job-status.service';
-import { createClient } from 'redis';
 import { EditGarmentDto } from './dto/edit-image.dto';
 import { RunPredictBodyDto } from './dto/run-predict.dto';
 
@@ -122,7 +121,6 @@ export class OutfitQueueService {
 
   /** Queue video pipeline job */
   async queueVideoPipeline(payload: VideoPipelineSwaggerDto) {
-    await this.clearRedis();
     const jobId = randomUUID();
     await this.queue.add(
       'videoPipeline',
@@ -174,13 +172,4 @@ export class OutfitQueueService {
     };
   }
 
-  async clearRedis() {
-    const client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
-
-    await client.flushAll(); // deletes all keys
-    console.log('Redis flushed');
-
-    await client.quit();
-  }
 }

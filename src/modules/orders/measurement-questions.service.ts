@@ -163,6 +163,9 @@ export class MeasurementQuestionsService {
           `<blockquote>${escapeHtml(question.message)}</blockquote>` +
           `<p>Open the order in your Qlozet account to check the numbers and reply. If anything is wrong, you can correct it for this order there.</p>`,
         populated?.customer?.full_name,
+        process.env.FRONTEND_URL
+          ? `${process.env.FRONTEND_URL}/profile?tab=orders&order=${encodeURIComponent(order.reference)}`
+          : undefined,
       );
     }
   }

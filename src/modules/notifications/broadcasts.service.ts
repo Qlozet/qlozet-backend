@@ -242,6 +242,11 @@ export class BroadcastsService {
 
   private async sendEmails(broadcast: BroadcastDocument, recipients: any[]) {
     const withEmail = recipients.filter((u) => u?.email);
+    // The email's button opens the app the audience uses.
+    const actionUrl =
+      AUDIENCE_USER_TYPE[broadcast.audience] === UserType.VENDOR
+        ? process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL
+        : process.env.FRONTEND_URL;
     let sent = 0;
     let failed = 0;
 
@@ -254,6 +259,7 @@ export class BroadcastsService {
             broadcast.subject,
             broadcast.body,
             user.full_name || user.first_name,
+            actionUrl,
           ),
         ),
       );
