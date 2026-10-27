@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { sanitizeDescription } from '../../common/utils/description-html';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import {
@@ -476,6 +477,13 @@ export class ProductService {
     business: Types.ObjectId,
     kind: string,
   ): Promise<{ data: ProductDocument; message: string }> {
+    // Descriptions are shown as HTML to every shopper: clean them on the way
+    // in (formatting only, no scripts), and turn plain text into paragraphs.
+    const sub = (dto as any)[kind];
+    if (sub && sub.description !== undefined) {
+      sub.description = sanitizeDescription(sub.description);
+    }
+
     // Piece selling: validate, and for a piece-only fabric derive the
     // per-yard price and minimum cut; listings then show the piece price.
     const piecePrice =
@@ -2952,8 +2960,10 @@ export class ProductService {
       detail.name = dto.name.trim();
       changes.push(`name changed to "${detail.name}"`);
     }
-    if (dto.description !== undefined && dto.description !== (detail.description ?? '')) {
-      detail.description = dto.description;
+    const cleanDescription =
+      dto.description !== undefined ? sanitizeDescription(dto.description) : undefined;
+    if (cleanDescription !== undefined && cleanDescription !== (detail.description ?? '')) {
+      detail.description = cleanDescription;
       changes.push('description edited');
     }
 

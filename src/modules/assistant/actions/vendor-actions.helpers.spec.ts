@@ -83,7 +83,7 @@ describe('validateListingChange', () => {
     const out = validateListingChange(product, { description: longDesc, audience: 'Unisex', categories: ['occasion', 'Office'], attributes: ['linen'] }, vocab);
     if ('error' in out) throw new Error(out.error);
     expect(out.set).toEqual({
-      'clothing.description': longDesc,
+      'clothing.description': `<p>${longDesc}</p>`, // stored as clean HTML
       'clothing.taxonomy.audience': 'unisex',
       'clothing.taxonomy.categories': ['Occasion', 'Office'],
       'clothing.taxonomy.attributes': ['Linen'],
