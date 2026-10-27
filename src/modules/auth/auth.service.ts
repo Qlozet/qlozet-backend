@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
@@ -52,6 +53,13 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+
+/** A verification code works for 30 minutes. */
+const VERIFY_CODE_TTL_MS = 30 * 60 * 1000;
+/** Wrong codes before a new one must be requested. */
+const MAX_VERIFY_ATTEMPTS = 5;
+/** At most one verification email a minute (the apps count down 90 s). */
+const RESEND_COOLDOWN_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -162,8 +170,9 @@ export class AuthService {
             email_verified: false,
             email_verification_token,
             email_verification_expires: new Date(
-              Date.now() + 24 * 60 * 60 * 1000,
+              Date.now() + VERIFY_CODE_TTL_MS,
             ),
+            email_verification_attempts: 0,
             status: 'active',
             profilePicture: display_picture_url || '',
             last_verification_email_sent: new Date(),
@@ -338,8 +347,9 @@ export class AuthService {
             email_verified: false,
             email_verification_token,
             email_verification_expires: new Date(
-              Date.now() + 24 * 60 * 60 * 1000,
+              Date.now() + VERIFY_CODE_TTL_MS,
             ),
+            email_verification_attempts: 0,
             status: 'active',
             dob: dob ? new Date(dob) : undefined,
             last_verification_email_sent: new Date(),
@@ -418,11 +428,23 @@ export class AuthService {
   }
 
   /**
-   * Send verification email
+   * Send the verification code. The button in the email opens the code
+   * screen of the app this account uses, with the email filled in (the old
+   * link went to a /verify-email page neither app has). With `throwOnFail`
+   * a mail-server failure reaches the caller instead of being logged and
+   * reported as sent.
    */
-  private async sendVerificationEmail(user: UserDocument, code: string) {
+  private async sendVerificationEmail(
+    user: UserDocument,
+    code: string,
+    opts: { throwOnFail?: boolean } = {},
+  ) {
     try {
-      const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${user.email_verification_token}&type=${user.type}`;
+      const email = encodeURIComponent(user.email);
+      const verificationLink =
+        user.type === UserType.VENDOR
+          ? `${process.env.VENDOR_FRONTEND_URL || process.env.FRONTEND_URL}/auth/verification?email=${email}`
+          : `${process.env.FRONTEND_URL}/auth/register?step=otp&email=${email}`;
 
       await this.mailService.sendVerificationEmail(
         user.email,
@@ -434,18 +456,23 @@ export class AuthService {
       // Update email tracking fields
       await this.userModel.findByIdAndUpdate(user._id, {
         lastVerificationEmailSent: new Date(),
+        last_verification_email_sent: new Date(),
         $inc: { verificationEmailAttempts: 1 },
       });
 
-      this.logger.log(`Verification email sent to ${user.type}: ${user.email}`);
+      this.logger.log(`Verification email sent to ${user.type} ${user._id}`);
     } catch (error) {
       this.logger.error(
-        `Failed to send verification email to ${user.email}:`,
-        error,
+        `Failed to send verification email to ${user.type} ${user._id}: ${(error as any)?.message}`,
       );
-      // Don't throw error to avoid breaking registration flow
+      if (opts.throwOnFail) {
+        throw new ServiceUnavailableException(
+          "We couldn't send the email just now. Check the address is right and try again in a minute.",
+        );
+      }
     }
   }
+
 
   /**
    * Send welcome email after verification
@@ -519,30 +546,66 @@ export class AuthService {
   /**
    * Verify email address
    */
-  async verifyEmail(code: string) {
+  async verifyEmail(code: string, email?: string) {
     const session = await this.connection.startSession();
     session.startTransaction();
 
     try {
-      const submittedHashed = code.length === 6 ? createHash(code) : code;
-
-      const user = await this.userModel.findOne(
-        {
-          email_verification_token: submittedHashed,
-          email_verification_expires: { $gt: new Date() },
-        },
-        null,
-        { session },
-      );
-
-      if (!user) {
-        throw new BadRequestException('Invalid or expired verification token');
+      let user: UserDocument | null;
+      if (/^\d{6}$/.test(code)) {
+        // A 6-digit code is checked against ONE account, the one it was sent
+        // to: looking codes up on their own let anyone try codes against
+        // every unverified account at once.
+        if (!email) {
+          throw new BadRequestException('Enter the email address the code was sent to.');
+        }
+        user = await this.userModel
+          .findOne({ email: email.trim().toLowerCase() }, null, { session })
+          .select('+email_verification_token +email_verification_expires +email_verification_attempts');
+        if (!user || user.email_verified) {
+          throw new BadRequestException('That code isn\'t right, or this email is already verified.');
+        }
+        if (!user.email_verification_token || !user.email_verification_expires || user.email_verification_expires <= new Date()) {
+          throw new BadRequestException('This code has expired. Request a new one.');
+        }
+        if ((user.email_verification_attempts ?? 0) >= MAX_VERIFY_ATTEMPTS) {
+          throw new BadRequestException('Too many wrong codes. Request a new one.');
+        }
+        if (createHash(code) !== user.email_verification_token) {
+          await this.userModel.updateOne(
+            { _id: user._id },
+            { $inc: { email_verification_attempts: 1 } },
+            { session },
+          );
+          await session.commitTransaction();
+          session.endSession();
+          const left = MAX_VERIFY_ATTEMPTS - ((user.email_verification_attempts ?? 0) + 1);
+          throw new BadRequestException(
+            left > 0
+              ? `That code isn't right. ${left} ${left === 1 ? 'try' : 'tries'} left.`
+              : 'Too many wrong codes. Request a new one.',
+          );
+        }
+      } else {
+        // Long tokens from older emails' links.
+        user = await this.userModel.findOne(
+          {
+            email_verification_token: code,
+            email_verification_expires: { $gt: new Date() },
+          },
+          null,
+          { session },
+        );
+        if (!user) {
+          throw new BadRequestException('Invalid or expired verification token');
+        }
       }
 
       Object.assign(user, {
         email_verified: true,
         email_verification_token: undefined,
         email_verification_expires: undefined,
+        email_verification_attempts: 0,
         status: 'active',
         email_verified_at: new Date(),
       });
@@ -576,9 +639,9 @@ export class AuthService {
         },
       };
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      this.logger.error('Email verification failed:', error);
+      if (session.inTransaction()) await session.abortTransaction();
+      await session.endSession();
+      this.logger.warn(`Email verification failed: ${(error as any)?.message}`);
       throw error;
     }
   }
@@ -587,81 +650,44 @@ export class AuthService {
    * Resend verification email
    */
   async resendVerificationEmail(email: string): Promise<{ message: string }> {
-    try {
-      const user = await this.userModel.findOne({ email });
+    const user = await this.userModel
+      .findOne({ email: String(email ?? '').trim().toLowerCase() })
+      .select('+email_verification_token +email_verification_expires');
 
-      if (!user) {
-        throw new NotFoundException('User not found with this email address.');
-      }
+    if (!user) {
+      throw new NotFoundException('User not found with this email address.');
+    }
+    if (user.email_verified) {
+      throw new BadRequestException('Email is already verified.');
+    }
 
-      // Check if email is already verified
-      if (user.email_verified) {
-        throw new BadRequestException('Email is already verified.');
-      }
-      const otp = generateOtp();
-      const email_verification_token = createHash(otp);
-      const now = new Date();
-      if (
-        user.email_verification_expires &&
-        user.email_verification_expires > now
-      ) {
-        // Token is still valid, check if we can resend
-        const lastEmailSent = user.last_welcome_email_sent?.getTime();
-        const timeSinceLastSent =
-          lastEmailSent && now.getTime() - lastEmailSent;
-        const minResendInterval = 2 * 60 * 1000; // 2 minutes in milliseconds
-
-        if (timeSinceLastSent && timeSinceLastSent < minResendInterval) {
-          const waitTime = Math.ceil(
-            (minResendInterval - timeSinceLastSent) / 1000 / 60,
-          );
-          throw new BadRequestException(
-            `Please wait ${waitTime} minute(s) before requesting another verification email.`,
-          );
-        }
-      }
-
-      if (
-        !user.email_verification_expires ||
-        user.email_verification_expires <= new Date(Date.now() + 60 * 60 * 1000)
-      ) {
-        user.email_verification_token = email_verification_token;
-        user.email_verification_expires = new Date(
-          Date.now() + 24 * 60 * 60 * 1000,
-        ); // 24 hours
-      }
-
-      // Update resend tracking
-      user.last_verification_email_sent = new Date();
-
-      await user.save();
-
-      this.sendVerificationEmail(user, otp);
-
-      this.logger.log(`Verification email resent to: ${email}`);
-
-      return {
-        message:
-          'Verification email sent successfully. Please check your inbox.',
-      };
-    } catch (error) {
-      this.logger.error(
-        `Resend verification failed: ${error.message}`,
-        error.stack,
-      );
-
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      throw new InternalServerErrorException(
-        'Failed to resend verification email. Please try again.',
+    // One email a minute. This used to read the welcome email's
+    // timestamp, so it never applied.
+    const last = user.last_verification_email_sent?.getTime();
+    if (last && Date.now() - last < RESEND_COOLDOWN_MS) {
+      const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - last)) / 1000);
+      throw new BadRequestException(
+        `Please wait ${wait} seconds before requesting another code.`,
       );
     }
+
+    // Every email carries the code that is stored: the newest code works,
+    // earlier ones stop.
+    const otp = generateOtp();
+    user.email_verification_token = createHash(otp);
+    user.email_verification_expires = new Date(Date.now() + VERIFY_CODE_TTL_MS);
+    (user as any).email_verification_attempts = 0;
+    await user.save();
+
+    // Waited for, so a mail failure is reported instead of "sent".
+    await this.sendVerificationEmail(user, otp, { throwOnFail: true });
+
+    this.logger.log(`Verification code resent to user ${user._id}`);
+    return {
+      message: 'A new code is on its way. It replaces any earlier code and works for 30 minutes.',
+    };
   }
+
 
   /**
    * Check verification status

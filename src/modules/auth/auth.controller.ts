@@ -216,6 +216,8 @@ export class AuthController {
   // ✅ Verify Email
   @Post('verify-email')
   @Public()
+  // Six digits can be guessed: a few tries a minute per address.
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Verify user email',
@@ -226,12 +228,13 @@ export class AuthController {
     description: 'Email verification token',
   })
   async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
-    return this.authService.verifyEmail(verifyEmailDto.token);
+    return this.authService.verifyEmail(verifyEmailDto.token, verifyEmailDto.email);
   }
 
   // ✅ Resend Verification Email
   @Post('resend-verification')
   @Public()
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resend verification email',

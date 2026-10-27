@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class VerifyEmailDto {
   @ApiProperty({
@@ -17,4 +18,12 @@ export class VerifyEmailDto {
     message: 'Token must be either a 6-digit OTP or a long alphanumeric token',
   })
   token: string;
+
+  @ApiPropertyOptional({
+    example: 'ada@example.com',
+    description: 'The email the code was sent to. Required with a 6-digit code.',
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 }

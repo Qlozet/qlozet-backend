@@ -42,8 +42,9 @@ export function createHash(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+/** A 6-digit code from a secure random source (Math.random is guessable). */
 export function generateOtp(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 export function generateVerificationToken(): string {
   return randomBytes(32).toString('hex');
