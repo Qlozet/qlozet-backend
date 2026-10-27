@@ -79,6 +79,10 @@ export class User extends Document {
   @Prop({ type: Date, select: false })
   email_verification_expires?: Date;
 
+  /** Wrong codes entered against the current code; reset by each new code. */
+  @Prop({ type: Number, default: 0, select: false })
+  email_verification_attempts?: number;
+
   @Prop({
     type: {
       pin: String, // sha256 hash of the 6-digit code (never stored in plaintext)

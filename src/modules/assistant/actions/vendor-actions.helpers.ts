@@ -4,6 +4,8 @@
  * No database here, so it is all unit-testable with plain objects.
  */
 
+import { sanitizeDescription } from '../../../common/utils/description-html';
+
 export const productName = (p: any): string =>
   p?.clothing?.name || p?.fabric?.name || p?.accessory?.name || 'Unnamed product';
 
@@ -236,7 +238,8 @@ export function validateListingChange(
     if (text.length < DESCRIPTION_MIN) return { error: `The description is too short (${text.length} characters; at least ${DESCRIPTION_MIN}).` };
     if (text.length > DESCRIPTION_MAX) return { error: `The description is too long (${text.length} characters; at most ${DESCRIPTION_MAX}).` };
     if (/https?:\/\/|www\./i.test(text)) return { error: 'Descriptions cannot contain links.' };
-    set[`${kind}.description`] = text;
+    // Stored as clean HTML, the way the shop shows descriptions.
+    set[`${kind}.description`] = sanitizeDescription(text);
     details.push({ label: 'Description', value: text.length > 220 ? `${text.slice(0, 220)}…` : text });
     changed.push('description');
   }
