@@ -14,7 +14,7 @@
     {{verificationCode}}</div>
 
 <p class="muted" style="color:#8A7C6E; font-size:14px;">The link and the code both
-    expire in 24 hours.</p>
+    expire in {{#if expiryTime}}{{expiryTime}}{{else}}30 minutes{{/if}}.</p>
 
 <div class="divider" style="height:1px; line-height:1px; font-size:0; background:#EDE7E0; margin:28px 0;">&nbsp;</div>
 
