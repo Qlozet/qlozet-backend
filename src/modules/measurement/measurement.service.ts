@@ -104,17 +104,62 @@ export class MeasurementService {
       // Return generated image — result.data[0] is data URL, result.data[1] is image path
       const dataUrl = result.data[0] as string;
       const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
-      const uploadResult = await this.cloudinary.uploadBase64(
+      const uploadResult = (await this.cloudinary.uploadBase64(
         base64,
         'outfits',
-      );
+      )) as { fileUrl: string };
       this.logger.log('Outfit generation completed successfully');
+
+      // The generator only imitates a picked fabric; put the real print on
+      // (exact motifs, same outline, still transparent). Best effort: any
+      // failure keeps the generated picture as it is.
+      const fabricUrl =
+        typeof config?.fabricRefId === 'string' && /^https?:\/\//i.test(config.fabricRefId)
+          ? config.fabricRefId
+          : null;
+      if (fabricUrl && uploadResult?.fileUrl) {
+        const exact = await this.applyExactFabric(uploadResult.fileUrl, fabricUrl, 'auto');
+        if (exact) return exact;
+      }
       return uploadResult;
     } catch (error) {
       this.logger.error(`Outfit generation error: ${JSON.stringify(error, null, 2)}`);
       this.logger.error(`Error message: ${error?.message || 'unknown'}`);
       this.logger.error(`Error stage: ${error?.stage || 'unknown'}`);
       throw new Error(`Failed to generate outfit image: ${error?.message || error?.stage || 'unknown error'}`);
+    }
+  }
+
+  /**
+   * Put a real fabric on a design with a transparent background, no AI: the
+   * image editor tiles the swatch inside the garment's outline, lit by its
+   * own folds. `scope` 'auto' replaces the print only where it already shows
+   * (e.g. the kaftan, not plain trousers); 'all' covers the whole garment.
+   * Returns the uploaded result, or null if anything fails (the caller keeps
+   * what it had), including an editor that doesn't have this endpoint yet.
+   */
+  async applyExactFabric(
+    designUrl: string,
+    fabricUrl: string,
+    scope: 'auto' | 'all' = 'auto',
+  ): Promise<{ fileUrl: string } | null> {
+    try {
+      const client = await this.gradio.getClient(this.ie);
+      const result = await client.predict('/apply_fabric_from_urls', {
+        base_url: designUrl,
+        fabric_url: fabricUrl,
+        scope,
+        repeats_down: 5,
+      });
+      const b64 = (result?.data?.[2] as string) || '';
+      if (!b64) {
+        this.logger.warn(`Exact fabric skipped: ${(result?.data?.[1] as string) || 'no image'}`);
+        return null;
+      }
+      return (await this.cloudinary.uploadBase64(b64, 'outfits')) as { fileUrl: string };
+    } catch (e) {
+      this.logger.warn(`Exact fabric skipped: ${e?.message || e}`);
+      return null;
     }
   }
 
