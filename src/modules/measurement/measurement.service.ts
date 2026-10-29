@@ -110,10 +110,13 @@ export class MeasurementService {
       )) as { fileUrl: string };
       this.logger.log('Outfit generation completed successfully');
 
-      // The generator only imitates a picked fabric; put the real print on
-      // (exact motifs, same outline, still transparent). Best effort: any
-      // failure keeps the generated picture as it is.
+      // Off by default. Laying the real swatch flat gives exact motifs but
+      // loses the drape: the model's own render bends stripes around
+      // gathers, wraps and trains, which reads far better for most fabrics.
+      // Kept behind EXACT_FABRIC_AFTER_GENERATE=true for prints the model
+      // can't copy; the intended home is an opt-in "match fabric exactly".
       const fabricUrl =
+        process.env.EXACT_FABRIC_AFTER_GENERATE === 'true' &&
         typeof config?.fabricRefId === 'string' && /^https?:\/\//i.test(config.fabricRefId)
           ? config.fabricRefId
           : null;
