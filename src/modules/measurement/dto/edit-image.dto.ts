@@ -1,7 +1,7 @@
 // src/designs/dto/edit-image.dto.ts
 
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export class EditGarmentDto {
   @ApiPropertyOptional({
@@ -97,6 +97,17 @@ export class EditGarmentDto {
     },
   })
   metadata_json?: any;
+
+  @ApiPropertyOptional({
+    description:
+      "'back' turns the base image round: the same garment seen from behind. " +
+      "Default 'front' is a normal edit.",
+    enum: ['front', 'back'],
+  })
+  @IsOptional()
+  @IsIn(['front', 'back'])
+  view?: 'front' | 'back';
+
   business?: string;
   customer?: string;
 }
