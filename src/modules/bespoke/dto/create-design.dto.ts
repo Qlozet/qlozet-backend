@@ -7,7 +7,22 @@ import {
   IsOptional,
   IsMongoId,
   ArrayMinSize,
+  IsBoolean,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class BackViewDto {
+  @ApiProperty({ description: 'The front design image this back view was made from' })
+  @IsString()
+  @IsNotEmpty()
+  front: string;
+
+  @ApiProperty({ description: 'The back view image' })
+  @IsString()
+  @IsNotEmpty()
+  back: string;
+}
 
 export class CreateDesignDto {
   @ApiProperty({ example: 'My Wedding Agbada' })
@@ -32,6 +47,25 @@ export class CreateDesignDto {
   @IsString({ each: true })
   @ArrayMinSize(1)
   design_images: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Back views, each tied to a front in design_images. Omit on update to keep the saved ones.',
+    type: [BackViewDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BackViewDto)
+  back_views?: BackViewDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'false: tailors see only the chosen version (design_images[0]) and its back view.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  show_other_versions?: boolean;
 
   @ApiPropertyOptional({
     description: 'Cloudinary URLs of customer reference photos',

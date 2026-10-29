@@ -75,6 +75,21 @@ import { roundToSellable } from '../products/fabric-pieces';
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
 
+/** Back views whose front is still one of the design's versions, one per front. */
+function backViewsFor(
+  views: { front: string; back: string }[] | undefined,
+  designImages: string[],
+): { front: string; back: string }[] {
+  const fronts = new Set(designImages);
+  const seen = new Set<string>();
+  return (views ?? []).filter((v) => {
+    if (!v?.front || !v?.back || !fronts.has(v.front) || seen.has(v.front))
+      return false;
+    seen.add(v.front);
+    return true;
+  }).map((v) => ({ front: v.front, back: v.back }));
+}
+
 @Injectable()
 export class BespokeService {
   private readonly logger = new Logger(BespokeService.name);
@@ -197,6 +212,8 @@ export class BespokeService {
       category: dto.category,
       gender: dto.gender,
       design_images: dto.design_images,
+      back_views: backViewsFor(dto.back_views, dto.design_images),
+      show_other_versions: dto.show_other_versions ?? true,
       reference_images: dto.reference_images || [],
       fabric: dto.fabric_id ? new Types.ObjectId(dto.fabric_id) : null,
       description: dto.description || null,
@@ -244,6 +261,14 @@ export class BespokeService {
     design.category = dto.category;
     design.gender = dto.gender;
     design.design_images = dto.design_images;
+    // Omitted back views keep the saved ones; either way, drop any whose
+    // front version was deleted.
+    design.back_views = backViewsFor(
+      dto.back_views ?? design.back_views,
+      dto.design_images,
+    );
+    if (dto.show_other_versions !== undefined)
+      design.show_other_versions = dto.show_other_versions;
     design.reference_images = dto.reference_images || [];
     design.description = dto.description || (null as any);
     if (dto.fabric_id) design.fabric = new Types.ObjectId(dto.fabric_id);
@@ -988,7 +1013,7 @@ export class BespokeService {
         .sort({ createdAt: -1 })
         .skip((page - 1) * size)
         .limit(size)
-        .populate('design', 'name category gender design_images reference_images description fabric')
+        .populate('design', 'name category gender design_images back_views show_other_versions reference_images description fabric')
         .populate('customer', 'first_name last_name email')
         .lean(),
       this.quoteModel.countDocuments(filter),
@@ -1027,7 +1052,7 @@ export class BespokeService {
         .limit(size)
         .populate(
           'design',
-          'name category gender design_images reference_images description fabric',
+          'name category gender design_images back_views show_other_versions reference_images description fabric',
         )
         .populate('vendor', 'business_name business_logo_url business_email')
         .populate('customer', 'username first_name last_name email')

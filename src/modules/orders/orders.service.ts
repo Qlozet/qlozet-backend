@@ -1652,7 +1652,7 @@ export class OrderService {
           // Bespoke orders: bring the design so the tailor sees what to make.
           .populate(
             'bespoke_design',
-            'name category gender design_images reference_images description fabric',
+            'name category gender design_images back_views show_other_versions reference_images description fabric',
           )
           .sort({ createdAt: -1 })
           .skip(skip)
@@ -2421,7 +2421,7 @@ export class OrderService {
         // customer's order shows the outfit name + image.
         .populate(
           'bespoke_design',
-          'name category gender design_images reference_images description',
+          'name category gender design_images back_views show_other_versions reference_images description',
         )
         .exec(),
 

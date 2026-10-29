@@ -473,6 +473,7 @@ export class MeasurementService {
         fit = 'tailored',
         style_notes = '',
         metadata_json,
+        view = 'front',
         business,
         customer,
       } = payload;
@@ -498,22 +499,29 @@ export class MeasurementService {
         .filter(Boolean)
         .join(' | ');
 
-      // Call the editor endpoint
-      const result = await client.predict('/edit_product_image_from_urls', {
-        base_url: base_image_url,
-        fabric_url: fabric_image_url || '',
-        accessory_url: accessory_image_url || '',
-        addon_url: addon_image_url || '',
-        garment_type: MeasurementService.SAFE_GARMENT_TYPE,
-        base_color,
-        pattern,
-        fit: MeasurementService.SAFE_FIT,
-        style_notes: enrichedNotes,
-        metadata_json: metadata_json ? JSON.stringify(metadata_json) : '',
-        model_name: 'gemini-2.5-flash-image',
-        aspect_ratio: '1:1',
-        resolution: '1K',
-      });
+      // The back view has its own endpoint: the normal edit rules ("keep the
+      // camera angle, change only what's asked") would fight turning it round.
+      const result = view === 'back'
+        ? await client.predict('/back_view_from_urls', {
+            base_url: base_image_url,
+            fabric_url: fabric_image_url || '',
+            style_notes: enrichedNotes,
+          })
+        : await client.predict('/edit_product_image_from_urls', {
+            base_url: base_image_url,
+            fabric_url: fabric_image_url || '',
+            accessory_url: accessory_image_url || '',
+            addon_url: addon_image_url || '',
+            garment_type: MeasurementService.SAFE_GARMENT_TYPE,
+            base_color,
+            pattern,
+            fit: MeasurementService.SAFE_FIT,
+            style_notes: enrichedNotes,
+            metadata_json: metadata_json ? JSON.stringify(metadata_json) : '',
+            model_name: 'gemini-2.5-flash-image',
+            aspect_ratio: '1:1',
+            resolution: '1K',
+          });
 
       // Extract results
 

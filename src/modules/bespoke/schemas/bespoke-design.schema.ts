@@ -37,6 +37,19 @@ export class BespokeDesign {
   @Prop({ type: [String], default: [] })
   reference_images: string[];
 
+  // design_images[0] is the version the customer chose (the one tailors make).
+  // A back view belongs to the front image it was made from.
+  @Prop({
+    type: [{ front: String, back: String, _id: false }],
+    default: [],
+  })
+  back_views: { front: string; back: string }[];
+
+  // false: tailors see only the chosen version (and its back), not the other
+  // versions the customer kept.
+  @Prop({ type: Boolean, default: true })
+  show_other_versions: boolean;
+
   // ─── Fabric (from platform catalog) ───
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   fabric: Types.ObjectId;
