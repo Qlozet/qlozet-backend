@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { DISPUTE_WINDOW_DAYS } from '../business/settlement';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Return, ReturnDocument, ReturnStatus } from './schemas/return.schema';
@@ -22,7 +23,6 @@ const RETURN_ROLES = [VendorRole.OPERATIONS, VendorRole.CUSTOMER_SUPPORT];
 
 // After a rejection the customer can still dispute it; the payout is held at
 // least this long so that is possible.
-const REJECTION_DISPUTE_DAYS = 3;
 import {
   NotificationCategory,
   NotificationType,
@@ -137,11 +137,9 @@ export class ReturnsService {
       throw new BadRequestException('You already have an active return request for this vendor');
     }
 
-    // Freeze earnings
-    await this.businessEarningsModel.updateMany(
-      { order: order._id, business: dto.business_id, released: false },
-      { $set: { release_date: null } },
-    );
+    // Payouts are not held for a return (settlement.ts). If the vendor has
+    // been paid by the time it is approved, the refund is recovered from
+    // their balance.
 
     const returnRequest = await this.returnModel.create({
       order: order._id,
@@ -303,33 +301,9 @@ export class ReturnsService {
     returnReq.vendor_rejection_reason = why;
     await returnReq.save();
 
-    // The customer is told they can dispute a rejection, which is only
-    // possible while the payout is still held. Releasing at once let the
-    // payout go out within half an hour and the dispute was then refused.
-    // Re-hold until the later of the normal delivery schedule and three days
-    // from now.
-    const order = await this.orderModel.findById(returnReq.order).lean();
-    const settings: any = await this.platformSettingsModel.findOne().lean();
-    const holdDays = Math.max(
-      Number(settings?.payout_delay_days ?? 3),
-      Number(settings?.return_window_days ?? 7),
-    );
-    const delivered = Math.max(
-      0,
-      ...((order as any)?.shipments ?? []).map((s: any) =>
-        s.delivered_at ? new Date(s.delivered_at).getTime() : 0,
-      ),
-    );
-    const releaseAt = new Date(
-      Math.max(
-        delivered ? delivered + holdDays * 86400000 : 0,
-        Date.now() + REJECTION_DISPUTE_DAYS * 86400000,
-      ),
-    );
-    await this.businessEarningsModel.updateMany(
-      { order: returnReq.order, business: businessId, released: false },
-      { $set: { release_date: releaseAt } },
-    );
+    // The customer can still report a problem (a dispute) after a rejection,
+    // up to DISPUTE_WINDOW_DAYS after delivery. The payout is not held for
+    // it: a dispute refund after payout is recovered from the vendor.
 
     this.logger.log(`[Return] Vendor ${businessId} rejected return ${returnId}`);
 
@@ -340,7 +314,7 @@ export class ReturnsService {
       category: NotificationCategory.ORDER,
       type: NotificationType.ORDER_CANCELLED,
       title: 'Return Rejected',
-      body: `Your return for order #${returnReq.order_reference} was rejected. Reason: ${why}. If you disagree, report a problem on the order within ${REJECTION_DISPUTE_DAYS} days.`,
+      body: `Your return for order #${returnReq.order_reference} was rejected. Reason: ${why}. If you disagree, report a problem on the order within ${DISPUTE_WINDOW_DAYS} days of delivery.`,
       metadata: {
         order_reference: returnReq.order_reference,
         return_id: returnReq._id,

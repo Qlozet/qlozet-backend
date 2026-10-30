@@ -6,11 +6,13 @@ import { DisputeResolution } from './dto/resolve-dispute.dto';
 import { OrderSchema } from '../orders/schemas/orders.schema';
 import { BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
 import { MemoryMongo, stubLogger } from '../../test-utils/memory-mongo';
+import { DISPUTE_WINDOW_DAYS } from '../business/settlement';
 
 /**
- * Dispute flow — the whole system leans on the payout hold as leverage:
- * filing freezes the vendor's unreleased earnings, and each resolution moves
- * the frozen money exactly once. Real models, stubbed money rails.
+ * Dispute flow. Payouts are never held for a dispute (Paystack, Oct 2026:
+ * see business/settlement.ts): filing leaves the payout date alone, and a
+ * refund takes unpaid earnings first, then recovers from what was already
+ * paid. Real models, stubbed money rails.
  */
 describe('DisputesService', () => {
   const mongo = new MemoryMongo();
@@ -109,9 +111,9 @@ describe('DisputesService', () => {
   });
 
   describe('fileDispute', () => {
-    it('freezes the vendor payout (release_date → null) and opens the case', async () => {
+    it('opens the case and leaves the payout date alone', async () => {
       const order = await makeDeliveredOrder();
-      await makeEarning(order);
+      const earningBefore = await makeEarning(order);
 
       // fileDispute returns the { message, data } envelope.
       const { data: dispute } = await service.fileDispute(
@@ -121,7 +123,7 @@ describe('DisputesService', () => {
 
       expect(dispute.status).toBe(DisputeStatus.OPEN);
       const earning = await earningsModel.findOne({ order: order._id }).lean();
-      expect(earning.release_date).toBeNull();
+      expect(earning.release_date).toEqual(earningBefore.release_date);
     });
 
     it('only delivered (completed) orders can be disputed', async () => {
@@ -213,13 +215,47 @@ describe('DisputesService', () => {
       });
     });
 
-    it('rejects once the vendor payout has already been released', async () => {
+    it('can be filed after the vendor was paid; a full refund recovers it from them', async () => {
       const order = await makeDeliveredOrder();
       await makeEarning(order, { released: true });
 
+      const { data: dispute } = await service.fileDispute(
+        customerId.toString(),
+        fileDto(order),
+      );
+      await service.resolveDispute(dispute._id.toString(), new Types.ObjectId().toString(), {
+        resolution: DisputeResolution.FULL_REFUND,
+      });
+
+      expect(creditWallet).toHaveBeenCalledWith(expect.any(String), 60_000);
+      expect(service.walletsService.reconcileBusinessWallet).toHaveBeenCalledWith(
+        businessId.toString(),
+        { balance: -54_000 },
+      );
+      const earning = await earningsModel.findOne({ order: order._id }).lean();
+      expect(earning.net_amount).toBe(0);
+    });
+
+    it(`is refused more than ${DISPUTE_WINDOW_DAYS} days after delivery`, async () => {
+      const order = await orderModel.create({
+        customer: customerId,
+        items: [],
+        total: 60_000,
+        subtotal: 60_000,
+        status: 'completed',
+        payment_status: 'paid',
+        reference: 'QLZ-OLD',
+        shipments: [
+          {
+            business: businessId,
+            status: 'delivered',
+            delivered_at: new Date(Date.now() - (DISPUTE_WINDOW_DAYS + 1) * 86_400_000),
+          },
+        ],
+      });
       await expect(
         service.fileDispute(customerId.toString(), fileDto(order)),
-      ).rejects.toThrow(/already been released/i);
+      ).rejects.toThrow(/days after delivery/i);
     });
 
     it('one open dispute per vendor per order', async () => {
@@ -262,7 +298,7 @@ describe('DisputesService', () => {
       expect(creditWallet).toHaveBeenCalledWith(expect.any(String), 60_000);
     });
 
-    it('partial refund: reduces the earning, unfreezes the rest, refunds the amount', async () => {
+    it('partial refund: reduces the unpaid earning, refunds the amount', async () => {
       const { order, dispute } = await openDispute();
 
       await service.resolveDispute(dispute._id.toString(), adminId, {
@@ -302,7 +338,7 @@ describe('DisputesService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('release to vendor: unfreezes the payout, no money to the customer', async () => {
+    it('release to vendor: payout untouched, no money to the customer', async () => {
       const { order, dispute } = await openDispute();
 
       await service.resolveDispute(dispute._id.toString(), adminId, {

@@ -1746,9 +1746,9 @@ export class OrderService {
           });
         }
 
-        // Earnings held by an open dispute or return on this vendor's part of
-        // the order. The order drawer shows "Earnings Frozen" from this; it
-        // read the flag before the backend ever sent one.
+        // An open dispute or return on this vendor's part of the order. It
+        // does not hold their earnings (business/settlement.ts); the drawer
+        // shows that a problem is open.
         const pageIds = scopedRows.map((r: any) => r?._id).filter(Boolean);
         const Dispute: any = (this.orderModel.db as any).models?.Dispute;
         const ReturnModel: any = (this.orderModel.db as any).models?.Return;
@@ -1786,7 +1786,6 @@ export class OrderService {
             if (!ds && !rs) return r;
             return {
               ...r,
-              earnings_frozen: true,
               ...(ds ? { has_dispute: true, dispute_status: ds } : {}),
               ...(rs ? { return_status: rs } : {}),
             };
