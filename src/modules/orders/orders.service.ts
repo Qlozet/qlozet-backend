@@ -4933,9 +4933,10 @@ export class OrderService {
               remaining -= take;
             }
             if (remaining > 0) {
-              // Already-released earnings → claw back from spendable balance.
-              // reconcileBusinessWallet floors at 0, so this only recovers what
-              // is still in the wallet (unrecoverable if already withdrawn).
+              // Already-released earnings (common now that payouts are a fixed
+              // 14 days after payment) → take it from the spendable balance.
+              // A shortfall is booked as owed and recovered from later
+              // earnings (reconcileBusinessWallet).
               await this.walletsService.reconcileBusinessWallet(businessId, {
                 balance: -remaining,
               });
