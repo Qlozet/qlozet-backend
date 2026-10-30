@@ -2,6 +2,13 @@ import { SetupSwagger } from './common/config/swagger.config';
 import { CustomResponseInterceptor } from './common/interceptors/response.interceptor';
 import { bootstrap } from './bootstrap';
 
+// A library bug that rejects a promise nobody awaits (the Gradio client does
+// this for an unknown endpoint) must not take the whole API down. Log it
+// loudly instead of letting Node exit.
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [process] Unhandled promise rejection:', reason);
+});
+
 async function startServer() {
   const app = await bootstrap();
 
