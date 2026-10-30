@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   UnauthorizedException,
+  ServiceUnavailableException,
   ConflictException,
 } from '@nestjs/common';
 import { GradioService } from './gradio.service';
@@ -460,6 +461,50 @@ export class MeasurementService {
   private static readonly SAFE_GARMENT_TYPE = 'generic clothing item';
   private static readonly SAFE_FIT = 'tailored';
 
+  /**
+   * client.predict, made safe. The Gradio client runs the call inside an
+   * async Promise executor: asking for an endpoint the Space doesn't have
+   * throws there, which escapes as an unhandled rejection (it crashed the
+   * server) and leaves predict's promise pending for ever. So check the
+   * endpoint first, and give up after a time limit.
+   */
+  private async safePredict(
+    spaceId: string,
+    endpoint: string,
+    data: Record<string, unknown>,
+    timeoutMs = 4 * 60 * 1000,
+  ): Promise<any> {
+    const name = endpoint.replace(/^\//, '');
+    const has = (c: any) =>
+      !c?.api_map || typeof c.api_map !== 'object' || name in c.api_map;
+    let client = await this.gradio.getClient(spaceId);
+    if (!has(client)) {
+      // The connection is cached; the Space may have gained the endpoint
+      // since. Reconnect once before giving up.
+      this.gradio.clearClient(spaceId);
+      client = await this.gradio.getClient(spaceId);
+      if (!has(client)) {
+        throw new ServiceUnavailableException(
+          `The image editor doesn't have /${name} yet. It needs the latest Space update.`,
+        );
+      }
+    }
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        client.predict(endpoint, data),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new ServiceUnavailableException('The image editor took too long. Please try again.')),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async editGarmentWithImageEditor(payload: EditGarmentDto) {
     try {
       const {
@@ -486,8 +531,6 @@ export class MeasurementService {
       // This method must NOT re-check or re-spend, otherwise the job is
       // double-charged, and a customer who paid their exact balance would
       // fail the redundant check here.
-      const client = await this.gradio.getClient(this.ie);
-
       // Fold the real garment name + fit into the free-form notes (the dropdowns
       // are pinned to neutral values below). The base image + metadata_json carry
       // the rest, so nothing the customer picked is lost.
@@ -502,12 +545,12 @@ export class MeasurementService {
       // The back view has its own endpoint: the normal edit rules ("keep the
       // camera angle, change only what's asked") would fight turning it round.
       const result = view === 'back'
-        ? await client.predict('/back_view_from_urls', {
+        ? await this.safePredict(this.ie, '/back_view_from_urls', {
             base_url: base_image_url,
             fabric_url: fabric_image_url || '',
             style_notes: enrichedNotes,
           })
-        : await client.predict('/edit_product_image_from_urls', {
+        : await this.safePredict(this.ie, '/edit_product_image_from_urls', {
             base_url: base_image_url,
             fabric_url: fabric_image_url || '',
             accessory_url: accessory_image_url || '',
@@ -548,7 +591,8 @@ export class MeasurementService {
 
       if (
         error instanceof BadRequestException ||
-        error instanceof UnauthorizedException
+        error instanceof UnauthorizedException ||
+        error instanceof ServiceUnavailableException
       ) {
         throw error;
       }
