@@ -12,7 +12,7 @@
  */
 export const SERVICE_AGREEMENT = {
   /** ISO date of the text currently in force. Must exist in ./agreements. */
-  VERSION: '2026-10-02',
+  VERSION: '2026-10-30',
 } as const;
 
 /**

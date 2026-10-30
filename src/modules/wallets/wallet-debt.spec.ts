@@ -12,7 +12,7 @@ import { MemoryMongo, stubLogger } from '../../test-utils/memory-mongo';
  * and before any withdrawal, and withdrawals also hold back the released
  * earnings on orders with an open return.
  */
-describe('WalletsService - owed balance and withdrawal holds', () => {
+describe('WalletsService - owed balance and withdrawals', () => {
   const mongo = new MemoryMongo();
   let walletModel: any;
   let service: any;
@@ -115,14 +115,15 @@ describe('WalletsService - owed balance and withdrawal holds', () => {
     expect(service.paymentService.sendPayout).not.toHaveBeenCalled();
   });
 
-  it('a withdrawal cannot take the released earnings of an order with an open return', async () => {
+  it('an open return holds nothing back from a withdrawal (no conditional holds)', async () => {
     await makeWallet({ balance: 20_000 });
     openReturns = [{ order: new Types.ObjectId() }];
     releasedOnReturnedOrders = 15_000;
 
-    await expect(service.requestWithdrawal(business.toString(), 10_000)).rejects.toThrow(/held while a return is open/);
-    await expect(service.requestWithdrawal(business.toString(), 5_000)).resolves.toMatchObject({
-      data: { amount: 5_000 },
+    // Paystack does not allow holding vendor money on a condition
+    // (business/settlement.ts); a refund after payout is recovered instead.
+    await expect(service.requestWithdrawal(business.toString(), 20_000)).resolves.toMatchObject({
+      data: { amount: 20_000 },
     });
   });
 

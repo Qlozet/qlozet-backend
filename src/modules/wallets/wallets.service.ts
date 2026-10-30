@@ -322,38 +322,6 @@ export class WalletsService {
   }
 
   /**
-   * Money that must stay in the wallet while a return is open on one of the
-   * vendor's orders: the released earnings on those orders are what a
-   * completed return claws back, so they cannot be withdrawn first.
-   */
-  async withdrawalHold(businessId: string | Types.ObjectId): Promise<number> {
-    const bid = new Types.ObjectId(String(businessId));
-    const open = await this.returnModel
-      .find({
-        business: bid,
-        status: {
-          $in: [
-            ReturnStatus.REQUESTED,
-            ReturnStatus.VENDOR_APPROVED,
-            ReturnStatus.RETURN_SHIPPED,
-            ReturnStatus.RECEIVED,
-          ],
-        },
-      })
-      .select('order')
-      .lean();
-    if (!open.length) return 0;
-    const orderIds = [...new Set(open.map((r: any) => String(r.order)))].map(
-      (id) => new Types.ObjectId(id),
-    );
-    const rows = await this.businessEarningsModel.aggregate<{ _id: null; amount: number }>([
-      { $match: { business: bid, order: { $in: orderIds }, released: true } },
-      { $group: { _id: null, amount: { $sum: '$net_amount' } } },
-    ]);
-    return Math.max(0, rows[0]?.amount ?? 0);
-  }
-
-  /**
    * Everything the admin console's vendor wallet panel shows, in one read.
    * Read-only on purpose: it never creates a wallet (getOrCreateWallet would)
    * and never settles debt, so looking at a vendor does not change them.
@@ -377,8 +345,7 @@ export class WalletsService {
       .lean();
     const earningsMatch = ObjectIdUtils.refMatch('business', businessId);
 
-    const [hold, earnings, firstDue, settings, payouts] = await Promise.all([
-      this.withdrawalHold(bid),
+    const [earnings, firstDue, settings, payouts] = await Promise.all([
       this.businessEarningsModel.aggregate<{
         _id: { released: boolean; scheduled: boolean };
         net: number;
@@ -450,10 +417,12 @@ export class WalletsService {
       balance,
       pending_balance: pending,
       owed_balance: owed,
-      withdrawal_hold: hold,
-      // Owed money is settled before anything can leave, so a debt blocks
-      // withdrawals outright; otherwise the open-return hold is kept back.
-      available_to_withdraw: owed > 0 ? 0 : Math.max(0, balance - hold),
+      // Nothing is held back for open returns or disputes (Paystack: no
+      // conditional holds, see business/settlement.ts). Kept at 0 for the
+      // admin panel. Owed money is a debt, not a hold: it blocks withdrawals
+      // until later earnings repay it.
+      withdrawal_hold: 0,
+      available_to_withdraw: owed > 0 ? 0 : Math.max(0, balance),
       minimum_payout: Number((settings as any)?.minimum_payout ?? 2000),
 
       lifetime: {
@@ -516,8 +485,8 @@ export class WalletsService {
       throw new NotFoundException('Vendor wallet not found');
     }
 
-    // Owed money is settled before anything can leave, and the released
-    // earnings on orders with an open return stay put until it closes.
+    // Owed money is settled before anything can leave. Nothing is held back
+    // for an open return (see business/settlement.ts).
     const recovered = await this.settleOwed(businessId);
     if (recovered > 0) {
       wallet.balance = (wallet.balance || 0) - recovered;
@@ -528,13 +497,10 @@ export class WalletsService {
         `₦${(wallet.owed_balance || 0).toLocaleString()} from refunded orders is still owed; it is taken from your next earnings release before withdrawals reopen.`,
       );
     }
-    const hold = await this.withdrawalHold(businessId);
-    const available = Math.max(0, (wallet.balance || 0) - hold);
+    const available = Math.max(0, wallet.balance || 0);
     if (available < amount) {
       throw new BadRequestException(
-        hold > 0
-          ? `Insufficient available balance. ₦${hold.toLocaleString()} is held while a return is open; available now: ₦${available.toLocaleString()}`
-          : `Insufficient wallet balance. Available: ₦${available.toLocaleString()}`,
+        `Insufficient wallet balance. Available: ₦${available.toLocaleString()}`,
       );
     }
 

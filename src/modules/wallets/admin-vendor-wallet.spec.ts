@@ -68,7 +68,6 @@ const build = (opts: {
       ),
     },
   });
-  jest.spyOn(service, 'withdrawalHold').mockResolvedValue(opts.hold ?? 0);
   return { service: service as WalletsService, walletModel };
 };
 
@@ -91,14 +90,13 @@ describe('WalletsService.getAdminVendorWallet', () => {
     expect(walletModel.updateOne).not.toHaveBeenCalled();
   });
 
-  it('keeps the open-return hold back from what can be withdrawn', async () => {
+  it('holds nothing back for open returns (no conditional holds)', async () => {
     const { service } = build({
       wallet: { balance: 50_000, pending_balance: 0, owed_balance: 0 },
-      hold: 20_000,
     });
     const out = await service.getAdminVendorWallet(BID);
-    expect(out.withdrawal_hold).toBe(20_000);
-    expect(out.available_to_withdraw).toBe(30_000);
+    expect(out.withdrawal_hold).toBe(0);
+    expect(out.available_to_withdraw).toBe(50_000);
   });
 
   it('a debt blocks withdrawals entirely', async () => {

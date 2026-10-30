@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { SETTLEMENT_DAYS, settlementDate } from './settlement';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Wallet, WalletDocument } from '../wallets/schema/wallet.schema';
 import { Model } from 'mongoose';
@@ -26,20 +27,12 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
-import { Dispute, DisputeDocument, DisputeStatus } from '../disputes/schemas/dispute.schema';
-import { Return, ReturnDocument, ReturnStatus } from '../returns/schemas/return.schema';
+import { Dispute, DisputeDocument } from '../disputes/schemas/dispute.schema';
+import { Return, ReturnDocument } from '../returns/schemas/return.schema';
 
 @Injectable()
 export class BusinessEarningsCron {
   private readonly logger = new Logger(BusinessEarningsCron.name);
-
-  // Fallback window: if the delivery webhook never fires, completion earnings
-  // would otherwise sit unreleasable forever. Auto-release them this many days
-  // after the vendor DISPATCHED the order (shipped_at), not after payment — so
-  // production time isn't baked in and the window can be short. Only fires when
-  // the order is in flight and not cancelled/returned. Overridable via
-  // PlatformSettings.auto_release_days.
-  private readonly DEFAULT_AUTO_RELEASE_DAYS = 10;
 
   constructor(
     @InjectModel(BusinessEarning.name)
@@ -64,40 +57,6 @@ export class BusinessEarningsCron {
     @InjectModel(Return.name)
     private readonly returnModel?: Model<ReturnDocument>,
   ) {}
-
-  /**
-   * A payout is held while the customer has an open dispute with this vendor
-   * on this order. Filing one empties release_date, but the delivery webhook
-   * and the stuck-earnings safety net both fill an empty date back in, so the
-   * one place that actually pays checks too.
-   */
-  private async heldByDispute(earning: BusinessEarningDocument): Promise<boolean> {
-    const dispute = this.disputeModel
-      ? await this.disputeModel.exists({
-          order: earning.order,
-          business: earning.business,
-          status: { $in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
-        })
-      : null;
-    if (dispute) return true;
-    // An open return holds the payout the same way: requesting one empties
-    // release_date, and the same two paths can fill it back in.
-    const openReturn = this.returnModel
-      ? await this.returnModel.exists({
-          order: earning.order,
-          business: earning.business,
-          status: {
-            $in: [
-              ReturnStatus.REQUESTED,
-              ReturnStatus.VENDOR_APPROVED,
-              ReturnStatus.RETURN_SHIPPED,
-              ReturnStatus.RECEIVED,
-            ],
-          },
-        })
-      : null;
-    return Boolean(openReturn);
-  }
 
   /** Notify the vendor that a payout landed in their wallet. */
   private async notifyPayout(earning: BusinessEarningDocument) {
@@ -233,7 +192,7 @@ export class BusinessEarningsCron {
 
     const pending = await this.businessEarningsModel.find({
       released: false,
-      release_date: { $ne: null, $lte: now }, // Must have a release_date set (set on delivery)
+      release_date: { $ne: null, $lte: now }, // payment + SETTLEMENT_DAYS (settlement.ts)
     });
 
     if (!pending.length) {
@@ -252,18 +211,6 @@ export class BusinessEarningsCron {
         if (!earning.net_amount) {
           this.logger.error(
             `ERROR: net_amount is undefined for earning ${earning._id}`,
-          );
-          continue;
-        }
-
-        if (await this.heldByDispute(earning)) {
-          // Put it back on hold; the dispute's resolution re-dates it.
-          await this.businessEarningsModel.updateOne(
-            { _id: earning._id, released: false },
-            { $set: { release_date: null } },
-          );
-          this.logger.warn(
-            `Earning ${earning._id} is held by an open dispute — not released.`,
           );
           continue;
         }
@@ -336,82 +283,29 @@ export class BusinessEarningsCron {
   }
 
   /**
-   * Safety net: completion earnings only get a release_date from the delivery
-   * webhook. If that webhook never fires (dropped event, test courier), the
-   * money would be stuck forever. Once the order was DISPATCHED long enough ago
-   * (shipped_at + auto_release_days) — by which point it has almost certainly
-   * been delivered — and the order is not cancelled/returned, schedule the
-   * earning so releaseFunds() can pay it out.
+   * Earnings are dated at payment (settlement.ts). Any without a date -
+   * recorded before the fixed schedule, or by an older path - are put on the
+   * same schedule: SETTLEMENT_DAYS after they were recorded (that is, after
+   * the customer paid). One already past that date releases on the next run.
    */
-  @Cron(CronExpression.EVERY_6_HOURS)
-  async autoReleaseStuckEarnings() {
-    const settings = await this.platformSettingsModel.findOne().lean();
-    const autoReleaseDays =
-      (settings as any)?.auto_release_days ?? this.DEFAULT_AUTO_RELEASE_DAYS;
-    const windowMs = autoReleaseDays * 24 * 60 * 60 * 1000;
-    const now = Date.now();
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduleUndatedEarnings() {
+    const undated = await this.businessEarningsModel
+      .find({ released: false, release_date: null })
+      .select('_id createdAt')
+      .lean();
+    if (!undated.length) return;
 
-    const stuck = await this.businessEarningsModel.find({
-      released: false,
-      release_date: null,
-    });
-
-    if (!stuck.length) {
-      this.logger.log('[AutoRelease] No unscheduled earnings to check.');
-      return;
+    let scheduled = 0;
+    for (const e of undated as any[]) {
+      const res = await this.businessEarningsModel.updateOne(
+        { _id: e._id, released: false, release_date: null },
+        { $set: { release_date: settlementDate(e.createdAt ?? Date.now()) } },
+      );
+      scheduled += res.modifiedCount;
     }
-
-    // Statuses in which auto-release is safe (vendor confirmed; order in flight
-    // or already completed). Explicitly excludes pending/in_review (vendor never
-    // confirmed), cancelled and returned.
-    const eligibleStatuses = new Set(['processing', 'in_transit', 'completed']);
-    const dispatchedStatuses = new Set(['shipped', 'in_transit', 'delivered']);
-
-    for (const earning of stuck) {
-      try {
-        const order = await this.orderModel.findById(earning.order).lean();
-        if (!order) continue;
-        if (!eligibleStatuses.has((order as any).status)) continue;
-
-        // Anchor on the most recent DISPATCH among this order's shipments.
-        // Prefer shipped_at; fall back to confirmed_at for older data. If the
-        // order was never dispatched, don't auto-release.
-        // This vendor's own parcel when it has one (payouts are per parcel),
-        // else the whole order for rows without a vendor shipment.
-        const allShipments = (order as any).shipments || [];
-        const own = allShipments.filter(
-          (s: any) => String(s.business) === String(earning.business),
-        );
-        const shipments = own.length ? own : allShipments;
-        const dispatchAnchors = shipments
-          .filter((s: any) => dispatchedStatuses.has(s.status))
-          .map((s: any) => s.shipped_at ?? s.confirmed_at)
-          .filter(Boolean)
-          .map((d: any) => new Date(d).getTime());
-
-        if (!dispatchAnchors.length) continue;
-
-        const latestDispatch = Math.max(...dispatchAnchors);
-        if (latestDispatch + windowMs > now) continue; // not old enough yet
-        // An empty date can also mean a dispute is holding it.
-        if (await this.heldByDispute(earning)) continue;
-
-        await this.businessEarningsModel.updateOne(
-          { _id: earning._id, released: false, release_date: null },
-          { $set: { release_date: new Date() } },
-        );
-
-        const daysSince = Math.round((now - latestDispatch) / 86400000);
-        this.logger.warn(
-          `[AutoRelease] Scheduled stuck ${earning.milestone} earning ${earning._id} ` +
-            `(order ${earning.order}, ₦${earning.net_amount}) — dispatched ${daysSince}d ago, ` +
-            `delivery webhook likely missed.`,
-        );
-      } catch (error) {
-        this.logger.error(
-          `[AutoRelease] Failed for earning ${earning._id}: ${error.message}`,
-        );
-      }
-    }
+    this.logger.log(
+      `[Settlement] Put ${scheduled} undated earning(s) on the ${SETTLEMENT_DAYS}-day schedule.`,
+    );
   }
 }

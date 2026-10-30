@@ -28,6 +28,7 @@ import { Utils } from 'src/common/utils/pagination';
 import { percentageChange } from '../../common/utils/percentageChange';
 import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
+import { settlementDate } from './settlement';
 import { LogisticsService } from '../logistics/logistics.service';
 import { User, UserDocument } from '../ums/schemas';
 import { PaginationQueryType } from 'src/common/types/pagination.type';
@@ -2146,6 +2147,10 @@ export class BusinessService {
       // Custom/tailored work qualifies for the upfront + completion milestone
       // split: custom clothing items, and every bespoke order (the tailor fronts
       // fabric + labour, so they get part on confirmation, the rest on delivery).
+      // Every earning from this payment becomes withdrawable on the same
+      // fixed date (see settlement.ts), never on delivery.
+      const releaseDate = settlementDate();
+
       const isCustom =
         (order as any).type === 'bespoke' ||
         (item as any).clothing_type === 'customize';
@@ -2164,7 +2169,7 @@ export class BusinessService {
           commission: commission * (upfrontPercent / 100),
           net_amount: upfrontNet,
           released: false,
-          release_date: null,
+          release_date: releaseDate,
           milestone: 'upfront',
         });
 
@@ -2176,7 +2181,7 @@ export class BusinessService {
           commission: commission * ((100 - upfrontPercent) / 100),
           net_amount: completionNet,
           released: false,
-          release_date: null,
+          release_date: releaseDate,
           milestone: 'completion',
         });
 
@@ -2193,7 +2198,7 @@ export class BusinessService {
           commission,
           net_amount: net,
           released: false,
-          release_date: null,
+          release_date: releaseDate,
           milestone: 'completion',
         });
       }
@@ -2242,7 +2247,7 @@ export class BusinessService {
               commission: fabricCommission,
               net_amount: fabricNet,
               released: false,
-              release_date: null,
+              release_date: releaseDate,
               milestone: 'completion',
             });
             await this.walletModel.findOneAndUpdate(

@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { DISPUTE_WINDOW_DAYS } from '../business/settlement';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Dispute, DisputeDocument, DisputeReason, DisputeStatus } from './schemas/dispute.schema';
@@ -90,8 +91,47 @@ export class DisputesService {
   }
 
   /**
+   * Take up to `amount` back from earnings already paid to this vendor for
+   * this order (payouts are never held for a dispute, so a refund can land
+   * after the vendor was paid). Comes out of their wallet balance; a
+   * shortfall is booked as owed and recovered from later earnings. Returns
+   * what was taken.
+   */
+  private async recoverFromPaidEarnings(
+    orderId: Types.ObjectId | string,
+    businessId: string,
+    amount: number,
+  ): Promise<number> {
+    if (!(amount > 0)) return 0;
+    const paid = await this.businessEarningsModel
+      .find({
+        order: orderId,
+        business: businessId,
+        released: true,
+        milestone: { $ne: 'cancellation_fee' },
+      })
+      .sort({ createdAt: -1 });
+    let remaining = amount;
+    let taken = 0;
+    for (const e of paid) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, e.net_amount || 0);
+      if (take <= 0) continue;
+      await this.walletsService.reconcileBusinessWallet(businessId as any, {
+        balance: -take,
+      });
+      e.net_amount = (e.net_amount || 0) - take;
+      await e.save();
+      remaining -= take;
+      taken += take;
+    }
+    return taken;
+  }
+
+  /**
    * Customer files a dispute against a vendor for a delivered order.
-   * Freezes the vendor's payout by setting release_date = null.
+   * The vendor's payout is not held (settlement.ts); a refund decided after
+   * payout is recovered from the vendor's balance.
    */
   async fileDispute(customerId: string, dto: CreateDisputeDto) {
     // Every other problem is about what arrived, so it needs a delivered
@@ -121,16 +161,24 @@ export class DisputesService {
       }
     }
 
-    // Check if payout has already been released
-    const releasedEarnings = await this.businessEarningsModel.find({
-      order: order._id,
-      business: dto.business_id,
-      released: true,
-    });
-    if (releasedEarnings.length > 0) {
-      throw new BadRequestException(
-        'Vendor payment has already been released. Please contact support.',
-      );
+    // A problem can be reported up to DISPUTE_WINDOW_DAYS after this
+    // vendor's parcel was delivered, whether or not the vendor has been paid.
+    if (!notReceived) {
+      const delivered = (order.shipments || [])
+        .filter(
+          (s: any) =>
+            String(s.business) === String(dto.business_id) && s.delivered_at,
+        )
+        .map((s: any) => new Date(s.delivered_at).getTime());
+      const deliveredAt = delivered.length ? Math.max(...delivered) : 0;
+      if (
+        deliveredAt &&
+        Date.now() > deliveredAt + DISPUTE_WINDOW_DAYS * 24 * 60 * 60 * 1000
+      ) {
+        throw new BadRequestException(
+          `Problems can be reported up to ${DISPUTE_WINDOW_DAYS} days after delivery. Please contact support.`,
+        );
+      }
     }
 
     // Check for existing open dispute
@@ -142,12 +190,6 @@ export class DisputesService {
     if (existingDispute) {
       throw new BadRequestException('You already have an open dispute for this vendor on this order');
     }
-
-    // Freeze payout: set release_date = null on all unreleased earnings
-    await this.businessEarningsModel.updateMany(
-      { order: order._id, business: dto.business_id, released: false },
-      { $set: { release_date: null } },
-    );
 
     const dispute = await this.disputeModel.create({
       order: order._id,
@@ -231,7 +273,7 @@ export class DisputesService {
       action_url: '/disputes',
     });
 
-    return { message: 'Dispute filed successfully. Vendor payout has been frozen.', data: dispute };
+    return { message: 'Dispute filed successfully.', data: dispute };
   }
 
   /**
@@ -326,9 +368,17 @@ export class DisputesService {
             (i: any) => i.business?.toString() === businessId && !i.rejected,
           )
           .reduce((sum: number, i: any) => sum + (i.total_price || 0), 0);
-        const earningsGross = earnings.reduce((sum, e) => sum + (e.amount || 0), 0);
         const earningsNet = earnings.reduce((sum, e) => sum + (e.net_amount || 0), 0);
-        const totalRefund = itemsGross > 0 ? itemsGross : earningsGross > 0 ? earningsGross : earningsNet;
+        // The fallback counts paid and unpaid earnings alike: payouts are not
+        // held, so the vendor may already have been paid for this order.
+        const allEarnings = await this.businessEarningsModel.find({
+          order: dispute.order,
+          business: businessId,
+          milestone: { $ne: 'cancellation_fee' },
+        });
+        const allGross = allEarnings.reduce((sum, e) => sum + (e.amount || 0), 0);
+        const allNet = allEarnings.reduce((sum, e) => sum + (e.net_amount || 0), 0);
+        const totalRefund = itemsGross > 0 ? itemsGross : allGross > 0 ? allGross : allNet;
 
         dispute.status = DisputeStatus.RESOLVED_REFUND;
         dispute.refund_amount = totalRefund;
@@ -348,6 +398,14 @@ export class DisputesService {
               this.logger.error(`Pending reconcile failed for dispute ${disputeId}: ${e?.message}`),
             );
         }
+
+        // Earnings already paid out for this order are recovered from the
+        // vendor's balance (any shortfall is booked as owed).
+        vendorLoses += await this.recoverFromPaidEarnings(
+          dispute.order as any,
+          businessId,
+          Number.MAX_SAFE_INTEGER,
+        );
 
         // Issue refund to customer
         await this.processDisputeRefund(order, totalRefund, `Dispute resolved: full refund`);
@@ -386,11 +444,15 @@ export class DisputesService {
             );
         }
 
-        // Unfreeze remaining earnings
-        await this.businessEarningsModel.updateMany(
-          { order: dispute.order, business: businessId, released: false },
-          { $set: { release_date: new Date() } },
-        );
+        // Whatever the unpaid earnings didn't cover comes out of what the
+        // vendor was already paid for this order.
+        if (remaining > 0) {
+          vendorLoses += await this.recoverFromPaidEarnings(
+            dispute.order as any,
+            businessId,
+            remaining,
+          );
+        }
 
         // Issue partial refund
         await this.processDisputeRefund(order, dto.refund_amount, `Dispute resolved: partial refund`);
@@ -400,11 +462,7 @@ export class DisputesService {
       case DisputeResolution.RELEASE_TO_VENDOR: {
         dispute.status = DisputeStatus.RESOLVED_RELEASED;
 
-        // Unfreeze payout
-        await this.businessEarningsModel.updateMany(
-          { order: dispute.order, business: businessId, released: false },
-          { $set: { release_date: new Date() } },
-        );
+        // Nothing to do: the payout was never held.
         break;
       }
     }

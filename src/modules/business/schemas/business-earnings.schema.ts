@@ -34,7 +34,7 @@ export class BusinessEarning extends Document {
   released: boolean;
 
   @Prop({ type: Date, default: null })
-  release_date: Date; // Set on delivery (delivery_date + payout_delay_days)
+  release_date: Date; // When it becomes withdrawable: payment + SETTLEMENT_DAYS (business/settlement.ts)
 
   @Prop({ default: null })
   released_at: Date;

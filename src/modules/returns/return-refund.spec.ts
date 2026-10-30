@@ -250,9 +250,10 @@ describe('ReturnsService - requests, rejection and auto-approval', () => {
     ).rejects.toThrow(/made to your measurements/);
   });
 
-  it('needs a reason to reject, and holds the payout long enough to dispute', async () => {
+  it('needs a reason to reject, and leaves the payout date alone (no holds)', async () => {
     const order = await delivered();
-    await earningsModel.create({ business: vendor, order: order._id, amount: 9_000, commission: 900, net_amount: 8_100, released: false, release_date: null });
+    const due = new Date(Date.now() + 5 * 86400000);
+    await earningsModel.create({ business: vendor, order: order._id, amount: 9_000, commission: 900, net_amount: 8_100, released: false, release_date: due });
     const ret = await returnModel.create({
       order: order._id, order_reference: order.reference, customer, business: vendor,
       items: [product], reason: 'wrong_size', status: ReturnStatus.REQUESTED,
@@ -262,8 +263,8 @@ describe('ReturnsService - requests, rejection and auto-approval', () => {
 
     await service.rejectReturn(ret._id.toString(), vendor.toString(), 'Worn and washed');
     const e = await earningsModel.findOne({ order: order._id }).lean();
-    // Not now: at least three days out, so the customer can still dispute.
-    expect(new Date(e.release_date).getTime()).toBeGreaterThan(Date.now() + 2.9 * 86400000);
+    // Paystack: payouts never wait on a return or dispute (settlement.ts).
+    expect(new Date(e.release_date).getTime()).toBe(due.getTime());
   });
 
   it('approves a return left unanswered past the setting, once', async () => {
