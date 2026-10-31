@@ -1788,8 +1788,13 @@ export class ProductService {
 
               // …or the fabric-KIND product's own fabric (product.fabric).
               if (embeddedRes.matchedCount === 0) {
+                // (older bespoke orders stored the product's own id here)
+                const isProductId =
+                  String(item.product) === String(selection.fabric_id);
                 await this.productModel.updateOne(
-                  { _id: item.product, 'fabric._id': selection.fabric_id },
+                  isProductId
+                    ? { _id: item.product, fabric: { $ne: null } }
+                    : { _id: item.product, 'fabric._id': selection.fabric_id },
                   { $inc: { 'fabric.yard_length': totalYards } },
                   { session },
                 );
@@ -1995,10 +2000,13 @@ export class ProductService {
         // product.fabric (normalizeSelections stores product.fabric._id as the
         // fabric_id). Without this branch, buying a fabric product threw
         // "Fabric … not found in product or standalone" at inventory time.
+        // Bespoke orders made before 31 Oct 2026 stored the fabric PRODUCT's
+        // id here instead of product.fabric._id, so accept either.
         if (
           !fabric &&
           product.fabric &&
-          String((product.fabric as any)._id) === String(selection.fabric_id)
+          (String((product.fabric as any)._id) === String(selection.fabric_id) ||
+            String(product._id) === String(selection.fabric_id))
         ) {
           fabric = product.fabric as any;
         }
@@ -2067,7 +2075,11 @@ export class ProductService {
     }
 
     // 3) Standalone fabric-KIND product: stock lives on product.fabric.
-    if (product.fabric && String((product.fabric as any)._id) === String(fabricId)) {
+    if (
+      product.fabric &&
+      (String((product.fabric as any)._id) === String(fabricId) ||
+        String(product._id) === String(fabricId))
+    ) {
       await this.productModel
         .updateOne(
           { _id: productId },
