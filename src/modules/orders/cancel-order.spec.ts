@@ -42,7 +42,15 @@ describe('OrdersService.cancelOrder', () => {
       logger: stubLogger,
       orderModel,
       businessEarningsModel: earningsModel,
-      transactionService: { findByOrderId, create: createTxn },
+      transactionService: {
+        findByOrderId,
+        create: createTxn,
+        // Sum of what was paid: the single payment findByOrderId returns.
+        paidTotalForOrder: jest.fn(async () => {
+          const tx = await findByOrderId.mock.results.at(-1)?.value;
+          return tx ? Number(tx.amount) || 0 : 0;
+        }),
+      },
       walletsService: {
         creditWallet,
         getOrCreateWallet: jest

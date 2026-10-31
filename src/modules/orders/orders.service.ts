@@ -1,4 +1,10 @@
 import { Length } from 'class-validator';
+import {
+  balanceDaysFrom,
+  balanceDueAt,
+  balanceOutstanding,
+  reminderDue,
+} from './bespoke-payment-plan';
 import { bucketSeries, DashboardRange, describeRange, resolveDashboardRange } from './dashboard-range';
 import {
   Injectable,
@@ -2819,7 +2825,20 @@ export class OrderService {
           item?.clothing_type === 'customize' ||
           (!item?.clothing_type && customProducts.has(String(item?.product)));
         if (!custom || !confirmed.has(String(item.business))) continue;
-        const amount = Math.round(((item.total_price || 0) * percent) / 100);
+        // Deposit orders: the fee is on the full quote (capped by what was
+        // paid, below). Once the finished piece was shown and the balance
+        // asked for, cancelling keeps the whole deposit, as letting the
+        // balance window pass would.
+        const plan: any = (order as any).payment_plan;
+        const planItem =
+          balanceOutstanding(plan) && String(item.business) === String(plan.tailor);
+        const base =
+          planItem && plan.status !== 'awaiting_balance'
+            ? Number(plan.quote_total) || 0
+            : item.total_price || 0;
+        const linePercent =
+          planItem && plan.status === 'awaiting_balance' ? 100 : percent;
+        const amount = Math.round((base * linePercent) / 100);
         if (amount <= 0) continue;
         lines.push({
           item: String(item._id),
@@ -2856,7 +2875,9 @@ export class OrderService {
     const transaction = await this.transactionService.findByOrderId(
       order._id.toString(),
     );
-    const paid = transaction ? Number(transaction.amount) || 0 : 0;
+    const paid = transaction
+      ? await this.transactionService.paidTotalForOrder(order._id.toString())
+      : 0;
     const quote = await this.quoteCancellation(order, paid);
     return {
       reference: order.reference,
@@ -2925,11 +2946,15 @@ export class OrderService {
     const transaction = await this.transactionService.findByOrderId(
       order._id.toString(),
     );
+    // A bespoke order may have been paid in two parts.
+    const paidTotal = transaction
+      ? await this.transactionService.paidTotalForOrder(order._id.toString())
+      : 0;
     if (opts?.customerId && transaction) {
       // A failure to work out the fee must never cost the customer their
       // refund: fall back to a full, free refund and log it.
       try {
-        fee = await this.quoteCancellation(order, Number(transaction.amount) || 0);
+        fee = await this.quoteCancellation(order, paidTotal);
         if (!fee.total) fee = null;
       } catch (feeErr: any) {
         fee = null;
@@ -2938,7 +2963,7 @@ export class OrderService {
         );
       }
     }
-    const refundAmount = fee ? fee.refund : transaction?.amount ?? 0;
+    const refundAmount = fee ? fee.refund : paidTotal;
     const refundNote = fee
       ? ` (₦${fee.total.toLocaleString()} kept as the cancellation fee for work already started)`
       : '';
@@ -3273,7 +3298,12 @@ export class OrderService {
    * finished-piece photos, or 72h passed without a response. Blocks when
    * nothing was submitted, changes were requested, or the review is fresh.
    */
-  private assertPreshipCleared(order: { preship?: any }) {
+  private assertPreshipCleared(order: { preship?: any; payment_plan?: any }) {
+    if (balanceOutstanding(order.payment_plan)) {
+      throw new BadRequestException(
+        `Waiting for the customer to pay the ₦${Number(order.payment_plan.balance_amount).toLocaleString()} balance. You can ship once it's paid.`,
+      );
+    }
     const preship = order.preship;
     const APPROVAL_WINDOW_MS = 72 * 60 * 60 * 1000;
     const windowElapsed =
@@ -3332,6 +3362,16 @@ export class OrderService {
       customer_note: null,
     };
     order.markModified('preship');
+    // Deposit orders: the photos are the moment the balance falls due.
+    const plan: any = (order as any).payment_plan;
+    const owesBalance = balanceOutstanding(plan);
+    if (owesBalance) {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      plan.status = 'awaiting_balance';
+      plan.balance_due_at = balanceDueAt(new Date(), balanceDaysFrom(settings));
+      plan.reminders_sent = 0;
+      order.markModified('payment_plan');
+    }
     await order.save();
 
     this.notificationsService
@@ -3341,7 +3381,9 @@ export class OrderService {
         category: NotificationCategory.ORDER,
         type: NotificationType.PRESHIP_REVIEW,
         title: 'Your outfit is ready — take a look 👀',
-        body: `The tailor finished order #${order.reference} and sent photos for your approval before shipping.`,
+        body: owesBalance
+          ? `The tailor finished order #${order.reference}. Check the photos, then pay the ₦${Number(plan.balance_amount).toLocaleString()} balance and they will ship it.`
+          : `The tailor finished order #${order.reference} and sent photos for your approval before shipping.`,
         metadata: { order_reference: order.reference },
         action_url: '/profile?tab=orders',
       })
@@ -3366,6 +3408,18 @@ export class OrderService {
     const preship = (order as any).preship;
     if (!preship || preship.status !== 'pending_review') {
       throw new BadRequestException('There is nothing awaiting your review on this order.');
+    }
+    const plan: any = (order as any).payment_plan;
+    if (dto.approve && balanceOutstanding(plan)) {
+      // On a deposit order, paying the balance is the approval.
+      throw new BadRequestException(
+        `Pay the ₦${Number(plan.balance_amount).toLocaleString()} balance to approve. The tailor ships once it's paid.`,
+      );
+    }
+    if (!dto.approve && plan?.status === 'awaiting_balance') {
+      // The balance clock waits while the tailor makes the changes.
+      plan.balance_due_at = null;
+      order.markModified('payment_plan');
     }
     preship.status = dto.approve ? 'approved' : 'changes_requested';
     preship.reviewed_at = new Date();
@@ -3404,6 +3458,255 @@ export class OrderService {
         );
     }
     return { message: dto.approve ? 'Approved — the tailor can ship.' : 'Change request sent to the tailor.', data: preship };
+  }
+
+  /**
+   * Customer pays the balance on a bespoke deposit order, from the wallet
+   * (settled at once) or by card (settled by the payment webhook / verify,
+   * like any checkout). Paying is also the approval of the pre-ship photos.
+   */
+  async payBespokeBalance(
+    reference: string,
+    customerId: string,
+    method: 'wallet' | 'card' = 'card',
+  ) {
+    const order = await this.orderModel.findOne({
+      reference,
+      customer: new Types.ObjectId(customerId),
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    const plan: any = (order as any).payment_plan;
+    if (!balanceOutstanding(plan)) {
+      throw new BadRequestException(
+        plan?.status === 'paid'
+          ? 'The balance on this order is already paid.'
+          : 'This order has no balance to pay.',
+      );
+    }
+    if (order.status !== OrderStatus.PROCESSING) {
+      throw new BadRequestException('This order is no longer open for payment.');
+    }
+    const amount = Number(plan.balance_amount) || 0;
+    const customer: any = await this.userModel
+      .findById(customerId)
+      .select('email')
+      .lean();
+
+    if (method === 'wallet') {
+      const wallet: any = await this.walletsService.getOrCreateWallet({
+        customer: customerId,
+      });
+      if ((wallet.balance ?? 0) < amount) {
+        throw new BadRequestException(
+          `Your wallet has ₦${Number(wallet.balance ?? 0).toLocaleString()}; the balance is ₦${amount.toLocaleString()}. Top up or pay by card.`,
+        );
+      }
+      await this.walletsService.debitWallet(String(wallet._id), amount);
+      const tx = await this.transactionService.create({
+        initiator: new Types.ObjectId(customerId),
+        order: order._id as Types.ObjectId,
+        wallet: wallet._id,
+        type: TransactionType.DEBIT,
+        amount,
+        status: TransactionStatus.SUCCESS,
+        description: `Balance for bespoke order ${order.reference}`,
+        channel: 'wallet_checkout',
+        metadata: {
+          order_reference: order.reference,
+          bespoke_balance: true,
+          payment_method: 'wallet',
+        },
+      } as any);
+      let settled = false;
+      try {
+        settled = await this.businessService.settleBespokeBalance(
+          order._id as Types.ObjectId,
+          tx.reference,
+        );
+      } finally {
+        if (!settled) {
+          // Never keep money the order didn't take.
+          await this.walletsService.creditWallet(String(wallet._id), amount);
+          await this.transactionService.markFailed(tx.reference).catch(() => undefined);
+        }
+      }
+      if (!settled) {
+        throw new BadRequestException('This balance could not be applied. Your wallet was not charged.');
+      }
+      this.notifyTailorBalancePaid(order).catch(() => undefined);
+      return {
+        message: 'Balance paid. The tailor will ship your order.',
+        data: {
+          transaction: { reference: tx.reference, amount, status: tx.status },
+          payment: null,
+        },
+      };
+    }
+
+    const tx = await this.transactionService.create({
+      initiator: new Types.ObjectId(customerId),
+      order: order._id as Types.ObjectId,
+      type: TransactionType.DEBIT,
+      amount,
+      description: `Balance for bespoke order ${order.reference}`,
+      channel: 'checkout',
+      metadata: {
+        order_reference: order.reference,
+        bespoke_balance: true,
+        payment_method: 'paystack',
+      },
+    } as any);
+    const init: any = await this.nairaGateway.initialize(
+      tx.reference,
+      customer?.email,
+    );
+    return {
+      message: 'Redirect to payment.',
+      data: {
+        transaction: { reference: tx.reference, amount, status: tx.status },
+        payment: init.data,
+      },
+    };
+  }
+
+  private async notifyTailorBalancePaid(order: any) {
+    const tailor = String(order?.payment_plan?.tailor ?? '');
+    if (!tailor) return;
+    const members = await this.vendorRecipients.resolve(tailor, FULFILMENT_ROLES);
+    await Promise.all(
+      members.map((member) =>
+        this.notificationsService.create({
+          recipient: member.userId,
+          recipient_business: tailor,
+          category: NotificationCategory.ORDER,
+          type: NotificationType.PRESHIP_DECISION,
+          title: 'Balance paid — ship it',
+          body: `The customer paid the balance on order #${order.reference}. You can ship now.`,
+          metadata: { order_reference: order.reference },
+          action_url: '/orders',
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Bespoke balance timers, hourly: remind the customer 2 and 5 days after
+   * the finished-piece photos, and close the order when the balance window
+   * passes unpaid (the tailor keeps the deposit; their deposit earnings stay).
+   * The clock only runs while the photos await the customer; a change
+   * request pauses it.
+   */
+  @Cron('50 * * * *', { timeZone: 'Africa/Lagos' })
+  async runBespokeBalanceTimers() {
+    try {
+      const now = new Date();
+      const orders: any[] = await this.orderModel
+        .find({
+          status: OrderStatus.PROCESSING,
+          'payment_plan.status': 'awaiting_balance',
+          'preship.status': 'pending_review',
+        })
+        .limit(500)
+        .lean();
+      for (const order of orders) {
+        const plan = order.payment_plan;
+        const dueAt = plan?.balance_due_at ? new Date(plan.balance_due_at) : null;
+        if (dueAt && dueAt <= now) {
+          await this.forfeitBespokeBalance(order, now);
+          continue;
+        }
+        const idx = reminderDue(plan, order.preship?.submitted_at, now);
+        if (idx < 0) continue;
+        const claim = await this.orderModel.updateOne(
+          {
+            _id: order._id,
+            'payment_plan.status': 'awaiting_balance',
+            'payment_plan.reminders_sent': idx === 0 ? { $in: [0, null] } : idx,
+          },
+          { $set: { 'payment_plan.reminders_sent': idx + 1 } },
+        );
+        if (claim.modifiedCount !== 1) continue;
+        await this.notificationsService
+          .create({
+            recipient: String(order.customer),
+            audience: 'customer',
+            category: NotificationCategory.ORDER,
+            type: NotificationType.PRESHIP_REVIEW,
+            title: 'Your outfit is waiting for you',
+            body: `Pay the ₦${Number(plan.balance_amount).toLocaleString()} balance on order #${order.reference} and the tailor will ship it.${dueAt ? ` Due by ${dueAt.toDateString()}.` : ''}`,
+            metadata: { order_reference: order.reference },
+            action_url: '/profile?tab=orders',
+          })
+          .catch(() => undefined);
+      }
+    } catch (err: any) {
+      this.logger.error(`[BespokeBalance] Timer run failed: ${err?.message}`);
+    }
+  }
+
+  private async forfeitBespokeBalance(order: any, now: Date) {
+    const claim = await this.orderModel.updateOne(
+      {
+        _id: order._id,
+        status: OrderStatus.PROCESSING,
+        'payment_plan.status': 'awaiting_balance',
+        'payment_plan.balance_due_at': { $lte: now },
+      },
+      {
+        $set: {
+          'payment_plan.status': 'forfeited',
+          'payment_plan.forfeited_at': now,
+          status: OrderStatus.CANCELLED,
+          // Not a normal cancellation: nothing is refunded and the deposit
+          // earnings stay, so the cancelled-order sweep must leave it alone.
+          cancellation_reconciled: true,
+        },
+      },
+    );
+    if (claim.modifiedCount !== 1) return;
+    const Design = this.orderModel.db.models['BespokeDesign'];
+    if (order.bespoke_design && Design) {
+      await Design.updateOne(
+        { _id: order.bespoke_design },
+        { $set: { status: 'cancelled' } },
+      ).catch(() => undefined);
+    }
+    this.logger.warn(
+      `[BespokeBalance] Order ${order.reference} closed: balance unpaid by ${now.toISOString()}; the tailor keeps the deposit.`,
+    );
+    const plan = order.payment_plan;
+    await this.notificationsService
+      .create({
+        recipient: String(order.customer),
+        audience: 'customer',
+        category: NotificationCategory.ORDER,
+        type: NotificationType.ORDER_CANCELLED,
+        title: 'Order closed',
+        body: `The balance on order #${order.reference} wasn't paid in time, so the order is closed. The deposit covers the tailor's work.`,
+        metadata: { order_reference: order.reference },
+        action_url: '/profile?tab=orders',
+      })
+      .catch(() => undefined);
+    const tailor = String(plan?.tailor ?? '');
+    const members = tailor
+      ? await this.vendorRecipients.resolve(tailor, FULFILMENT_ROLES)
+      : [];
+    await Promise.all(
+      members.map((member) =>
+        this.notificationsService
+          .create({
+            recipient: member.userId,
+            recipient_business: tailor,
+            category: NotificationCategory.ORDER,
+            type: NotificationType.ORDER_CANCELLED,
+            title: 'Balance not paid — order closed',
+            body: `The customer didn't pay the balance on order #${order.reference}. The order is closed and you keep the ₦${Number(plan?.deposit_amount ?? 0).toLocaleString()} deposit.`,
+            metadata: { order_reference: order.reference },
+            action_url: '/orders',
+          })
+          .catch(() => undefined),
+      ),
+    );
   }
 
   /**
@@ -4805,6 +5108,8 @@ export class OrderService {
         status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
         'shipments.confirmed': true,
         'shipments.fulfillment_deadline': { $lte: new Date() },
+        // The tailor finished; the customer owes the balance. Not late.
+        'payment_plan.status': { $ne: 'awaiting_balance' },
       });
 
       if (orders.length === 0) return;
@@ -5069,6 +5374,8 @@ export class OrderService {
 
       const orders = await this.orderModel.find({
         status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+        // Waiting on the customer's balance, not on the tailor.
+        'payment_plan.status': { $ne: 'awaiting_balance' },
         shipments: {
           $elemMatch: {
             confirmed: true,

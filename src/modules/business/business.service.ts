@@ -29,6 +29,10 @@ import { percentageChange } from '../../common/utils/percentageChange';
 import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { settlementDate } from './settlement';
+import {
+  SHIP_AFTER_BALANCE_DAYS,
+  balanceDueAt,
+} from '../orders/bespoke-payment-plan';
 import { LogisticsService } from '../logistics/logistics.service';
 import { User, UserDocument } from '../ums/schemas';
 import { PaginationQueryType } from 'src/common/types/pagination.type';
@@ -2072,6 +2076,119 @@ export class BusinessService {
   }
 
   // in product.service.ts or a dedicated service like business-earnings.service.ts
+  /**
+   * The customer paid a bespoke balance. Exactly once per order (an atomic
+   * claim on the plan): raise the tailor's item and the order total to the
+   * full quote, give the tailor at least a few days to ship from now, approve
+   * the pending pre-ship photos (paying is the approval), and record the
+   * tailor's balance earning on the normal fixed schedule.
+   *
+   * Returns false when nothing was settled: the balance was already paid, or
+   * the order was closed (forfeited / cancelled) before the money landed.
+   */
+  async settleBespokeBalance(
+    orderId: Types.ObjectId | string,
+    reference: string,
+  ): Promise<boolean> {
+    const order: any = await this.orderModel.findById(orderId).lean();
+    const plan = order?.payment_plan;
+    if (!plan || plan.kind !== 'deposit') return false;
+    const balance = Number(plan.balance_amount) || 0;
+    const now = new Date();
+    const shipBy = balanceDueAt(now, SHIP_AFTER_BALANCE_DAYS);
+    const tailor = String(plan.tailor);
+
+    const claim = await this.orderModel.updateOne(
+      {
+        _id: order._id,
+        status: { $ne: 'cancelled' },
+        'payment_plan.status': { $in: ['deposit_paid', 'awaiting_balance'] },
+      },
+      {
+        $set: {
+          'payment_plan.status': 'paid',
+          'payment_plan.balance_paid_at': now,
+          'payment_plan.balance_reference': reference,
+          'payment_plan.balance_due_at': null,
+        },
+        $inc: {
+          total: balance,
+          subtotal: balance,
+          'items.$[t].total_price': balance,
+        },
+        $max: { 'shipments.$[s].fulfillment_deadline': shipBy },
+      },
+      {
+        arrayFilters: [
+          { 't.business': { $in: [new Types.ObjectId(tailor), tailor] } },
+          {
+            's.business': { $in: [new Types.ObjectId(tailor), tailor] },
+            's.shipment_type': 'vendor_to_customer',
+          },
+        ],
+      },
+    );
+    if (claim.modifiedCount !== 1) return false;
+
+    await this.orderModel.updateOne(
+      { _id: order._id, 'preship.status': 'pending_review' },
+      { $set: { 'preship.status': 'approved', 'preship.reviewed_at': now } },
+    );
+    await this.recordBespokeBalanceEarnings(order._id, tailor, balance);
+    this.logger.log(
+      `[Bespoke] Balance ₦${balance} paid on order ${order.reference} (${reference})`,
+    );
+    return true;
+  }
+
+  /** The tailor's earning for a paid balance (same commission rules as the deposit). */
+  private async recordBespokeBalanceEarnings(
+    orderId: Types.ObjectId,
+    tailor: string,
+    gross: number,
+  ) {
+    if (gross <= 0) return;
+    const exists = await this.businessEarningsModel.exists({
+      order: orderId,
+      milestone: 'balance',
+    });
+    if (exists) return;
+    const settings: any = await this.platformSettingsModel.findOne().lean();
+    // A flat commission is per item and was taken on the deposit.
+    const commission =
+      (settings?.platform_commission_type ?? 'percent') === 'fixed'
+        ? 0
+        : gross * ((settings?.platform_commission_percent ?? 10) / 100);
+    const net = gross - commission;
+    const order: any = await this.orderModel
+      .findById(orderId)
+      .select('items')
+      .lean();
+    const item = (order?.items ?? []).find(
+      (i: any) => String(i.business) === tailor,
+    );
+    await this.businessEarningsModel.create({
+      business: new Types.ObjectId(tailor),
+      order: orderId,
+      item: item?._id,
+      amount: gross,
+      commission,
+      net_amount: net,
+      released: false,
+      release_date: settlementDate(),
+      milestone: 'balance',
+    });
+    await this.walletModel.findOneAndUpdate(
+      { business: new Types.ObjectId(tailor) },
+      { $inc: { pending_balance: net } },
+      { upsert: true },
+    );
+    await this.orderModel.updateOne(
+      { _id: orderId },
+      { $inc: { vendor_earnings: net, platform_commission: commission } },
+    );
+  }
+
   async recordBusinessEarnings(orderId: Types.ObjectId) {
     this.logger.log(`Recording business earnings for order: ${orderId}`);
 

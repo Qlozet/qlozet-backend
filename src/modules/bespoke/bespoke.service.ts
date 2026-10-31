@@ -36,6 +36,10 @@ import { generateUniqueQlozetReference } from '../../common/utils/generateString
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
+import {
+  buildPaymentPlan,
+  depositPercentFrom,
+} from '../orders/bespoke-payment-plan';
 import { WalletsService } from '../wallets/wallets.service';
 import { BusinessService } from '../business/business.service';
 import {
@@ -164,6 +168,11 @@ export class BespokeService {
 
     order.status = OrderStatus.PROCESSING;
     (order as any).payment_status = 'paid';
+    if ((order as any).payment_plan?.status === 'awaiting_deposit') {
+      (order as any).payment_plan.status = 'deposit_paid';
+      (order as any).payment_plan.deposit_paid_at = new Date();
+      order.markModified('payment_plan');
+    }
     await order.save();
 
     await this.businessService.recordBusinessEarnings(
@@ -336,7 +345,13 @@ export class BespokeService {
       .sort({ createdAt: -1 })
       .lean();
 
-    return { data: { design, quotes } };
+    const percent = await this.depositPercent();
+    return {
+      data: {
+        design,
+        quotes: quotes.map((q: any) => ({ ...q, payment_preview: this.paymentPreview(q, percent) })),
+      },
+    };
   }
 
   async cancelDesign(designId: string, customerId: string) {
@@ -751,6 +766,16 @@ export class BespokeService {
 
       const fabricTransferDeadline = new Date();
       fabricTransferDeadline.setDate(fabricTransferDeadline.getDate() + 3);
+      // Deposit now, balance when the tailor shows the finished piece (see
+      // orders/bespoke-payment-plan.ts). Fabric from another vendor ships at
+      // once, so it is always paid in full up front.
+      const planSettings = await this.platformSettingsModel.findOne().lean();
+      const plan = buildPaymentPlan(
+        String(quote.vendor),
+        quote.total,
+        depositPercentFrom(planSettings),
+      );
+      const tailorCharge = plan ? plan.deposit_amount : quote.total;
 
       order = await new this.orderModel({
         reference: orderReference,
@@ -765,7 +790,7 @@ export class BespokeService {
           {
             product: fabricForeign ? null : design.fabric || null,
             business: quote.vendor,
-            total_price: quote.total,
+            total_price: tailorCharge,
             note: quote.vendor_notes,
             body_profile: bodyProfile,
             ...(fabricProduct && !fabricForeign
@@ -822,9 +847,10 @@ export class BespokeService {
               ]
             : []),
         ],
-        subtotal: quote.total + fabricCost,
+        subtotal: tailorCharge + fabricCost,
         shipping_fee: 0,
-        total: quote.total + fabricCost,
+        total: tailorCharge + fabricCost,
+        payment_plan: plan,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
       }).save();
@@ -895,7 +921,9 @@ export class BespokeService {
       order: order._id as Types.ObjectId,
       type: TransactionType.DEBIT,
       amount: order.total,
-      description: `Bespoke order payment for design ${design.reference}`,
+      description: (order as any).payment_plan
+        ? `Bespoke deposit for design ${design.reference}`
+        : `Bespoke order payment for design ${design.reference}`,
       channel: 'checkout',
       metadata: {
         order_reference: order.reference,
@@ -1113,7 +1141,9 @@ export class BespokeService {
       (quote as any).design,
       (quote as any).customer,
     );
-    return { data: { ...quote, measurements } };
+    // The tailor sees how they'll be paid: deposit now, balance at the photos.
+    const deposit_percent = await this.depositPercent();
+    return { data: { ...quote, measurements, deposit_percent } };
   }
 
   async getQuoteDetailForCustomer(quoteId: string, customerId: string) {
@@ -1131,7 +1161,28 @@ export class BespokeService {
 
     if (!quote) throw new NotFoundException('Quote not found');
 
-    return { data: quote };
+    const percent = await this.depositPercent();
+    return { data: { ...quote, payment_preview: this.paymentPreview(quote, percent) } };
+  }
+
+  private async depositPercent(): Promise<number> {
+    const settings = await this.platformSettingsModel.findOne().lean();
+    return depositPercentFrom(settings);
+  }
+
+  /**
+   * What accepting this quote charges now and later (fabric from another
+   * vendor is added to the deposit at acceptance). null = paid in full.
+   */
+  private paymentPreview(quote: any, percent: number) {
+    const plan = buildPaymentPlan(String(quote?.vendor?._id ?? quote?.vendor), quote?.total, percent);
+    return plan
+      ? {
+          deposit_percent: plan.deposit_percent,
+          deposit_amount: plan.deposit_amount,
+          balance_amount: plan.balance_amount,
+        }
+      : null;
   }
 
   async saveQuoteDraft(

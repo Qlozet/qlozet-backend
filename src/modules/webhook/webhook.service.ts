@@ -21,6 +21,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
+import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
+import { VendorRole } from '../ums/schemas/role.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { EmailStatus } from '../notifications/schemas/email-log.schema';
@@ -50,6 +52,7 @@ export class WebhookService {
     private readonly paymentService: PaymentService,
     private readonly nairaGateway: NairaGatewayService,
     private readonly notificationsService: NotificationsService,
+    private readonly vendorRecipients: VendorRecipientsService,
     private readonly mailService: MailService,
     private readonly stripeProvider: StripeProvider,
 
@@ -469,6 +472,14 @@ export class WebhookService {
     const order = await this.orderModel.findById(orderId).lean();
     if (!order) return;
 
+    // The second half of a bespoke deposit order: settle the balance only.
+    // Everything else (acceptance, stock, the deposit's earnings) already ran
+    // when the deposit was paid.
+    if ((transaction.metadata as any)?.bespoke_balance) {
+      await this.finalizeBespokeBalance(order as any, transaction);
+      return;
+    }
+
     const isBespoke = (order as any)?.type === 'bespoke';
     const alreadyPaid = (order as any)?.payment_status === 'paid';
 
@@ -519,6 +530,16 @@ export class WebhookService {
       await this.orderModel.updateOne(
         { _id: orderId, status: 'pending' },
         { status: isBespoke ? 'processing' : 'in_review' },
+      );
+      // A bespoke deposit: the balance comes later (bespoke-payment-plan.ts).
+      await this.orderModel.updateOne(
+        { _id: orderId, 'payment_plan.status': 'awaiting_deposit' },
+        {
+          $set: {
+            'payment_plan.status': 'deposit_paid',
+            'payment_plan.deposit_paid_at': new Date(),
+          },
+        },
       );
     }
 
@@ -604,6 +625,61 @@ export class WebhookService {
           );
       }
     }
+  }
+
+  /**
+   * A bespoke balance charge settled. Settles the plan once; if the order was
+   * closed first (balance window passed, or cancelled) and this payment never
+   * counted, the money goes straight back to the customer's wallet.
+   */
+  private async finalizeBespokeBalance(order: any, transaction: TransactionDocument) {
+    const settled = await this.businessService
+      .settleBespokeBalance(order._id, transaction.reference)
+      .catch((e: any) => {
+        this.logger.error(
+          `[Bespoke] Balance settlement failed for ${order.reference}: ${e?.message}`,
+        );
+        return null;
+      });
+    if (settled === null) return; // retried by the next webhook / verify
+    if (settled) {
+      this.notifyTailorBalancePaid(order).catch(() => undefined);
+      return;
+    }
+    const fresh: any = await this.orderModel.findById(order._id).lean();
+    if (fresh?.payment_plan?.balance_reference === transaction.reference) return; // retry
+    const first = await this.transactionService
+      .claimMetadataFlag(transaction.reference, 'balance_refunded')
+      .catch(() => false);
+    if (first) {
+      this.logger.warn(
+        `[Bespoke] Balance ${transaction.reference} arrived after order ${order.reference} closed — refunding to wallet.`,
+      );
+      await this.refundPaymentOnCancelledOrder(fresh ?? order, transaction);
+    }
+  }
+
+  private async notifyTailorBalancePaid(order: any) {
+    const tailor = String(order?.payment_plan?.tailor ?? '');
+    if (!tailor) return;
+    const members = await this.vendorRecipients.resolve(tailor, [
+      VendorRole.OPERATIONS,
+      VendorRole.TAILOR,
+    ]);
+    await Promise.all(
+      members.map((member) =>
+        this.notificationsService.create({
+          recipient: member.userId,
+          recipient_business: tailor,
+          category: NotificationCategory.ORDER,
+          type: NotificationType.PRESHIP_DECISION,
+          title: 'Balance paid — ship it',
+          body: `The customer paid the balance on order #${order.reference}. You can ship now.`,
+          metadata: { order_reference: order.reference },
+          action_url: '/orders',
+        } as any),
+      ),
+    );
   }
 
   /**
