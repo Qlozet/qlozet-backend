@@ -7,6 +7,7 @@ import {
 } from '../platform/schema/platformSettings.schema';
 import { PaystackProvider } from './paystack.provider';
 import { StripeProvider } from './stripe.provider';
+import { FlutterwaveProvider } from './flutterwave.provider';
 import {
   PaymentProvider,
   PayoutProvider,
@@ -30,13 +31,24 @@ export class ProviderRouter {
     private readonly settingsModel: Model<PlatformSettingsDocument>,
     private readonly paystack: PaystackProvider,
     private readonly stripeProvider: StripeProvider,
+    private readonly flutterwaveProvider: FlutterwaveProvider,
   ) {}
 
   async processorFor(currency: string): Promise<Processor> {
     const ccy = (currency || 'NGN').toUpperCase();
     const settings: any = await this.settingsModel.findOne().lean();
     const map: Record<string, string> = settings?.currency_processor_map ?? {};
-    const chosen = (map[ccy] ?? map.default ?? (ccy === 'NGN' ? 'paystack' : 'stripe')) as Processor;
+    // Naira's default provider is the admin's naira_processor (failover between
+    // Paystack and Flutterwave happens in NairaGatewayService).
+    const nairaDefault =
+      settings?.naira_processor === 'flutterwave' && settings?.flutterwave_enabled
+        ? 'flutterwave'
+        : undefined;
+    const chosen = (
+      ccy === 'NGN' && nairaDefault
+        ? nairaDefault
+        : map[ccy] ?? map.default ?? (ccy === 'NGN' ? 'paystack' : 'stripe')
+    ) as Processor;
     if (chosen === 'stripe' && !settings?.stripe_enabled) {
       throw new BadRequestException(
         `Payments in ${ccy} are not available yet.`,
@@ -56,6 +68,7 @@ export class ProviderRouter {
 
   async payoutProviderFor(currency: string): Promise<PayoutProvider> {
     const processor = await this.processorFor(currency);
+    if (processor === 'flutterwave') return this.flutterwaveProvider;
     if (processor !== 'paystack') {
       // Stripe Connect payouts are Phase 4.
       throw new BadRequestException(
@@ -69,6 +82,8 @@ export class ProviderRouter {
     switch (processor) {
       case 'paystack':
         return this.paystack;
+      case 'flutterwave':
+        return this.flutterwaveProvider;
       case 'stripe':
         // Charging only for now — Connect payouts land in Phase 4.
         return this.stripeProvider;

@@ -569,8 +569,8 @@ export class Order {
   @Prop({ type: Number, default: null })
   group_amount_usd?: number | null; // consolidation view (minor units)
 
-  @Prop({ type: String, enum: ['paystack', 'stripe'], default: 'paystack' })
-  processor?: 'paystack' | 'stripe';
+  @Prop({ type: String, enum: ['paystack', 'flutterwave', 'stripe'], default: 'paystack' })
+  processor?: 'paystack' | 'flutterwave' | 'stripe';
 
   @Prop({ type: String, enum: ['ng', 'us'], default: 'ng' })
   entity?: 'ng' | 'us'; // which settlement entity the money landed in

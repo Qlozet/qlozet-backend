@@ -20,6 +20,7 @@ import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { EmailStatus } from '../notifications/schemas/email-log.schema';
@@ -47,6 +48,7 @@ export class WebhookService {
     private readonly businessService: BusinessService,
     private readonly productService: ProductService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
     private readonly notificationsService: NotificationsService,
     private readonly mailService: MailService,
     private readonly stripeProvider: StripeProvider,
@@ -210,6 +212,74 @@ export class WebhookService {
     return { status: 'success', received: true, reference };
   }
 
+  /**
+   * Flutterwave events. The body is only a hint: a charge is re-checked with
+   * Flutterwave (amount and currency included) before anything is settled,
+   * then it runs through the same idempotent success path as Paystack.
+   *   charge.completed   → card payment (data.tx_ref = our reference)
+   *   transfer.completed → vendor payout (data.reference = our reference)
+   */
+  async handleFlutterwaveWebhook(payload: any) {
+    const event: string = payload?.event ?? payload?.type ?? '';
+    const data: any = payload?.data ?? {};
+
+    if (event === 'charge.completed') {
+      const reference: string | undefined = data.tx_ref;
+      if (!reference) return { status: 'ignored', message: 'No reference' };
+      const exists = await this.transactionService
+        .findByReference(reference)
+        .catch(() => null);
+      if (!exists) return { status: 'ignored', message: 'Transaction not found' };
+
+      await this.nairaGateway.verify(reference, 'flutterwave');
+      // Reload: verify settled the row atomically, and saving the stale copy
+      // would undo that.
+      const transaction = await this.transactionService.findByReference(reference);
+      if (transaction.status === TransactionStatus.SUCCESS) {
+        await this.handleChargeSuccess(transaction);
+      }
+      transaction.metadata = {
+        ...(transaction.metadata as any),
+        flutterwave_event: event,
+        processed_at: new Date().toISOString(),
+      };
+      await transaction.save();
+      return { status: 'success', received: true, reference };
+    }
+
+    if (event === 'transfer.completed') {
+      const reference: string | undefined = data.reference;
+      if (!reference) return { status: 'ignored', message: 'No reference' };
+      const transaction = await this.transactionService
+        .findByReference(reference)
+        .catch(() => null);
+      if (!transaction) return { status: 'ignored', message: 'Transaction not found' };
+
+      const outcome = String(data.status || '').toUpperCase();
+      // Flutterwave retries; a payout already settled either way is left alone.
+      const settled =
+        transaction.status === TransactionStatus.SUCCESS ||
+        transaction.status === TransactionStatus.FAILED;
+      if (!settled && outcome === 'SUCCESSFUL') {
+        await this.handleTransferSuccess(transaction);
+        transaction.status = TransactionStatus.SUCCESS;
+      } else if (!settled && outcome === 'FAILED') {
+        await this.handleTransferFailed(transaction);
+        transaction.status = TransactionStatus.FAILED;
+      }
+      transaction.metadata = {
+        ...(transaction.metadata as any),
+        flutterwave_event: event,
+        flutterwave_transfer_status: outcome,
+        processed_at: new Date().toISOString(),
+      };
+      await transaction.save();
+      return { status: 'success', received: true, reference };
+    }
+
+    return { status: 'ignored', message: `Unhandled event ${event}` };
+  }
+
   // ------------------------ Helpers ------------------------
 
   private async handleChargeSuccess(
@@ -225,30 +295,44 @@ export class WebhookService {
       `handleChargeSuccess: type=${transaction.type}, wallet=${transaction.wallet}, isWalletFunding=${isWalletFunding}`,
     );
 
-    // Idempotency: Paystack retries webhooks. Credit a funded wallet only once.
-    const alreadyCredited = (transaction.metadata as any)?.funding_credited === true;
-    if (isWalletFunding && !alreadyCredited) {
-      try {
-        this.logger.log(
-          `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
+    // Idempotency: providers retry webhooks, and the customer's return page
+    // (/wallets/verify) credits too. One atomic flag decides who credits.
+    if (isWalletFunding) {
+      const first = await this.transactionService
+        .claimMetadataFlag(transaction.reference, 'funding_credited')
+        .catch(() => false);
+      if (first) {
+        try {
+          this.logger.log(
+            `Crediting wallet ${transaction.wallet} with ${transaction.amount}`,
+          );
+          await this.walletsService.creditWallet(
+            transaction.wallet!.toString(),
+            transaction.amount,
+          );
+          this.logger.log(`Wallet ${transaction.wallet} credited successfully`);
+        } catch (error) {
+          this.logger.error(`Failed to credit wallet: ${error.message}`, error.stack);
+          // Release the flag so a webhook retry or the return page can credit.
+          await this.transactionService
+            .attachMetadata(transaction.reference, { funding_credited: false })
+            .catch(() => undefined);
+          transaction.metadata = {
+            ...(transaction.metadata as any),
+            funding_credited: false,
+          };
+          return isWalletFunding;
+        }
+      } else {
+        this.logger.warn(
+          `Wallet funding ${transaction.reference} already credited — skipping.`,
         );
-        await this.walletsService.creditWallet(
-          transaction.wallet!.toString(),
-          transaction.amount,
-        );
-        // Flag persists via the metadata spread + save() in the caller.
-        transaction.metadata = {
-          ...(transaction.metadata as any),
-          funding_credited: true,
-        };
-        this.logger.log(`Wallet ${transaction.wallet} credited successfully`);
-      } catch (error) {
-        this.logger.error(`Failed to credit wallet: ${error.message}`, error.stack);
       }
-    } else if (isWalletFunding && alreadyCredited) {
-      this.logger.warn(
-        `Wallet funding ${transaction.reference} already credited — skipping.`,
-      );
+      // Keep the flag when the caller saves this (possibly stale) document.
+      transaction.metadata = {
+        ...(transaction.metadata as any),
+        funding_credited: true,
+      };
     }
 
     const isCheckoutOrder =
@@ -564,6 +648,27 @@ export class WebhookService {
     // ARE Paystack charges though, so they get the same active-verify safety
     // net as card checkout: without it the organizer's confirmation page could
     // only succeed if the webhook happened to land within its polling window.
+    // Wallet top-ups are card charges too (Paystack or Flutterwave): confirm
+    // with the provider when the webhook hasn't landed yet, then credit
+    // through the same once-only path the webhook uses.
+    if (
+      transaction.channel === 'wallet_topup' &&
+      transaction.status !== TransactionStatus.SUCCESS
+    ) {
+      await this.nairaGateway.verify(reference).catch((e: any) =>
+        this.logger.error(
+          `[VerifyAndFinalize] Top-up verify failed for ${reference}: ${e?.message}`,
+        ),
+      );
+      const topUp = await this.transactionService.findByReference(reference);
+      if (topUp.status === TransactionStatus.SUCCESS) {
+        await this.handleChargeSuccess(topUp);
+        await topUp.save();
+        return { success: true, status: 'success' };
+      }
+      return { success: false, status: topUp.status };
+    }
+
     if (
       transaction.channel !== 'checkout' &&
       transaction.channel !== 'reservation'
@@ -596,8 +701,8 @@ export class WebhookService {
             await this.transactionService.markSuccess(reference);
           }
         } else {
-          await this.paymentService
-            .verifyPaystackPayment(reference)
+          await this.nairaGateway
+            .verify(reference)
             .catch((e: any) =>
               this.logger.error(
                 `[VerifyAndFinalize] Reservation-fee verify failed for ${reference}: ${e?.message}`,
@@ -638,11 +743,11 @@ export class WebhookService {
           await this.transactionService.markSuccess(reference);
         }
       } else {
-        await this.paymentService
-          .verifyPaystackPayment(reference)
+        await this.nairaGateway
+          .verify(reference)
           .catch((e: any) =>
             this.logger.error(
-              `[VerifyAndFinalize] Paystack verify failed for ${reference}: ${e?.message}`,
+              `[VerifyAndFinalize] Card verify failed for ${reference}: ${e?.message}`,
             ),
           );
       }

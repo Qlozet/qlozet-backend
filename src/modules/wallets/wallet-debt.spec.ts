@@ -43,7 +43,7 @@ describe('WalletsService - owed balance and withdrawals', () => {
       transactionService: { create: createTxn, updateStatus: jest.fn() },
       platformSettingsModel: { findOne: () => ({ lean: async () => ({ minimum_payout: 2000 }) }) },
       businessModel: { findById: jest.fn().mockResolvedValue({ transfer_recipient_code: 'RCP', business_name: 'Ada Wears', created_by: { id: 'u1' } }) },
-      paymentService: { sendPayout: jest.fn().mockResolvedValue('PAY-1') },
+      nairaGateway: { payout: jest.fn().mockResolvedValue('PAY-1') },
       returnModel: {
         find: () => ({ select: () => ({ lean: async () => openReturns }) }),
       },
@@ -112,7 +112,7 @@ describe('WalletsService - owed balance and withdrawals', () => {
     const saved = await walletModel.findOne({ business }).lean();
     expect(saved.balance).toBe(0);
     expect(saved.owed_balance).toBe(2_000);
-    expect(service.paymentService.sendPayout).not.toHaveBeenCalled();
+    expect(service.nairaGateway.payout).not.toHaveBeenCalled();
   });
 
   it('an open return holds nothing back from a withdrawal (no conditional holds)', async () => {

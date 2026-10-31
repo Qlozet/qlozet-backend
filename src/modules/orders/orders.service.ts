@@ -64,6 +64,7 @@ import { TransactionService } from '../transactions/transactions.service';
 import { User, UserType } from '../ums/schemas';
 import { LogisticsService } from '../logistics/logistics.service';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { BusinessService } from '../business/business.service';
 import { ProductService } from '../products/products.service';
 import { computeAvailability } from '../products/product-availability';
@@ -138,6 +139,7 @@ export class OrderService {
     private readonly validationService: OrderValidationService,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
     private readonly priceCalculationService: PriceCalculationService,
     private readonly logisticService: LogisticsService,
     @InjectModel('Product') private productModel: Model<ProductDocument>,
@@ -701,7 +703,7 @@ export class OrderService {
           },
         });
 
-        const paymentInit = await this.paymentService.initializePaystackPayment(
+        const paymentInit = await this.nairaGateway.initialize(
           transaction.reference,
           customer.email,
         );
@@ -1559,7 +1561,7 @@ export class OrderService {
       channel: opts.channel,
       metadata: { ...(opts.metadata ?? {}), payment_method: 'paystack' },
     });
-    const paymentInit = await this.paymentService.initializePaystackPayment(
+    const paymentInit = await this.nairaGateway.initialize(
       tx.reference,
       opts.email,
     );
@@ -4933,9 +4935,10 @@ export class OrderService {
               remaining -= take;
             }
             if (remaining > 0) {
-              // Already-released earnings → claw back from spendable balance.
-              // reconcileBusinessWallet floors at 0, so this only recovers what
-              // is still in the wallet (unrecoverable if already withdrawn).
+              // Already-released earnings (common now that payouts are a fixed
+              // 14 days after payment) → take it from the spendable balance.
+              // A shortfall is booked as owed and recovered from later
+              // earnings (reconcileBusinessWallet).
               await this.walletsService.reconcileBusinessWallet(businessId, {
                 balance: -remaining,
               });

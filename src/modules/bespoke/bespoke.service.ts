@@ -35,6 +35,7 @@ import { RevisionRequestDto } from './dto/revision-request.dto';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { BusinessService } from '../business/business.service';
 import {
@@ -117,6 +118,7 @@ export class BespokeService {
     private readonly platformSettingsModel: Model<any>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
     private readonly walletsService: WalletsService,
     private readonly businessService: BusinessService,
     private readonly mailService: MailService,
@@ -902,7 +904,7 @@ export class BespokeService {
         items_count: 1,
       },
     });
-    const paymentInit = await this.paymentService.initializePaystackPayment(
+    const paymentInit = await this.nairaGateway.initialize(
       transaction.reference,
       customer.email,
     );

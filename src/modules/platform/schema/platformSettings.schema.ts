@@ -224,6 +224,22 @@ export class PlatformSettings extends Document {
   // Kill-switch: non-NGN routing refuses until Stripe (Phase 3) is live.
   @Prop({ type: Boolean, default: false })
   stripe_enabled: boolean;
+
+  // ── Naira card payments: two providers with failover ──
+  // Which provider naira checkouts try first. If it can't start a payment,
+  // the other one is tried (see payment/naira-gateway.service.ts).
+  @Prop({ type: String, enum: ['paystack', 'flutterwave'], default: 'paystack' })
+  naira_processor: 'paystack' | 'flutterwave';
+
+  // Flutterwave joins checkout only when this is on AND FLW_SECRET_KEY is set.
+  // Keep off until Flutterwave has approved the account for live payments.
+  @Prop({ type: Boolean, default: false })
+  flutterwave_enabled: boolean;
+
+  // Send a payout through Flutterwave when Paystack refuses it (for example,
+  // not enough Paystack balance because customers paid through Flutterwave).
+  @Prop({ type: Boolean, default: false })
+  flutterwave_payouts_enabled: boolean;
 }
 
 export type PlatformSettingsDocument = PlatformSettings & Document;

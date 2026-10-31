@@ -470,4 +470,29 @@ export class UpdatePlatformSettingsDto {
   @IsOptional()
   @IsBoolean()
   stripe_enabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Provider naira checkouts try first; the other takes over if it fails',
+    enum: ['paystack', 'flutterwave'],
+    example: 'paystack',
+  })
+  @IsOptional()
+  @IsIn(['paystack', 'flutterwave'])
+  naira_processor?: 'paystack' | 'flutterwave';
+
+  @ApiPropertyOptional({
+    description: 'Let Flutterwave take naira payments (needs FLW_SECRET_KEY)',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  flutterwave_enabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Send a payout through Flutterwave when Paystack refuses it',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  flutterwave_payouts_enabled?: boolean;
 }

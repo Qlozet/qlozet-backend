@@ -47,7 +47,11 @@ export class PaymentService {
     return { Authorization: `Bearer ${PAYSTACK_SECRET}` };
   }
 
-  async initializePaystackPayment(txReference: string, email: string) {
+  async initializePaystackPayment(
+    txReference: string,
+    email: string,
+    callbackUrl?: string,
+  ) {
     try {
       const transaction =
         await this.transactionService.findByReference(txReference);
@@ -79,7 +83,9 @@ export class PaymentService {
       // becomes "undefined/payment/verify", which Paystack rejects as an invalid
       // URL (a 400 that surfaced here as a generic 502). With it omitted,
       // Paystack falls back to the dashboard-configured callback.
-      if (FRONTEND_URL) {
+      if (callbackUrl) {
+        payload.callback_url = callbackUrl;
+      } else if (FRONTEND_URL) {
         payload.callback_url = `${FRONTEND_URL}/payment/verify`;
       } else {
         this.logger?.warn(

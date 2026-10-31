@@ -100,6 +100,31 @@ export class TransactionService {
     await this.transactionModel.updateOne({ reference }, { $set: set });
   }
 
+  /**
+   * Mark a transaction successful exactly once. Returns the updated document,
+   * or null when it was already successful (another request got there first).
+   */
+  async settleOnce(reference: string, set: Record<string, any> = {}) {
+    return this.transactionModel.findOneAndUpdate(
+      { reference, status: { $ne: TransactionStatus.SUCCESS } },
+      { $set: { ...set, status: TransactionStatus.SUCCESS } },
+      { new: true },
+    );
+  }
+
+  /**
+   * Set metadata[key] = true unless it is already set. Returns true only to
+   * the one caller that flipped it, so a side effect guarded by it (crediting
+   * a wallet, say) runs once even when a webhook and a redirect race.
+   */
+  async claimMetadataFlag(reference: string, key: string): Promise<boolean> {
+    const res = await this.transactionModel.updateOne(
+      { reference, [`metadata.${key}`]: { $ne: true } },
+      { $set: { [`metadata.${key}`]: true } },
+    );
+    return res.modifiedCount === 1;
+  }
+
   async markFailed(reference: string) {
     return this.updateStatus(reference, TransactionStatus.FAILED);
   }
