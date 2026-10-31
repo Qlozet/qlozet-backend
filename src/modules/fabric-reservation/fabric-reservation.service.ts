@@ -28,6 +28,7 @@ import { StripeProvider } from '../payment-providers/stripe.provider';
 import { generateUniqueQlozetReference } from '../../common/utils/generateString';
 import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { PlatformService } from '../platform/platform.service';
 import {
   Order,
@@ -59,6 +60,7 @@ export class FabricReservationService {
     private readonly productModel: Model<ProductDocument>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
     private readonly platformService: PlatformService,
     private readonly orderService: OrderService,
     private readonly stripeProvider: StripeProvider,
@@ -315,8 +317,8 @@ export class FabricReservationService {
           await this.transactionService.markSuccess(tx.reference);
         }
       } else {
-        await this.paymentService
-          .verifyPaystackPayment(tx.reference)
+        await this.nairaGateway
+          .verify(tx.reference)
           .catch(() => undefined);
       }
       tx = await txModel.findById(reservation.fee_transaction);

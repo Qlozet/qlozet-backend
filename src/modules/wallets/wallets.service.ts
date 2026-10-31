@@ -10,6 +10,7 @@ import { Wallet, WalletDocument } from './schema/wallet.schema';
 import { TransactionService } from '../transactions/transactions.service';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { Return, ReturnDocument, ReturnStatus } from '../returns/schemas/return.schema';
 import {
@@ -39,6 +40,7 @@ export class WalletsService {
     private readonly businessEarningsModel: Model<BusinessEarningDocument>,
     private readonly transactionService: TransactionService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
   ) {}
 
   async getOrCreateWallet(opts: { business?: string; customer?: string }) {
@@ -105,9 +107,11 @@ export class WalletsService {
       description: `Funding wallet`,
     });
 
-    const result = await this.paymentService.initializePaystackPayment(
+    const result = await this.nairaGateway.initialize(
       transaction.reference,
       email,
+      // Vendors return to their own wallet page, not the shop.
+      { returnTo: businessId ? 'vendor' : 'shop' },
     );
 
     return {
@@ -535,7 +539,7 @@ export class WalletsService {
 
     // Send payout via Paystack
     try {
-      const payoutReference = await this.paymentService.sendPayout(
+      const payoutReference = await this.nairaGateway.payout(
         businessId,
         amount,
         `Withdrawal for ${business.business_name}`,

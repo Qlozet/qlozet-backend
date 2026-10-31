@@ -13,6 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { WebhookService } from './webhook.service';
 import { StripeProvider } from '../payment-providers/stripe.provider';
+import { FlutterwaveService } from '../payment/flutterwave.service';
 import { Public } from 'src/common/decorators/public.decorator';
 import { RolesGuard } from 'src/common/guards';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -30,6 +31,7 @@ export class WebhookController {
     private readonly webhookService: WebhookService,
     private readonly configService: ConfigService,
     private readonly stripeProvider: StripeProvider,
+    private readonly flutterwave: FlutterwaveService,
   ) {}
 
   @Public()
@@ -73,6 +75,21 @@ export class WebhookController {
     );
 
     return this.webhookService.handlePaystackWebhook(req.body);
+  }
+
+  @Public()
+  @Post('flutterwave')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Handle Flutterwave webhook' })
+  @ApiResponse({ status: 200, description: 'Webhook received successfully' })
+  async handleFlutterwaveWebhook(@Req() req: any) {
+    const raw: Buffer | string =
+      req.rawBody instanceof Buffer ? req.rawBody : JSON.stringify(req.body ?? {});
+    if (!this.flutterwave.isValidWebhook(req.headers ?? {}, raw)) {
+      this.logger.warn('[Webhook] Invalid or missing Flutterwave signature — rejecting');
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+    return this.webhookService.handleFlutterwaveWebhook(req.body);
   }
 
   // Customer-return verification (authenticated, like /wallets/verify). Actively

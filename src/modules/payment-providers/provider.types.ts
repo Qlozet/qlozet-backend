@@ -2,17 +2,19 @@
 //
 // Charging and payouts go through these interfaces so processors are swappable
 // and routable by currency/entity:
-//   NGN  → Paystack   (Qlozet Nigeria entity)
+//   NGN  → Paystack or Flutterwave (Qlozet Nigeria entity; see
+//          payment/naira-gateway.service.ts for the default + failover)
 //   else → Stripe     (Qlozet, Inc. US entity — Phase 3)
 //
 // See docs/multi-currency-payments-plan.md.
 
-export type Processor = 'paystack' | 'stripe';
+export type Processor = 'paystack' | 'flutterwave' | 'stripe';
 export type SettlementEntity = 'ng' | 'us';
 
 /** Which entity a processor's money lands in. */
 export const PROCESSOR_ENTITY: Record<Processor, SettlementEntity> = {
   paystack: 'ng',
+  flutterwave: 'ng',
   stripe: 'us',
 };
 

@@ -30,6 +30,8 @@ import { UserType } from '../ums/schemas';
 import { VendorRole } from '../ums/schemas/role.schema';
 import { TokenService } from './token.service';
 import { PaymentService } from '../payment/payment.service';
+import { NairaGatewayService } from '../payment/naira-gateway.service';
+import { TransactionService } from '../transactions/transactions.service';
 import { WithdrawDto } from './dto/withdraw.dto';
 import {
   CreateTransferRecipientDto,
@@ -51,6 +53,8 @@ export class WalletsController {
     private readonly walletsService: WalletsService,
     private readonly tokenService: TokenService,
     private readonly paymentService: PaymentService,
+    private readonly nairaGateway: NairaGatewayService,
+    private readonly transactionService: TransactionService,
   ) {}
 
   // Fund wallet. Customers fund their own wallet (they bypass the vendor-role
@@ -61,7 +65,7 @@ export class WalletsController {
   @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Post('fund')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Fund wallet via Paystack' })
+  @ApiOperation({ summary: 'Fund wallet by card (Paystack or Flutterwave)' })
   @ApiBody({ type: FundWalletDto })
   @ApiOkResponse({
     description: 'Wallet funding initialized. Redirect the user to the authorization_url.',
@@ -86,27 +90,36 @@ export class WalletsController {
     return { message: 'Wallet funding initialized', data: result };
   }
 
-  // Verify payment after Paystack redirect
+  // Verify a top-up after the customer returns from Paystack or Flutterwave
   @Get('verify/:reference')
-  @ApiOperation({ summary: 'Verify Paystack payment and credit wallet' })
+  @ApiOperation({ summary: 'Verify a wallet top-up and credit the wallet' })
   @ApiParam({ name: 'reference', description: 'Transaction reference' })
   @ApiOkResponse({
     description: 'Payment verification result. Wallet is credited if status is success.',
     type: VerifyPaymentResponseDto,
   })
   async verifyPayment(@Param('reference') reference: string) {
-    const result = await this.paymentService.verifyPaystackPayment(reference);
+    const result = await this.nairaGateway.verify(reference);
 
-    // Credit wallet only if payment succeeded AND not already processed (avoids double-credit)
-    if (
-      result.status === 'success' &&
-      result.walletId &&
-      !result.alreadyProcessed
-    ) {
-      await this.walletsService.creditWallet(
-        result.walletId,
-        result.amount,
+    // Credit once. The webhook credits through the same flag, so whichever of
+    // the two arrives first does it and the other skips (checking
+    // alreadyProcessed alone let both credit when the redirect came first).
+    if (result.status === 'success' && result.walletId) {
+      const first = await this.transactionService.claimMetadataFlag(
+        reference,
+        'funding_credited',
       );
+      if (first) {
+        try {
+          await this.walletsService.creditWallet(result.walletId, result.amount);
+        } catch (error) {
+          // Release the flag so the webhook (or a retry) can still credit.
+          await this.transactionService.attachMetadata(reference, {
+            funding_credited: false,
+          });
+          throw error;
+        }
+      }
     }
 
     return result;
