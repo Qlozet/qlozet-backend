@@ -797,7 +797,11 @@ export class BespokeService {
               ? {
                   fabric_selections: [
                     {
-                      fabric_id: String(design.fabric),
+                      // Same shape as a normal fabric purchase: the fabric's
+                      // own id (product.fabric._id), not the product id.
+                      fabric_id: String(
+                        (fabricProduct as any).fabric?._id ?? design.fabric,
+                      ),
                       yardage: fabricYards,
                       quantity: 1,
                     },
