@@ -573,6 +573,25 @@ export class OrderController {
   }
 
   @Roles(UserType.CUSTOMER)
+  @Post(':reference/pay-balance')
+  @ApiOperation({
+    summary:
+      'Pay the balance on a bespoke deposit order (wallet or card). Paying approves the pre-ship photos.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async payBalance(
+    @Param('reference') reference: string,
+    @Body() body: { payment_method?: 'wallet' | 'card' | 'paystack' },
+    @Req() req: any,
+  ) {
+    return this.orderService.payBespokeBalance(
+      reference,
+      req.user?.id || req.user?._id,
+      body?.payment_method === 'wallet' ? 'wallet' : 'card',
+    );
+  }
+
+  @Roles(UserType.CUSTOMER)
   @Post(':reference/fit-feedback')
   @ApiOperation({ summary: 'Rate how the delivered bespoke piece fit' })
   @ApiParam({ name: 'reference', description: 'Order reference' })

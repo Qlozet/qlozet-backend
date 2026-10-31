@@ -136,6 +136,18 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 30 })
   custom_cancellation_fee_percent: number;
 
+  // ── Bespoke: deposit + balance (orders/bespoke-payment-plan.ts) ──
+  // Share of the tailor's quote charged when the customer accepts it. The
+  // balance is charged when the tailor sends photos of the finished piece.
+  // 0 or 100 = the whole quote is paid at acceptance.
+  @Prop({ type: Number, default: 50 })
+  bespoke_deposit_percent: number;
+
+  // Days the customer has to pay the balance after the photos arrive. When
+  // they pass unpaid, the order closes and the tailor keeps the deposit.
+  @Prop({ type: Number, default: 14 })
+  bespoke_balance_days: number;
+
   // ── Listing review ──
   // How a newly published listing reaches the shop. 'review_first': hidden
   // until an admin approves it. 'live_first': visible at once while it waits

@@ -113,6 +113,28 @@ export class UpdatePlatformSettingsDto {
 
   @ApiPropertyOptional({
     description:
+      'Bespoke deposit: share of the quote paid at acceptance; the balance is paid when the tailor sends finished-piece photos. 0 or 100 = pay in full.',
+    example: 50,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  bespoke_deposit_percent?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Days the customer has to pay a bespoke balance after the photos arrive; unpaid, the order closes and the tailor keeps the deposit.',
+    example: 14,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  bespoke_balance_days?: number;
+
+  @ApiPropertyOptional({
+    description:
       "How new listings reach the shop. 'review_first': hidden until approved. 'live_first': visible at once while awaiting review; a rejection takes it down.",
     enum: ['review_first', 'live_first'],
     example: 'review_first',

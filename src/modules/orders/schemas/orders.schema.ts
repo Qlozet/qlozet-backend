@@ -1,4 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import type { PaymentPlan } from '../bespoke-payment-plan';
 import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { Address, AddressSchema } from '../../ums/schemas/address.schema';
 
@@ -534,6 +535,12 @@ export class Order {
     comment?: string | null;
     created_at: Date;
   } | null;
+
+  // Bespoke deposit + balance (see orders/bespoke-payment-plan.ts). While the
+  // balance is unpaid, the tailor's item and the order total carry only what
+  // was charged; quote_total holds the full price. null = paid in one go.
+  @Prop({ type: Object, default: null })
+  payment_plan?: PaymentPlan | null;
 
   // Customer-facing payment/refund state (denormalised from Transactions so the
   // order list can render Paid/Refunded without joining the transactions coll).

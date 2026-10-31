@@ -359,6 +359,22 @@ export class TransactionService {
     });
   }
 
+  /**
+   * Everything the customer has paid on an order (a bespoke order is paid in
+   * two parts: deposit, then balance).
+   */
+  async paidTotalForOrder(orderId: string): Promise<number> {
+    const rows = await this.transactionModel
+      .find({
+        ...ObjectIdUtils.refMatch('order', orderId),
+        status: TransactionStatus.SUCCESS,
+        channel: { $in: ['checkout', 'wallet_checkout'] },
+      })
+      .select('amount')
+      .lean();
+    return rows.reduce((sum, r: any) => sum + (Number(r.amount) || 0), 0);
+  }
+
   /** Whether the customer has already been credited back anything on this order. */
   async hasSuccessfulRefund(orderId: string | Types.ObjectId): Promise<boolean> {
     const found = await this.transactionModel.exists({

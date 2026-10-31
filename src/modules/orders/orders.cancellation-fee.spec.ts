@@ -59,6 +59,7 @@ const build = (order: any, opts: { percent?: number; paid?: number; channel?: st
       })),
     },
     transactionService: {
+      paidTotalForOrder: jest.fn().mockResolvedValue(opts.paid ?? 125_000),
       findByOrderId: jest.fn().mockResolvedValue({
         amount: opts.paid ?? 125_000,
         channel: opts.channel ?? 'checkout',
