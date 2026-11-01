@@ -7,6 +7,7 @@ import { searchGaps, stuckOrdersFrom, vendorHealth, VendorHealthInput } from './
 import { CATALOGUE_ISSUE_LABEL, catalogueIssues, describeOrder, vendorItems } from './vendor-ops.helpers';
 import { escapeRegex, pickByName, productName } from '../actions/vendor-actions.helpers';
 import { LedgerSums, TallyOrder, tallyVendorMoney } from '../../business/vendor-money-tally';
+import { explainVendorMoney, MONEY_FIXES } from '../../business/vendor-money-explain';
 
 const RANGE_PROPS = {
   period: { type: 'string', enum: [...PERIOD_ENUM], description: 'Preset time window. Defaults to this_month.' },
@@ -112,8 +113,8 @@ export class AdminOpsToolsService {
       {
         name: 'get_vendor_money_tally',
         description:
-          "Do vendor money records agree? Checks every vendor wallet against its records: pending earnings vs the unreleased earning rows, and the wallet balance vs its transaction history (top-ups + released earnings - withdrawals - token purchases - clawbacks). For paid orders in the period, checks each order's vendor earnings and commission against its earning rows, and lists paid orders with no earnings at all and released earnings with no history entry. Finance only.",
-        input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max items per list (default 10, max 25).' } } },
+          "Do vendor money records agree? Checks every vendor wallet against its records: pending earnings vs the unreleased earning rows, and the wallet balance vs its transaction history (top-ups + released earnings - withdrawals - token purchases - clawbacks). For paid orders in the period, checks each order's vendor earnings and commission against its earning rows, and lists paid orders with no earnings at all and released earnings with no history entry. Pass a vendor to explain that vendor's differences instead: which records cause them (earnings paid with no history entry, the same earning paid more than once, old payouts missing from history or taken twice, money taken back with no entry), how much each accounts for, whether it predates the fix, and what is left unexplained. Finance only.",
+        input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max items per list (default 10, max 25).' }, business: { type: 'string', description: 'Optional vendor name, email or id: explain this vendor only.' } } },
       },
       {
         name: 'get_search_gaps',
@@ -734,6 +735,7 @@ export class AdminOpsToolsService {
   // ── Vendor money tally ────────────────────────────────────────────────────
 
   private async vendorMoneyTally(args: any) {
+    if (args?.business) return this.explainVendorMoneyFor(args);
     const range = resolveRange((args ?? {}) as RangeArgs);
     const limit = this.clamp(args.limit, 10, 25);
     const num = (v: any) => Number(v) || 0;
@@ -876,6 +878,91 @@ export class AdminOpsToolsService {
         paid_without_earnings: tally.paid_without_earnings.slice(0, limit),
         note:
           'Wallet checks are all-time; order checks cover paid orders created in the period. A positive balance difference means the wallet holds more than its history explains. Before 1 Nov 2026, money taken back after payout for returns, dispute refunds and late penalties wrote no history entry, and order totals were only reset on a full cancellation, so older vendors and orders can show differences from that alone.',
+      },
+    };
+  }
+
+  /** One vendor: which records cause its money differences. */
+  private async explainVendorMoneyFor(args: any) {
+    const pick = await this.findBusiness(String(args.business ?? ''));
+    if ('none' in pick) return { error: `No vendor matching "${args.business}".` };
+    if ('ambiguous' in pick) return { error: `Several vendors match: ${pick.ambiguous.join(', ')}. Which one?` };
+    const b: any = pick.match;
+    const bid = String(b._id);
+    const idForms = [b._id, bid];
+    const num = (v: any) => Number(v) || 0;
+
+    const wallet: any = await this.walletModel
+      .findOne({ business: { $in: idForms } })
+      .select('balance pending_balance owed_balance')
+      .lean();
+    if (!wallet) return { error: `${b.business_name} has no wallet yet.` };
+    const walletForms = [wallet._id, String(wallet._id)];
+
+    const [earnings, linked, unlinked] = await Promise.all([
+      this.earningModel
+        .find({ business: { $in: idForms } })
+        .select('order amount net_amount released released_at createdAt milestone')
+        .populate('order', 'reference')
+        .limit(20000)
+        .lean(),
+      this.transactionModel
+        .find({ wallet: { $in: walletForms } })
+        .select('reference type status amount channel createdAt metadata.earning_id metadata.payout_reversed metadata.clawback')
+        .limit(20000)
+        .lean(),
+      // Payouts before the July ledger fix were logged without the wallet.
+      this.transactionModel
+        .find({ wallet: null, channel: 'payout', 'metadata.business_id': { $in: idForms } })
+        .select('reference type status amount channel createdAt')
+        .limit(5000)
+        .lean(),
+    ]);
+
+    const tx = (t: any, unlinkedRow = false) => ({
+      id: String(t._id),
+      reference: t.reference ?? null,
+      type: String(t.type),
+      status: String(t.status),
+      amount: num(t.amount),
+      channel: t.channel ?? null,
+      created_at: t.createdAt ?? null,
+      earning_id: t.metadata?.earning_id ? String(t.metadata.earning_id) : null,
+      payout_reversed: t.metadata?.payout_reversed === true,
+      clawback: t.metadata?.clawback === true,
+      unlinked: unlinkedRow,
+    });
+
+    const explanation = explainVendorMoney({
+      wallet: {
+        balance: num(wallet.balance),
+        pending_balance: num(wallet.pending_balance),
+        owed_balance: num(wallet.owed_balance),
+      },
+      earnings: (earnings as any[]).map((e) => ({
+        id: String(e._id),
+        order: e.order?.reference ?? (e.order ? String(e.order) : null),
+        amount: num(e.amount),
+        net_amount: num(e.net_amount),
+        released: !!e.released,
+        released_at: e.released_at ?? null,
+        created_at: e.createdAt ?? null,
+        milestone: e.milestone ?? null,
+      })),
+      transactions: [
+        ...(linked as any[]).map((t) => tx(t)),
+        ...(unlinked as any[]).map((t) => tx(t, true)),
+      ],
+    });
+
+    return {
+      currency: 'NGN',
+      data: {
+        business: b.business_name,
+        ...explanation,
+        fixes: Object.values(MONEY_FIXES),
+        note:
+          'accounts_for is signed: positive means the wallet holds more than its records, negative less. balance_unexplained is what no known cause covers; near zero, with every cause before_fix, means the difference is left over from bugs already fixed and current code is not adding to it. Pending should always equal the unreleased earnings. This only reads; nothing was changed.',
       },
     };
   }
