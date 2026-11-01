@@ -69,7 +69,15 @@ export class BespokeQuote {
 
   // ─── Vendor Details ───
   @Prop({ type: Number, default: null })
-  required_fabric_yards: number;
+  required_fabric_yards: number | null;
+
+  /**
+   * The fabric's source and price (bespoke/quote-fabric.ts), worked out on
+   * every save and frozen when the quote is sent. null on quotes sent before
+   * 31 Oct 2026.
+   */
+  @Prop({ type: Object, default: null })
+  fabric_pricing: Record<string, any> | null;
 
   @Prop({ type: Number, default: null })
   estimated_completion_days: number;

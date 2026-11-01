@@ -29,10 +29,15 @@ export class SubmitQuoteDto {
   @ArrayMinSize(1)
   line_items: LineItemDto[];
 
-  @ApiProperty({ example: 7, description: 'Yards of fabric required' })
+  @ApiPropertyOptional({
+    example: 7,
+    description:
+      'Yards of fabric required. Required when the design has a fabric (it prices the fabric); optional when the tailor sources the fabric and types its cost on the "Fabric" line.',
+  })
+  @IsOptional()
   @IsNumber()
   @Min(0.1)
-  required_fabric_yards: number;
+  required_fabric_yards?: number;
 
   @ApiProperty({ example: 14, description: 'Days the tailor needs before shipping, counted from payment. This is the ship-by deadline late penalties are measured against; delivery time is on top.' })
   @IsNumber()
