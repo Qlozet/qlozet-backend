@@ -522,7 +522,7 @@ export class OrderController {
   async answerMeasurementQuestion(
     @Param('reference') reference: string,
     @Param('questionId') questionId: string,
-    @Body() body: { measurements?: Record<string, number>; message?: string },
+    @Body() body: { measurements?: Record<string, number>; message?: string; save_to_profile?: boolean },
     @Req() req: any,
   ) {
     return this.measurementQuestions.answer(reference, req.user?.id, questionId, body);

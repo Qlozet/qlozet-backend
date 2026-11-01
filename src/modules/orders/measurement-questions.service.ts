@@ -1,9 +1,12 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -16,6 +19,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { UserService } from '../ums/services/users.service';
 
 /** The body parts a customer can record (and a tailor can ask about). */
 export const MEASUREMENT_KEYS = [
@@ -55,7 +59,44 @@ export class MeasurementQuestionsService {
     private readonly notifications: NotificationsService,
     private readonly vendorRecipients: VendorRecipientsService,
     private readonly mail: MailService,
+    @Optional()
+    @Inject(forwardRef(() => UserService))
+    private readonly users?: UserService,
   ) {}
+
+  /**
+   * Copy the customer's corrections into their saved measurement set, the
+   * one this order was measured from (by name; the active set when the order
+   * didn't record one). Goes through the normal set update, so the numbers
+   * are marked as measured by the customer, the set's method and updated_at
+   * move, and body type is recomputed. Returns the set's name, or null with
+   * the reason it couldn't be saved; the order's answer stands either way.
+   */
+  private async saveToProfile(
+    customerId: string,
+    orderCopy: { set_name?: string | null; unit?: string },
+    changes: { body_part: string; to: number }[],
+  ): Promise<{ set: string | null; reason?: string }> {
+    if (!this.users) return { set: null, reason: 'unavailable' };
+    const { sets } = await this.users.getAllMeasurementSets(customerId);
+    const set =
+      (orderCopy.set_name
+        ? sets.find((s: any) => s.name === orderCopy.set_name)
+        : sets.find((s: any) => s.active)) ?? null;
+    if (!set) return { set: null, reason: 'set_missing' };
+    // The answer is in the order copy's unit; the saved set may use the other.
+    const from = orderCopy.unit === 'inch' ? 'inch' : 'cm';
+    const to = (set as any).unit === 'inch' ? 'inch' : 'cm';
+    const factor = from === to ? 1 : from === 'cm' ? 1 / 2.54 : 2.54;
+    const measurements: Record<string, number> = {};
+    for (const c of changes) {
+      measurements[c.body_part] = Math.round(c.to * factor * 10) / 10;
+    }
+    await this.users.updateMeasurementSet(customerId, (set as any).name, {
+      measurements,
+    } as any);
+    return { set: (set as any).name };
+  }
 
   /** The copy a question is about: one made-to-order line, or the order's own. */
   private target(order: any, itemId: string | null) {
@@ -214,7 +255,7 @@ export class MeasurementQuestionsService {
     reference: string,
     customerId: string,
     questionId: string,
-    dto: { measurements?: Record<string, number>; message?: string },
+    dto: { measurements?: Record<string, number>; message?: string; save_to_profile?: boolean },
   ) {
     const order: any = await this.orderModel.findOne({ reference });
     if (!order || String(order.customer) !== String(customerId)) throw new NotFoundException('Order not found');
@@ -283,6 +324,22 @@ export class MeasurementQuestionsService {
     order.markModified('measurement_questions');
     await order.save();
 
+    // Optional: the same corrections into the customer's saved set, so the
+    // next order doesn't start from the wrong number again. Never fails the
+    // answer — the order copy is what the tailor needs right now.
+    let savedTo: string | null = null;
+    let notSavedReason: string | undefined;
+    if (dto.save_to_profile && changes.length) {
+      try {
+        const res = await this.saveToProfile(String(customerId), target.profile, changes);
+        savedTo = res.set;
+        notSavedReason = res.reason;
+      } catch (e: any) {
+        notSavedReason = 'failed';
+        this.logger.warn(`Saving measurement answer to profile failed: ${e?.message}`);
+      }
+    }
+
     const summary = changes.length
       ? changes.map((c) => `${label(c.body_part)} ${c.from ?? '—'} → ${c.to}`).join(', ')
       : 'no changes';
@@ -302,6 +359,13 @@ export class MeasurementQuestionsService {
         .catch((e) => this.logger.warn(`Measurement answer notice failed: ${e?.message}`));
     }
 
-    return { message: 'Thanks — your tailor has your answer.', data: { changes } };
+    const message = savedTo
+      ? `Thanks — your tailor has your answer, and "${savedTo}" in your measurements is updated too.`
+      : dto.save_to_profile && changes.length
+        ? notSavedReason === 'set_missing'
+          ? "Thanks — your tailor has your answer. The measurement set this order used isn't in your profile any more, so update your measurements there."
+          : 'Thanks — your tailor has your answer. Your saved measurements could not be updated; change them in your profile.'
+        : 'Thanks — your tailor has your answer.';
+    return { message, data: { changes, saved_to_profile: savedTo } };
   }
 }
