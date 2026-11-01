@@ -232,8 +232,15 @@ export class BusinessController {
     VendorRole.SALES,
   )
   @Get('earnings/upcoming')
-  async getUpcomingEarnings(@Req() req: any) {
-    return this.businessService.getUpcomingEarnings(req.business.id);
+  async getUpcomingEarnings(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('size') size?: string,
+  ) {
+    return this.businessService.getUpcomingEarnings(req.business.id, {
+      page: page ? Number(page) : undefined,
+      size: size ? Number(size) : undefined,
+    });
   }
   @Roles(UserType.VENDOR)
   @Get()

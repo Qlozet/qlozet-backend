@@ -2665,37 +2665,60 @@ export class BusinessService {
     businessId: string,
     query?: { page?: number; size?: number },
   ) {
-    const { page = 1, size = 10 } = query || {};
+    const page = Math.max(1, Number(query?.page) || 1);
+    const size = Math.min(50, Math.max(1, Number(query?.size) || 10));
     const { take, skip } = await Utils.getPagination(page, size);
 
+    // Money still on its way to the vendor's wallet, soonest first. Rows a
+    // refund or penalty took to zero are not payouts.
     const filter = {
       business: new Types.ObjectId(businessId),
       released: false,
+      net_amount: { $gt: 0 },
     };
 
-    const [earnings, totalCount] = await Promise.all([
+    const [earnings, totalCount, totals] = await Promise.all([
       this.businessEarningsModel
         .find(filter)
-        .select('net_amount release_date order')
+        .select('net_amount release_date order milestone')
+        .sort({ release_date: 1, _id: 1 })
         .skip(skip)
         .limit(take)
+        .populate({ path: 'order', select: 'reference type' })
         .lean()
         .exec(),
       this.businessEarningsModel.countDocuments(filter),
+      this.businessEarningsModel.aggregate([
+        { $match: filter },
+        { $group: { _id: null, total: { $sum: '$net_amount' } } },
+      ]),
     ]);
 
-    // Expose frontend-friendly aliases (amount/date/label) alongside the raw
-    // fields so the vendor app can render upcoming earnings without a mapping.
-    const rows = earnings.map((e) => ({
-      ...e,
-      amount: e.net_amount,
-      date: e.release_date,
-      label: e.release_date
-        ? new Date(e.release_date).toISOString().slice(0, 10)
-        : null,
-    }));
+    // Frontend-friendly aliases (amount/date/label/order_reference) alongside
+    // the raw fields so the vendor app can render the list without a mapping.
+    const rows = earnings.map((e: any) => {
+      const order = e.order && typeof e.order === 'object' ? e.order : null;
+      return {
+        ...e,
+        order: order ? order._id : e.order,
+        order_reference: order?.reference ?? null,
+        order_type: order?.type ?? null,
+        amount: e.net_amount,
+        date: e.release_date,
+        label: e.release_date
+          ? new Date(e.release_date).toISOString().slice(0, 10)
+          : null,
+      };
+    });
 
-    return Utils.getPagingData({ count: totalCount, rows }, page, size);
+    const paged: any = await Utils.getPagingData(
+      { count: totalCount, rows },
+      page,
+      size,
+    );
+    // Sum of every upcoming row, not just this page.
+    paged.total_amount = Math.round((totals[0]?.total ?? 0) * 100) / 100;
+    return paged;
   }
   /**
    * Net earnings per bucket over the dashboard window (`rangeKey`: 7d, 30d,

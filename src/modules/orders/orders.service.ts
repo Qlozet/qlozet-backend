@@ -5243,7 +5243,26 @@ export class OrderService {
               // Already-released earnings (common now that payouts are a fixed
               // 14 days after payment) → take it from the spendable balance.
               // A shortfall is booked as owed and recovered from later
-              // earnings (reconcileBusinessWallet).
+              // earnings (reconcileBusinessWallet). Reduce the paid earning
+              // rows too, so the vendor's "Total earnings" drops by the
+              // penalty, as it does for returns and dispute refunds.
+              let fromRows = remaining;
+              const paid = await this.businessEarningsModel
+                .find({
+                  order: order._id,
+                  business: businessId,
+                  released: true,
+                  milestone: { $ne: 'cancellation_fee' },
+                })
+                .sort({ createdAt: -1 });
+              for (const earning of paid) {
+                if (fromRows <= 0) break;
+                const take = Math.min(fromRows, earning.net_amount || 0);
+                if (take <= 0) continue;
+                earning.net_amount = (earning.net_amount || 0) - take;
+                await earning.save();
+                fromRows -= take;
+              }
               await this.walletsService.reconcileBusinessWallet(businessId, {
                 balance: -remaining,
               });
