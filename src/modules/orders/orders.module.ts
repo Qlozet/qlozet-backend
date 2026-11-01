@@ -32,6 +32,7 @@ import { LogisticsModule } from '../logistics/logistics.module';
 import { CartModule } from '../cart/cart.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UmsModule } from '../ums/ums.module';
 
 @Module({
   imports: [
@@ -55,7 +56,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     CurrencyModule,      // provides CurrencyService (FX quotes at checkout)
     LogisticsModule,     // provides LogisticsService
     CartModule,          // provides CartService + Cart model
-    forwardRef(() => WalletsModule),  // forwardRef: avoids circular dep with PlatformModule
+    forwardRef(() => WalletsModule),
+    forwardRef(() => UmsModule), // measurement answers can update the customer's saved set  // forwardRef: avoids circular dep with PlatformModule
     NotificationsModule,  // provides NotificationsService
   ],
   controllers: [OrderController],

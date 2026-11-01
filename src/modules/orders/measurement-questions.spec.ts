@@ -118,6 +118,64 @@ describe('measurement questions', () => {
     expect(notices.some((n) => n.type === 'measurement_answered' && n.recipient === 'tailor-1')).toBe(true);
   });
 
+  describe('save to my profile', () => {
+    const askAndAnswer = async (sets: any[], body: any) => {
+      const order = makeOrder();
+      const { service: base } = build(order);
+      const updates: any[] = [];
+      const users: any = {
+        getAllMeasurementSets: jest.fn(async () => ({ sets })),
+        updateMeasurementSet: jest.fn(async (...a: any[]) => updates.push(a)),
+      };
+      const service = new MeasurementQuestionsService(
+        (base as any).orderModel,
+        (base as any).notifications,
+        (base as any).vendorRecipients,
+        (base as any).mail,
+        users,
+      );
+      await service.ask('ORD-1', String(vendor), String(new Types.ObjectId()), {
+        item_id: String(itemId),
+        message: 'Please check your waist measurement.',
+      });
+      const qid = String(order.measurement_questions[0]._id);
+      const res = await service.answer('ORD-1', String(customer), qid, body);
+      return { res, updates, order };
+    };
+
+    it("copies the corrections into the set the order used, in that set's unit", async () => {
+      const { res, updates, order } = await askAndAnswer(
+        [{ name: 'Me', active: true, unit: 'cm' }, { name: 'Dad', active: false, unit: 'inch' }],
+        { measurements: { waist: 84 }, save_to_profile: true },
+      );
+      expect(order.items[0].body_profile.measurements.waist).toBe(84);
+      expect(updates).toHaveLength(1);
+      expect(updates[0][1]).toBe('Dad');
+      expect(updates[0][2]).toEqual({ measurements: { waist: 33.1 } });
+      expect(res.data.saved_to_profile).toBe('Dad');
+    });
+
+    it('leaves the profile alone unless asked', async () => {
+      const { updates, res } = await askAndAnswer(
+        [{ name: 'Dad', active: true, unit: 'cm' }],
+        { measurements: { waist: 84 } },
+      );
+      expect(updates).toHaveLength(0);
+      expect(res.data.saved_to_profile).toBeNull();
+    });
+
+    it('still answers when the set is gone, and says so', async () => {
+      const { updates, res, order } = await askAndAnswer(
+        [{ name: 'Me', active: true, unit: 'cm' }],
+        { measurements: { waist: 84 }, save_to_profile: true },
+      );
+      expect(updates).toHaveLength(0);
+      expect(order.measurement_questions[0].status).toBe('answered');
+      expect(res.data.saved_to_profile).toBeNull();
+      expect(res.message).toMatch(/isn't in your profile/);
+    });
+  });
+
   it('refuses a second answer, and an empty one', async () => {
     const order = makeOrder();
     const { service } = build(order);
