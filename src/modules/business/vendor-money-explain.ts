@@ -194,22 +194,31 @@ export function explainVendorMoney(input: {
     examples: failedNotRestored.slice(0, EXAMPLES).map((t) => ({ reference: t.reference, amount: r2(t.amount), status: t.status, date: day(t.created_at) })),
   });
 
-  // Released then fully taken back, with no clawback entry. The amount taken
-  // is gone from the row (net is 0), so the gross is the nearest clue.
-  const silentClawbacks = earnings.filter(
-    (e) => e.released && !(e.net_amount > 0) && e.milestone !== 'cancellation_fee' && creditsByEarning.has(e.id) && !refundEarnings.has(e.id),
+  // Paid out, then partly or fully taken back (return, dispute refund, late
+  // penalty) with no clawback entry: what was paid less what the row is
+  // worth now. Late-penalty entries cover several rows and carry no earning
+  // id, so they are netted off the total instead of matched per row.
+  const paidOf = (e: ExplainEarning) =>
+    creditsByEarning.get(e.id)?.find((t) => t.status === 'success')?.amount ?? 0;
+  const silentClawbacks = earnings
+    .filter((e) => e.released && !refundEarnings.has(e.id))
+    .map((e) => ({ e, taken: r2(paidOf(e) - Math.max(0, e.net_amount || 0)) }))
+    .filter((x) => x.taken >= 1);
+  const unmatchedClawbackEntries = linked
+    .filter((t) => t.type === 'refund' && t.status === 'success' && t.clawback && !t.earning_id)
+    .reduce((s, t) => s + t.amount, 0);
+  const silentTotal = Math.max(
+    0,
+    silentClawbacks.reduce((s, x) => s + x.taken, 0) - unmatchedClawbackEntries,
   );
   add({
     kind: 'taken_back_without_history',
-    meaning: 'Earnings paid out and later taken back with no history entry: the wallet holds less. The amount taken is not stored, so the gross is shown as a guide.',
-    accounts_for: -silentClawbacks.reduce(
-      (s, e) => s + (creditsByEarning.get(e.id)?.[0]?.amount ?? 0),
-      0,
-    ),
-    count: silentClawbacks.length,
-    before_fix: silentClawbacks.every((e) => before(e.released_at ?? e.created_at, MONEY_FIXES.clawbackHistory.date)),
+    meaning: 'Earnings paid out and later taken back in full or in part (returns, dispute refunds, late penalties) with no history entry: the wallet holds less.',
+    accounts_for: -silentTotal,
+    count: silentTotal >= 1 ? silentClawbacks.length : 0,
+    before_fix: silentClawbacks.every((x) => before(x.e.released_at ?? x.e.created_at, MONEY_FIXES.clawbackHistory.date)),
     fix_date: MONEY_FIXES.clawbackHistory.date,
-    examples: silentClawbacks.slice(0, EXAMPLES).map((e) => ({ order: e.order, paid: r2(creditsByEarning.get(e.id)?.[0]?.amount ?? 0), gross: r2(e.amount) })),
+    examples: silentClawbacks.slice(0, EXAMPLES).map((x) => ({ order: x.e.order, paid: r2(paidOf(x.e)), worth_now: r2(x.e.net_amount), taken_back: x.taken })),
   });
 
   const explained = causes.reduce((s, c) => s + c.accounts_for, 0);
