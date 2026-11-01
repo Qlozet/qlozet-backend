@@ -231,9 +231,17 @@ describe('DisputesService', () => {
       expect(service.walletsService.reconcileBusinessWallet).toHaveBeenCalledWith(
         businessId.toString(),
         { balance: -54_000 },
+        // ...and writes the matching entry to the vendor's history.
+        expect.objectContaining({
+          order: order._id,
+          metadata: expect.objectContaining({ reason: 'dispute' }),
+        }),
       );
       const earning = await earningsModel.findOne({ order: order._id }).lean();
       expect(earning.net_amount).toBe(0);
+      // The customer got their money back, so the commission goes too, and
+      // the order's totals follow the row.
+      expect(earning.commission).toBe(0);
     });
 
     it(`is refused more than ${DISPUTE_WINDOW_DAYS} days after delivery`, async () => {

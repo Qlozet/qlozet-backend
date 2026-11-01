@@ -234,6 +234,8 @@ describe('cancellation fee: protected from later reversals', () => {
           filters.push(f);
           return Promise.resolve([]);
         }),
+        // The order's totals are re-summed from the rows afterwards.
+        aggregate: jest.fn().mockResolvedValue([]),
       },
       orderModel: { updateOne: jest.fn().mockResolvedValue({}) },
     });

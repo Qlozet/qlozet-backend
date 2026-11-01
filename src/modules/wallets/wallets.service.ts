@@ -164,6 +164,11 @@ export class WalletsService {
   async reconcileBusinessWallet(
     businessId: string | Types.ObjectId,
     deltas: { pending?: number; balance?: number },
+    // When money is taken from the spendable balance, write the matching
+    // REFUND entry to the vendor's history (only what actually left the
+    // balance; a shortfall is booked when it is recovered). Without it the
+    // history stops adding up to the balance.
+    ledger?: { order?: any; description: string; metadata?: Record<string, any> },
   ) {
     const pendingDelta = deltas.pending ?? 0;
     const balanceDelta = deltas.balance ?? 0;
@@ -218,6 +223,28 @@ export class WalletsService {
     await wallet.save();
     if (recovered > 0) {
       await this.recordDebtRecovery(wallet, recovered);
+    }
+    const taken = balanceDelta < 0 ? -balanceDelta - shortfall : 0;
+    if (ledger && taken > 0) {
+      try {
+        await this.transactionService.create({
+          wallet: wallet._id as any,
+          order: ledger.order ?? undefined,
+          type: TransactionType.REFUND,
+          amount: taken,
+          status: TransactionStatus.SUCCESS,
+          channel: 'refund',
+          payment_method: 'wallet',
+          description: ledger.description,
+          metadata: {
+            business_id: wallet.business?.toString(),
+            clawback: true,
+            ...(ledger.metadata ?? {}),
+          },
+        } as any);
+      } catch (err: any) {
+        this.logger.warn(`[WalletReconcile] Could not record clawback entry: ${err.message}`);
+      }
     }
 
     this.logger.log(

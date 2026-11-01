@@ -53,6 +53,7 @@ const TOOL_MODULES: Record<string, string[] | null> = {
   get_stuck_orders: ['order_management', 'vendor_management'],
   get_vendor_health: ['vendor_management', 'analytics'],
   get_payment_reconciliation: ['financial_management'],
+  get_vendor_money_tally: ['financial_management'],
   get_search_gaps: ['analytics', 'product_management'],
   get_catalogue_quality: ['product_management', 'vendor_management'],
 };
