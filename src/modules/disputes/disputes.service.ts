@@ -28,6 +28,10 @@ import {
 import { Business, BusinessDocument } from '../business/schemas/business.schema';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
+import {
+  reduceEarning,
+  syncOrderEarningTotals,
+} from '../business/order-earning-totals';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
 
 @Injectable()
@@ -117,10 +121,16 @@ export class DisputesService {
       if (remaining <= 0) break;
       const take = Math.min(remaining, e.net_amount || 0);
       if (take <= 0) continue;
-      await this.walletsService.reconcileBusinessWallet(businessId as any, {
-        balance: -take,
-      });
-      e.net_amount = (e.net_amount || 0) - take;
+      await this.walletsService.reconcileBusinessWallet(
+        businessId as any,
+        { balance: -take },
+        {
+          order: orderId,
+          description: 'Dispute refund on a paid order',
+          metadata: { earning_id: String(e._id), reason: 'dispute' },
+        },
+      );
+      reduceEarning(e, take, { refund: true });
       await e.save();
       remaining -= take;
       taken += take;
@@ -431,7 +441,7 @@ export class DisputesService {
           if (remaining <= 0) break;
           const take = Math.min(remaining, e.net_amount || 0);
           if (take <= 0) continue;
-          e.net_amount = (e.net_amount || 0) - take;
+          reduceEarning(e, take, { refund: true });
           await e.save();
           remaining -= take;
         }
@@ -465,6 +475,17 @@ export class DisputesService {
         // Nothing to do: the payout was never held.
         break;
       }
+    }
+
+    // The order's earnings totals follow its earning rows.
+    if (dto.resolution !== DisputeResolution.RELEASE_TO_VENDOR) {
+      await syncOrderEarningTotals(
+        this.orderModel,
+        this.businessEarningsModel,
+        dispute.order as any,
+      ).catch((e: any) =>
+        this.logger.warn(`Order totals sync failed for dispute ${disputeId}: ${e?.message}`),
+      );
     }
 
     dispute.resolved_by = new Types.ObjectId(adminId);

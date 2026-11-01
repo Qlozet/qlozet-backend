@@ -6,6 +6,7 @@ import { PERIOD_ENUM, RangeArgs, resolveRange } from './date-range';
 import { searchGaps, stuckOrdersFrom, vendorHealth, VendorHealthInput } from './admin-ops.helpers';
 import { CATALOGUE_ISSUE_LABEL, catalogueIssues, describeOrder, vendorItems } from './vendor-ops.helpers';
 import { escapeRegex, pickByName, productName } from '../actions/vendor-actions.helpers';
+import { LedgerSums, TallyOrder, tallyVendorMoney } from '../../business/vendor-money-tally';
 
 const RANGE_PROPS = {
   period: { type: 'string', enum: [...PERIOD_ENUM], description: 'Preset time window. Defaults to this_month.' },
@@ -109,6 +110,12 @@ export class AdminOpsToolsService {
         input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max items per list (default 10, max 25).' } } },
       },
       {
+        name: 'get_vendor_money_tally',
+        description:
+          "Do vendor money records agree? Checks every vendor wallet against its records: pending earnings vs the unreleased earning rows, and the wallet balance vs its transaction history (top-ups + released earnings - withdrawals - token purchases - clawbacks). For paid orders in the period, checks each order's vendor earnings and commission against its earning rows, and lists paid orders with no earnings at all and released earnings with no history entry. Finance only.",
+        input_schema: { type: 'object', properties: { ...RANGE_PROPS, limit: { type: 'number', description: 'Max items per list (default 10, max 25).' } } },
+      },
+      {
         name: 'get_search_gaps',
         description:
           "What shoppers search for and do not find: terms searched at least twice in the period where half or more of the searches returned nothing - demand the catalogue is not supplying - plus the most-searched terms overall. Searches recorded before result counts were kept are counted but not judged.",
@@ -146,6 +153,7 @@ export class AdminOpsToolsService {
       case 'get_stuck_orders': return this.stuckOrders(a);
       case 'get_vendor_health': return this.vendorHealthReport(a);
       case 'get_payment_reconciliation': return this.paymentReconciliation(a);
+      case 'get_vendor_money_tally': return this.vendorMoneyTally(a);
       case 'get_search_gaps': return this.searchGapsReport(a);
       case 'get_catalogue_quality': return this.catalogueQuality(a);
       default: return { error: `Unknown tool: ${name}` };
@@ -719,6 +727,155 @@ export class AdminOpsToolsService {
         refund_flag_without_transaction: refundOrdersNoTx.slice(0, limit).map((o) => ({ order: o.reference, refund_status: o.refund_status, total: o.total })),
         refund_transaction_without_flag: refundTxNoFlag.slice(0, limit).map((t) => ({ ...txRow(t), order: t.reference_order })),
         note: 'Card payments confirmed by the processor webhook mark the order paid directly and may carry no transaction record; "paid without transaction" is a list to check, not proof of a problem. Stuck attempts are pending/failed for over an hour.',
+      },
+    };
+  }
+
+  // ── Vendor money tally ────────────────────────────────────────────────────
+
+  private async vendorMoneyTally(args: any) {
+    const range = resolveRange((args ?? {}) as RangeArgs);
+    const limit = this.clamp(args.limit, 10, 25);
+    const num = (v: any) => Number(v) || 0;
+
+    // Wallets and their records are all-time (a balance is cumulative).
+    const wallets = await this.walletModel
+      .find({ business: { $ne: null } })
+      .select('business balance pending_balance owed_balance')
+      .limit(5000)
+      .lean();
+    const walletIds = (wallets as any[]).map((w) => w._id);
+    const walletForms = [...walletIds, ...walletIds.map((id) => String(id))];
+    const businessIds = (wallets as any[]).map((w) => String(w.business));
+
+    const [businesses, unreleasedRows, ledgerRows, orders] = await Promise.all([
+      this.businessModel
+        .find({ _id: { $in: businessIds.filter((id) => Types.ObjectId.isValid(id)) } })
+        .select('business_name')
+        .lean(),
+      this.earningModel.aggregate([
+        { $match: { released: false } },
+        { $group: { _id: { $toString: '$business' }, net: { $sum: { $ifNull: ['$net_amount', 0] } } } },
+      ]),
+      this.transactionModel.aggregate([
+        { $match: { wallet: { $in: walletForms } } },
+        {
+          $group: {
+            _id: { wallet: { $toString: '$wallet' }, type: '$type', status: '$status' },
+            amount: { $sum: { $ifNull: ['$amount', 0] } },
+          },
+        },
+      ]),
+      this.orderModel
+        .find({ createdAt: { $gte: range.start, $lt: range.end }, payment_status: 'paid' })
+        .select('reference status payment_status vendor_earnings platform_commission')
+        .limit(5000)
+        .lean(),
+    ]);
+
+    const names = new Map((businesses as any[]).map((b) => [String(b._id), b.business_name]));
+    const unreleased = new Map((unreleasedRows as any[]).map((r) => [String(r._id), num(r.net)]));
+
+    const ledger = new Map<string, LedgerSums>();
+    for (const r of ledgerRows as any[]) {
+      const key = String(r._id.wallet);
+      const sums = ledger.get(key) ?? { fund: 0, credit: 0, debit: 0, refund: 0 };
+      const { type, status } = r._id;
+      const amount = num(r.amount);
+      if (type === 'fund' && status === 'success') sums.fund += amount;
+      else if (type === 'credit' && status === 'success') sums.credit += amount;
+      // The wallet is debited when a withdrawal is requested; a failed
+      // transfer is marked failed and credited back.
+      else if (type === 'debit' && (status === 'success' || status === 'pending')) sums.debit += amount;
+      else if (type === 'refund' && status === 'success') sums.refund += amount;
+      ledger.set(key, sums);
+    }
+
+    const orderIds = (orders as any[]).map((o) => o._id);
+    const [rowsByOrder, released] = await Promise.all([
+      this.earningModel.aggregate([
+        { $match: { order: { $in: orderIds } } },
+        {
+          $group: {
+            _id: '$order',
+            rows: { $sum: 1 },
+            net: { $sum: { $ifNull: ['$net_amount', 0] } },
+            commission: { $sum: { $ifNull: ['$commission', 0] } },
+          },
+        },
+      ]),
+      this.earningModel
+        .find({ released: true, net_amount: { $gt: 0 }, released_at: { $gte: range.start, $lt: range.end } })
+        .select('_id')
+        .limit(20000)
+        .lean(),
+    ]);
+    const rowSums = new Map((rowsByOrder as any[]).map((r) => [String(r._id), r]));
+
+    const releasedIds = (released as any[]).map((e) => String(e._id));
+    const credited = releasedIds.length
+      ? await this.transactionModel
+          .find({ type: 'credit', 'metadata.earning_id': { $in: releasedIds } })
+          .select('metadata.earning_id')
+          .lean()
+      : [];
+    const creditedIds = new Set((credited as any[]).map((t) => String(t.metadata?.earning_id)));
+
+    const tally = tallyVendorMoney({
+      wallets: (wallets as any[]).map((w) => ({
+        wallet_id: String(w._id),
+        business_id: String(w.business),
+        business_name: names.get(String(w.business)) ?? null,
+        balance: num(w.balance),
+        pending_balance: num(w.pending_balance),
+        owed_balance: num(w.owed_balance),
+      })),
+      unreleased,
+      ledger,
+      orders: (orders as any[]).map((o): TallyOrder => {
+        const s = rowSums.get(String(o._id));
+        return {
+          order_id: String(o._id),
+          reference: o.reference,
+          status: o.status,
+          payment_status: o.payment_status,
+          vendor_earnings: num(o.vendor_earnings),
+          platform_commission: num(o.platform_commission),
+          rows: num(s?.rows),
+          rows_net: num(s?.net),
+          rows_commission: num(s?.commission),
+        };
+      }),
+      releasedWithoutHistory: releasedIds.filter((id) => !creditedIds.has(id)).length,
+    });
+
+    const clean =
+      !tally.pending_mismatch.length &&
+      !tally.balance_mismatch.length &&
+      !tally.order_totals_mismatch.length &&
+      !tally.paid_without_earnings.length &&
+      !tally.released_without_history;
+
+    return {
+      period: range.label,
+      currency: 'NGN',
+      data: {
+        all_clear: clean,
+        totals: {
+          vendors_checked: tally.vendors_checked,
+          orders_checked: tally.orders_checked,
+          pending_mismatch: tally.pending_mismatch.length,
+          balance_mismatch: tally.balance_mismatch.length,
+          order_totals_mismatch: tally.order_totals_mismatch.length,
+          paid_without_earnings: tally.paid_without_earnings.length,
+          released_without_history: tally.released_without_history,
+        },
+        pending_mismatch: tally.pending_mismatch.slice(0, limit),
+        balance_mismatch: tally.balance_mismatch.slice(0, limit),
+        order_totals_mismatch: tally.order_totals_mismatch.slice(0, limit),
+        paid_without_earnings: tally.paid_without_earnings.slice(0, limit),
+        note:
+          'Wallet checks are all-time; order checks cover paid orders created in the period. A positive balance difference means the wallet holds more than its history explains. Before 1 Nov 2026, money taken back after payout for returns, dispute refunds and late penalties wrote no history entry, and order totals were only reset on a full cancellation, so older vendors and orders can show differences from that alone.',
       },
     };
   }

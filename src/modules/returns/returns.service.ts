@@ -29,6 +29,10 @@ import {
 } from '../notifications/schemas/notification.schema';
 import { TransactionService } from '../transactions/transactions.service';
 import { WalletsService } from '../wallets/wallets.service';
+import {
+  reduceEarning,
+  syncOrderEarningTotals,
+} from '../business/order-earning-totals';
 import { ProductService } from '../products/products.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
@@ -544,10 +548,16 @@ export class ReturnsService {
       if (take <= 0) continue;
 
       if (earning.released) {
-        await this.walletsService.reconcileBusinessWallet(earning.business, {
-          balance: -take,
-        });
-        earning.net_amount = net - take;
+        await this.walletsService.reconcileBusinessWallet(
+          earning.business,
+          { balance: -take },
+          {
+            order: order._id,
+            description: `Return refunded on order ${order.reference}`,
+            metadata: { earning_id: String(earning._id), reason: 'return' },
+          },
+        );
+        reduceEarning(earning, take, { refund: true });
         await earning.save();
       } else {
         await this.walletsService.reconcileBusinessWallet(earning.business, {
@@ -556,11 +566,18 @@ export class ReturnsService {
         if (net - take <= 0) {
           await this.businessEarningsModel.deleteOne({ _id: earning._id });
         } else {
-          earning.net_amount = net - take;
+          reduceEarning(earning, take, { refund: true });
           await earning.save();
         }
       }
       reversed += take;
+    }
+    if (reversed > 0) {
+      await syncOrderEarningTotals(
+        this.orderModel,
+        this.businessEarningsModel,
+        order._id,
+      );
     }
     return reversed;
   }

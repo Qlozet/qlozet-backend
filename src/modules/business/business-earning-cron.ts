@@ -208,9 +208,12 @@ export class BusinessEarningsCron {
           `Processing earning for business=${earning.business} | net=${earning.net_amount}`,
         );
 
-        if (!earning.net_amount) {
-          this.logger.error(
-            `ERROR: net_amount is undefined for earning ${earning._id}`,
+        if (!(Number(earning.net_amount) > 0)) {
+          // A refund or penalty took this earning to nothing: there is no
+          // money to release, so close it rather than retrying every run.
+          await this.businessEarningsModel.updateOne(
+            { _id: earning._id, released: false },
+            { $set: { released: true, released_at: new Date(), net_amount: 0 } },
           );
           continue;
         }

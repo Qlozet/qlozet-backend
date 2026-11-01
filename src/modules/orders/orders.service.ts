@@ -100,6 +100,10 @@ import {
   CheckoutRateCacheDocument,
 } from './schemas/checkout-rate-cache.schema';
 import { WalletsService } from '../wallets/wallets.service';
+import {
+  reduceEarning,
+  syncOrderEarningTotals,
+} from '../business/order-earning-totals';
 import { estimateProductWeightKg } from '../../common/constants/product-weight.constant';
 import { NotificationsService, CreateNotificationDto } from '../notifications/notifications.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
@@ -3114,6 +3118,12 @@ export class OrderService {
           );
         }
       }
+      // The tailor's fee is money they keep from this order.
+      await syncOrderEarningTotals(
+        this.orderModel,
+        this.businessEarningsModel,
+        order._id as any,
+      ).catch(() => undefined);
     }
 
     // Restore inventory
@@ -3841,19 +3851,20 @@ export class OrderService {
       }
 
       // Mark the earning as reversed. Keep released=true so the release cron
-      // does not re-pick it (release_date is already in the past).
+      // does not re-pick it (release_date is already in the past). The
+      // customer is refunded, so the platform's commission on it goes too.
       earning.net_amount = 0;
+      earning.commission = 0;
       await earning.save();
     }
 
-    // Reset order-level earnings fields only on a FULL reversal (no per-vendor,
-    // no per-item scoping) — a partial reversal must leave them intact.
-    if (!businessId && !itemId) {
-      await this.orderModel.updateOne(
-        { _id: order._id },
-        { $set: { vendor_earnings: 0, platform_commission: 0 } },
-      );
-    }
+    // The order's earnings totals follow its rows: zero on a full reversal,
+    // just this vendor's or item's share less on a partial one.
+    await syncOrderEarningTotals(
+      this.orderModel,
+      this.businessEarningsModel,
+      order._id as any,
+    );
   }
 
 
@@ -5232,7 +5243,7 @@ export class OrderService {
               if (remaining <= 0) break;
               const take = Math.min(remaining, earning.net_amount || 0);
               if (take <= 0) continue;
-              earning.net_amount = (earning.net_amount || 0) - take;
+              reduceEarning(earning, take, { refund: false });
               await earning.save();
               await this.walletsService.reconcileBusinessWallet(businessId, {
                 pending: -take,
@@ -5259,13 +5270,19 @@ export class OrderService {
                 if (fromRows <= 0) break;
                 const take = Math.min(fromRows, earning.net_amount || 0);
                 if (take <= 0) continue;
-                earning.net_amount = (earning.net_amount || 0) - take;
+                reduceEarning(earning, take, { refund: false });
                 await earning.save();
                 fromRows -= take;
               }
-              await this.walletsService.reconcileBusinessWallet(businessId, {
-                balance: -remaining,
-              });
+              await this.walletsService.reconcileBusinessWallet(
+                businessId,
+                { balance: -remaining },
+                {
+                  order: order._id,
+                  description: `Late delivery penalty on order ${order.reference}`,
+                  metadata: { reason: 'late_penalty' },
+                },
+              );
               this.logger.warn(
                 `[LatePenalty] Clawed back ₦${remaining} from ${businessName}'s released balance on order ${order.reference} (pending earnings did not cover the penalty).`,
               );
@@ -5275,6 +5292,11 @@ export class OrderService {
               `[LatePenalty] Failed to charge penalty to vendor ${businessId}: ${err.message}`,
             );
           }
+          await syncOrderEarningTotals(
+            this.orderModel,
+            this.businessEarningsModel,
+            order._id as any,
+          ).catch(() => undefined);
 
           // Refund the incremental amount to the customer, then only tell them
           // they were compensated if the credit actually landed — the vendor
