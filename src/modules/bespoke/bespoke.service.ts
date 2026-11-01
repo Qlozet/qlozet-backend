@@ -76,6 +76,14 @@ import {
 } from '../notifications/schemas/notification.schema';
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
 import { roundToSellable } from '../products/fabric-pieces';
+import {
+  QuoteFabric,
+  applyFabricLine,
+  fabricDepositFloor,
+  fabricOffer,
+  fabricYardsInStock,
+  priceQuoteFabric,
+} from './quote-fabric';
 
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
@@ -751,18 +759,48 @@ export class BespokeService {
       const fabricProduct = design.fabric
         ? await this.productModel.findById(design.fabric).lean()
         : null;
-      const neededYards =
-        quote.required_fabric_yards ||
-        (fabricProduct as any)?.fabric?.min_cut ||
-        1;
+      const pricing = (quote as any).fabric_pricing as QuoteFabric | null;
+      // The quote priced a specific fabric; if the design's fabric changed
+      // since, that price no longer describes what would be bought.
+      if (
+        pricing &&
+        String(pricing.product ?? null) !== String(design.fabric ?? null)
+      ) {
+        throw new BadRequestException(
+          "This design's fabric changed after the quote was sent. Ask the tailor to update the quote.",
+        );
+      }
       const fabricForeign =
         !!fabricProduct &&
         String((fabricProduct as any).business) !== String(quote.vendor);
-      // Another vendor's piece-only fabric is bought in whole pieces: the
-      // yards (and so the transfer and stock) round up to the pieces bought.
-      const sellable = roundToSellable((fabricProduct as any)?.fabric, neededYards);
-      const fabricYards = fabricForeign ? sellable.yards : neededYards;
-      const fabricCost = fabricForeign ? Math.round(sellable.cost) : 0;
+      let fabricYards: number;
+      let fabricCost: number;
+      if (pricing) {
+        // Frozen when the tailor sent the quote: what the customer was shown.
+        fabricYards = pricing.yards ?? quote.required_fabric_yards ?? 1;
+        fabricCost = fabricForeign ? Math.round(pricing.amount || 0) : 0;
+      } else {
+        // Quotes sent before fabric pricing (31 Oct 2026).
+        const neededYards =
+          quote.required_fabric_yards ||
+          (fabricProduct as any)?.fabric?.min_cut ||
+          1;
+        // Another vendor's piece-only fabric is bought in whole pieces: the
+        // yards (and so the transfer and stock) round up to the pieces bought.
+        const sellable = roundToSellable((fabricProduct as any)?.fabric, neededYards);
+        fabricYards = fabricForeign ? sellable.yards : neededYards;
+        fabricCost = fabricForeign ? Math.round(sellable.cost) : 0;
+      }
+      // Stock can move between the quote and now: refuse clearly here rather
+      // than take payment for yards that aren't there.
+      if (fabricProduct) {
+        const inStock = fabricYardsInStock(fabricProduct);
+        if (inStock !== null && inStock < fabricYards) {
+          throw new BadRequestException(
+            `${(fabricProduct as any).fabric?.name ?? 'This fabric'} now has only ${inStock} yards left and this quote needs ${fabricYards}. Ask the tailor to update the quote.`,
+          );
+        }
+      }
 
       const fabricTransferDeadline = new Date();
       fabricTransferDeadline.setDate(fabricTransferDeadline.getDate() + 3);
@@ -774,6 +812,7 @@ export class BespokeService {
         String(quote.vendor),
         quote.total,
         depositPercentFrom(planSettings),
+        fabricDepositFloor(pricing),
       );
       const tailorCharge = plan ? plan.deposit_amount : quote.total;
 
@@ -1147,7 +1186,17 @@ export class BespokeService {
     );
     // The tailor sees how they'll be paid: deposit now, balance at the photos.
     const deposit_percent = await this.depositPercent();
-    return { data: { ...quote, measurements, deposit_percent } };
+    const fabricDoc = (quote as any).design?.fabric ?? null;
+    let supplierName: string | null = null;
+    if (fabricDoc && String(fabricDoc.business) !== String(businessId)) {
+      const supplier = await this.businessModel
+        .findById(fabricDoc.business)
+        .select('business_name')
+        .lean();
+      supplierName = (supplier as any)?.business_name ?? null;
+    }
+    const fabric_offer = fabricOffer(fabricDoc, businessId, supplierName);
+    return { data: { ...quote, measurements, deposit_percent, fabric_offer } };
   }
 
   async getQuoteDetailForCustomer(quoteId: string, customerId: string) {
@@ -1179,14 +1228,57 @@ export class BespokeService {
    * vendor is added to the deposit at acceptance). null = paid in full.
    */
   private paymentPreview(quote: any, percent: number) {
-    const plan = buildPaymentPlan(String(quote?.vendor?._id ?? quote?.vendor), quote?.total, percent);
+    const plan = buildPaymentPlan(
+      String(quote?.vendor?._id ?? quote?.vendor),
+      quote?.total,
+      percent,
+      fabricDepositFloor(quote?.fabric_pricing),
+    );
     return plan
       ? {
           deposit_percent: plan.deposit_percent,
           deposit_amount: plan.deposit_amount,
           balance_amount: plan.balance_amount,
+          deposit_covers_fabric: !!plan.deposit_covers_fabric,
         }
       : null;
+  }
+
+  /**
+   * Price the fabric for a quote from its design (bespoke/quote-fabric.ts).
+   * The fabric product comes back too so callers can check stock.
+   */
+  private async priceQuoteFabricFor(
+    quote: any,
+    lineItems: { label?: string; amount?: number }[],
+    yards?: number | null,
+  ): Promise<{ pricing: QuoteFabric; fabricProduct: any }> {
+    const design = await this.designModel
+      .findById(quote.design?._id ?? quote.design)
+      .select('fabric')
+      .lean();
+    const fabricProduct = (design as any)?.fabric
+      ? await this.productModel.findById((design as any).fabric).lean()
+      : null;
+    const tailorId = String(quote.vendor?._id ?? quote.vendor);
+    let supplierName: string | null = null;
+    if (fabricProduct && String((fabricProduct as any).business) !== tailorId) {
+      const supplier = await this.businessModel
+        .findById((fabricProduct as any).business)
+        .select('business_name')
+        .lean();
+      supplierName = (supplier as any)?.business_name ?? null;
+    }
+    return {
+      pricing: priceQuoteFabric({
+        fabricProduct,
+        tailorId,
+        yards,
+        lineItems,
+        supplierName,
+      }),
+      fabricProduct,
+    };
   }
 
   async saveQuoteDraft(
@@ -1220,13 +1312,20 @@ export class BespokeService {
     if (dto.vendor_notes !== undefined)
       quote.vendor_notes = dto.vendor_notes;
 
-    // Calculate total from line items
-    if (dto.line_items) {
-      quote.total = dto.line_items.reduce(
-        (sum, item) => sum + (item.amount || 0),
-        0,
-      );
-    }
+    // Fabric is priced by the platform (or typed by the tailor when they
+    // source it); the Fabric line and the total follow.
+    const { pricing } = await this.priceQuoteFabricFor(
+      quote,
+      (quote.line_items as any[]) ?? [],
+      quote.required_fabric_yards,
+    );
+    quote.line_items = applyFabricLine((quote.line_items as any[]) ?? [], pricing) as any;
+    quote.total = (quote.line_items as any[]).reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0,
+    );
+    quote.fabric_pricing = pricing as any;
+    quote.markModified('fabric_pricing');
 
     quote.status = BespokeQuoteStatus.DRAFT;
     await quote.save();
@@ -1266,10 +1365,41 @@ export class BespokeService {
       throw new BadRequestException('This quote has expired');
     }
 
+    // Fabric: priced from the listing when the design has one (yards
+    // required, stock checked), typed by the tailor when they source it.
+    const { pricing, fabricProduct } = await this.priceQuoteFabricFor(
+      quote,
+      dto.line_items,
+      dto.required_fabric_yards,
+    );
+    if (pricing.source !== 'tailor_sourced') {
+      if (!(Number(dto.required_fabric_yards) > 0)) {
+        throw new BadRequestException(
+          'Enter how many yards of fabric you need. It prices the fabric.',
+        );
+      }
+      const inStock = fabricYardsInStock(fabricProduct);
+      if (inStock !== null && inStock < (pricing.yards ?? 0)) {
+        throw new BadRequestException(
+          pricing.source === 'tailor_stock'
+            ? `Your listing for ${pricing.name ?? 'this fabric'} has ${inStock} yards in stock and this quote needs ${pricing.yards}. Update the stock, or lower the yards.`
+            : `${pricing.name ?? 'This fabric'} has only ${inStock} yards left and this quote needs ${pricing.yards}. Decline the request, or tell the customer in your notes.`,
+        );
+      }
+    }
+
     // Update quote
-    quote.line_items = dto.line_items as any;
-    quote.total = dto.line_items.reduce((sum, item) => sum + item.amount, 0);
-    quote.required_fabric_yards = dto.required_fabric_yards;
+    quote.line_items = applyFabricLine(dto.line_items as any[], pricing) as any;
+    quote.total = (quote.line_items as any[]).reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0,
+    );
+    if (!(quote.total > 0)) {
+      throw new BadRequestException('Add at least one price before sending the quote.');
+    }
+    quote.fabric_pricing = pricing as any;
+    quote.markModified('fabric_pricing');
+    quote.required_fabric_yards = dto.required_fabric_yards ?? null;
     quote.estimated_completion_days = dto.estimated_completion_days;
     quote.vendor_notes = dto.vendor_notes || '';
     const previousStatus = quote.status;
@@ -1302,6 +1432,9 @@ export class BespokeService {
 
     // Get vendor info for the email
     const business = await this.businessModel.findById(businessId);
+    // What the customer pays in all: another vendor's fabric is on top.
+    const customerPrice =
+      quote.total + (pricing.in_quote ? 0 : Math.round(pricing.amount || 0));
 
     // Send email notification to customer
     try {
@@ -1310,7 +1443,7 @@ export class BespokeService {
         customerUser.email,
         customerUser.first_name,
         business?.business_name || 'A vendor',
-        quote.total,
+        customerPrice,
         dto.estimated_completion_days,
       );
     } catch (err) {
@@ -1327,13 +1460,13 @@ export class BespokeService {
       category: NotificationCategory.BESPOKE,
       type: NotificationType.BESPOKE_QUOTE_RECEIVED,
       title: 'Quote Received!',
-      body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${quote.total?.toLocaleString()} for your bespoke design.`,
+      body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${customerPrice.toLocaleString()} for your bespoke design${pricing.in_quote || !pricing.amount ? '' : ', fabric included'}.`,
       // design_id lets the shop open this design's quotes directly.
       metadata: {
         quote_id: quote._id,
         design_id: String((quote.design as any)?._id ?? quote.design ?? ''),
         vendor_name: business?.business_name,
-        total: quote.total,
+        total: customerPrice,
       },
       action_url: `/bespoke?quotes=${String((quote.design as any)?._id ?? quote.design ?? '')}`,
     }).catch((err) => this.logger.warn(`Failed to create quote notification: ${err.message}`));

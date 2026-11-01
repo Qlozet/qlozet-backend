@@ -28,6 +28,10 @@ export interface PaymentPlan {
   deposit_percent: number;
   /** Tailor share charged at acceptance (fabric from another vendor is extra). */
   deposit_amount: number;
+  /** Fabric inside the quote; the deposit never goes below it. */
+  fabric_amount?: number;
+  /** True when the fabric, not the percentage, set the deposit. */
+  deposit_covers_fabric?: boolean;
   balance_amount: number;
   status: PaymentPlanStatus;
   deposit_paid_at?: Date | null;
@@ -61,22 +65,32 @@ export function balanceDaysFrom(settings: any): number {
 
 /**
  * The split for a quote, or null when it is paid in one go (deposit set to
- * 0% or 100%, or a quote too small to split).
+ * 0% or 100%, a quote too small to split, or fabric that is the whole quote).
+ *
+ * `fabricFloor` is the fabric inside the quote (bespoke/quote-fabric.ts): the
+ * tailor pays for it before cutting, so the deposit is the percentage or the
+ * fabric, whichever is higher.
  */
 export function buildPaymentPlan(
   tailor: string,
   quoteTotal: number,
   depositPercent: number,
+  fabricFloor = 0,
 ): PaymentPlan | null {
   const total = Math.round(Number(quoteTotal) || 0);
+  const floor = Math.max(0, Math.round(Number(fabricFloor) || 0));
   if (depositPercent <= 0 || depositPercent >= 100 || total < 2) return null;
-  const deposit = Math.min(Math.max(Math.round((total * depositPercent) / 100), 1), total - 1);
+  if (floor >= total) return null;
+  const byPercent = Math.round((total * depositPercent) / 100);
+  const deposit = Math.min(Math.max(byPercent, floor, 1), total - 1);
   return {
     kind: 'deposit',
     tailor: String(tailor),
     quote_total: total,
     deposit_percent: depositPercent,
     deposit_amount: deposit,
+    fabric_amount: floor,
+    deposit_covers_fabric: floor > byPercent,
     balance_amount: total - deposit,
     status: 'awaiting_deposit',
     deposit_paid_at: null,

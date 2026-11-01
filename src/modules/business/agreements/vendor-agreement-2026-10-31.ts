@@ -6,7 +6,9 @@
  * tailor sends photos of the finished piece (orders/bespoke-payment-plan.ts).
  * The tailor ships once the balance is paid; an unpaid balance closes the
  * order and the tailor keeps the deposit. Each part follows the 14-day
- * schedule from its own payment.
+ * schedule from its own payment. The deposit is never less than the fabric
+ * inside the quote (bespoke/quote-fabric.ts), which the platform prices from
+ * the listing or the tailor states when they buy it.
  *
  * Carried over from 2026-10-30 (what changed from 2026-10-02): payouts follow a fixed schedule, 14 days
  * after the customer pays (business/settlement.ts), and are never held for
@@ -140,8 +142,11 @@ customer confirms or raises a problem. The date each amount becomes available
 is shown in your vendor console.
 
 **Bespoke orders from a quote are paid in two parts.** The customer pays a
-deposit when they accept your quote (currently 50% of your quoted price) and
-the balance when you send photos of the finished piece. Each part becomes
+deposit when they accept your quote (currently 50% of your quoted price, or
+the cost of the fabric in your quote if that is more) and the balance when
+you send photos of the finished piece. Fabric from your own listings is
+priced at your listed price; where you buy the fabric yourself, you state its
+cost on the quote and must state it honestly. Each part becomes
 available 14 days after the customer pays that part. Fabric from another
 vendor is paid in full by the customer up front and is not part of the
 split. If the customer does not pay the balance within the published period
