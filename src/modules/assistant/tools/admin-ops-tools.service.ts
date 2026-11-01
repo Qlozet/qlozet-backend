@@ -962,7 +962,7 @@ export class AdminOpsToolsService {
         ...explanation,
         fixes: Object.values(MONEY_FIXES),
         note:
-          'accounts_for is signed: positive means the wallet holds more than its records, negative less. balance_unexplained is what no known cause covers; near zero, with every cause before_fix, means the difference is left over from bugs already fixed and current code is not adding to it. Pending should always equal the unreleased earnings. This only reads; nothing was changed.',
+          'accounts_for is signed: positive means the wallet holds more than its records, negative less. balance_unexplained is what no known cause covers. Only when it is near zero AND every cause is before_fix may you say the difference is left over from bugs already fixed. If it is not near zero, say plainly that this amount is unexplained and needs a person to check the vendor's records; never call it legacy or harmless. paid_more_than_once copies are each logged, so they are an overpayment to recover, not a history gap. Pending should always equal the unreleased earnings. This only reads; nothing was changed.',
       },
     };
   }

@@ -70,6 +70,27 @@ describe('explainVendorMoney', () => {
     expect(out.balance_unexplained).toBe(0);
   });
 
+  it('accounts for part of a paid earning taken back with no entry, net of late-penalty entries', () => {
+    const out = explainVendorMoney({
+      wallet: { balance: 2_000, pending_balance: 0, owed_balance: 0 },
+      earnings: [
+        { id: 'e1', amount: 11_000, net_amount: 6_000, released: true, released_at: '2026-09-01' },
+        { id: 'e2', amount: 5_500, net_amount: 3_000, released: true, released_at: '2026-11-02' },
+      ],
+      transactions: [
+        credit('e1', 10_000, '2026-09-01'),
+        credit('e2', 5_000, '2026-11-02'),
+        // A logged late penalty on e2 (no earning id on these entries).
+        { id: 'r1', type: 'refund', status: 'success', amount: 2_000, channel: 'refund', created_at: '2026-11-03', clawback: true },
+        { id: 'w1', type: 'debit', status: 'success', amount: 7_000, channel: 'payout', created_at: '2026-11-04' },
+      ],
+    });
+    expect(out.history_balance).toBe(6_000);
+    const c = out.causes.find((x) => x.kind === 'taken_back_without_history')!;
+    expect(c.accounts_for).toBe(-4_000);
+    expect(out.balance_unexplained).toBe(0);
+  });
+
   it('leaves a recent unexplained gap visible, and says activity continued after the fixes', () => {
     const out = explainVendorMoney({
       wallet: { balance: 12_000, pending_balance: 5_000, owed_balance: 0 },
