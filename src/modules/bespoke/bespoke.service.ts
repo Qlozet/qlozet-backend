@@ -371,8 +371,28 @@ export class BespokeService {
       this.designModel.countDocuments(filter),
     ]);
 
+    // Each design's quotes at a glance, so the shop can put prices waiting
+    // and the latest quote activity first.
+    const summaries = designs.length
+      ? await this.quoteModel.aggregate<{ _id: Types.ObjectId; priced: number; last_activity_at: Date | null }>([
+          { $match: { design: { $in: designs.map((d: any) => d._id) } } },
+          {
+            $group: {
+              _id: '$design',
+              priced: { $sum: { $cond: [{ $eq: ['$status', BespokeQuoteStatus.SUBMITTED] }, 1, 0] } },
+              last_activity_at: { $max: '$updatedAt' },
+            },
+          },
+        ])
+      : [];
+    const byDesign = new Map(summaries.map((x) => [String(x._id), x]));
+    const rows = designs.map((d: any) => {
+      const x = byDesign.get(String(d._id));
+      return { ...d, quote_summary: { priced: x?.priced ?? 0, last_activity_at: x?.last_activity_at ?? null } };
+    });
+
     return Utils.getPagingData(
-      { count: total, rows: designs },
+      { count: total, rows },
       page,
       size,
     );
