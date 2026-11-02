@@ -4,11 +4,23 @@ import {
   IsNumber,
   IsString,
   IsOptional,
+  IsIn,
   ValidateNested,
   Min,
   ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class ExtraFabricYardsDto {
+  @ApiProperty({ enum: ['contrast', 'lining'] })
+  @IsIn(['contrast', 'lining'])
+  role: 'contrast' | 'lining';
+
+  @ApiProperty({ example: 2 })
+  @IsNumber()
+  @Min(0.1)
+  yards: number;
+}
 
 class LineItemDto {
   @ApiProperty({ example: 'Base Tailoring' })
@@ -38,6 +50,16 @@ export class SubmitQuoteDto {
   @IsNumber()
   @Min(0.1)
   required_fabric_yards?: number;
+
+  @ApiPropertyOptional({
+    type: [ExtraFabricYardsDto],
+    description: "Yards for each of the design's extra fabrics (contrast, lining). Required for each one picked from a listing.",
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExtraFabricYardsDto)
+  extra_fabric_yards?: ExtraFabricYardsDto[];
 
   @ApiProperty({ example: 14, description: 'Days the tailor needs before shipping, counted from payment. This is the ship-by deadline late penalties are measured against; delivery time is on top.' })
   @IsNumber()

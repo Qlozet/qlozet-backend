@@ -6,6 +6,7 @@ import { OutfitJobData } from './outfit-job.interface';
 import { JobState } from 'src/common/schemas/job-status.schema';
 import { Logger } from '@nestjs/common';
 import { TokenService } from '../../wallets/token.service';
+import { FabricVisionService } from '../fabric-vision.service';
 
 // Only these job types pre-charge tokens in the controller (spend() before
 // queuing), so only these are refunded on failure. auto-mask / video-pipeline /
@@ -25,6 +26,7 @@ export class OutfitProcessor extends WorkerHost {
     private measurement: MeasurementService,
     private jobStatusService: JobStatusService,
     private tokenService: TokenService,
+    private fabricVision: FabricVisionService,
   ) {
     super();
   }
@@ -100,14 +102,23 @@ export class OutfitProcessor extends WorkerHost {
           break;
 
         case 'analyzeReference': {
+          // The fabrics are read alongside the style analysis; it never
+          // fails the job (null = no fabric suggestions).
+          const fabricsRead = job.data.imageUrl
+            ? this.fabricVision.matchPhoto(job.data.imageUrl).catch(() => null)
+            : Promise.resolve(null);
           const analysis = await this.measurement.analyzeReferenceImage(job.data);
           // Also match metadata to platform styles
           const matchedStyles = await this.measurement.matchMetadataToStyles(
             analysis.metadata,
           );
+          const photoFabrics = await fabricsRead;
           result = {
             ...analysis,
             matched_styles: matchedStyles,
+            fabrics: photoFabrics?.fabrics ?? [],
+            fabric_matches: photoFabrics?.matches ?? {},
+            fabric_sets: photoFabrics?.sets ?? [],
           };
           break;
         }

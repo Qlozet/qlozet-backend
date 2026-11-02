@@ -803,6 +803,10 @@ export class ProductService {
         { 'clothing.name': { $regex: search, $options: 'i' } },
         { 'accessory.name': { $regex: search, $options: 'i' } },
         { 'fabric.name': { $regex: search, $options: 'i' } },
+        // A shopper looking for fabric types what it is or its colour.
+        { 'fabric.material': { $regex: search, $options: 'i' } },
+        { 'fabric.pattern': { $regex: search, $options: 'i' } },
+        { 'fabric.colors.name': { $regex: search, $options: 'i' } },
 
         { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
         { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
@@ -1760,6 +1764,8 @@ export class ProductService {
               (selection.yardage ?? 0) * (selection.quantity ?? 1);
 
             if (totalYards <= 0) continue;
+            // A selection can name its own listing (bespoke extra fabrics).
+            const fabricProductId = (selection as any).product_id ?? item.product;
 
             // Try standalone fabric first
             const standaloneFabric = await this.fabricModel
@@ -1777,7 +1783,7 @@ export class ProductService {
               // Try embedded fabric in clothing…
               const embeddedRes = await this.productModel.updateOne(
                 {
-                  _id: item.product,
+                  _id: fabricProductId,
                   'clothing.fabrics._id': selection.fabric_id,
                 },
                 {
@@ -1790,11 +1796,11 @@ export class ProductService {
               if (embeddedRes.matchedCount === 0) {
                 // (older bespoke orders stored the product's own id here)
                 const isProductId =
-                  String(item.product) === String(selection.fabric_id);
+                  String(fabricProductId) === String(selection.fabric_id);
                 await this.productModel.updateOne(
                   isProductId
-                    ? { _id: item.product, fabric: { $ne: null } }
-                    : { _id: item.product, 'fabric._id': selection.fabric_id },
+                    ? { _id: fabricProductId, fabric: { $ne: null } }
+                    : { _id: fabricProductId, 'fabric._id': selection.fabric_id },
                   { $inc: { 'fabric.yard_length': totalYards } },
                   { session },
                 );
@@ -1984,10 +1990,12 @@ export class ProductService {
         .findById(selection.fabric_id)
         .session(session);
       let isEmbedded = false;
+      // A selection can name its own listing (bespoke extra fabrics).
+      const fabricProductId = (selection as any).product_id ?? item.product;
 
       if (!fabric) {
         const product = await this.productModel
-          .findById(item.product)
+          .findById(fabricProductId)
           .session(session);
         if (!product) throw new BadRequestException('Product not found');
 
@@ -2029,7 +2037,7 @@ export class ProductService {
       // Update yardage using the separate function
       const newYardLength = fabric.yard_length - totalYards;
       await this.updateFabricStock(
-        item.product,
+        fabricProductId,
         fabric._id.toString(),
         newYardLength,
         session,

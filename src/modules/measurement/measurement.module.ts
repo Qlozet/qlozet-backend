@@ -14,11 +14,16 @@ import { UmsModule } from '../ums/ums.module';
 import { PlatformModule } from '../platform/platform.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { StyleLibraryModule } from '../style-library/style-library.module';
+import { Product, ProductSchema } from '../products/schemas/product.schema';
+import { AnthropicAuthService } from '../assistant/llm/anthropic-auth.service';
+import { FabricVisionService } from './fabric-vision.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: JobStatus.name, schema: JobStatusSchema },
+      // Fabric suggestions from a reference photo rank the fabric listings.
+      { name: Product.name, schema: ProductSchema },
     ]),
     WalletsModule,
     UmsModule,
@@ -45,6 +50,8 @@ import { StyleLibraryModule } from '../style-library/style-library.module';
     JobStatusService,
     OutfitQueueService,
     OutfitProcessor,
+    AnthropicAuthService,
+    FabricVisionService,
   ],
 })
 export class MeasurementModule {}

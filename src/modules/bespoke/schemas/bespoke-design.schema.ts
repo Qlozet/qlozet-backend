@@ -54,6 +54,20 @@ export class BespokeDesign {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
   fabric: Types.ObjectId;
 
+  // Other fabrics the garment needs (a contrast panel, a lining), one per
+  // role. fabric null = the tailor chooses and buys it. See quote-fabric.ts.
+  @Prop({
+    type: [
+      {
+        role: { type: String, enum: ['contrast', 'lining'], required: true },
+        fabric: { type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null },
+        _id: false,
+      },
+    ],
+    default: [],
+  })
+  extra_fabrics: { role: 'contrast' | 'lining'; fabric: Types.ObjectId | null }[];
+
   // ─── Optional Details ───
   @Prop({ type: String, default: null })
   description: string;

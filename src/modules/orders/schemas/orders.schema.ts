@@ -86,6 +86,12 @@ class FabricSelection {
   @Prop({ type: Number, default: null })
   pieces?: number | null;
 
+  // The fabric listing this comes from, when it is not the item's product
+  // (a bespoke garment's lining from the tailor's own stock). null = the
+  // item's product.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null })
+  product_id?: Types.ObjectId | null;
+
   @Prop({ type: Number, min: 1 })
   total_amount: number;
 }
