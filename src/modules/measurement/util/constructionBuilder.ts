@@ -22,9 +22,11 @@ export const DEFAULT_BASE_PROMPT =
   'If fabric reference images are provided, match the fabric texture and color exactly. ' +
   'Do NOT add any embroidery, patterns, prints, or decorative elements unless explicitly specified in the metadata. ' +
   'Do not show any mannequin, human body, or face. Show only the garment on a transparent background.';
-export function buildPrompt(userPrompt?: string): string {
-  if (!userPrompt) return DEFAULT_BASE_PROMPT;
-  return `${DEFAULT_BASE_PROMPT} Additional user direction:
+/** imageNote says which input picture is the fabric and which are style references. */
+export function buildPrompt(userPrompt?: string, imageNote?: string): string {
+  const base = imageNote ? `${DEFAULT_BASE_PROMPT} ${imageNote}` : DEFAULT_BASE_PROMPT;
+  if (!userPrompt) return base;
+  return `${base} Additional user direction:
 ${userPrompt}`;
 }
 // Example usage:
