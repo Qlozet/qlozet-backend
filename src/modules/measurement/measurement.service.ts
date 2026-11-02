@@ -62,6 +62,9 @@ export class MeasurementService {
         referenceUrls: reference_image_urls,
         metadataRefs,
         fabricUrl: metadataObj.fabric?.use_reference_image ? config.fabricRefId : null,
+        bottomFabricUrl: metadataObj.bottom_fabric?.use_reference_image ? config.bottomFabricRefId : null,
+        bottomPiece:
+          config.bottomPiece ?? (/two_piece/.test(config.garmentType ?? '') ? 'trousers' : null),
       });
       const allReferenceUrls = images.urls;
       metadataObj.image_roles = images.roles;
@@ -83,12 +86,12 @@ export class MeasurementService {
 
       // Log what we're sending to Gradio
       this.logger.log(`Gradio /generate_handler call:`);
-      this.logger.log(`  prompt: ${prompt.slice(0, 100)}...`);
+      this.logger.log(`  prompt: ${prompt}`);
       if (images.note) this.logger.log(`  image roles: ${images.note}`);
       this.logger.log(`  view: ${view}`);
       this.logger.log(`  image_inputs: ${allReferenceUrls.join(',') || '(empty)'}`);
       this.logger.log(`  image_uploads: ${imageUploads.length} file(s)`);
-      this.logger.log(`  metadata_json_str: ${metadataJson.slice(0, 200)}...`);
+      this.logger.log(`  metadata_json_str: ${metadataJson}`);
       // gpt-image-1 was shut down by OpenAI on 23 Oct 2026. The Space only
       // accepts the models in its dropdown (gpt-image-2 is its default), so
       // the next change is a secret, not a deploy: OUTFIT_IMAGE_MODEL.
@@ -115,7 +118,7 @@ export class MeasurementService {
         base64,
         'outfits',
       )) as { fileUrl: string };
-      this.logger.log('Outfit generation completed successfully');
+      this.logger.log(`Outfit generation completed successfully: ${uploadResult?.fileUrl ?? '(no url)'}`);
 
       // Off by default. Laying the real swatch flat gives exact motifs but
       // loses the drape: the model's own render bends stripes around
@@ -124,6 +127,7 @@ export class MeasurementService {
       // can't copy; the intended home is an opt-in "match fabric exactly".
       const fabricUrl =
         process.env.EXACT_FABRIC_AFTER_GENERATE === 'true' &&
+        !config?.bottomFabricRefId &&
         typeof config?.fabricRefId === 'string' && /^https?:\/\//i.test(config.fabricRefId)
           ? config.fabricRefId
           : null;
