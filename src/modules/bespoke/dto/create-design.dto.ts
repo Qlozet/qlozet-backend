@@ -9,7 +9,9 @@ import {
   ArrayMinSize,
   IsBoolean,
   ValidateNested,
+  MaxLength,
 } from 'class-validator';
+import { EXTRA_FABRIC_ROLES, type ExtraFabricRole } from '../quote-fabric';
 import { Type } from 'class-transformer';
 
 export class BackViewDto {
@@ -25,14 +27,23 @@ export class BackViewDto {
 }
 
 export class ExtraFabricDto {
-  @ApiProperty({ enum: ['contrast', 'lining'] })
-  @IsEnum(['contrast', 'lining'])
-  role: 'contrast' | 'lining';
+  @ApiProperty({ enum: EXTRA_FABRIC_ROLES })
+  @IsEnum(EXTRA_FABRIC_ROLES)
+  role: ExtraFabricRole;
 
   @ApiPropertyOptional({ description: 'Fabric product id; omit or null to let the tailor choose it.' })
   @IsOptional()
   @IsMongoId()
   fabric_id?: string | null;
+
+  @ApiPropertyOptional({
+    example: '#1A1A1A',
+    description: 'Colour wanted when the tailor chooses the fabric. Ignored when fabric_id is set.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  color?: string | null;
 }
 
 export class CreateDesignDto {

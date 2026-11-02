@@ -25,8 +25,9 @@ export type FabricSource = 'other_vendor' | 'tailor_stock' | 'tailor_sourced';
  * `fabric`; the others are `extra_fabrics`, one per role. Each is priced on
  * its own, the same way, and gets its own Fabric line when it is inside the
  * quote ("Fabric" for the main one, "Fabric (Lining)" for a lining).
+ * A slot the tailor fills can carry the colour the customer wants (`color`).
  */
-export const EXTRA_FABRIC_ROLES = ['contrast', 'lining'] as const;
+export const EXTRA_FABRIC_ROLES = ['contrast', 'lining', 'bottom'] as const;
 export type ExtraFabricRole = (typeof EXTRA_FABRIC_ROLES)[number];
 export type FabricRole = 'main' | ExtraFabricRole;
 
@@ -34,6 +35,9 @@ export const FABRIC_ROLE_NAMES: Record<FabricRole, string> = {
   main: 'Main fabric',
   contrast: 'Contrast fabric',
   lining: 'Lining',
+  // A two-piece set whose bottom (trousers, skirt) is in a different fabric;
+  // the main fabric is then the top's.
+  bottom: 'Bottom fabric',
 };
 
 export const fabricLineLabel = (role: FabricRole = 'main') =>

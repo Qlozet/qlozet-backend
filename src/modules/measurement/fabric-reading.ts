@@ -48,7 +48,7 @@ export const FABRIC_PATTERNS = [
 ] as const;
 export type FabricPattern = (typeof FABRIC_PATTERNS)[number];
 
-export type FabricRole = 'main' | 'contrast' | 'lining';
+export type FabricRole = 'main' | 'contrast' | 'lining' | 'bottom';
 
 export interface ReadFabric {
   role: FabricRole;
@@ -76,7 +76,7 @@ export const FABRIC_READING_SCHEMA = {
         additionalProperties: false,
         required: ['role', 'colors', 'fabric_type', 'pattern', 'description'],
         properties: {
-          role: { type: 'string', enum: ['main', 'contrast', 'lining'] },
+          role: { type: 'string', enum: ['main', 'contrast', 'lining', 'bottom'] },
           colors: {
             type: 'array',
             items: {
@@ -100,9 +100,10 @@ export const FABRIC_READING_SCHEMA = {
 
 export const FABRIC_READING_SYSTEM = `You read the fabrics in photos of outfits for Qlozet, a Nigerian marketplace where customers have clothes made by tailors from fabric sold on the platform. Your reading is used to find the closest fabrics in the catalogue, so describe what the fabric looks like, not what the garment is.
 
-List each distinct fabric the garment is made from, at most three:
-- main: the fabric covering most of the garment. Always list it when the photo shows an outfit.
-- contrast: a clearly different second fabric used for panels, a yoke, cuffs, collar, trim or a skirt. Only when one is visible.
+List each distinct fabric the garment is made from, at most four:
+- main: the fabric covering most of the garment, or the top's fabric in a two-piece outfit. Always list it when the photo shows an outfit.
+- bottom: in a two-piece outfit (a top with separate trousers or a skirt), the bottom's fabric when it clearly differs from the top's. Leave it out when both pieces are the same fabric.
+- contrast: a clearly different fabric used for panels, a yoke, cuffs, collar or trim. Only when one is visible.
 - lining: only when the inside layer is visible and differs from the outside.
 
 For each fabric:
@@ -158,7 +159,7 @@ export function parseFabricReading(response: any): FabricReading | null {
   const seen = new Set<string>();
   const fabrics: ReadFabric[] = [];
   for (const f of Array.isArray(raw?.fabrics) ? raw.fabrics : []) {
-    if (!['main', 'contrast', 'lining'].includes(f?.role) || seen.has(f.role)) continue;
+    if (!['main', 'contrast', 'lining', 'bottom'].includes(f?.role) || seen.has(f.role)) continue;
     seen.add(f.role);
     fabrics.push({
       role: f.role,

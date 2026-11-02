@@ -10,11 +10,12 @@ import {
   ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EXTRA_FABRIC_ROLES, type ExtraFabricRole } from '../quote-fabric';
 
 export class ExtraFabricYardsDto {
-  @ApiProperty({ enum: ['contrast', 'lining'] })
-  @IsIn(['contrast', 'lining'])
-  role: 'contrast' | 'lining';
+  @ApiProperty({ enum: EXTRA_FABRIC_ROLES })
+  @IsIn(EXTRA_FABRIC_ROLES)
+  role: ExtraFabricRole;
 
   @ApiProperty({ example: 2 })
   @IsNumber()
