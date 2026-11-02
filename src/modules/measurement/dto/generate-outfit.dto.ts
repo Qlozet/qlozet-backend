@@ -88,6 +88,14 @@ export class GarmentConfigDto {
   fabricRefId?: string;
 
   @ApiPropertyOptional({
+    description: "A two-piece set's bottom fabric image URL, when it differs from the top's",
+  })
+  bottomFabricRefId?: string;
+
+  @ApiPropertyOptional({ description: "A two-piece set's bottom: 'trousers' or 'skirt'", example: 'trousers' })
+  bottomPiece?: string;
+
+  @ApiPropertyOptional({
     description: 'Embroidery reference ID or URL',
     example: 'embro_98765',
   })

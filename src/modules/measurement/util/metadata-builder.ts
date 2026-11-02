@@ -133,6 +133,15 @@ export function buildMetadataFromConfig(config: GarmentConfigDto): any {
     metadata.colors = { use_reference_image: true };
     metadata.references.push(fabricUrl);
   }
+  // A two-piece set whose bottom is in another fabric: its own picture.
+  if (config.bottomFabricRefId && isFetchable(config.bottomFabricRefId)) {
+    metadata.bottom_fabric = {
+      use_reference_image: true,
+      applies_to: config.bottomPiece || 'bottom piece',
+    };
+    metadata.references.push(resolveAssetUrl(config.bottomFabricRefId));
+  }
+  if (config.bottomPiece) metadata.bottom_piece = config.bottomPiece;
   if (config.embroideryRefId && isFetchable(config.embroideryRefId)) {
     const embroideryUrl = resolveAssetUrl(config.embroideryRefId);
     metadata.embroidery_reference = {

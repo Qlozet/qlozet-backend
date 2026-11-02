@@ -62,6 +62,9 @@ export class MeasurementService {
         referenceUrls: reference_image_urls,
         metadataRefs,
         fabricUrl: metadataObj.fabric?.use_reference_image ? config.fabricRefId : null,
+        bottomFabricUrl: metadataObj.bottom_fabric?.use_reference_image ? config.bottomFabricRefId : null,
+        bottomPiece:
+          config.bottomPiece ?? (/two_piece/.test(config.garmentType ?? '') ? 'trousers' : null),
       });
       const allReferenceUrls = images.urls;
       metadataObj.image_roles = images.roles;
@@ -124,6 +127,7 @@ export class MeasurementService {
       // can't copy; the intended home is an opt-in "match fabric exactly".
       const fabricUrl =
         process.env.EXACT_FABRIC_AFTER_GENERATE === 'true' &&
+        !config?.bottomFabricRefId &&
         typeof config?.fabricRefId === 'string' && /^https?:\/\//i.test(config.fabricRefId)
           ? config.fabricRefId
           : null;
