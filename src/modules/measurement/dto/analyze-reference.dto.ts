@@ -43,4 +43,10 @@ export interface AnalyzeReferenceResult {
       matched_from: string;
     }
   >;
+  /** Fabrics read from the photo (main, contrast, lining), with colours, type and pattern. */
+  fabrics?: import('../fabric-reading').ReadFabric[];
+  /** Closest in-stock fabrics for each role read. */
+  fabric_matches?: Record<string, import('../../products/fabric-match').FabricMatch[]>;
+  /** Shops whose fabrics match every fabric in the photo. */
+  fabric_sets?: import('../../products/fabric-match').FabricSetMatch[];
 }
