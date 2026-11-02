@@ -17,6 +17,7 @@ import { PlatformService } from '../platform/platform.service';
 import { GenerateOutfitRequestDto } from './dto/generate-outfit.dto';
 import { buildMetadataFromConfig } from './util/metadata-builder';
 import { buildPrompt } from './util/constructionBuilder';
+import { orderGenerationImages } from './util/generation-images';
 import { StyleLibraryService } from '../style-library/style-library.service';
 import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
 import { applyBodyShape, hasBodyShape } from './body-shape';
@@ -46,22 +47,26 @@ export class MeasurementService {
     try {
       const { config, user_prompt, reference_image_urls = [] } = params;
       const metadataObj = buildMetadataFromConfig(config);
-      const metadataJson = JSON.stringify(metadataObj);
-      const prompt = buildPrompt(user_prompt);
       const view = config.view ?? 'front';
       const client = await this.gradio.getClient(this.ig);
 
       // The generator only "sees" images passed via image_inputs/image_uploads.
       // The chosen fabric (plus inspiration/silhouette) lives in
-      // metadata.references, so it was being IGNORED — the model only used the
-      // customer's reference images. Feed those references in as real image
-      // inputs too (deduped), so the picked fabric actually influences the render.
+      // metadata.references, so feed those in as real image inputs too. The
+      // fabric goes first and the prompt says which picture is the fabric and
+      // which are style references, or the model keeps the reference's fabric.
       const metadataRefs: string[] = Array.isArray(metadataObj.references)
         ? metadataObj.references
         : [];
-      const allReferenceUrls = Array.from(
-        new Set([...reference_image_urls, ...metadataRefs]),
-      );
+      const images = orderGenerationImages({
+        referenceUrls: reference_image_urls,
+        metadataRefs,
+        fabricUrl: metadataObj.fabric?.use_reference_image ? config.fabricRefId : null,
+      });
+      const allReferenceUrls = images.urls;
+      metadataObj.image_roles = images.roles;
+      const metadataJson = JSON.stringify(metadataObj);
+      const prompt = buildPrompt(user_prompt, images.note);
 
       // Download all reference images and convert to blob for Gradio
       let imageUploads: any[] = [];
@@ -79,6 +84,7 @@ export class MeasurementService {
       // Log what we're sending to Gradio
       this.logger.log(`Gradio /generate_handler call:`);
       this.logger.log(`  prompt: ${prompt.slice(0, 100)}...`);
+      if (images.note) this.logger.log(`  image roles: ${images.note}`);
       this.logger.log(`  view: ${view}`);
       this.logger.log(`  image_inputs: ${allReferenceUrls.join(',') || '(empty)'}`);
       this.logger.log(`  image_uploads: ${imageUploads.length} file(s)`);
