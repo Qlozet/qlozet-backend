@@ -803,6 +803,10 @@ export class ProductService {
         { 'clothing.name': { $regex: search, $options: 'i' } },
         { 'accessory.name': { $regex: search, $options: 'i' } },
         { 'fabric.name': { $regex: search, $options: 'i' } },
+        // A shopper looking for fabric types what it is or its colour.
+        { 'fabric.material': { $regex: search, $options: 'i' } },
+        { 'fabric.pattern': { $regex: search, $options: 'i' } },
+        { 'fabric.colors.name': { $regex: search, $options: 'i' } },
 
         { 'clothing.taxonomy.categories': { $regex: search, $options: 'i' } },
         { 'accessory.taxonomy.categories': { $regex: search, $options: 'i' } },
