@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Schema as MongooseSchema } from 'mongoose';
+import { EXTRA_FABRIC_ROLES, type ExtraFabricRole } from '../quote-fabric';
 
 export enum BespokeDesignStatus {
   DRAFT = 'draft',
@@ -59,14 +60,16 @@ export class BespokeDesign {
   @Prop({
     type: [
       {
-        role: { type: String, enum: ['contrast', 'lining'], required: true },
+        role: { type: String, enum: EXTRA_FABRIC_ROLES, required: true },
         fabric: { type: MongooseSchema.Types.ObjectId, ref: 'Product', default: null },
+        // The colour wanted when the tailor chooses the fabric (fabric null).
+        color: { type: String, default: null },
         _id: false,
       },
     ],
     default: [],
   })
-  extra_fabrics: { role: 'contrast' | 'lining'; fabric: Types.ObjectId | null }[];
+  extra_fabrics: { role: ExtraFabricRole; fabric: Types.ObjectId | null; color?: string | null }[];
 
   // ─── Optional Details ───
   @Prop({ type: String, default: null })

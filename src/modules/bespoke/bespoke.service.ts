@@ -79,6 +79,7 @@ import { roundToSellable } from '../products/fabric-pieces';
 import {
   FABRIC_ROLE_NAMES,
   FabricRole,
+  ExtraFabricRole,
   QuoteFabric,
   applyFabricLine,
   fabricDepositFloor,
@@ -262,7 +263,7 @@ export class BespokeService {
   private async extraFabricsFrom(list?: ExtraFabricDto[]) {
     if (!list) return undefined;
     const seen = new Set<string>();
-    const out: { role: 'contrast' | 'lining'; fabric: Types.ObjectId | null }[] = [];
+    const out: { role: ExtraFabricRole; fabric: Types.ObjectId | null; color: string | null }[] = [];
     for (const slot of list) {
       const name = FABRIC_ROLE_NAMES[slot.role as FabricRole] ?? slot.role;
       if (seen.has(slot.role)) {
@@ -278,6 +279,8 @@ export class BespokeService {
       out.push({
         role: slot.role,
         fabric: slot.fabric_id ? new Types.ObjectId(slot.fabric_id) : null,
+        // A colour only means something when the tailor picks the fabric.
+        color: slot.fabric_id ? null : slot.color?.trim() || null,
       });
     }
     return out;
@@ -1332,7 +1335,11 @@ export class BespokeService {
         const supplier = await this.businessModel.findById(doc.business).select('business_name').lean();
         name = (supplier as any)?.business_name ?? null;
       }
-      extra_fabric_offers.push({ role: slot.role, ...fabricOffer(doc, businessId, name) });
+      extra_fabric_offers.push({
+        role: slot.role,
+        color: doc ? null : (slot.color ?? null),
+        ...fabricOffer(doc, businessId, name),
+      });
     }
     return {
       data: { ...quote, measurements, deposit_percent, fabric_offer, extra_fabric_offers },

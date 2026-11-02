@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import {
   applyFabricLine,
   fabricDepositFloor,
+  fabricLineLabel,
   fabricOnTop,
   priceQuoteFabric,
   quoteFabrics,
@@ -127,6 +128,13 @@ describe('a garment with more than one fabric', () => {
     const lining = priceQuoteFabric({ fabricProduct: null, tailorId: tailor, lineItems: lines, role: 'lining' });
     expect(main).toMatchObject({ role: 'main', amount: 9000, in_quote: true });
     expect(lining).toMatchObject({ role: 'lining', amount: 6000, in_quote: true });
+  });
+
+  it('prices a two-piece bottom in another fabric from its own line', () => {
+    const withBottom = [...lines, { label: 'Fabric (Bottom)', amount: 8000 }];
+    const bottom = priceQuoteFabric({ fabricProduct: null, tailorId: tailor, lineItems: withBottom, role: 'bottom' });
+    expect(bottom).toMatchObject({ role: 'bottom', amount: 8000, in_quote: true });
+    expect(fabricLineLabel('bottom')).toBe('Fabric (Bottom)');
   });
 
   it('gives each fabric inside the quote its own line, and drops one billed on top', () => {
