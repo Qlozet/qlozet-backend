@@ -77,13 +77,18 @@ import {
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
 import { roundToSellable } from '../products/fabric-pieces';
 import {
+  FABRIC_ROLE_NAMES,
+  FabricRole,
   QuoteFabric,
   applyFabricLine,
   fabricDepositFloor,
   fabricOffer,
+  fabricOnTop,
   fabricYardsInStock,
   priceQuoteFabric,
+  quoteFabrics,
 } from './quote-fabric';
+import { ExtraFabricDto } from './dto/create-design.dto';
 
 const MAX_VENDORS_PER_DESIGN = 5;
 const QUOTE_EXPIRY_DAYS = 7;
@@ -235,6 +240,7 @@ export class BespokeService {
       show_other_versions: dto.show_other_versions ?? true,
       reference_images: dto.reference_images || [],
       fabric: dto.fabric_id ? new Types.ObjectId(dto.fabric_id) : null,
+      extra_fabrics: (await this.extraFabricsFrom(dto.extra_fabrics)) ?? [],
       description: dto.description || null,
       measurement: dto.measurement_id
         ? new Types.ObjectId(dto.measurement_id)
@@ -247,6 +253,34 @@ export class BespokeService {
     );
 
     return { message: 'Design saved successfully', data: design };
+  }
+
+  /**
+   * A design's other fabrics (contrast, lining): one per role, each a real
+   * fabric listing or null for "the tailor chooses". undefined = not sent.
+   */
+  private async extraFabricsFrom(list?: ExtraFabricDto[]) {
+    if (!list) return undefined;
+    const seen = new Set<string>();
+    const out: { role: 'contrast' | 'lining'; fabric: Types.ObjectId | null }[] = [];
+    for (const slot of list) {
+      const name = FABRIC_ROLE_NAMES[slot.role as FabricRole] ?? slot.role;
+      if (seen.has(slot.role)) {
+        throw new BadRequestException(`A design can have one ${name.toLowerCase()}.`);
+      }
+      seen.add(slot.role);
+      if (slot.fabric_id) {
+        const fabric = await this.productModel.findById(slot.fabric_id).select('kind').lean();
+        if (!fabric || (fabric as any).kind !== 'fabric') {
+          throw new BadRequestException(`Invalid ${name.toLowerCase()}: product not found or not a fabric.`);
+        }
+      }
+      out.push({
+        role: slot.role,
+        fabric: slot.fabric_id ? new Types.ObjectId(slot.fabric_id) : null,
+      });
+    }
+    return out;
   }
 
   async updateDesign(designId: string, dto: CreateDesignDto, customer: any) {
@@ -291,6 +325,11 @@ export class BespokeService {
     design.reference_images = dto.reference_images || [];
     design.description = dto.description || (null as any);
     if (dto.fabric_id) design.fabric = new Types.ObjectId(dto.fabric_id);
+    const extras = await this.extraFabricsFrom(dto.extra_fabrics);
+    if (extras) {
+      design.extra_fabrics = extras as any;
+      design.markModified('extra_fabrics');
+    }
     if (dto.measurement_id)
       design.measurement = new Types.ObjectId(dto.measurement_id);
 
@@ -324,6 +363,7 @@ export class BespokeService {
         .skip((page - 1) * size)
         .limit(size)
         .populate('fabric', 'name fabric')
+        .populate('extra_fabrics.fabric', 'name fabric')
         .lean(),
       this.designModel.countDocuments(filter),
     ]);
@@ -342,6 +382,7 @@ export class BespokeService {
         customer: new Types.ObjectId(customerId),
       })
       .populate('fabric')
+      .populate('extra_fabrics.fabric')
       .populate('accepted_quote')
       .lean();
 
@@ -802,6 +843,82 @@ export class BespokeService {
         }
       }
 
+      // ── The garment's other fabrics (contrast, lining) ──
+      // Same rules as the main fabric, one fabric each: the tailor's own
+      // stock rides on their item as another fabric selection (inside the
+      // quote); another vendor's fabric is its own paid item with its own
+      // transfer to the tailor (on top of the quote).
+      const extraSlots = (((design as any).extra_fabrics ?? []) as any[]);
+      const extraPricing = (((quote as any).extra_fabric_pricing ?? []) as QuoteFabric[]);
+      const pricedFor = (role: string) => extraPricing.find((p) => p.role === role);
+      const extrasChanged =
+        extraSlots.length !== extraPricing.length ||
+        extraSlots.some(
+          (slot) =>
+            !pricedFor(slot.role) ||
+            String(pricedFor(slot.role)!.product ?? null) !== String(slot.fabric ?? null),
+        );
+      if (extrasChanged) {
+        throw new BadRequestException(
+          "This design's fabrics changed after the quote was sent. Ask the tailor to update the quote.",
+        );
+      }
+      const extras: { pricing: QuoteFabric; fabricProduct: any }[] = [];
+      for (const p of extraPricing) {
+        extras.push({
+          pricing: p,
+          fabricProduct: p.product ? await this.productModel.findById(p.product).lean() : null,
+        });
+      }
+      if (extras.length) {
+        this.assertFabricStock(
+          [
+            ...(fabricProduct
+              ? [{ pricing: { ...(pricing ?? {}), source: fabricForeign ? 'other_vendor' : 'tailor_stock', yards: fabricYards, name: (fabricProduct as any).fabric?.name } as QuoteFabric, fabricProduct }]
+              : []),
+            ...extras,
+          ],
+          'customer',
+        );
+      }
+      const extraSelections: any[] = [];
+      const extraItems: any[] = [];
+      const extraTransfers: any[] = [];
+      for (const { pricing: p, fabricProduct: fp } of extras) {
+        if (!fp || p.source === 'tailor_sourced') continue;
+        const selection = {
+          fabric_id: String((fp as any).fabric?._id ?? fp._id),
+          product_id: fp._id,
+          yardage: p.yards,
+          quantity: 1,
+        };
+        if (p.source === 'tailor_stock') {
+          extraSelections.push(selection);
+          continue;
+        }
+        const amount = Math.round(p.amount || 0);
+        extraItems.push({
+          product: fp._id,
+          business: (fp as any).business,
+          total_price: amount,
+          subtotal: amount,
+          fabric_selections: [selection],
+          note: `${FABRIC_ROLE_NAMES[p.role ?? 'main']} for bespoke ${design.reference} — ${p.yards} yd`,
+        });
+        extraTransfers.push({
+          business: (fp as any).business,
+          destination_business: quote.vendor,
+          fabric_product: fp._id,
+          fabric_yards: p.yards,
+          shipment_type: ShipmentType.FABRIC_TRANSFER,
+          status: ShipmentStatus.PENDING,
+          confirmed: true,
+          confirmed_at: new Date(),
+          shipping_fee: 0,
+        });
+      }
+      const extraOnTop = fabricOnTop(extras.map((e) => e.pricing));
+
       const fabricTransferDeadline = new Date();
       fabricTransferDeadline.setDate(fabricTransferDeadline.getDate() + 3);
       // Deposit now, balance when the tailor shows the finished piece (see
@@ -812,7 +929,7 @@ export class BespokeService {
         String(quote.vendor),
         quote.total,
         depositPercentFrom(planSettings),
-        fabricDepositFloor(pricing),
+        fabricDepositFloor([pricing, ...extras.map((e) => e.pricing)].filter(Boolean) as QuoteFabric[]),
       );
       const tailorCharge = plan ? plan.deposit_amount : quote.total;
 
@@ -844,9 +961,12 @@ export class BespokeService {
                       yardage: fabricYards,
                       quantity: 1,
                     },
+                    ...extraSelections,
                   ],
                 }
-              : {}),
+              : extraSelections.length
+                ? { fabric_selections: extraSelections }
+                : {}),
             ...(fabricForeign
               ? {
                   applied_fabric: design.fabric,
@@ -865,6 +985,7 @@ export class BespokeService {
                 },
               ]
             : []),
+          ...extraItems,
         ],
         shipments: [
           {
@@ -880,6 +1001,11 @@ export class BespokeService {
             ? [
                 {
                   business: (fabricProduct as any).business,
+                  // Who the fabric goes to: the tailor sees it coming and
+                  // waits for it before shipping the garment.
+                  destination_business: quote.vendor,
+                  fabric_product: design.fabric,
+                  fabric_yards: fabricYards,
                   shipment_type: ShipmentType.FABRIC_TRANSFER,
                   status: ShipmentStatus.PENDING,
                   confirmed: true,
@@ -889,10 +1015,11 @@ export class BespokeService {
                 },
               ]
             : []),
+          ...extraTransfers.map((t) => ({ ...t, fulfillment_deadline: fabricTransferDeadline })),
         ],
-        subtotal: tailorCharge + fabricCost,
+        subtotal: tailorCharge + fabricCost + extraOnTop,
         shipping_fee: 0,
-        total: tailorCharge + fabricCost,
+        total: tailorCharge + fabricCost + extraOnTop,
         payment_plan: plan,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
@@ -1086,7 +1213,7 @@ export class BespokeService {
         .sort({ createdAt: -1 })
         .skip((page - 1) * size)
         .limit(size)
-        .populate('design', 'name category gender design_images back_views show_other_versions reference_images description fabric')
+        .populate('design', 'name category gender design_images back_views show_other_versions reference_images description fabric extra_fabrics')
         .populate('customer', 'first_name last_name email')
         .lean(),
       this.quoteModel.countDocuments(filter),
@@ -1139,7 +1266,7 @@ export class BespokeService {
   async adminGetQuote(quoteId: string) {
     const quote = await this.quoteModel
       .findById(new Types.ObjectId(quoteId))
-      .populate({ path: 'design', populate: { path: 'fabric' } })
+      .populate({ path: 'design', populate: [{ path: 'fabric' }, { path: 'extra_fabrics.fabric' }] })
       .populate('vendor', 'business_name business_logo_url business_email')
       .populate('customer', 'username first_name last_name email')
       .lean();
@@ -1158,6 +1285,7 @@ export class BespokeService {
     const design = await this.designModel
       .findById(new Types.ObjectId(designId))
       .populate('fabric')
+      .populate('extra_fabrics.fabric')
       .populate('accepted_quote')
       .lean();
     if (!design) throw new NotFoundException('Design not found');
@@ -1172,7 +1300,7 @@ export class BespokeService {
       })
       .populate({
         path: 'design',
-        populate: { path: 'fabric' },
+        populate: [{ path: 'fabric' }, { path: 'extra_fabrics.fabric' }],
       })
       .populate('customer', 'first_name last_name email')
       .lean();
@@ -1196,7 +1324,19 @@ export class BespokeService {
       supplierName = (supplier as any)?.business_name ?? null;
     }
     const fabric_offer = fabricOffer(fabricDoc, businessId, supplierName);
-    return { data: { ...quote, measurements, deposit_percent, fabric_offer } };
+    const extra_fabric_offers: any[] = [];
+    for (const slot of ((quote as any).design?.extra_fabrics ?? []) as any[]) {
+      const doc = slot.fabric ?? null;
+      let name: string | null = null;
+      if (doc && String(doc.business) !== String(businessId)) {
+        const supplier = await this.businessModel.findById(doc.business).select('business_name').lean();
+        name = (supplier as any)?.business_name ?? null;
+      }
+      extra_fabric_offers.push({ role: slot.role, ...fabricOffer(doc, businessId, name) });
+    }
+    return {
+      data: { ...quote, measurements, deposit_percent, fabric_offer, extra_fabric_offers },
+    };
   }
 
   async getQuoteDetailForCustomer(quoteId: string, customerId: string) {
@@ -1207,7 +1347,7 @@ export class BespokeService {
       })
       .populate({
         path: 'design',
-        populate: { path: 'fabric' },
+        populate: [{ path: 'fabric' }, { path: 'extra_fabrics.fabric' }],
       })
       .populate('vendor', 'business_name business_logo_url business_email')
       .lean();
@@ -1232,7 +1372,7 @@ export class BespokeService {
       String(quote?.vendor?._id ?? quote?.vendor),
       quote?.total,
       percent,
-      fabricDepositFloor(quote?.fabric_pricing),
+      fabricDepositFloor(quoteFabrics(quote)),
     );
     return plan
       ? {
@@ -1252,33 +1392,78 @@ export class BespokeService {
     quote: any,
     lineItems: { label?: string; amount?: number }[],
     yards?: number | null,
-  ): Promise<{ pricing: QuoteFabric; fabricProduct: any }> {
+    extraYards?: { role: string; yards: number }[] | null,
+  ): Promise<{
+    pricing: QuoteFabric;
+    fabricProduct: any;
+    extras: { pricing: QuoteFabric; fabricProduct: any }[];
+  }> {
     const design = await this.designModel
       .findById(quote.design?._id ?? quote.design)
-      .select('fabric')
+      .select('fabric extra_fabrics')
       .lean();
-    const fabricProduct = (design as any)?.fabric
-      ? await this.productModel.findById((design as any).fabric).lean()
-      : null;
     const tailorId = String(quote.vendor?._id ?? quote.vendor);
-    let supplierName: string | null = null;
-    if (fabricProduct && String((fabricProduct as any).business) !== tailorId) {
-      const supplier = await this.businessModel
-        .findById((fabricProduct as any).business)
-        .select('business_name')
-        .lean();
-      supplierName = (supplier as any)?.business_name ?? null;
-    }
-    return {
-      pricing: priceQuoteFabric({
+    const price = async (productId: any, role: FabricRole, y?: number | null) => {
+      const fabricProduct = productId
+        ? await this.productModel.findById(productId).lean()
+        : null;
+      let supplierName: string | null = null;
+      if (fabricProduct && String((fabricProduct as any).business) !== tailorId) {
+        const supplier = await this.businessModel
+          .findById((fabricProduct as any).business)
+          .select('business_name')
+          .lean();
+        supplierName = (supplier as any)?.business_name ?? null;
+      }
+      return {
+        pricing: priceQuoteFabric({ fabricProduct, tailorId, yards: y, lineItems, supplierName, role }),
         fabricProduct,
-        tailorId,
-        yards,
-        lineItems,
-        supplierName,
-      }),
-      fabricProduct,
+      };
     };
+    const main = await price((design as any)?.fabric, 'main', yards);
+    const yardsFor = new Map((extraYards ?? []).map((e) => [e.role, e.yards]));
+    const extras: { pricing: QuoteFabric; fabricProduct: any }[] = [];
+    for (const slot of ((design as any)?.extra_fabrics ?? []) as any[]) {
+      extras.push(await price(slot.fabric, slot.role, yardsFor.get(slot.role)));
+    }
+    return { ...main, extras };
+  }
+
+  /** The quote's lines with a Fabric line for every fabric inside it. */
+  private withFabricLines(lineItems: any[], fabrics: QuoteFabric[]) {
+    return fabrics.reduce((lines, f) => applyFabricLine(lines, f), lineItems ?? []);
+  }
+
+  /**
+   * Refuse when a fabric listing has fewer yards than the quote needs. Two
+   * fabrics of one garment can be the same listing, so yards add up.
+   */
+  private assertFabricStock(
+    entries: { pricing: QuoteFabric; fabricProduct: any }[],
+    who: 'tailor' | 'customer',
+  ) {
+    const need = new Map<string, { yards: number; entry: { pricing: QuoteFabric; fabricProduct: any } }>();
+    for (const e of entries) {
+      if (!e.fabricProduct || e.pricing.source === 'tailor_sourced') continue;
+      const id = String(e.fabricProduct._id);
+      const prev = need.get(id);
+      need.set(id, { yards: (prev?.yards ?? 0) + (Number(e.pricing.yards) || 0), entry: prev?.entry ?? e });
+    }
+    for (const { yards, entry } of need.values()) {
+      const inStock = fabricYardsInStock(entry.fabricProduct);
+      if (inStock === null || inStock >= yards) continue;
+      const name = entry.pricing.name ?? 'This fabric';
+      if (who === 'customer') {
+        throw new BadRequestException(
+          `${name} now has only ${inStock} yards left and this quote needs ${yards}. Ask the tailor to update the quote.`,
+        );
+      }
+      throw new BadRequestException(
+        entry.pricing.source === 'tailor_stock'
+          ? `Your listing for ${name} has ${inStock} yards in stock and this quote needs ${yards}. Update the stock, or lower the yards.`
+          : `${name} has only ${inStock} yards left and this quote needs ${yards}. Decline the request, or tell the customer in your notes.`,
+      );
+    }
   }
 
   async saveQuoteDraft(
@@ -1307,6 +1492,10 @@ export class BespokeService {
     if (dto.line_items !== undefined) quote.line_items = dto.line_items as any;
     if (dto.required_fabric_yards !== undefined)
       quote.required_fabric_yards = dto.required_fabric_yards;
+    if (dto.extra_fabric_yards !== undefined) {
+      quote.extra_fabric_yards = dto.extra_fabric_yards as any;
+      quote.markModified('extra_fabric_yards');
+    }
     if (dto.estimated_completion_days !== undefined)
       quote.estimated_completion_days = dto.estimated_completion_days;
     if (dto.vendor_notes !== undefined)
@@ -1314,18 +1503,24 @@ export class BespokeService {
 
     // Fabric is priced by the platform (or typed by the tailor when they
     // source it); the Fabric line and the total follow.
-    const { pricing } = await this.priceQuoteFabricFor(
+    const { pricing, extras } = await this.priceQuoteFabricFor(
       quote,
       (quote.line_items as any[]) ?? [],
       quote.required_fabric_yards,
+      quote.extra_fabric_yards,
     );
-    quote.line_items = applyFabricLine((quote.line_items as any[]) ?? [], pricing) as any;
+    quote.line_items = this.withFabricLines(
+      (quote.line_items as any[]) ?? [],
+      [pricing, ...extras.map((e) => e.pricing)],
+    ) as any;
     quote.total = (quote.line_items as any[]).reduce(
       (sum, item) => sum + (item.amount || 0),
       0,
     );
     quote.fabric_pricing = pricing as any;
     quote.markModified('fabric_pricing');
+    quote.extra_fabric_pricing = extras.map((e) => e.pricing) as any;
+    quote.markModified('extra_fabric_pricing');
 
     quote.status = BespokeQuoteStatus.DRAFT;
     await quote.save();
@@ -1367,29 +1562,30 @@ export class BespokeService {
 
     // Fabric: priced from the listing when the design has one (yards
     // required, stock checked), typed by the tailor when they source it.
-    const { pricing, fabricProduct } = await this.priceQuoteFabricFor(
+    const { pricing, fabricProduct, extras } = await this.priceQuoteFabricFor(
       quote,
       dto.line_items,
       dto.required_fabric_yards,
+      dto.extra_fabric_yards,
     );
-    if (pricing.source !== 'tailor_sourced') {
-      if (!(Number(dto.required_fabric_yards) > 0)) {
+    if (pricing.source !== 'tailor_sourced' && !(Number(dto.required_fabric_yards) > 0)) {
+      throw new BadRequestException(
+        'Enter how many yards of fabric you need. It prices the fabric.',
+      );
+    }
+    for (const e of extras) {
+      if (e.pricing.source !== 'tailor_sourced' && !(Number(e.pricing.yards) > 0)) {
+        const name = FABRIC_ROLE_NAMES[e.pricing.role ?? 'main'].toLowerCase();
         throw new BadRequestException(
-          'Enter how many yards of fabric you need. It prices the fabric.',
-        );
-      }
-      const inStock = fabricYardsInStock(fabricProduct);
-      if (inStock !== null && inStock < (pricing.yards ?? 0)) {
-        throw new BadRequestException(
-          pricing.source === 'tailor_stock'
-            ? `Your listing for ${pricing.name ?? 'this fabric'} has ${inStock} yards in stock and this quote needs ${pricing.yards}. Update the stock, or lower the yards.`
-            : `${pricing.name ?? 'This fabric'} has only ${inStock} yards left and this quote needs ${pricing.yards}. Decline the request, or tell the customer in your notes.`,
+          `Enter how many yards of ${name} you need. It prices the ${name}.`,
         );
       }
     }
+    this.assertFabricStock([{ pricing, fabricProduct }, ...extras], 'tailor');
+    const allFabrics = [pricing, ...extras.map((e) => e.pricing)];
 
     // Update quote
-    quote.line_items = applyFabricLine(dto.line_items as any[], pricing) as any;
+    quote.line_items = this.withFabricLines(dto.line_items as any[], allFabrics) as any;
     quote.total = (quote.line_items as any[]).reduce(
       (sum, item) => sum + (item.amount || 0),
       0,
@@ -1399,6 +1595,10 @@ export class BespokeService {
     }
     quote.fabric_pricing = pricing as any;
     quote.markModified('fabric_pricing');
+    quote.extra_fabric_pricing = extras.map((e) => e.pricing) as any;
+    quote.markModified('extra_fabric_pricing');
+    quote.extra_fabric_yards = (dto.extra_fabric_yards ?? []) as any;
+    quote.markModified('extra_fabric_yards');
     quote.required_fabric_yards = dto.required_fabric_yards ?? null;
     quote.estimated_completion_days = dto.estimated_completion_days;
     quote.vendor_notes = dto.vendor_notes || '';
@@ -1433,8 +1633,8 @@ export class BespokeService {
     // Get vendor info for the email
     const business = await this.businessModel.findById(businessId);
     // What the customer pays in all: another vendor's fabric is on top.
-    const customerPrice =
-      quote.total + (pricing.in_quote ? 0 : Math.round(pricing.amount || 0));
+    const onTop = fabricOnTop(allFabrics);
+    const customerPrice = quote.total + onTop;
 
     // Send email notification to customer
     try {
@@ -1460,7 +1660,7 @@ export class BespokeService {
       category: NotificationCategory.BESPOKE,
       type: NotificationType.BESPOKE_QUOTE_RECEIVED,
       title: 'Quote Received!',
-      body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${customerPrice.toLocaleString()} for your bespoke design${pricing.in_quote || !pricing.amount ? '' : ', fabric included'}.`,
+      body: `${business?.business_name || 'A vendor'} submitted a quote of ₦${customerPrice.toLocaleString()} for your bespoke design${onTop > 0 ? ', fabric included' : ''}.`,
       // design_id lets the shop open this design's quotes directly.
       metadata: {
         quote_id: quote._id,

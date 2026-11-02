@@ -58,4 +58,38 @@ describe('bespoke fabric stock deduction', () => {
       ),
     ).rejects.toThrow('not found in product or standalone');
   });
+
+  it("deducts a selection that names its own listing (a bespoke lining from the tailor's stock)", async () => {
+    const liningId = new Types.ObjectId();
+    const liningFabricId = new Types.ObjectId();
+    const lining: any = { _id: liningId, fabric: { _id: liningFabricId, name: 'Silk lining', yard_length: 8 } };
+    const updates: any[] = [];
+    const looked: string[] = [];
+    const q = (v: any) => ({ session: () => Promise.resolve(v) });
+    const svc: any = Object.create(ProductService.prototype);
+    svc.logger = { log: () => undefined };
+    svc.fabricModel = { findById: () => q(null) };
+    svc.productModel = {
+      findById: (id: any) => {
+        looked.push(String(id));
+        return q(String(id) === String(liningId) ? lining : null);
+      },
+      updateOne: (filter: any, update: any) => {
+        updates.push({ filter, update });
+        return { session: () => Promise.resolve({ matchedCount: 1 }) };
+      },
+    };
+    await svc.updateFabric(
+      {
+        product: productId,
+        fabric_selections: [{ fabric_id: String(liningFabricId), product_id: liningId, yardage: 2, quantity: 1 }],
+      },
+      undefined,
+    );
+    expect(looked.every((id) => id === String(liningId))).toBe(true);
+    expect(updates[0]).toEqual({
+      filter: { _id: liningId },
+      update: { $set: { 'fabric.yard_length': 6 } },
+    });
+  });
 });

@@ -20,7 +20,28 @@ import { roundToSellable } from '../products/fabric-pieces';
  */
 export type FabricSource = 'other_vendor' | 'tailor_stock' | 'tailor_sourced';
 
+/**
+ * A garment can need more than one fabric. The main fabric is the design's
+ * `fabric`; the others are `extra_fabrics`, one per role. Each is priced on
+ * its own, the same way, and gets its own Fabric line when it is inside the
+ * quote ("Fabric" for the main one, "Fabric (Lining)" for a lining).
+ */
+export const EXTRA_FABRIC_ROLES = ['contrast', 'lining'] as const;
+export type ExtraFabricRole = (typeof EXTRA_FABRIC_ROLES)[number];
+export type FabricRole = 'main' | ExtraFabricRole;
+
+export const FABRIC_ROLE_NAMES: Record<FabricRole, string> = {
+  main: 'Main fabric',
+  contrast: 'Contrast fabric',
+  lining: 'Lining',
+};
+
+export const fabricLineLabel = (role: FabricRole = 'main') =>
+  role === 'main' ? 'Fabric' : `Fabric (${role[0].toUpperCase()}${role.slice(1)})`;
+
 export interface QuoteFabric {
+  /** Which fabric of the garment this is. Absent on quotes before 2 Nov 2026 (= main). */
+  role?: FabricRole;
   source: FabricSource;
   /** The fabric product, or null when the tailor sources it. */
   product: string | null;
@@ -40,8 +61,8 @@ export interface QuoteFabric {
 
 export const FABRIC_LINE_LABEL = 'Fabric';
 
-const isFabricLine = (li: { label?: string }) =>
-  String(li?.label ?? '').trim().toLowerCase() === 'fabric';
+const isFabricLine = (li: { label?: string }, role: FabricRole = 'main') =>
+  String(li?.label ?? '').trim().toLowerCase() === fabricLineLabel(role).toLowerCase();
 
 export function fabricSourceFor(
   fabricProduct: any | null | undefined,
@@ -55,8 +76,11 @@ export function fabricSourceFor(
 }
 
 /** The amount the tailor typed on the Fabric line (tailor_sourced only). */
-export function typedFabricAmount(lineItems: { label?: string; amount?: number }[] = []): number {
-  const line = lineItems.find(isFabricLine);
+export function typedFabricAmount(
+  lineItems: { label?: string; amount?: number }[] = [],
+  role: FabricRole = 'main',
+): number {
+  const line = lineItems.find((li) => isFabricLine(li, role));
   return Math.max(0, Math.round(Number(line?.amount) || 0));
 }
 
@@ -66,13 +90,16 @@ export function priceQuoteFabric(opts: {
   yards?: number | null;
   lineItems?: { label?: string; amount?: number }[];
   supplierName?: string | null;
+  role?: FabricRole;
 }): QuoteFabric {
   const { fabricProduct, tailorId } = opts;
+  const role: FabricRole = opts.role ?? 'main';
   const source = fabricSourceFor(fabricProduct, tailorId);
   const yards = Number(opts.yards) > 0 ? Number(opts.yards) : null;
 
   if (source === 'tailor_sourced') {
     return {
+      role,
       source,
       product: null,
       name: null,
@@ -82,7 +109,7 @@ export function priceQuoteFabric(opts: {
       pieces: null,
       price_per_yard: null,
       piece_price: null,
-      amount: typedFabricAmount(opts.lineItems),
+      amount: typedFabricAmount(opts.lineItems, role),
       in_quote: true,
     };
   }
@@ -90,6 +117,7 @@ export function priceQuoteFabric(opts: {
   const f = fabricProduct.fabric ?? {};
   const sellable = yards ? roundToSellable(f, yards) : null;
   return {
+    role,
     source,
     product: String(fabricProduct._id),
     name: f.name ?? fabricProduct.name ?? null,
@@ -113,10 +141,11 @@ export function applyFabricLine<T extends { label?: string; amount?: number }>(
   lineItems: T[],
   fabric: QuoteFabric,
 ): T[] {
-  const rest = lineItems.filter((li) => !isFabricLine(li));
+  const role = fabric.role ?? 'main';
+  const rest = lineItems.filter((li) => !isFabricLine(li, role));
   if (!fabric.in_quote) return rest;
-  const idx = lineItems.findIndex(isFabricLine);
-  const line = { label: FABRIC_LINE_LABEL, amount: fabric.amount } as T;
+  const idx = lineItems.findIndex((li) => isFabricLine(li, role));
+  const line = { label: fabricLineLabel(role), amount: fabric.amount } as T;
   if (idx < 0) return [...rest, line];
   const out = [...rest];
   out.splice(idx, 0, line);
@@ -129,9 +158,31 @@ export function fabricYardsInStock(fabricProduct: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** The deposit floor a quote's fabric sets (0 when it is billed on top). */
-export function fabricDepositFloor(fabric?: QuoteFabric | null): number {
-  return fabric?.in_quote ? Math.max(0, Math.round(fabric.amount || 0)) : 0;
+/** Every priced fabric on a quote: the main one, then the extra ones. */
+export function quoteFabrics(quote: any): QuoteFabric[] {
+  return [quote?.fabric_pricing, ...((quote?.extra_fabric_pricing as any[]) ?? [])].filter(
+    Boolean,
+  ) as QuoteFabric[];
+}
+
+/**
+ * The deposit floor a quote's fabric sets: every fabric inside the quote
+ * (another vendor's fabric is billed on top, so it sets none).
+ */
+export function fabricDepositFloor(fabric?: QuoteFabric | QuoteFabric[] | null): number {
+  const list = Array.isArray(fabric) ? fabric : fabric ? [fabric] : [];
+  return list.reduce(
+    (sum, f) => sum + (f?.in_quote ? Math.max(0, Math.round(f.amount || 0)) : 0),
+    0,
+  );
+}
+
+/** What the customer pays on top of the quote: other vendors' fabric. */
+export function fabricOnTop(fabrics: QuoteFabric[]): number {
+  return fabrics.reduce(
+    (sum, f) => sum + (f && !f.in_quote ? Math.max(0, Math.round(f.amount || 0)) : 0),
+    0,
+  );
 }
 
 /** What the vendor app needs to price fabric live as the tailor types yards. */

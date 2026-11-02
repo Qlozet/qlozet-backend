@@ -24,6 +24,17 @@ export class BackViewDto {
   back: string;
 }
 
+export class ExtraFabricDto {
+  @ApiProperty({ enum: ['contrast', 'lining'] })
+  @IsEnum(['contrast', 'lining'])
+  role: 'contrast' | 'lining';
+
+  @ApiPropertyOptional({ description: 'Fabric product id; omit or null to let the tailor choose it.' })
+  @IsOptional()
+  @IsMongoId()
+  fabric_id?: string | null;
+}
+
 export class CreateDesignDto {
   @ApiProperty({ example: 'My Wedding Agbada' })
   @IsString()
@@ -83,6 +94,17 @@ export class CreateDesignDto {
   @IsOptional()
   @IsMongoId()
   fabric_id?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Other fabrics the garment needs, one per role (contrast, lining). Omit on update to keep the saved ones; [] removes them.',
+    type: [ExtraFabricDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExtraFabricDto)
+  extra_fabrics?: ExtraFabricDto[];
 
   @ApiPropertyOptional({ example: 'I want a modern take on traditional agbada' })
   @IsOptional()

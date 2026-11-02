@@ -79,6 +79,14 @@ export class BespokeQuote {
   @Prop({ type: Object, default: null })
   fabric_pricing: Record<string, any> | null;
 
+  /** Yards for each extra fabric of the design (contrast, lining). */
+  @Prop({ type: [{ role: String, yards: Number, _id: false }], default: [] })
+  extra_fabric_yards: { role: string; yards: number }[];
+
+  /** Each extra fabric priced like fabric_pricing, with its role. */
+  @Prop({ type: [Object], default: [] })
+  extra_fabric_pricing: Record<string, any>[];
+
   @Prop({ type: Number, default: null })
   estimated_completion_days: number;
 

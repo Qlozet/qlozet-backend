@@ -2,7 +2,9 @@ import { Types } from 'mongoose';
 import {
   applyFabricLine,
   fabricDepositFloor,
+  fabricOnTop,
   priceQuoteFabric,
+  quoteFabrics,
 } from './quote-fabric';
 import { buildPaymentPlan } from '../orders/bespoke-payment-plan';
 
@@ -110,5 +112,58 @@ describe('deposit floor', () => {
 
   it('charges in full when the fabric is the whole quote', () => {
     expect(buildPaymentPlan(tailor, 50000, 50, 50000)).toBeNull();
+  });
+});
+
+describe('a garment with more than one fabric', () => {
+  const lines = [
+    { label: 'Tailoring', amount: 40000 },
+    { label: 'Fabric', amount: 9000 },
+    { label: 'Fabric (Lining)', amount: 6000 },
+  ];
+
+  it('reads each fabric the tailor sources from its own line', () => {
+    const main = priceQuoteFabric({ fabricProduct: null, tailorId: tailor, lineItems: lines });
+    const lining = priceQuoteFabric({ fabricProduct: null, tailorId: tailor, lineItems: lines, role: 'lining' });
+    expect(main).toMatchObject({ role: 'main', amount: 9000, in_quote: true });
+    expect(lining).toMatchObject({ role: 'lining', amount: 6000, in_quote: true });
+  });
+
+  it('gives each fabric inside the quote its own line, and drops one billed on top', () => {
+    const contrast = priceQuoteFabric({
+      fabricProduct: fabricProduct(tailor, { price_per_yard: 3000 }),
+      tailorId: tailor,
+      yards: 2,
+      lineItems: lines,
+      role: 'contrast',
+    });
+    const lining = priceQuoteFabric({
+      fabricProduct: fabricProduct(other, { price_per_yard: 2500 }),
+      tailorId: tailor,
+      yards: 3,
+      lineItems: lines,
+      role: 'lining',
+    });
+    const out = [contrast, lining].reduce((l, f) => applyFabricLine(l, f), lines);
+    expect(out).toEqual([
+      { label: 'Tailoring', amount: 40000 },
+      { label: 'Fabric', amount: 9000 },
+      { label: 'Fabric (Contrast)', amount: 6000 },
+    ]);
+    expect(fabricOnTop([contrast, lining])).toBe(7500);
+  });
+
+  it('every fabric inside the quote counts toward the deposit floor', () => {
+    const quote = {
+      fabric_pricing: { source: 'tailor_stock', amount: 9000, in_quote: true },
+      extra_fabric_pricing: [
+        { role: 'lining', source: 'tailor_sourced', amount: 6000, in_quote: true },
+        { role: 'contrast', source: 'other_vendor', amount: 7500, in_quote: false },
+      ],
+    };
+    expect(quoteFabrics(quote)).toHaveLength(3);
+    expect(fabricDepositFloor(quoteFabrics(quote))).toBe(15000);
+    expect(fabricDepositFloor(quote.fabric_pricing as any)).toBe(9000);
+    expect(fabricOnTop(quoteFabrics(quote))).toBe(7500);
   });
 });
