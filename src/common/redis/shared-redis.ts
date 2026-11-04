@@ -11,6 +11,7 @@ import IORedis from 'ioredis';
  * maxRetriesPerRequest must be null for a connection BullMQ workers use.
  */
 let shared: IORedis | undefined;
+let subscriber: IORedis | undefined;
 
 export function sharedRedis(): IORedis {
   if (!shared) {
@@ -22,8 +23,29 @@ export function sharedRedis(): IORedis {
   return shared;
 }
 
+/**
+ * A second connection for listening. A connection that subscribes to Redis
+ * messages can do nothing else, so the live-message relay between servers
+ * (see redis-io.adapter.ts) gets its own: one extra connection per machine.
+ */
+export function sharedRedisSubscriber(): IORedis {
+  if (!subscriber) {
+    subscriber = sharedRedis().duplicate();
+  }
+  return subscriber;
+}
+
 /** Closed on shutdown, so a stopped machine gives its slot back at once. */
 export async function closeSharedRedis(): Promise<void> {
+  if (subscriber) {
+    const sub = subscriber;
+    subscriber = undefined;
+    try {
+      await sub.quit();
+    } catch {
+      sub.disconnect();
+    }
+  }
   if (!shared) return;
   const conn = shared;
   shared = undefined;

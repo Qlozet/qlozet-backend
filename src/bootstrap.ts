@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './common/redis/redis-io.adapter';
 
 export async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -17,6 +18,8 @@ export async function bootstrap() {
   app.set('trust proxy', 1);
 
   app.enableShutdownHooks();
+  // Live chat and notifications reach people on every machine, not just this one.
+  app.useWebSocketAdapter(new RedisIoAdapter(app));
   app.use(helmet());
   app.use(
     json({
