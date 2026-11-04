@@ -68,7 +68,12 @@ describe('linked shop and store accounts', () => {
       }),
       updateOne: jest.fn(() => q({})),
       updateMany: jest.fn(async (f: any, u: any) => {
-        users.filter((x) => matches(x, f)).forEach((x) => Object.assign(x, u.$set));
+        const hit = users.filter((x) => matches(x, f));
+        hit.forEach((x) => {
+          Object.assign(x, u.$set ?? {});
+          Object.keys(u.$unset ?? {}).forEach((k) => delete x[k]);
+        });
+        return { modifiedCount: hit.length };
       }),
       findByIdAndUpdate: jest.fn(async () => undefined),
     };
@@ -164,6 +169,21 @@ describe('linked shop and store accounts', () => {
       ]);
       await expect(service.registerVendor(signup())).rejects.toBeInstanceOf(
         ConflictException,
+      );
+    });
+
+    it('frees a number held by an unverified sign-up on another email', async () => {
+      const abandoned = shopper({
+        email: 'ada@exmaple.com', // the typo
+        type: UserType.VENDOR,
+        email_verified: false,
+      });
+      const { service, created } = build([abandoned]);
+      await service.registerVendor(signup());
+      expect(abandoned.phone_number).toBeUndefined();
+      expect(abandoned.email).toBe('ada@exmaple.com'); // kept, just no number
+      expect(created.find((u) => u.type === UserType.VENDOR).phone_number).toBe(
+        '+2348031234567',
       );
     });
 

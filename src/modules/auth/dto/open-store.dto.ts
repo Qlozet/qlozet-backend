@@ -1,3 +1,5 @@
+import { Transform } from 'class-transformer';
+import { PHONE_MESSAGE, phoneTransform } from '../../../common/utils/phone';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsOptional,
@@ -28,6 +30,7 @@ export class OpenStoreDto {
     example: '+2348031234567',
   })
   @IsOptional()
-  @IsPhoneNumber(undefined, { message: 'Enter a valid phone number.' })
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
   phone_number?: string;
 }

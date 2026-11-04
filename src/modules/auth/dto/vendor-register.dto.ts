@@ -1,3 +1,4 @@
+import { PHONE_MESSAGE, phoneTransform } from '../../../common/utils/phone';
 import {
   IsString,
   IsNotEmpty,
@@ -37,9 +38,8 @@ export class VendorRegisterDto {
     example: '+2348012345678',
   })
   @IsOptional()
-  @IsPhoneNumber(undefined, {
-    message: 'Please provide a valid business_phone_number',
-  })
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: `Business phone: ${PHONE_MESSAGE}` })
   business_phone_number?: string;
 
   @ApiPropertyOptional({
@@ -63,10 +63,9 @@ export class VendorRegisterDto {
     description: 'Personal phone number',
     example: '+2348012345679',
   })
-  @IsPhoneNumber(undefined, {
-    message: 'Please provide a valid personal_phone_number',
-  })
-  @IsNotEmpty({ message: 'personal_phone_number is required' })
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
+  @IsNotEmpty({ message: 'Enter your phone number.' })
   personal_phone_number: string;
 
   @ApiProperty({

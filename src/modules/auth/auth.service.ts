@@ -132,9 +132,10 @@ export class AuthService {
       );
     }
 
+    await this.releasePhoneFromUnverified(personal_phone_number, UserType.VENDOR);
     if (await this.phoneTaken(personal_phone_number, UserType.VENDOR)) {
       throw new ConflictException(
-        'A store account with this phone number already exists.',
+        'A store account with this phone number already exists. Sign in instead, or use a different number.',
       );
     }
 
@@ -303,6 +304,26 @@ export class AuthService {
       throw new ConflictException(
         `A business with this ${field} already exists.`,
       );
+    }
+  }
+
+  /**
+   * A sign-up that was never verified (typo in the email, never got the
+   * code) shouldn't keep holding its phone number, or the person can't try
+   * again with the right email. Only the number is removed: if that account
+   * was real it can still be verified, and adds a number later.
+   */
+  private async releasePhoneFromUnverified(
+    phone: string | undefined,
+    type: UserType,
+  ) {
+    if (!phone) return;
+    const res = await this.userModel.updateMany(
+      { phone_number: phone, type, email_verified: { $ne: true } },
+      { $unset: { phone_number: 1 } },
+    );
+    if (res?.modifiedCount) {
+      this.logger.log(`Released ${phone.slice(0, 5)}… from an unverified ${type} sign-up`);
     }
   }
 
@@ -525,6 +546,7 @@ export class AuthService {
         'You have a Qlozet store with this email. Sign in with the same email and password; your shopping account is set up automatically.',
       );
     }
+    await this.releasePhoneFromUnverified(phone_number, UserType.CUSTOMER);
     if (await this.phoneTaken(phone_number, UserType.CUSTOMER)) {
       throw new ConflictException('Email or phone number already in use');
     }

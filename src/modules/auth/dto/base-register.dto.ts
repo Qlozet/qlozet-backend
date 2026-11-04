@@ -1,3 +1,5 @@
+import { Transform } from 'class-transformer';
+import { PHONE_MESSAGE, phoneTransform } from '../../../common/utils/phone';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
@@ -21,8 +23,9 @@ export class BaseRegistrationDto {
   email: string;
 
   @ApiProperty({ description: 'Customer phone number' })
-  @IsNotEmpty()
-  @IsPhoneNumber()
+  @IsNotEmpty({ message: 'Enter your phone number.' })
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
   phone_number: string;
 
   @ApiProperty({ description: 'Customer password', minLength: 6 })
