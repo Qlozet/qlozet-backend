@@ -27,10 +27,13 @@ export class User extends Document {
   @Prop({ required: true, trim: true })
   full_name: string;
 
-  @Prop({ required: true, unique: true, lowercase: true, trim: true })
+  // Unique per account type, not globally (indexes at the bottom): one
+  // person may hold a shopping account and a store account on the same
+  // email and number. See modules/auth/linked-accounts.ts.
+  @Prop({ required: true, lowercase: true, trim: true })
   email: string;
 
-  @Prop({ required: false, unique: true, sparse: true })
+  @Prop({ required: false })
   phone_number?: string;
 
   /**
@@ -258,6 +261,20 @@ export class User extends Document {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
+// One shopping account and one store account per email / number. The old
+// global indexes (email_1, phone_number_1) are dropped at boot by
+// LinkedAccountsIndexMigration.
+UserSchema.index({ email: 1, type: 1 }, { unique: true, name: 'email_type_unique' });
+UserSchema.index(
+  { phone_number: 1, type: 1 },
+  {
+    unique: true,
+    name: 'phone_type_unique',
+    // Not sparse: type is always set, so a sparse compound index would still
+    // index every account with no number and refuse the second one.
+    partialFilterExpression: { phone_number: { $type: 'string' } },
+  },
+);
 UserSchema.index({ email_verification_token: 1 });
 UserSchema.index({ email_verification_expires: 1 });
 UserSchema.index({ status: 1, email_verified: 1 });

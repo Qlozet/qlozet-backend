@@ -68,6 +68,16 @@ describe('AuthService.loginWithGoogle', () => {
         },
       ]),
       updateOne: jest.fn().mockResolvedValue({}),
+      exists: jest.fn().mockResolvedValue(null),
+      findById: jest.fn((id: string) => ({
+        select: jest.fn().mockResolvedValue({
+          _id: id,
+          email: 'ada@example.com',
+          type: UserType.CUSTOMER,
+          status: 'active',
+          toObject: () => ({ _id: id, email: 'ada@example.com' }),
+        }),
+      })),
     };
     walletModel = { create: jest.fn().mockResolvedValue([{}]) };
     tokenModel = { create: jest.fn().mockResolvedValue([{}]) };
@@ -175,20 +185,50 @@ describe('AuthService.loginWithGoogle', () => {
       );
     });
 
-    it('refuses a business account rather than converting it', async () => {
-      userModel.findOne.mockReturnValue({
-        select: jest.fn().mockResolvedValue({
-          _id: 'vendor-id',
-          email: 'ada@example.com',
-          type: UserType.VENDOR,
-          status: 'active',
-          toObject: () => ({}),
-        }),
-      });
+    it('refuses a staff account', async () => {
+      userModel.exists.mockImplementation(async (q: any) =>
+        q.type === UserType.PLATFORM ? { _id: 'staff-id' } : null,
+      );
 
       await expect(service.loginWithGoogle('token')).rejects.toThrow(
         UnauthorizedException,
       );
+      expect(userModel.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a store owner without a shopping account', () => {
+    it('makes a linked shopping account instead of refusing', async () => {
+      userModel.findOne.mockImplementation((q: any) => ({
+        select: jest.fn().mockResolvedValue(
+          q.type === UserType.VENDOR
+            ? {
+                _id: 'vendor-id',
+                email: 'ada@example.com',
+                full_name: 'Ada Obi',
+                phone_number: '+2348031234567',
+                hashed_password: 'store-hash',
+                type: UserType.VENDOR,
+                status: 'active',
+                email_verified: true,
+              }
+            : null,
+        ),
+      }));
+
+      const result = await service.loginWithGoogle('token');
+
+      expect(userModel.create).toHaveBeenCalledTimes(1);
+      const created = userModel.create.mock.calls[0][0][0];
+      expect(created.type).toBe(UserType.CUSTOMER);
+      expect(created.email).toBe('ada@example.com');
+      // Same person: the store's password and number come across.
+      expect(created.hashed_password).toBe('store-hash');
+      expect(created.phone_number).toBe('+2348031234567');
+      expect(created.google_id).toBe('google-subject-123');
+      expect(created.email_verified).toBe(true);
+      expect(walletModel.create).toHaveBeenCalledTimes(1);
+      expect(result.data.token).toBeDefined();
     });
   });
 

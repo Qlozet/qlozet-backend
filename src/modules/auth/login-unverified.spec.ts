@@ -47,7 +47,8 @@ describe('sign-in before the email is verified', () => {
         await expect(login('right-password')).rejects.toThrow(
           /verify your email\. We've sent a new code/,
         );
-        expect(service.resendVerificationEmail).toHaveBeenCalledWith('ada@example.com');
+        // The code goes to THIS app's account; the email may hold both.
+        expect(service.resendVerificationEmail).toHaveBeenCalledWith('ada@example.com', type);
       });
 
       it('sends nothing and says nothing about verification on a wrong password', async () => {

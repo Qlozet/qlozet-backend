@@ -37,6 +37,11 @@ describe('email verification codes', () => {
     return user;
   };
 
+  const chain = (value: any) => {
+    const q: any = { sort: () => q, select: async () => value };
+    return q;
+  };
+
   const build = (user: any, mailFails = false) => {
     const updates: any[] = [];
     const sent: any[] = [];
@@ -44,7 +49,10 @@ describe('email verification codes', () => {
     service.logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
     service.connection = { startSession: async () => session };
     service.userModel = {
-      findOne: jest.fn(() => ({ select: async () => user })),
+      // Lookups now ask for the account still waiting for a code.
+      findOne: jest.fn(() => chain(user.email_verified ? null : user)),
+      find: jest.fn(() => chain(user.email_verified ? [] : [user])),
+      exists: jest.fn(async () => ({ _id: user._id })),
       updateOne: jest.fn(async (_q: any, u: any) => updates.push(u)),
       findByIdAndUpdate: jest.fn(async () => undefined),
     };

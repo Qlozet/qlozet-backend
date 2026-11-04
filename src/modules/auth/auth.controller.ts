@@ -35,6 +35,7 @@ import { PasswordResetDto } from './dto/password-reset.dto';
 import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SwitchBusinessDto } from './dto/switch-business.dto';
+import { OpenStoreDto } from './dto/open-store.dto';
 import { ApiResponseWrapper } from 'src/common/decorators/api-response.decorator';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
@@ -320,6 +321,20 @@ export class AuthController {
     @Req() req: any,
   ) {
     return this.authService.changePassword(req.user.id, changePasswordDto);
+  }
+
+  // A signed-in shopper opens a store on the same email and password.
+  @Post('open-store')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 3, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Open a store from a shopping account',
+    description:
+      'Creates the store account (same email, number and password) for the signed-in shopper. They then sign in to the vendor app with the same details.',
+  })
+  @ApiBody({ type: OpenStoreDto })
+  async openStore(@Body() dto: OpenStoreDto, @Req() req: any) {
+    return this.authService.openStoreForCustomer(req.user.id, dto);
   }
 
   // ✅ Switch Business (Authenticated)

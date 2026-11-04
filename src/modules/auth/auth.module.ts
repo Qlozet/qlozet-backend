@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { LinkedAccountsIndexMigration } from './linked-accounts';
 import { User, UserSchema } from '../ums/schemas/user.schema';
 import { Role, RoleSchema } from '../ums/schemas/role.schema';
 import { Permission, PermissionSchema } from '../ums/schemas/permission.schema';
@@ -76,6 +77,7 @@ import { SizeGuideModule } from '../size-guide/size-guide.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    LinkedAccountsIndexMigration,
     PermissionService,  // pragmatic: AuthModule already registers User/Role schemas
     UserService,
     JwtAuthGuard,
