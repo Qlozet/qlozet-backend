@@ -31,8 +31,10 @@ import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { settlementDate } from './settlement';
 import {
   SHIP_AFTER_BALANCE_DAYS,
+  balanceDaysFrom,
   balanceDueAt,
 } from '../orders/bespoke-payment-plan';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { LogisticsService } from '../logistics/logistics.service';
 import { User, UserDocument } from '../ums/schemas';
 import { PaginationQueryType } from 'src/common/types/pagination.type';
@@ -2128,17 +2130,159 @@ export class BusinessService {
         ],
       },
     );
-    if (claim.modifiedCount !== 1) return false;
+    if (claim.modifiedCount !== 1) {
+      // The same payment arriving again (a webhook retry): the order is already
+      // settled by it, so only make sure the tailor's earning exists.
+      if (plan.balance_reference === reference) {
+        await this.recordBespokeBalanceEarningsSafely(order, tailor, balance);
+      }
+      return false;
+    }
 
-    await this.orderModel.updateOne(
-      { _id: order._id, 'preship.status': 'pending_review' },
-      { $set: { 'preship.status': 'approved', 'preship.reviewed_at': now } },
-    );
-    await this.recordBespokeBalanceEarnings(order._id, tailor, balance);
+    // From here the payment counts: the order is paid. Nothing below may
+    // undo that or make the caller think it failed (a wallet payment would be
+    // refunded while the order stays paid). A missed earning is recorded by
+    // repairBespokeBalances within the hour.
+    await this.orderModel
+      .updateOne(
+        { _id: order._id, 'preship.status': 'pending_review' },
+        { $set: { 'preship.status': 'approved', 'preship.reviewed_at': now } },
+      )
+      .catch((e: any) =>
+        this.logger.error(
+          `[Bespoke] Could not approve the photos on ${order.reference} after the balance: ${e?.message}`,
+        ),
+      );
+    await this.recordBespokeBalanceEarningsSafely(order, tailor, balance);
     this.logger.log(
       `[Bespoke] Balance ₦${balance} paid on order ${order.reference} (${reference})`,
     );
     return true;
+  }
+
+  private async recordBespokeBalanceEarningsSafely(
+    order: any,
+    tailor: string,
+    balance: number,
+  ) {
+    try {
+      await this.recordBespokeBalanceEarnings(order._id, tailor, balance);
+    } catch (e: any) {
+      this.logger.error(
+        `[Bespoke] Balance on ${order.reference} is paid but the tailor's earning was not recorded (repair job will retry): ${e?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Hourly repair for bespoke balances left half-done (an error after the
+   * order was marked paid). For each paid balance with no tailor earning:
+   * - the payment went through → record the earning;
+   * - the payment failed or was refunded (a wallet payment is refunded when
+   *   settling throws) → reopen the balance so the customer can pay again,
+   *   with a fresh payment window and the photos back to awaiting review.
+   * Pending payments are left alone.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async repairBespokeBalances(): Promise<{ recorded: number; reopened: number }> {
+    const result = { recorded: 0, reopened: 0 };
+    try {
+      const paid: any[] = await this.orderModel
+        .find({
+          'payment_plan.kind': 'deposit',
+          'payment_plan.status': 'paid',
+          'payment_plan.balance_reference': { $nin: [null, ''] },
+          'payment_plan.balance_amount': { $gt: 0 },
+        })
+        .select('reference status payment_plan preship')
+        .limit(500)
+        .lean();
+      if (!paid.length) return result;
+
+      const withEarning = new Set(
+        (
+          await this.businessEarningsModel
+            .find({ order: { $in: paid.map((o) => o._id) }, milestone: 'balance' })
+            .select('order')
+            .lean()
+        ).map((e: any) => String(e.order)),
+      );
+      const settings: any = await this.platformSettingsModel.findOne().lean();
+
+      for (const order of paid) {
+        if (withEarning.has(String(order._id))) continue;
+        const plan = order.payment_plan;
+        const tailor = String(plan.tailor);
+        const balance = Number(plan.balance_amount) || 0;
+        const tx: any = await this.transactionModel
+          .findOne({ reference: plan.balance_reference })
+          .select('status')
+          .lean();
+        const status = tx?.status;
+
+        if (status === TransactionStatus.SUCCESS) {
+          await this.recordBespokeBalanceEarnings(order._id, tailor, balance);
+          result.recorded++;
+          this.logger.warn(
+            `[Bespoke] Repaired: recorded the missing balance earning on ${order.reference}`,
+          );
+          continue;
+        }
+        if (status !== TransactionStatus.FAILED && status !== TransactionStatus.REVERSED) {
+          continue; // still pending, or unknown: leave it for a person
+        }
+        if (order.status !== 'processing') {
+          // Shipped or closed since: reopening would ask for money the
+          // customer can no longer pay. A person has to decide.
+          this.logger.error(
+            `[Bespoke] ${order.reference}: balance payment failed but the order is ${order.status}; needs a manual decision`,
+          );
+          continue;
+        }
+
+        const reopened = await this.orderModel.updateOne(
+          {
+            _id: order._id,
+            'payment_plan.status': 'paid',
+            'payment_plan.balance_reference': plan.balance_reference,
+          },
+          {
+            $set: {
+              'payment_plan.status': order.preship ? 'awaiting_balance' : 'deposit_paid',
+              'payment_plan.balance_paid_at': null,
+              'payment_plan.balance_reference': null,
+              'payment_plan.balance_due_at': order.preship
+                ? balanceDueAt(new Date(), balanceDaysFrom(settings))
+                : null,
+            },
+            $inc: {
+              total: -balance,
+              subtotal: -balance,
+              'items.$[t].total_price': -balance,
+            },
+          },
+          {
+            arrayFilters: [
+              { 't.business': { $in: [new Types.ObjectId(tailor), tailor] } },
+            ],
+          },
+        );
+        if (reopened.modifiedCount !== 1) continue;
+        if (order.preship?.status === 'approved') {
+          await this.orderModel.updateOne(
+            { _id: order._id },
+            { $set: { 'preship.status': 'pending_review', 'preship.reviewed_at': null } },
+          );
+        }
+        result.reopened++;
+        this.logger.warn(
+          `[Bespoke] Repaired: balance payment on ${order.reference} had failed; balance reopened for the customer`,
+        );
+      }
+    } catch (e: any) {
+      this.logger.error(`[Bespoke] Balance repair failed: ${e?.message}`);
+    }
+    return result;
   }
 
   /** The tailor's earning for a paid balance (same commission rules as the deposit). */

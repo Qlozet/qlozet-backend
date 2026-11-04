@@ -1,4 +1,5 @@
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
+import { BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
 import { OrderService } from './orders.service';
 import { OrderSchema } from './schemas/orders.schema';
 import { BusinessService } from '../business/business.service';
@@ -55,6 +56,8 @@ describe('bespoke deposit orders (real Mongo)', () => {
   let earnings: any[];
   let walletIncs: any[];
   let notify: jest.Mock;
+  let txs: Record<string, any>;
+  let failEarning: boolean;
 
   const customerId = new Types.ObjectId();
   const tailorId = new Types.ObjectId();
@@ -72,6 +75,8 @@ describe('bespoke deposit orders (real Mongo)', () => {
     await orderModel.deleteMany({});
     earnings = [];
     walletIncs = [];
+    txs = {};
+    failEarning = false;
     notify = jest.fn().mockResolvedValue({});
     const settings = {
       platform_commission_type: 'percent',
@@ -89,7 +94,23 @@ describe('bespoke deposit orders (real Mongo)', () => {
       businessEarningsModel: {
         exists: async (q: any) =>
           earnings.some((e) => String(e.order) === String(q.order) && e.milestone === q.milestone),
-        create: async (doc: any) => earnings.push(doc),
+        create: async (doc: any) => {
+          if (failEarning) throw new Error('earning write failed');
+          earnings.push(doc);
+        },
+        find: (q: any) => ({
+          select: () => ({
+            lean: async () =>
+              earnings.filter(
+                (e) =>
+                  q.order.$in.some((id: any) => String(id) === String(e.order)) &&
+                  e.milestone === q.milestone,
+              ),
+          }),
+        }),
+      },
+      transactionModel: {
+        findOne: (q: any) => ({ select: () => ({ lean: async () => txs[q.reference] ?? null }) }),
       },
       walletModel: {
         findOneAndUpdate: async (_q: any, u: any) => walletIncs.push(u),
@@ -228,5 +249,57 @@ describe('bespoke deposit orders (real Mongo)', () => {
     await orders.runBespokeBalanceTimers();
     const saved = await orderModel.findById(order._id).lean();
     expect(saved.status).toBe('processing');
+  });
+
+  it('the earnings record accepts a balance milestone', () => {
+    const Earning = mongoose.model('EarningCheck', BusinessEarningSchema);
+    const doc = new Earning({ business: tailorId, order: new Types.ObjectId(), amount: 1, milestone: 'balance' });
+    expect(doc.validateSync()?.errors?.milestone).toBeUndefined();
+  });
+
+  it('a failed earning write never undoes a paid balance', async () => {
+    const order = await makeDepositOrder({ status: 'awaiting_balance' }, {
+      preship: { photos: ['x'], status: 'pending_review', submitted_at: new Date() },
+    });
+    failEarning = true;
+    expect(await business.settleBespokeBalance(order._id, 'PAY-BAL')).toBe(true);
+    const saved = await orderModel.findById(order._id).lean();
+    expect(saved.payment_plan.status).toBe('paid');
+    expect(earnings).toHaveLength(0);
+
+    // A retry of the same payment fills in the earning.
+    failEarning = false;
+    expect(await business.settleBespokeBalance(order._id, 'PAY-BAL')).toBe(false);
+    expect(earnings).toHaveLength(1);
+    expect(earnings[0].milestone).toBe('balance');
+  });
+
+  it('repair: a paid balance with no earning gets one; a failed payment reopens the balance', async () => {
+    const good = await makeDepositOrder({ status: 'awaiting_balance' }, {
+      preship: { photos: ['x'], status: 'pending_review', submitted_at: new Date() },
+    });
+    const bad = await makeDepositOrder({ status: 'awaiting_balance' }, {
+      preship: { photos: ['x'], status: 'pending_review', submitted_at: new Date() },
+    });
+    failEarning = true;
+    await business.settleBespokeBalance(good._id, 'TX-GOOD');
+    await business.settleBespokeBalance(bad._id, 'TX-BAD');
+    failEarning = false;
+    txs = { 'TX-GOOD': { status: 'success' }, 'TX-BAD': { status: 'failed' } };
+
+    expect(await business.repairBespokeBalances()).toEqual({ recorded: 1, reopened: 1 });
+    expect(earnings).toHaveLength(1);
+    expect(String(earnings[0].order)).toBe(String(good._id));
+
+    const reopened = await orderModel.findById(bad._id).lean();
+    expect(reopened.payment_plan.status).toBe('awaiting_balance');
+    expect(reopened.payment_plan.balance_reference).toBeNull();
+    expect(new Date(reopened.payment_plan.balance_due_at).getTime()).toBeGreaterThan(Date.now());
+    expect(reopened.total).toBe(45_000);
+    expect(reopened.items[0].total_price).toBe(45_000);
+    expect(reopened.preship.status).toBe('pending_review');
+
+    // Running again changes nothing.
+    expect(await business.repairBespokeBalances()).toEqual({ recorded: 0, reopened: 0 });
   });
 });

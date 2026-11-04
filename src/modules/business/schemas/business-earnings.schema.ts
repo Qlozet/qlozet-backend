@@ -39,11 +39,13 @@ export class BusinessEarning extends Document {
   @Prop({ default: null })
   released_at: Date;
 
+  // 'balance': the second half of a bespoke deposit order, paid at the
+  // finished-piece photos.
   // 'cancellation_fee': the share of a custom item the tailor keeps when the
   // customer cancels after confirming. Never reversed by a cancellation.
   @Prop({
     type: String,
-    enum: ['upfront', 'completion', 'cancellation_fee'],
+    enum: ['upfront', 'completion', 'balance', 'cancellation_fee'],
     default: 'completion',
   })
   milestone: string;
