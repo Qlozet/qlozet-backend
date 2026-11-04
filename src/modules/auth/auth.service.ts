@@ -53,6 +53,7 @@ import {
   NotificationCategory,
   NotificationType,
 } from '../notifications/schemas/notification.schema';
+import { LINKABLE_TYPES } from './linked-accounts';
 
 /** A verification code works for 30 minutes. */
 const VERIFY_CODE_TTL_MS = 30 * 60 * 1000;
@@ -84,7 +85,14 @@ export class AuthService {
   ) {}
 
   /**
-   * Register a new vendor
+   * Register a new vendor.
+   *
+   * The same email and number may already hold a SHOPPING account (see
+   * linked-accounts.ts). Signing up with that email and the shop password
+   * proves it is the same person: the store is ready at once and they are
+   * signed in, no code. A different password is refused with a way forward,
+   * because one email shares one password. A Google-only shopper (no
+   * password) goes through the usual emailed code.
    */
   async registerVendor(data: VendorRegisterDto) {
     const {
@@ -101,93 +109,286 @@ export class AuthService {
       ...businessData
     } = data;
 
-    // Only check for conflicting businesses if email or phone were provided.
-    // When these optional fields are undefined, MongoDB treats { field: undefined }
-    // as { field: null }, which falsely matches any doc missing that field.
-    const businessOrConditions: Record<string, string>[] = [];
-    if (business_email) businessOrConditions.push({ business_email });
-    if (business_phone_number)
-      businessOrConditions.push({ business_phone_number });
+    await this.assertBusinessContactsFree(business_email, business_phone_number);
 
-    if (businessOrConditions.length > 0) {
-      const existingBusiness = await this.businessModel.findOne({
-        $or: businessOrConditions,
-      });
-      if (existingBusiness) {
-        const field =
-          business_email &&
-          existingBusiness.business_email === business_email
-            ? 'email'
-            : 'phone number';
-        throw new ConflictException(
-          `A business with this ${field} already exists.`,
-        );
-      }
+    const sameEmail = await this.userModel
+      .find({ email: personal_email })
+      .select('+hashed_password');
+    if (sameEmail.some((u) => u.type === UserType.PLATFORM)) {
+      throw new ConflictException('A user with this email already exists.');
     }
-
-    const existingUser = await this.userModel.findOne({
-      $or: [{ email: personal_email }, { phone_number: personal_phone_number }],
-    });
-    if (existingUser) {
+    const existingVendor = sameEmail.find((u) => u.type === UserType.VENDOR);
+    if (existingVendor) {
       // An abandoned signup (registered, never entered the code) should be
       // guided back to verification, not dead-ended on "already exists".
-      if (
-        !existingUser.email_verified &&
-        existingUser.email === personal_email
-      ) {
-        await this.resendVerificationEmail(existingUser.email).catch(() => {});
+      if (!existingVendor.email_verified) {
+        await this.resendVerificationEmail(existingVendor.email, UserType.VENDOR).catch(() => {});
         throw new ConflictException(
           "This account already exists but isn't verified — we've sent a new code to your email.",
         );
       }
-      const field =
-        existingUser.email === personal_email ? 'email' : 'phone number';
       throw new ConflictException(
-        `A user with this ${field} already exists.`,
+        'A store account with this email already exists. Sign in instead.',
       );
     }
 
+    await this.releasePhoneFromUnverified(personal_phone_number, UserType.VENDOR);
+    if (await this.phoneTaken(personal_phone_number, UserType.VENDOR)) {
+      throw new ConflictException(
+        'A store account with this phone number already exists. Sign in instead, or use a different number.',
+      );
+    }
+
+    // Already shops on Qlozet with this email?
+    const shopper = sameEmail.find((u) => u.type === UserType.CUSTOMER);
+    let linked = false;
+    if (shopper?.hashed_password) {
+      const same = await bcrypt.compare(password, shopper.hashed_password);
+      if (!same) {
+        throw new ConflictException(
+          'You already shop on Qlozet with this email. Use your shop password to open your store, or reset it with Forgot password.',
+        );
+      }
+      // Proven by the password; the email was proven when the shop account
+      // was verified. An unverified shop account still gets a code.
+      linked = shopper.email_verified === true;
+    }
+
+    const hashed_password = await bcrypt.hash(password, 10);
+    const otp = linked ? null : generateOtp();
+
+    const { user: vendorUser, business } = await this.createStoreAccount({
+      full_name: personal_name,
+      email: personal_email,
+      phone_number: personal_phone_number,
+      hashed_password,
+      email_verified: linked,
+      verification_code: otp,
+      display_picture_url,
+      business: {
+        business_name,
+        business_email,
+        business_phone_number,
+        business_logo_url,
+        cover_image_url,
+        ...businessData,
+      },
+    });
+
+    if (otp) await this.sendVerificationEmail(vendorUser, otp);
+    this.notifyNewVendor(business);
+
+    if (linked) {
+      this.sendWelcomeEmail(vendorUser, business).catch(() => {});
+      const token = await this.issueSession(vendorUser);
+      return {
+        data: {
+          user: sanitizeUser(vendorUser),
+          business: sanitizeBusiness(business),
+          token,
+          linked_shop_account: true,
+        },
+        message:
+          'Your store is ready. Use the same email and password for the shop and your store.',
+      };
+    }
+
+    return {
+      data: {
+        user: sanitizeUser(vendorUser),
+        business: sanitizeBusiness(business),
+      },
+      message: 'Vendor registered successfully. Check email to verify.',
+    };
+  }
+
+  /**
+   * Open a store from a signed-in shopping account. Same email, number and
+   * password; nothing to verify, the shop account already proved the email.
+   * A Google-only shopper has no password, so sets one here for the store.
+   */
+  async openStoreForCustomer(
+    userId: string,
+    dto: { business_name: string; password?: string; phone_number?: string },
+  ) {
+    const shopper = await this.userModel
+      .findById(userId)
+      .select('+hashed_password');
+    if (!shopper || shopper.type !== UserType.CUSTOMER) {
+      throw new BadRequestException('Sign in with your shopping account first.');
+    }
+    if (!shopper.email_verified) {
+      throw new BadRequestException('Verify your email before opening a store.');
+    }
+    const name = String(dto.business_name ?? '').trim();
+    if (name.length < 2) {
+      throw new BadRequestException('Enter your store name (at least 2 characters).');
+    }
+
+    const existing = await this.userModel.findOne({
+      email: shopper.email,
+      type: UserType.VENDOR,
+    });
+    if (existing) {
+      throw new ConflictException(
+        'You already have a store account. Sign in to it with this email and your password.',
+      );
+    }
+
+    let hashed_password = shopper.hashed_password;
+    if (!hashed_password) {
+      const pw = String(dto.password ?? '');
+      if (pw.length < 8 || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(pw)) {
+        throw new BadRequestException(
+          'Set a password for your store: at least 8 characters, with an uppercase letter, a lowercase letter and a number.',
+        );
+      }
+      hashed_password = await bcrypt.hash(pw, 10);
+    }
+
+    // The store needs a number; use the shop one unless another store has it.
+    const phone = String(dto.phone_number || shopper.phone_number || '').trim();
+    if (!phone) {
+      throw new BadRequestException('Add a phone number for your store.');
+    }
+    if (await this.phoneTaken(phone, UserType.VENDOR)) {
+      throw new ConflictException(
+        'Another store already uses this phone number. Use a different one.',
+      );
+    }
+
+    const { user, business } = await this.createStoreAccount({
+      full_name: shopper.full_name,
+      email: shopper.email,
+      phone_number: phone,
+      hashed_password,
+      email_verified: true,
+      verification_code: null,
+      business: { business_name: name },
+    });
+
+    this.notifyNewVendor(business);
+    this.sendWelcomeEmail(user, business).catch(() => {});
+
+    const vendorUrl =
+      process.env.VENDOR_FRONTEND_URL || 'https://vendor.qlozet.app';
+    return {
+      message: shopper.hashed_password
+        ? 'Your store is ready. Sign in to the vendor app with the same email and password.'
+        : 'Your store is ready. Sign in to the vendor app with this email and the password you just set.',
+      data: {
+        business: sanitizeBusiness(business),
+        email: user.email,
+        vendor_login_url: `${vendorUrl}/auth/sign-in?email=${encodeURIComponent(user.email)}`,
+      },
+    };
+  }
+
+  /** A business email or number already belongs to another store. */
+  private async assertBusinessContactsFree(
+    business_email?: string,
+    business_phone_number?: string,
+  ) {
+    // Only check what was provided: { field: undefined } matches as null,
+    // which would hit every business without that field.
+    const or: Record<string, string>[] = [];
+    if (business_email) or.push({ business_email });
+    if (business_phone_number) or.push({ business_phone_number });
+    if (!or.length) return;
+    const existing = await this.businessModel.findOne({ $or: or });
+    if (existing) {
+      const field =
+        business_email && existing.business_email === business_email
+          ? 'email'
+          : 'phone number';
+      throw new ConflictException(
+        `A business with this ${field} already exists.`,
+      );
+    }
+  }
+
+  /**
+   * A sign-up that was never verified (typo in the email, never got the
+   * code) shouldn't keep holding its phone number, or the person can't try
+   * again with the right email. Only the number is removed: if that account
+   * was real it can still be verified, and adds a number later.
+   */
+  private async releasePhoneFromUnverified(
+    phone: string | undefined,
+    type: UserType,
+  ) {
+    if (!phone) return;
+    const res = await this.userModel.updateMany(
+      { phone_number: phone, type, email_verified: { $ne: true } },
+      { $unset: { phone_number: 1 } },
+    );
+    if (res?.modifiedCount) {
+      this.logger.log(`Released ${phone.slice(0, 5)}… from an unverified ${type} sign-up`);
+    }
+  }
+
+  /** Another account of this type already has the number. */
+  private async phoneTaken(phone: string | undefined, type: UserType) {
+    if (!phone) return false;
+    return !!(await this.userModel.exists({ phone_number: phone, type }));
+  }
+
+  /**
+   * The store account and everything it needs, in one transaction: the
+   * vendor user, the business, the owner's team record, wallet and tokens.
+   */
+  private async createStoreAccount(input: {
+    full_name: string;
+    email: string;
+    phone_number?: string;
+    hashed_password: string;
+    email_verified: boolean;
+    /** Emailed after commit by the caller; null when the email is proven. */
+    verification_code: string | null;
+    display_picture_url?: string;
+    business: Record<string, any> & { business_name: string };
+  }): Promise<{ user: UserDocument; business: BusinessDocument }> {
     const ownerRole = await this.roleModel.findOne({ name: VendorRole.OWNER });
     if (!ownerRole) throw new BadRequestException('Vendor role not found.');
 
     const session = await this.connection.startSession();
     session.startTransaction();
-
     try {
-      const hashed_password = await bcrypt.hash(password, 10);
-      const otp = generateOtp();
-      const email_verification_token = createHash(otp);
-
+      const code = input.verification_code;
       const [vendorUser] = await this.userModel.create(
         [
           {
-            full_name: personal_name,
-            email: personal_email,
-            phone_number: personal_phone_number,
-            hashed_password,
+            full_name: input.full_name,
+            email: input.email,
+            ...(input.phone_number ? { phone_number: input.phone_number } : {}),
+            hashed_password: input.hashed_password,
             role: ownerRole._id,
             type: UserType.VENDOR,
-            email_verified: false,
-            email_verification_token,
-            email_verification_expires: new Date(
-              Date.now() + VERIFY_CODE_TTL_MS,
-            ),
-            email_verification_attempts: 0,
+            email_verified: input.email_verified,
+            ...(input.email_verified || !code
+              ? { email_verified_at: new Date() }
+              : {
+                  email_verification_token: createHash(code),
+                  email_verification_expires: new Date(
+                    Date.now() + VERIFY_CODE_TTL_MS,
+                  ),
+                  email_verification_attempts: 0,
+                  last_verification_email_sent: new Date(),
+                }),
             status: 'active',
-            profilePicture: display_picture_url || '',
-            last_verification_email_sent: new Date(),
+            profilePicture: input.display_picture_url || '',
           },
         ],
         { session },
       );
 
+      const { business_logo_url, cover_image_url, ...businessFields } =
+        input.business;
       const [business] = await this.businessModel.create(
         [
           {
-            business_name,
-            business_email,
-            business_phone_number,
-            display_picture_url: display_picture_url ?? '',
+            ...businessFields,
+            display_picture_url: input.display_picture_url ?? '',
             business_logo_url: business_logo_url ?? '',
             cover_image_url: cover_image_url ?? '',
             created_by: {
@@ -195,7 +396,6 @@ export class AuthService {
               name: vendorUser.full_name,
               email: vendorUser.email,
             },
-            ...businessData,
             team_members: [],
           },
         ],
@@ -226,69 +426,38 @@ export class AuthService {
       );
 
       await this.walletModel.create(
-        [
-          {
-            business: business._id,
-            balance: 0,
-            currency: 'NGN',
-          },
-        ],
+        [{ business: business._id, balance: 0, currency: 'NGN' }],
         { session },
       );
 
       // Wallet starts empty — the vendor signup token reward (admin-tunable)
       // is granted once, when the business is approved, so throwaway
       // registrations can't farm tokens.
-      await this.tokenModel.create(
-        [
-          {
-            business: business._id,
-            tokens: 0,
-          },
-        ],
+      await this.tokenModel.create([{ business: business._id, tokens: 0 }], {
+        session,
+      });
+
+      await this.userModel.updateOne(
+        { _id: vendorUser._id },
+        { $set: { business: business._id } },
         { session },
       );
+      (vendorUser as any).business = business._id;
 
       await session.commitTransaction();
-
-      const token = await this.generateToken({
-        id: vendorUser._id,
-        email: vendorUser.email,
-      });
-
-      await this.userModel.findByIdAndUpdate(vendorUser._id, {
-        refreshToken: token.refresh_token,
-        business: business._id,
-      });
-
-      await this.sendVerificationEmail(vendorUser, otp);
-
-      // Admin work queue: a new business is waiting for approval. After the
-      // commit and fire-and-forget — registration must not fail on this.
-      this.notificationsService.notifyPlatformAdmins({
-        category: NotificationCategory.SYSTEM,
-        type: NotificationType.VENDOR_APPLICATION,
-        title: 'New Vendor Application',
-        body: `${business_name} registered and is awaiting approval.`,
-        metadata: {
-          business_id: business._id,
-          business_name,
-          business_email,
-        },
-        action_url: `/vendors/${business._id}`,
-      });
-
-      return {
-        data: {
-          user: sanitizeUser(vendorUser),
-          business: sanitizeBusiness(business),
-        },
-        message: 'Vendor registered successfully. Check email to verify.',
-      };
+      return { user: vendorUser, business };
     } catch (error) {
       await session.abortTransaction();
-      console.error('❌ Vendor registration error:', error?.message || error);
-      console.error('Stack:', error?.stack);
+      this.logger.error(
+        `Vendor registration failed: ${error?.message || error}`,
+        error?.stack,
+      );
+      // Two sign-ups racing for the same email or number.
+      if (error?.code === 11000) {
+        throw new ConflictException(
+          'A store account with this email or phone number already exists.',
+        );
+      }
       throw error instanceof BadRequestException ||
         error instanceof ConflictException
         ? error
@@ -301,6 +470,51 @@ export class AuthService {
   }
 
   /**
+   * Admin work queue: a new business is waiting for approval. After the
+   * commit and fire-and-forget — registration must not fail on this.
+   */
+  private notifyNewVendor(business: BusinessDocument) {
+    this.notificationsService.notifyPlatformAdmins({
+      category: NotificationCategory.SYSTEM,
+      type: NotificationType.VENDOR_APPLICATION,
+      title: 'New Vendor Application',
+      body: `${business.business_name} registered and is awaiting approval.`,
+      metadata: {
+        business_id: business._id,
+        business_name: business.business_name,
+        business_email: business.business_email,
+      },
+      action_url: `/vendors/${business._id}`,
+    });
+  }
+
+  /** Tokens for a new session, with the refresh token stored hashed. */
+  private async issueSession(user: UserDocument): Promise<Tokens> {
+    const token = await this.generateToken({ id: user._id, email: user.email });
+    const hashedRt = await bcrypt.hash(token.refresh_token, 10);
+    await this.userModel.findByIdAndUpdate(user._id, {
+      refreshToken: hashedRt,
+    });
+    return token;
+  }
+
+  /**
+   * Give the linked account (same email, the other of shop / store) the
+   * same password. Staff accounts never take part.
+   */
+  private async syncLinkedPassword(user: UserDocument, hashed: string) {
+    if (!LINKABLE_TYPES.includes(user.type)) return;
+    await this.userModel.updateMany(
+      {
+        email: user.email,
+        type: { $in: LINKABLE_TYPES },
+        _id: { $ne: user._id },
+      },
+      { $set: { hashed_password: hashed } },
+    );
+  }
+
+  /**
    * Register a new customer
    */
   async registerCustomer(data: CustomerRegistrationDto): Promise<{
@@ -310,17 +524,30 @@ export class AuthService {
     const { full_name, email, phone_number, password, dob, ...customerData } =
       data;
 
-    const existingUser = await this.userModel.findOne({
-      $or: [{ email }, { phone_number }],
-    });
+    // Only other SHOPPING accounts and staff block the email; a store owner
+    // gets a shopping account by signing in on the shop (linked-accounts.ts).
+    const sameEmail = await this.userModel.find({ email });
+    const existingUser = sameEmail.find((u) => u.type === UserType.CUSTOMER);
     if (existingUser) {
       // Abandoned signup → guide back to verification instead of dead-ending.
-      if (!existingUser.email_verified && existingUser.email === email) {
-        await this.resendVerificationEmail(existingUser.email).catch(() => {});
+      if (!existingUser.email_verified) {
+        await this.resendVerificationEmail(existingUser.email, UserType.CUSTOMER).catch(() => {});
         throw new ConflictException(
           "This account already exists but isn't verified — we've sent a new code to your email.",
         );
       }
+      throw new ConflictException('Email or phone number already in use');
+    }
+    if (sameEmail.some((u) => u.type === UserType.PLATFORM)) {
+      throw new ConflictException('Email or phone number already in use');
+    }
+    if (sameEmail.some((u) => u.type === UserType.VENDOR)) {
+      throw new ConflictException(
+        'You have a Qlozet store with this email. Sign in with the same email and password; your shopping account is set up automatically.',
+      );
+    }
+    await this.releasePhoneFromUnverified(phone_number, UserType.CUSTOMER);
+    if (await this.phoneTaken(phone_number, UserType.CUSTOMER)) {
       throw new ConflictException('Email or phone number already in use');
     }
 
@@ -559,9 +786,18 @@ export class AuthService {
         if (!email) {
           throw new BadRequestException('Enter the email address the code was sent to.');
         }
-        user = await this.userModel
-          .findOne({ email: email.trim().toLowerCase() }, null, { session })
+        // An email can hold a shopping and a store account (linked-accounts.ts);
+        // the code belongs to whichever of them is waiting for one. If both
+        // are, the code itself says which; a wrong code counts against the
+        // newest.
+        const waiting = await this.userModel
+          .find({ email: email.trim().toLowerCase(), email_verified: { $ne: true } }, null, { session })
+          .sort({ createdAt: -1 })
           .select('+email_verification_token +email_verification_expires +email_verification_attempts');
+        user =
+          waiting.find((u) => u.email_verification_token === createHash(code)) ??
+          waiting[0] ??
+          null;
         if (!user || user.email_verified) {
           throw new BadRequestException('That code isn\'t right, or this email is already verified.');
         }
@@ -657,9 +893,12 @@ export class AuthService {
    * Runs only after the password check, so nobody can learn an account is
    * unverified, or trigger emails, from the email address alone.
    */
-  private async refuseUnverifiedLogin(email: string): Promise<never> {
+  private async refuseUnverifiedLogin(
+    email: string,
+    type?: UserType,
+  ): Promise<never> {
     try {
-      await this.resendVerificationEmail(email);
+      await this.resendVerificationEmail(email, type);
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {
         throw new UnauthorizedException(
@@ -676,15 +915,27 @@ export class AuthService {
     );
   }
 
-  async resendVerificationEmail(email: string): Promise<{ message: string }> {
+  async resendVerificationEmail(
+    email: string,
+    type?: UserType,
+  ): Promise<{ message: string }> {
+    const address = String(email ?? '').trim().toLowerCase();
+    // The account waiting for a code (an email may hold a shopping and a
+    // store account; at most one of them is normally unverified).
     const user = await this.userModel
-      .findOne({ email: String(email ?? '').trim().toLowerCase() })
+      .findOne({
+        email: address,
+        email_verified: { $ne: true },
+        ...(type ? { type } : {}),
+      })
+      .sort({ createdAt: -1 })
       .select('+email_verification_token +email_verification_expires');
 
     if (!user) {
-      throw new NotFoundException('User not found with this email address.');
-    }
-    if (user.email_verified) {
+      const any = await this.userModel.exists({ email: address });
+      if (!any) {
+        throw new NotFoundException('User not found with this email address.');
+      }
       throw new BadRequestException('Email is already verified.');
     }
 
@@ -749,6 +1000,19 @@ export class AuthService {
         .exec();
 
       if (!vendor) {
+        // A shopper trying the vendor app: say how to open a store, but only
+        // once the password is right, so nobody learns who shops here.
+        const shopper = await this.userModel
+          .findOne({ email, type: UserType.CUSTOMER })
+          .select('+hashed_password');
+        if (
+          shopper?.hashed_password &&
+          (await bcrypt.compare(password, shopper.hashed_password))
+        ) {
+          throw new UnauthorizedException(
+            "This is your shopping account; you don't have a store yet. Tap Sign up and use this same email and password to open one.",
+          );
+        }
         throw new UnauthorizedException('Invalid credentials');
       }
 
@@ -776,7 +1040,7 @@ export class AuthService {
 
       // Only after the password: an unverified account gets a fresh code.
       if (!vendor.email_verified) {
-        await this.refuseUnverifiedLogin(vendor.email);
+        await this.refuseUnverifiedLogin(vendor.email, UserType.VENDOR);
       }
 
       // Look up ALL businesses this user belongs to
@@ -1020,13 +1284,101 @@ export class AuthService {
   }
 
   /**
+   * Make the shopping account for someone who so far only has a store
+   * (linked-accounts.ts). Proof is the store password or a verified Google
+   * sign-in for the same email. Returns null when there is no such store
+   * owner or the proof fails, so the caller answers as it would anyway.
+   */
+  private async shoppingAccountForStoreOwner(
+    email: string,
+    proof: { password: string } | { google: { sub: string; picture?: string } },
+  ): Promise<UserDocument | null> {
+    const owner = await this.userModel
+      .findOne({ email, type: UserType.VENDOR })
+      .select('+hashed_password');
+    if (!owner || owner.status !== 'active') return null;
+
+    if ('password' in proof) {
+      if (!owner.hashed_password) return null;
+      if (!(await bcrypt.compare(proof.password, owner.hashed_password))) {
+        return null;
+      }
+      // An unproven email can't open a second account on the back of it.
+      if (!owner.email_verified) return null;
+    }
+
+    const role = await this.roleModel.findOne({ name: UserRole.CUSTOMER });
+    if (!role) throw new BadRequestException('Customer role not found');
+
+    // Keep the number unless another shopper already has it.
+    const phone =
+      owner.phone_number &&
+      !(await this.phoneTaken(owner.phone_number, UserType.CUSTOMER))
+        ? owner.phone_number
+        : undefined;
+    const google = 'google' in proof ? proof.google : null;
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+    try {
+      const [created] = await this.userModel.create(
+        [
+          {
+            full_name: owner.full_name,
+            email: owner.email,
+            ...(phone ? { phone_number: phone } : {}),
+            ...(owner.hashed_password
+              ? { hashed_password: owner.hashed_password }
+              : {}),
+            role: role._id,
+            type: UserType.CUSTOMER,
+            auth_provider:
+              google && !owner.hashed_password
+                ? AuthProvider.GOOGLE
+                : AuthProvider.LOCAL,
+            ...(google ? { google_id: google.sub } : {}),
+            ...(google?.picture ? { profile_picture: google.picture } : {}),
+            email_verified: true,
+            email_verified_at: new Date(),
+            status: 'active',
+          },
+        ],
+        { session },
+      );
+      await this.provisionCustomer(created._id as Types.ObjectId, session);
+      await session.commitTransaction();
+      this.logger.log(`Shopping account created for store owner ${owner._id}`);
+      this.sendWelcomeEmail(created).catch(() => {});
+      return this.userModel
+        .findById(created._id)
+        .select('+hashed_password +google_id');
+    } catch (error) {
+      await session.abortTransaction();
+      // Two sign-ins at once: the other one made it; use that.
+      if (error?.code === 11000) {
+        return this.userModel
+          .findOne({ email, type: UserType.CUSTOMER })
+          .select('+hashed_password +google_id');
+      }
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
    * Login customer
    */
   async loginCustomer(email: string, password: string) {
     try {
-      const user = await this.userModel
+      let user: UserDocument | null = await this.userModel
         .findOne({ email, type: UserType.CUSTOMER })
         .select('+hashed_password');
+      if (!user) {
+        // A store owner shopping for the first time: their store password
+        // proves who they are, so their shopping account is made right here.
+        user = await this.shoppingAccountForStoreOwner(email, { password });
+      }
       if (!user) {
         throw new UnauthorizedException('Invalid credentials');
       }
@@ -1059,7 +1411,7 @@ export class AuthService {
 
       // Only after the password: an unverified account gets a fresh code.
       if (!user.email_verified) {
-        await this.refuseUnverifiedLogin(user.email);
+        await this.refuseUnverifiedLogin(user.email, UserType.CUSTOMER);
       }
 
       const token = await this.generateToken({
@@ -1130,16 +1482,23 @@ export class AuthService {
     }
 
     const email = payload.email.toLowerCase();
-    const existing = await this.userModel
-      .findOne({ email })
+    // The shopping account for this email. A store owner without one gets it
+    // made now: Google has just proven the email (linked-accounts.ts).
+    let existing: UserDocument | null = await this.userModel
+      .findOne({ email, type: UserType.CUSTOMER })
       .select('+google_id');
-
-    if (existing) {
-      if (existing.type !== UserType.CUSTOMER) {
+    if (!existing) {
+      if (await this.userModel.exists({ email, type: UserType.PLATFORM })) {
         throw new UnauthorizedException(
-          'This email belongs to a business account. Sign in with your password.',
+          'This email belongs to a staff account. Sign in with your password.',
         );
       }
+      existing = await this.shoppingAccountForStoreOwner(email, {
+        google: { sub: payload.sub, picture: payload.picture },
+      });
+    }
+
+    if (existing) {
       if (existing.status !== 'active') {
         throw new UnauthorizedException(
           'Your account is not active. Please contact support.',
@@ -1402,6 +1761,8 @@ export class AuthService {
     user.hashed_password = await bcrypt.hash(new_password, 10);
     user.must_change_password = false;
     await user.save();
+    // One email, one password: the linked shop / store account too.
+    await this.syncLinkedPassword(user, user.hashed_password);
 
     // Send password updated email
     try {
@@ -1433,8 +1794,12 @@ export class AuthService {
    * expiry, a zeroed attempt counter, and a resend-cooldown anchor.
    */
   async requestPasswordReset(email: string): Promise<{ message: string }> {
+    // An email may hold a shopping and a store account sharing one password;
+    // the code lives on the older one and the reset changes both. Same
+    // order here and in assertResetCode.
     const user = await this.userModel
       .findOne({ email })
+      .sort({ createdAt: 1, _id: 1 })
       .select('+password_reset_code');
 
     // Same response for a missing account — never reveal existence.
@@ -1485,6 +1850,7 @@ export class AuthService {
 
     const user = await this.userModel
       .findOne({ email })
+      .sort({ createdAt: 1, _id: 1 })
       .select('+password_reset_code +hashed_password');
 
     const rc = user?.password_reset_code;
@@ -1548,6 +1914,8 @@ export class AuthService {
     user.hashed_password = await bcrypt.hash(newPassword, 10);
     user.password_reset_code = undefined; // single-use: consume it
     await user.save();
+    // One email, one password: the linked shop / store account too.
+    await this.syncLinkedPassword(user, user.hashed_password);
 
     try {
       await this.mailService.sendPasswordResetSuccessEmail(

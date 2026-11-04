@@ -62,23 +62,48 @@ export class TeamService {
       const role = await this.roleModel.findById(dto.role).session(session);
       if (!role) throw new BadRequestException('Role not found.');
 
-      // ✅ Find user by email OR phone number (only check provided fields)
+      // The STORE account for this email, or for this number (only check
+      // provided fields). Shopping accounts don't count: a shopper gets a
+      // linked store account below (modules/auth/linked-accounts.ts).
       const userOrConditions: Record<string, string>[] = [{ email: dto.email }];
       if (dto.phone_number) userOrConditions.push({ phone_number: dto.phone_number });
 
       let user = await this.userModel
-        .findOne({ $or: userOrConditions })
+        .findOne({ $or: userOrConditions, type: UserType.VENDOR })
         .session(session);
 
       let isNewUser = false; // 👈 track user creation
 
-      // A customer (or staff) account cannot double as a vendor's team member:
-      // the roles guard reads the account type first, so they could never sign
-      // in to the vendor app. Say so instead of silently rewiring the account.
-      if (user && user.type !== UserType.VENDOR) {
-        throw new BadRequestException(
-          `${dto.email} belongs to a ${user.type} account. Invite a different email address.`,
-        );
+      if (!user) {
+        const sameEmail = await this.userModel
+          .find({ email: dto.email })
+          .select('+hashed_password')
+          .session(session);
+        // Staff belong to Qlozet itself, never to a store's team.
+        if (sameEmail.some((u) => u.type === UserType.PLATFORM)) {
+          throw new BadRequestException(
+            `${dto.email} belongs to a Qlozet staff account. Invite a different email address.`,
+          );
+        }
+        // Someone who shops on Qlozet: a store account on the same email and
+        // password, so they sign in to the vendor app the way they sign in
+        // to the shop. Without a password (Google only) they are treated as
+        // new and get a temporary one.
+        const shopper = sameEmail.find((u) => u.type === UserType.CUSTOMER);
+        if (shopper?.hashed_password) {
+          user = new this.userModel({
+            full_name: shopper.full_name || dto.full_name,
+            email: dto.email,
+            ...(dto.phone_number && { phone_number: dto.phone_number }),
+            hashed_password: shopper.hashed_password,
+            business: ObjectIdUtils.toObjectId(business.id),
+            role: dto.role,
+            type: UserType.VENDOR,
+            email_verified: shopper.email_verified === true,
+            status: 'active',
+          });
+          await user.save({ session });
+        }
       }
 
       if (!user) {
