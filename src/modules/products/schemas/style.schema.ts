@@ -72,6 +72,13 @@ export class Style {
 
   @Prop({ type: String, required: true })
   type: string;
+
+  /**
+   * The style shown in the listing photo for its part (type). Orders that
+   * leave the part empty get this one; see products/style-defaults.ts.
+   */
+  @Prop({ type: Boolean, default: false })
+  is_default?: boolean;
 }
 
 export const StyleSchema = SchemaFactory.createForClass(Style);

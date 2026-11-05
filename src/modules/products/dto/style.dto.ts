@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -90,4 +91,13 @@ export class CreateStyleDto {
   @IsNotEmpty()
   @IsString()
   type: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'The style shown in the listing photo for its part. Without one, the cheapest style of the part is the default.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_default?: boolean;
 }
