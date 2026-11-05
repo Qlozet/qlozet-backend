@@ -1482,6 +1482,9 @@ export class BusinessService {
           $set: {
             verification_state: 'action_required',
             verification_message: DEADLINE_PASSED_MESSAGE,
+            // From here they are a QoreID vendor: they come back by passing
+            // the checks, not by another manual approval.
+            verification_method: 'qoreid',
             // They need a run to finish; give one if none is left.
             verification_attempts_allowed: Math.max(Number(b.verification_attempts_allowed ?? 1), used + 1),
           },
