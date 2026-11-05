@@ -207,7 +207,7 @@ export class User extends Document {
       string,
       { tier?: string; mae_cm?: number | null; method?: string }
     > | null;
-    method?: 'manual' | 'estimate' | 'mixed' | 'scan' | null;
+    method?: 'manual' | 'estimate' | 'mixed' | 'scan' | 'photo' | null;
     updated_at?: Date | null;
   }[];
 

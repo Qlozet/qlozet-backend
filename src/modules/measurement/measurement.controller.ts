@@ -41,6 +41,11 @@ import {
   GenerateOutfitRequestDto,
 } from './dto/generate-outfit.dto';
 import { OutfitQueueService } from './outfit-queue.service';
+import { Throttle } from '@nestjs/throttler';
+import {
+  MeasurementPhotoService,
+  PHOTO_MAX_BYTES,
+} from './measurement-photo.service';
 import { PlatformService } from '../platform/platform.service';
 import { TokenService } from '../wallets/token.service';
 import { UserService } from '../ums/services';
@@ -66,6 +71,7 @@ export class MeasurementController {
     private readonly platformService: PlatformService,
     private readonly tokenService: TokenService,
     private readonly userService: UserService,
+    private readonly measurementPhoto: MeasurementPhotoService,
   ) {}
 
   @Roles(UserType.CUSTOMER)
@@ -368,6 +374,41 @@ export class MeasurementController {
       business,
       customer,
     });
+  }
+
+  // Fill the manual form from a photo of a measurement book (or a PDF).
+  // Reads only: nothing is saved, and the file is not stored.
+  @Roles(UserType.CUSTOMER)
+  @Post('read-photo')
+  @Throttle({ short: { limit: 1, ttl: 2000 }, long: { limit: 10, ttl: 3600000 } })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: multer.memoryStorage(),
+      limits: { fileSize: PHOTO_MAX_BYTES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Read measurements from a photo or PDF',
+    description:
+      "Returns each person's values in cm per field (with what was written and whether it read clearly), plus anything it couldn't place. The shop fills the manual form; the customer checks and saves with method 'photo'.",
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  async readPhoto(@UploadedFile() file: Express.Multer.File) {
+    const reading = await this.measurementPhoto.read(
+      MeasurementPhotoService.media(file),
+    );
+    return {
+      message: reading.is_measurements
+        ? 'Check the numbers we filled in before you save.'
+        : "We couldn't find measurements in that photo.",
+      data: reading,
+    };
   }
 
   @Roles(UserType.CUSTOMER)
