@@ -88,6 +88,7 @@ describe('linked shop and store accounts', () => {
     };
     service.teamMemberModel = {
       create: jest.fn(async () => [{ _id: new Types.ObjectId() }]),
+      countDocuments: jest.fn(async () => 0),
     };
     service.walletModel = { create: jest.fn(async () => [{}]) };
     service.tokenModel = { create: jest.fn(async () => [{}]) };
@@ -195,6 +196,81 @@ describe('linked shop and store accounts', () => {
       await expect(service.registerVendor(signup())).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  describe('a team member opening their own store', () => {
+    const member = (over: Record<string, any> = {}) =>
+      shopper({
+        type: UserType.VENDOR,
+        business: 'employer',
+        toObject() {
+          return { ...this };
+        },
+        ...over,
+      });
+
+    it('sign-up with their password adds the store to the same login', async () => {
+      const m = member();
+      const { service, created } = build([m]);
+      const res = await service.registerVendor(signup());
+
+      // No second login: the store joins the one they have.
+      expect(created).toHaveLength(0);
+      expect(service.userModel.create).not.toHaveBeenCalled();
+      const owner = service.teamMemberModel.create.mock.calls[0][0][0];
+      expect(String(owner.user)).toBe(String(m._id));
+      expect(owner.is_owner).toBe(true);
+      expect(service.walletModel.create).toHaveBeenCalled();
+      expect(res.data.added_to_existing_login).toBe(true);
+      expect(res.data.token.access_token).toBe('a');
+    });
+
+    it('a wrong password is refused with the way forward', async () => {
+      const { service } = build([member()]);
+      await expect(service.registerVendor(signup('Other1234'))).rejects.toThrow(
+        /store login with this email/,
+      );
+      expect(service.businessModel.create).not.toHaveBeenCalled();
+    });
+
+    it('someone still on a temporary password sets their own first', async () => {
+      const { service } = build([member({ must_change_password: true })]);
+      await expect(service.registerVendor(signup())).rejects.toThrow(
+        /set your own password/,
+      );
+    });
+
+    it('opens one from the store menu, as owner', async () => {
+      const m = member();
+      const { service } = build([m]);
+      const res = await service.openAnotherStore(String(m._id), {
+        business_name: '  Ada Couture ',
+      });
+      expect(res.data.business.business_name).toBe('Ada Couture');
+      expect(service.teamMemberModel.create.mock.calls[0][0][0].is_owner).toBe(
+        true,
+      );
+      expect(service.userModel.create).not.toHaveBeenCalled();
+    });
+
+    it('a shopping account cannot use the store-menu route', async () => {
+      const s = shopper();
+      const { service } = build([s]);
+      await expect(
+        service.openAnotherStore(String(s._id), { business_name: 'X Store' }),
+      ).rejects.toThrow(/vendor app/);
+    });
+
+    it('stops at the most stores one person may own', async () => {
+      const m = member();
+      const { service } = build([m]);
+      service.teamMemberModel.countDocuments = jest.fn(
+        async () => AuthService.MAX_OWNED_STORES,
+      );
+      await expect(
+        service.openAnotherStore(String(m._id), { business_name: 'One More' }),
+      ).rejects.toThrow(/most one person can open/);
     });
   });
 

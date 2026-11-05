@@ -44,10 +44,7 @@ import {
   PlatformSettings,
   PlatformSettingsDocument,
 } from '../platform/schema/platformSettings.schema';
-import {
-  createHash,
-  generateOtp,
-} from 'src/common/utils/generateString';
+import { createHash, generateOtp } from 'src/common/utils/generateString';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   NotificationCategory,
@@ -109,7 +106,10 @@ export class AuthService {
       ...businessData
     } = data;
 
-    await this.assertBusinessContactsFree(business_email, business_phone_number);
+    await this.assertBusinessContactsFree(
+      business_email,
+      business_phone_number,
+    );
 
     const sameEmail = await this.userModel
       .find({ email: personal_email })
@@ -122,17 +122,31 @@ export class AuthService {
       // An abandoned signup (registered, never entered the code) should be
       // guided back to verification, not dead-ended on "already exists".
       if (!existingVendor.email_verified) {
-        await this.resendVerificationEmail(existingVendor.email, UserType.VENDOR).catch(() => {});
+        await this.resendVerificationEmail(
+          existingVendor.email,
+          UserType.VENDOR,
+        ).catch(() => {});
         throw new ConflictException(
           "This account already exists but isn't verified — we've sent a new code to your email.",
         );
       }
-      throw new ConflictException(
-        'A store account with this email already exists. Sign in instead.',
-      );
+      // Already has a store login (a team member, or an owner opening a
+      // second store): the same password adds a store they own to it.
+      return this.addStoreToLogin(existingVendor, password, {
+        business_name,
+        business_email,
+        business_phone_number,
+        business_logo_url,
+        cover_image_url,
+        personal_phone_number,
+        ...businessData,
+      });
     }
 
-    await this.releasePhoneFromUnverified(personal_phone_number, UserType.VENDOR);
+    await this.releasePhoneFromUnverified(
+      personal_phone_number,
+      UserType.VENDOR,
+    );
     if (await this.phoneTaken(personal_phone_number, UserType.VENDOR)) {
       throw new ConflictException(
         'A store account with this phone number already exists. Sign in instead, or use a different number.',
@@ -215,14 +229,20 @@ export class AuthService {
       .findById(userId)
       .select('+hashed_password');
     if (!shopper || shopper.type !== UserType.CUSTOMER) {
-      throw new BadRequestException('Sign in with your shopping account first.');
+      throw new BadRequestException(
+        'Sign in with your shopping account first.',
+      );
     }
     if (!shopper.email_verified) {
-      throw new BadRequestException('Verify your email before opening a store.');
+      throw new BadRequestException(
+        'Verify your email before opening a store.',
+      );
     }
     const name = String(dto.business_name ?? '').trim();
     if (name.length < 2) {
-      throw new BadRequestException('Enter your store name (at least 2 characters).');
+      throw new BadRequestException(
+        'Enter your store name (at least 2 characters).',
+      );
     }
 
     const existing = await this.userModel.findOne({
@@ -284,6 +304,146 @@ export class AuthService {
     };
   }
 
+  /** Most stores one person may own; stops throwaway store farming. */
+  static readonly MAX_OWNED_STORES = 5;
+
+  /**
+   * Sign-up with an email that already has a store login (typically someone
+   * on another store's team). Their password proves it is them; the new store
+   * joins the same login and they switch between stores from the picker.
+   */
+  private async addStoreToLogin(
+    vendor: UserDocument,
+    password: string,
+    input: Record<string, any> & {
+      business_name: string;
+      personal_phone_number?: string;
+    },
+  ) {
+    const same =
+      !!vendor.hashed_password &&
+      (await bcrypt.compare(password, vendor.hashed_password));
+    if (!same) {
+      throw new ConflictException(
+        'You already have a Qlozet store login with this email. Use that password to open your own store, or reset it with Forgot password.',
+      );
+    }
+    const { personal_phone_number, ...business } = input;
+    const { user, business: created } = await this.openStoreOnLogin(
+      vendor,
+      business as any,
+      personal_phone_number,
+    );
+    const token = await this.issueSession(user);
+    return {
+      data: {
+        user: sanitizeUser(user),
+        business: sanitizeBusiness(created),
+        token,
+        added_to_existing_login: true,
+      },
+      message:
+        'Your store is ready. It is on the login you already have; switch between your stores from the store menu.',
+    };
+  }
+
+  /**
+   * A signed-in store account opens a store of its own (from the store
+   * picker). They own it; their place on any other team is unchanged.
+   */
+  async openAnotherStore(
+    userId: string,
+    dto: { business_name: string; phone_number?: string },
+  ) {
+    const vendor = await this.userModel
+      .findById(userId)
+      .select('+hashed_password');
+    if (!vendor || vendor.type !== UserType.VENDOR) {
+      throw new BadRequestException('Sign in to the vendor app first.');
+    }
+    const { user, business } = await this.openStoreOnLogin(
+      vendor,
+      { business_name: dto.business_name },
+      dto.phone_number,
+    );
+    return {
+      message: `${business.business_name} is ready. You're now working in it.`,
+      data: {
+        user: sanitizeUser(user),
+        business: sanitizeBusiness(business),
+      },
+    };
+  }
+
+  /** The checks and the store, shared by both ways in above. */
+  private async openStoreOnLogin(
+    vendor: UserDocument,
+    business: Record<string, any> & { business_name: string },
+    phone?: string,
+  ) {
+    if (vendor.status && vendor.status !== 'active') {
+      throw new ForbiddenException('This account is closed.');
+    }
+    if (!vendor.email_verified) {
+      throw new BadRequestException(
+        'Verify your email before opening a store.',
+      );
+    }
+    if ((vendor as any).must_change_password) {
+      throw new ForbiddenException(
+        'Sign in and set your own password before opening a store.',
+      );
+    }
+    const name = String(business.business_name ?? '').trim();
+    if (name.length < 2) {
+      throw new BadRequestException(
+        'Enter your store name (at least 2 characters).',
+      );
+    }
+    await this.assertBusinessContactsFree(
+      business.business_email,
+      business.business_phone_number,
+    );
+
+    const owned = await this.teamMemberModel.countDocuments({
+      ...ObjectIdUtils.refMatch('user', String(vendor._id)),
+      is_owner: true,
+    });
+    if (owned >= AuthService.MAX_OWNED_STORES) {
+      throw new BadRequestException(
+        `You already own ${owned} stores, the most one person can open. Contact support if you need more.`,
+      );
+    }
+
+    // A number for the login if it has none yet, unless another store has it.
+    const newPhone = phone && !vendor.phone_number ? phone : undefined;
+    if (newPhone) {
+      const holder = await this.userModel.findOne({
+        phone_number: newPhone,
+        type: UserType.VENDOR,
+      });
+      if (holder && String(holder._id) !== String(vendor._id)) {
+        throw new ConflictException(
+          'Another store already uses this phone number. Use a different one.',
+        );
+      }
+    }
+
+    const created = await this.createStoreAccount({
+      existingUser: vendor,
+      ...(newPhone && { phone_number: newPhone }),
+      full_name: vendor.full_name,
+      email: vendor.email,
+      hashed_password: vendor.hashed_password ?? '', // unused: the login exists
+      email_verified: true,
+      verification_code: null,
+      business: { ...business, business_name: name },
+    });
+    this.notifyNewVendor(created.business);
+    this.sendWelcomeEmail(created.user, created.business).catch(() => {});
+    return created;
+  }
+
   /** A business email or number already belongs to another store. */
   private async assertBusinessContactsFree(
     business_email?: string,
@@ -323,7 +483,9 @@ export class AuthService {
       { $unset: { phone_number: 1 } },
     );
     if (res?.modifiedCount) {
-      this.logger.log(`Released ${phone.slice(0, 5)}… from an unverified ${type} sign-up`);
+      this.logger.log(
+        `Released ${phone.slice(0, 5)}… from an unverified ${type} sign-up`,
+      );
     }
   }
 
@@ -347,6 +509,11 @@ export class AuthService {
     verification_code: string | null;
     display_picture_url?: string;
     business: Record<string, any> & { business_name: string };
+    /**
+     * A store login that already exists (a team member or an owner opening
+     * another store): the store joins it instead of a new user being made.
+     */
+    existingUser?: UserDocument;
   }): Promise<{ user: UserDocument; business: BusinessDocument }> {
     const ownerRole = await this.roleModel.findOne({ name: VendorRole.OWNER });
     if (!ownerRole) throw new BadRequestException('Vendor role not found.');
@@ -355,32 +522,44 @@ export class AuthService {
     session.startTransaction();
     try {
       const code = input.verification_code;
-      const [vendorUser] = await this.userModel.create(
-        [
-          {
-            full_name: input.full_name,
-            email: input.email,
-            ...(input.phone_number ? { phone_number: input.phone_number } : {}),
-            hashed_password: input.hashed_password,
-            role: ownerRole._id,
-            type: UserType.VENDOR,
-            email_verified: input.email_verified,
-            ...(input.email_verified || !code
-              ? { email_verified_at: new Date() }
-              : {
-                  email_verification_token: createHash(code),
-                  email_verification_expires: new Date(
-                    Date.now() + VERIFY_CODE_TTL_MS,
-                  ),
-                  email_verification_attempts: 0,
-                  last_verification_email_sent: new Date(),
-                }),
-            status: 'active',
-            profilePicture: input.display_picture_url || '',
-          },
-        ],
-        { session },
-      );
+      if (input.existingUser && input.phone_number) {
+        await this.userModel.updateOne(
+          { _id: input.existingUser._id },
+          { $set: { phone_number: input.phone_number } },
+          { session },
+        );
+        input.existingUser.phone_number = input.phone_number;
+      }
+      const [vendorUser] = input.existingUser
+        ? [input.existingUser]
+        : await this.userModel.create(
+            [
+              {
+                full_name: input.full_name,
+                email: input.email,
+                ...(input.phone_number
+                  ? { phone_number: input.phone_number }
+                  : {}),
+                hashed_password: input.hashed_password,
+                role: ownerRole._id,
+                type: UserType.VENDOR,
+                email_verified: input.email_verified,
+                ...(input.email_verified || !code
+                  ? { email_verified_at: new Date() }
+                  : {
+                      email_verification_token: createHash(code),
+                      email_verification_expires: new Date(
+                        Date.now() + VERIFY_CODE_TTL_MS,
+                      ),
+                      email_verification_attempts: 0,
+                      last_verification_email_sent: new Date(),
+                    }),
+                status: 'active',
+                profilePicture: input.display_picture_url || '',
+              },
+            ],
+            { session },
+          );
 
       const { business_logo_url, cover_image_url, ...businessFields } =
         input.business;
@@ -531,7 +710,10 @@ export class AuthService {
     if (existingUser) {
       // Abandoned signup → guide back to verification instead of dead-ending.
       if (!existingUser.email_verified) {
-        await this.resendVerificationEmail(existingUser.email, UserType.CUSTOMER).catch(() => {});
+        await this.resendVerificationEmail(
+          existingUser.email,
+          UserType.CUSTOMER,
+        ).catch(() => {});
         throw new ConflictException(
           "This account already exists but isn't verified — we've sent a new code to your email.",
         );
@@ -700,7 +882,6 @@ export class AuthService {
     }
   }
 
-
   /**
    * Send welcome email after verification
    */
@@ -784,28 +965,51 @@ export class AuthService {
         // to: looking codes up on their own let anyone try codes against
         // every unverified account at once.
         if (!email) {
-          throw new BadRequestException('Enter the email address the code was sent to.');
+          throw new BadRequestException(
+            'Enter the email address the code was sent to.',
+          );
         }
         // An email can hold a shopping and a store account (linked-accounts.ts);
         // the code belongs to whichever of them is waiting for one. If both
         // are, the code itself says which; a wrong code counts against the
         // newest.
         const waiting = await this.userModel
-          .find({ email: email.trim().toLowerCase(), email_verified: { $ne: true } }, null, { session })
+          .find(
+            {
+              email: email.trim().toLowerCase(),
+              email_verified: { $ne: true },
+            },
+            null,
+            { session },
+          )
           .sort({ createdAt: -1 })
-          .select('+email_verification_token +email_verification_expires +email_verification_attempts');
+          .select(
+            '+email_verification_token +email_verification_expires +email_verification_attempts',
+          );
         user =
-          waiting.find((u) => u.email_verification_token === createHash(code)) ??
+          waiting.find(
+            (u) => u.email_verification_token === createHash(code),
+          ) ??
           waiting[0] ??
           null;
         if (!user || user.email_verified) {
-          throw new BadRequestException('That code isn\'t right, or this email is already verified.');
+          throw new BadRequestException(
+            "That code isn't right, or this email is already verified.",
+          );
         }
-        if (!user.email_verification_token || !user.email_verification_expires || user.email_verification_expires <= new Date()) {
-          throw new BadRequestException('This code has expired. Request a new one.');
+        if (
+          !user.email_verification_token ||
+          !user.email_verification_expires ||
+          user.email_verification_expires <= new Date()
+        ) {
+          throw new BadRequestException(
+            'This code has expired. Request a new one.',
+          );
         }
         if ((user.email_verification_attempts ?? 0) >= MAX_VERIFY_ATTEMPTS) {
-          throw new BadRequestException('Too many wrong codes. Request a new one.');
+          throw new BadRequestException(
+            'Too many wrong codes. Request a new one.',
+          );
         }
         if (createHash(code) !== user.email_verification_token) {
           await this.userModel.updateOne(
@@ -815,7 +1019,8 @@ export class AuthService {
           );
           await session.commitTransaction();
           session.endSession();
-          const left = MAX_VERIFY_ATTEMPTS - ((user.email_verification_attempts ?? 0) + 1);
+          const left =
+            MAX_VERIFY_ATTEMPTS - ((user.email_verification_attempts ?? 0) + 1);
           throw new BadRequestException(
             left > 0
               ? `That code isn't right. ${left} ${left === 1 ? 'try' : 'tries'} left.`
@@ -833,7 +1038,9 @@ export class AuthService {
           { session },
         );
         if (!user) {
-          throw new BadRequestException('Invalid or expired verification token');
+          throw new BadRequestException(
+            'Invalid or expired verification token',
+          );
         }
       }
 
@@ -919,7 +1126,9 @@ export class AuthService {
     email: string,
     type?: UserType,
   ): Promise<{ message: string }> {
-    const address = String(email ?? '').trim().toLowerCase();
+    const address = String(email ?? '')
+      .trim()
+      .toLowerCase();
     // The account waiting for a code (an email may hold a shopping and a
     // store account; at most one of them is normally unverified).
     const user = await this.userModel
@@ -962,10 +1171,10 @@ export class AuthService {
 
     this.logger.log(`Verification code resent to user ${user._id}`);
     return {
-      message: 'A new code is on its way. It replaces any earlier code and works for 30 minutes.',
+      message:
+        'A new code is on its way. It replaces any earlier code and works for 30 minutes.',
     };
   }
-
 
   /**
    * Check verification status
@@ -1147,11 +1356,12 @@ export class AuthService {
       .exec();
 
     if (!membership) {
-      throw new UnauthorizedException(
-        'You are not a member of this business.',
-      );
+      throw new UnauthorizedException('You are not a member of this business.');
     }
-    if ((membership as any).is_active === false && !(membership as any).is_owner) {
+    if (
+      (membership as any).is_active === false &&
+      !(membership as any).is_owner
+    ) {
       throw new ForbiddenException(
         'The store owner has turned off your access to this store.',
       );
@@ -1582,10 +1792,7 @@ export class AuthService {
       };
     } catch (error) {
       await session.abortTransaction();
-      this.logger.error(
-        `Google sign-up failed: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Google sign-up failed: ${error.message}`, error.stack);
       throw new InternalServerErrorException(
         'Could not complete sign-in. Please try again.',
       );
@@ -1643,7 +1850,10 @@ export class AuthService {
    */
   private stampLastLogin(userId: unknown): void {
     void this.userModel
-      .updateOne({ _id: userId as any }, { $set: { last_login_at: new Date() } })
+      .updateOne(
+        { _id: userId as any },
+        { $set: { last_login_at: new Date() } },
+      )
       .exec()
       .then(
         () => undefined,
@@ -1842,7 +2052,11 @@ export class AuthService {
     // Best-effort send — a mail failure must NOT change the response (else a
     // 500-vs-200 difference would leak which emails exist).
     try {
-      await this.mailService.sendResetCodeEmail(user.email, user.full_name, code);
+      await this.mailService.sendResetCodeEmail(
+        user.email,
+        user.full_name,
+        code,
+      );
     } catch (error) {
       this.logger.error('Failed to send reset code email:', error);
     }

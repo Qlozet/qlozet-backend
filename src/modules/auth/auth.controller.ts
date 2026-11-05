@@ -35,7 +35,7 @@ import { PasswordResetDto } from './dto/password-reset.dto';
 import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SwitchBusinessDto } from './dto/switch-business.dto';
-import { OpenStoreDto } from './dto/open-store.dto';
+import { NewStoreDto, OpenStoreDto } from './dto/open-store.dto';
 import { ApiResponseWrapper } from 'src/common/decorators/api-response.decorator';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
@@ -229,7 +229,10 @@ export class AuthController {
     description: 'Email verification token',
   })
   async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
-    return this.authService.verifyEmail(verifyEmailDto.token, verifyEmailDto.email);
+    return this.authService.verifyEmail(
+      verifyEmailDto.token,
+      verifyEmailDto.email,
+    );
   }
 
   // ✅ Resend Verification Email
@@ -337,6 +340,22 @@ export class AuthController {
     return this.authService.openStoreForCustomer(req.user.id, dto);
   }
 
+  // A signed-in store account opens a store it owns. No @Roles on purpose:
+  // someone removed from their only team has no active store, and the roles
+  // guard would refuse them. The service checks the account type.
+  @Post('new-store')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ short: { limit: 1, ttl: 1000 }, long: { limit: 3, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Open another store on this login',
+    description:
+      'Creates a store owned by the signed-in vendor account and makes it the active store. Their memberships of other stores are unchanged.',
+  })
+  @ApiBody({ type: NewStoreDto })
+  async newStore(@Body() dto: NewStoreDto, @Req() req: any) {
+    return this.authService.openAnotherStore(req.user.id, dto);
+  }
+
   // ✅ Switch Business (Authenticated)
   @Post('switch-business')
   @HttpCode(HttpStatus.OK)
@@ -346,10 +365,7 @@ export class AuthController {
       'Switch the active business context for a vendor user who belongs to multiple businesses.',
   })
   @ApiBody({ type: SwitchBusinessDto })
-  async switchBusiness(
-    @Body() dto: SwitchBusinessDto,
-    @Req() req: any,
-  ) {
+  async switchBusiness(@Body() dto: SwitchBusinessDto, @Req() req: any) {
     return this.authService.switchBusiness(req.user.id, dto.business_id);
   }
 
