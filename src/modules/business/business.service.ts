@@ -1,3 +1,4 @@
+import { customerForVendor } from '../../common/utils/customer-privacy';
 import {
   BadRequestException,
   HttpException,
@@ -2988,9 +2989,11 @@ export class BusinessService {
         $project: {
           _id: 1,
           username: '$customer_info.username',
+          // No email or phone (see common/utils/customer-privacy.ts); the
+          // name is shortened below.
           full_name: '$customer_info.full_name',
-          email: '$customer_info.email',
-          phone_number: '$customer_info.phone_number',
+          firstName: '$customer_info.firstName',
+          lastName: '$customer_info.lastName',
           profile_picture: '$customer_info.profile_picture',
           status: '$customer_info.status',
           gender: '$customer_info.gender',
@@ -3055,8 +3058,18 @@ export class BusinessService {
             active: set.active,
           }
         : null;
+      const { firstName, lastName, username, ...rest } = row;
+      const who = customerForVendor({
+        _id: row._id,
+        full_name: row.full_name,
+        firstName,
+        lastName,
+        username,
+      });
       return {
-        ...row,
+        ...rest,
+        full_name: who.full_name ?? '',
+        ...(who.username && { username: who.username }),
         default_measurement,
         body_type: tailored
           ? vendorBodyType(body_type_classification, set, row.gender)
