@@ -34,3 +34,20 @@ export class OpenStoreDto {
   @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
   phone_number?: string;
 }
+
+/** A signed-in store account opening a store of its own. */
+export class NewStoreDto {
+  @ApiProperty({ example: 'Ada Couture' })
+  @IsString()
+  @MinLength(2, { message: 'Enter your store name (at least 2 characters).' })
+  business_name: string;
+
+  @ApiPropertyOptional({
+    description: 'Only used when the login has no phone number yet.',
+    example: '+2348031234567',
+  })
+  @IsOptional()
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
+  phone_number?: string;
+}
