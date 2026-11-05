@@ -42,7 +42,8 @@ describe('linked shop and store accounts', () => {
     const matches = (u: any, f: any) =>
       Object.entries(f).every(([k, v]: [string, any]) => {
         if (v && typeof v === 'object' && '$ne' in v) return u[k] !== v.$ne;
-        if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(u[k]);
+        if (v && typeof v === 'object' && '$in' in v)
+          return v.$in.includes(u[k]);
         return u[k] === v;
       });
     service.userModel = {
@@ -155,7 +156,9 @@ describe('linked shop and store accounts', () => {
     });
 
     it('sends a code when the shopper signed up with Google', async () => {
-      const { service, created } = build([shopper({ hashed_password: undefined })]);
+      const { service, created } = build([
+        shopper({ hashed_password: undefined }),
+      ]);
       const res = await service.registerVendor(signup());
       const vendor = created.find((u) => u.type === UserType.VENDOR);
       expect(vendor.email_verified).toBe(false);
@@ -213,7 +216,9 @@ describe('linked shop and store accounts', () => {
       const me = shopper({ hashed_password: undefined });
       const { service } = build([me]);
       await expect(
-        service.openStoreForCustomer(String(me._id), { business_name: 'Ada Couture' }),
+        service.openStoreForCustomer(String(me._id), {
+          business_name: 'Ada Couture',
+        }),
       ).rejects.toThrow(/Set a password/);
     });
 
@@ -221,7 +226,9 @@ describe('linked shop and store accounts', () => {
       const me = shopper();
       const { service } = build([me, shopper({ type: UserType.VENDOR })]);
       await expect(
-        service.openStoreForCustomer(String(me._id), { business_name: 'Ada Couture' }),
+        service.openStoreForCustomer(String(me._id), {
+          business_name: 'Ada Couture',
+        }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });
@@ -273,7 +280,10 @@ describe('linked shop and store accounts', () => {
   it('one password: a reset on one account changes the other', async () => {
     const shop = shopper();
     const store = shopper({ type: UserType.VENDOR });
-    const staff = shopper({ type: UserType.PLATFORM, email: 'ada@example.com' });
+    const staff = shopper({
+      type: UserType.PLATFORM,
+      email: 'ada@example.com',
+    });
     const { service } = build([shop, store, staff]);
     shop.save = jest.fn(async () => shop);
     service.assertResetCode = jest.fn(async () => shop);
@@ -284,5 +294,46 @@ describe('linked shop and store accounts', () => {
     expect(store.hashed_password).not.toBe(hash);
     // Staff never share it.
     expect(staff.hashed_password).toBe(hash);
+  });
+});
+
+describe('swapping the old global indexes', () => {
+  const { LinkedAccountsIndexMigration } = require('./linked-accounts');
+
+  const collectionWith = (names: string[], failBuild: string[] = []) => {
+    const present = new Set(names);
+    return {
+      present,
+      createIndex: jest.fn(async (_k: any, o: any) => {
+        if (failBuild.includes(o.name)) throw new Error('E11000 duplicate');
+        present.add(o.name);
+      }),
+      indexes: jest.fn(async () => [...present].map((name) => ({ name }))),
+      dropIndex: jest.fn(async (n: string) => {
+        present.delete(n);
+      }),
+    };
+  };
+
+  it('drops email_1 even when the phone index cannot be built', async () => {
+    const users = collectionWith(
+      ['_id_', 'email_1', 'phone_number_1'],
+      ['phone_type_unique'],
+    );
+    await new LinkedAccountsIndexMigration({ collection: users }).run();
+    expect(users.present.has('email_1')).toBe(false);
+    expect(users.present.has('email_type_unique')).toBe(true);
+    // No replacement, so the old phone rule stays rather than leaving none.
+    expect(users.present.has('phone_number_1')).toBe(true);
+  });
+
+  it('does nothing once swapped', async () => {
+    const users = collectionWith([
+      '_id_',
+      'email_type_unique',
+      'phone_type_unique',
+    ]);
+    await new LinkedAccountsIndexMigration({ collection: users }).run();
+    expect(users.dropIndex).not.toHaveBeenCalled();
   });
 });
