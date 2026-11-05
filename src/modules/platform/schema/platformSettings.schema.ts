@@ -156,6 +156,17 @@ export class PlatformSettings extends Document {
   @Prop({ type: String, enum: ['review_first', 'live_first'], default: 'review_first' })
   listing_review_mode: 'review_first' | 'live_first';
 
+  // How vendors are verified. 'qoreid': the hosted identity checks. 'manual':
+  // vendors accept the agreement and submit their CAC number and payout
+  // account; the team checks them by hand (qoreid/manual-verification.ts).
+  // Switching back to 'qoreid' gives manually approved vendors
+  // manual_verification_grace_days to finish the full checks.
+  @Prop({ type: String, enum: ['qoreid', 'manual'], default: 'qoreid' })
+  vendor_verification_mode: 'qoreid' | 'manual';
+
+  @Prop({ type: Number, default: 30, min: 1 })
+  manual_verification_grace_days: number;
+
   @Prop({ type: Number, default: 10 })
   reservation_fee_percent: number;
 

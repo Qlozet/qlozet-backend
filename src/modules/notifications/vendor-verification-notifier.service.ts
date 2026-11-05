@@ -9,12 +9,18 @@ import {
   NotificationType,
 } from './schemas/notification.schema';
 
-export type VerificationOutcome = 'approved' | 'action_required' | 'rejected';
+export type VerificationOutcome =
+  | 'approved'
+  | 'action_required'
+  | 'rejected'
+  /** A manually approved vendor must finish the full checks by a date. */
+  | 'full_check_required';
 
 const TITLES: Record<VerificationOutcome, string> = {
   approved: 'Your store is approved',
   action_required: 'Your verification needs attention',
   rejected: 'Your store was not approved',
+  full_check_required: 'Finish your verification',
 };
 
 /**

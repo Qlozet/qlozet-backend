@@ -1,6 +1,7 @@
 import { VENDOR_AGREEMENT_2026_10_02 } from './vendor-agreement-2026-10-02';
 import { VENDOR_AGREEMENT_2026_10_30 } from './vendor-agreement-2026-10-30';
 import { VENDOR_AGREEMENT_2026_10_31 } from './vendor-agreement-2026-10-31';
+import { VENDOR_AGREEMENT_2026_11_05 } from './vendor-agreement-2026-11-05';
 
 /**
  * Every version of the vendor agreement that has ever been in force.
@@ -18,6 +19,7 @@ export const VENDOR_AGREEMENTS: Record<string, string> = {
   '2026-10-02': VENDOR_AGREEMENT_2026_10_02,
   '2026-10-30': VENDOR_AGREEMENT_2026_10_30,
   '2026-10-31': VENDOR_AGREEMENT_2026_10_31,
+  '2026-11-05': VENDOR_AGREEMENT_2026_11_05,
 };
 
 export const getVendorAgreement = (version: string): string | null =>

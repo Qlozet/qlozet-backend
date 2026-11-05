@@ -144,6 +144,26 @@ export class UpdatePlatformSettingsDto {
   listing_review_mode?: 'review_first' | 'live_first';
 
   @ApiPropertyOptional({
+    description:
+      "How vendors are verified. 'qoreid': hosted identity checks. 'manual': agreement + CAC number + payout account, checked by the team. Switching back to 'qoreid' gives manually approved vendors manual_verification_grace_days to finish the full checks.",
+    enum: ['qoreid', 'manual'],
+    example: 'manual',
+  })
+  @IsOptional()
+  @IsIn(['qoreid', 'manual'])
+  vendor_verification_mode?: 'qoreid' | 'manual';
+
+  @ApiPropertyOptional({
+    description: 'Days a manually approved vendor gets to finish the full checks once QoreID is back.',
+    example: 30,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(180)
+  manual_verification_grace_days?: number;
+
+  @ApiPropertyOptional({
     description: 'Fabric reservation fee (%)',
     example: 10,
   })

@@ -30,6 +30,16 @@ import {
 import { getVendorAgreement } from '../business/agreements';
 import { nextVerificationState } from './verification-state';
 import { QoreIdService } from './qoreid.service';
+import {
+  PlatformSettings,
+  PlatformSettingsDocument,
+} from '../platform/schema/platformSettings.schema';
+import {
+  cleanRcNumber,
+  graceDays,
+  manualSubmitProblem,
+  verificationMode,
+} from './manual-verification';
 
 class VerifyVninDto {
   @IsString()
@@ -51,6 +61,12 @@ class VerifyVninDto {
 }
 
 class VerifyCacDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Enter your CAC registration (RC/BN) number.' })
+  rc_number: string;
+}
+
+class ManualSubmitDto {
   @IsString()
   @IsNotEmpty({ message: 'Enter your CAC registration (RC/BN) number.' })
   rc_number: string;
@@ -103,7 +119,23 @@ export class VerificationController {
     private readonly qoreid: QoreIdService,
     @InjectModel(Business.name)
     private readonly businessModel: Model<BusinessDocument>,
+    @InjectModel(PlatformSettings.name)
+    private readonly settingsModel: Model<PlatformSettingsDocument>,
   ) {}
+
+  private async settings() {
+    return this.settingsModel
+      .findOne({}, { vendor_verification_mode: 1, manual_verification_grace_days: 1 })
+      .lean<any>();
+  }
+
+  /** A manually approved vendor finishing the QoreID checks while still live. */
+  private static isUpgrade(b: any): boolean {
+    return (
+      b?.verification_method === 'manual' &&
+      b?.verification_state === VerificationState.APPROVED
+    );
+  }
 
   /**
    * Move the verification state to match the checks that have passed.
@@ -143,15 +175,58 @@ export class VerificationController {
       .select(
         'verification status business_name verification_state ' +
           'verification_message verification_attempts ' +
-          'verification_attempts_allowed service_agreement',
+          'verification_attempts_allowed service_agreement ' +
+          'verification_method full_verification_due_at ' +
+          'payout_account_number payout_account_name payout_bank_name',
       )
       .lean();
 
     const b = business as any;
     const agreementAccepted = hasAcceptedCurrentAgreement(b ?? {});
     const state = b?.verification_state ?? VerificationState.NOT_STARTED;
+    const settings = await this.settings();
+    const mode = verificationMode(settings);
+    const upgrade = VerificationController.isUpgrade(b);
+    const attemptsLeft =
+      (b?.verification_attempts ?? 0) < (b?.verification_attempts_allowed ?? 1);
 
     return {
+      /**
+       * 'manual' while QoreID is not available: the vendor submits their CAC
+       * number and linked payout account (POST /verification/manual) and the
+       * team checks them. 'qoreid': the hosted checks below.
+       */
+      mode,
+      /** How this vendor was verified: 'qoreid', 'manual', or null. */
+      method: b?.verification_method ?? null,
+      /**
+       * Manually approved vendors once QoreID is back: finish the checks by
+       * this date or the store is paused. Null otherwise.
+       */
+      full_verification_due_at: b?.full_verification_due_at ?? null,
+      /** Days a manually approved vendor gets once QoreID is back. */
+      grace_days: graceDays(settings),
+      manual: b?.verification?.manual
+        ? {
+            rc_number: b.verification.manual.rc_number ?? null,
+            submitted_at: b.verification.manual.submitted_at ?? null,
+          }
+        : null,
+      /** The linked payout account the manual route checks. */
+      payout_account: b?.payout_account_number
+        ? {
+            bank_name: b.payout_bank_name ?? null,
+            account_name: b.payout_account_name ?? null,
+            last4: String(b.payout_account_number).slice(-4),
+          }
+        : null,
+      /** Everything but the CAC number is in place for a manual submit. */
+      can_submit_manual:
+        manualSubmitProblem(b ?? {}, {
+          mode,
+          agreementAccepted,
+          rcNumber: 'RC0000',
+        }) === null,
       configured: this.qoreid.isConfigured(),
       /**
        * Whether the hosted workflow is available. False until
@@ -174,12 +249,13 @@ export class VerificationController {
       attempts_allowed: b?.verification_attempts_allowed ?? 1,
       can_start:
         agreementAccepted &&
-        (b?.verification_attempts ?? 0) < (b?.verification_attempts_allowed ?? 1) &&
-        ![
-          VerificationState.AWAITING_REVIEW,
-          VerificationState.APPROVED,
-          VerificationState.REJECTED,
-        ].includes(state),
+        attemptsLeft &&
+        (upgrade ||
+          ![
+            VerificationState.AWAITING_REVIEW,
+            VerificationState.APPROVED,
+            VerificationState.REJECTED,
+          ].includes(state)),
       service_agreement: {
         required_version: SERVICE_AGREEMENT.VERSION,
         /** Fetch the text from GET /verification/service-agreement. */
@@ -283,12 +359,15 @@ export class VerificationController {
       .findById(req.business.id)
       .select(
         'verification_state verification_attempts ' +
-          'verification_attempts_allowed service_agreement',
+          'verification_attempts_allowed service_agreement verification_method',
       )
       .lean();
     if (!business) throw new BadRequestException('Business not found');
 
     const b = business as any;
+    // A manually approved vendor finishing the full checks stays approved
+    // and live throughout; only the session is recorded.
+    const upgrade = VerificationController.isUpgrade(b);
 
     if (!hasAcceptedCurrentAgreement(b)) {
       throw new BadRequestException(
@@ -302,7 +381,7 @@ export class VerificationController {
         'Your business is already under review — nothing to do right now.',
       );
     }
-    if (state === VerificationState.APPROVED) {
+    if (state === VerificationState.APPROVED && !upgrade) {
       throw new BadRequestException('Your business is already verified.');
     }
     if (state === VerificationState.REJECTED) {
@@ -334,7 +413,9 @@ export class VerificationController {
       { _id: req.business.id },
       {
         $set: {
-          verification_state: VerificationState.IN_PROGRESS,
+          ...(upgrade
+            ? {}
+            : { verification_state: VerificationState.IN_PROGRESS }),
           verification_message: null,
           'verification.session': {
             session_id: session.session_id,
@@ -466,8 +547,70 @@ export class VerificationController {
           verification_state: VerificationState.AWAITING_REVIEW,
           verification_submitted_at: new Date(),
           verification_message: null,
+          verification_method: 'qoreid',
           // Trading status follows: in-review is visible to the admin queue
           // and still not sellable, which is the correct reading.
+          status: BusinessStatus.IN_REVIEW,
+        },
+      },
+    );
+
+    return {
+      message: 'Submitted for review',
+      verification_state: VerificationState.AWAITING_REVIEW,
+    };
+  }
+
+  /**
+   * Submit for review by hand, while verification is in manual mode.
+   *
+   * The vendor gives their CAC number; their payout account must already be
+   * linked, because linking it asks the bank (through Paystack) for the
+   * account name, which is the one thing here a third party has confirmed.
+   * The team then checks the CAC register, compares the payout name and
+   * calls the owner before approving (qoreid/manual-verification.ts).
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Post('manual')
+  @ApiOperation({ summary: 'Submit my business for manual review (manual mode only)' })
+  async submitManually(@Req() req: any, @Body() dto: ManualSubmitDto) {
+    const business = await this.businessModel
+      .findById(req.business.id)
+      .select(
+        'verification_state service_agreement payout_account_number ' +
+          'payout_account_name payout_bank_name',
+      )
+      .lean();
+    if (!business) throw new BadRequestException('Business not found');
+    const b = business as any;
+
+    const rcNumber = cleanRcNumber(dto.rc_number);
+    const problem = manualSubmitProblem(b, {
+      mode: verificationMode(await this.settings()),
+      agreementAccepted: hasAcceptedCurrentAgreement(b),
+      rcNumber,
+    });
+    if (problem) throw new BadRequestException(problem);
+
+    const now = new Date();
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      {
+        $set: {
+          'verification.manual': {
+            rc_number: rcNumber,
+            payout_account_name: b.payout_account_name ?? null,
+            payout_bank_name: b.payout_bank_name ?? null,
+            payout_account_last4: String(b.payout_account_number).slice(-4),
+            submitted_at: now,
+            checks: {},
+          },
+          verification_method: 'manual',
+          verification_state: VerificationState.AWAITING_REVIEW,
+          verification_submitted_at: now,
+          verification_message: null,
+          // In the review queue, not yet sellable.
           status: BusinessStatus.IN_REVIEW,
         },
       },

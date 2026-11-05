@@ -361,6 +361,22 @@ export class Business extends Document {
   @Prop({ type: Date, default: null })
   verification_submitted_at?: Date | null;
 
+  /**
+   * How the vendor was (or is being) verified: 'qoreid' through the hosted
+   * identity checks, 'manual' by the Qlozet team while QoreID was not
+   * available (qoreid/manual-verification.ts). Null before they submit.
+   */
+  @Prop({ type: String, enum: ['qoreid', 'manual', null], default: null })
+  verification_method?: 'qoreid' | 'manual' | null;
+
+  /**
+   * Manually approved vendors only: when they must have finished the QoreID
+   * checks. Set when the platform switches back to QoreID; cleared when they
+   * pass. Past it, the daily check pauses them until they finish.
+   */
+  @Prop({ type: Date, default: null })
+  full_verification_due_at?: Date | null;
+
   @Prop({ type: Date, default: null })
   verification_decided_at?: Date | null;
 
@@ -389,6 +405,19 @@ export class Business extends Document {
     identity?: Record<string, any> | null;
     business?: Record<string, any> | null;
     bank?: Record<string, any> | null;
+    /** Manual verification: what the vendor gave and what the reviewer checked. */
+    manual?: {
+      rc_number?: string;
+      payout_account_name?: string | null;
+      payout_bank_name?: string | null;
+      payout_account_last4?: string | null;
+      submitted_at?: Date;
+      checks?: Record<string, boolean>;
+      note?: string | null;
+      checked_by?: string | null;
+      checked_at?: Date | null;
+      upgraded_at?: Date | null;
+    } | null;
   };
   @Prop({
     type: {
