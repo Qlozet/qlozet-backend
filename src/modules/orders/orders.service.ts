@@ -1,3 +1,4 @@
+import { orderContactForVendor } from '../../common/utils/customer-privacy';
 import { Length } from 'class-validator';
 import {
   balanceDaysFrom,
@@ -1691,10 +1692,10 @@ export class OrderService {
 
       let scopedRows = business
         ? orders.map((o) => {
-            const scoped = this.scopeOrderForVendor(
-              o,
-              String(business),
-              commissionParams,
+            // Area-only address and a short name: Qlozet's courier delivers,
+            // so the vendor never needs the street, phone or email.
+            const scoped = orderContactForVendor(
+              this.scopeOrderForVendor(o, String(business), commissionParams),
             );
             // Fabric-transfer-only orders already carry their own fabric_*
             // breakdown; real (garment) vendors get a per-vendor breakdown of
@@ -3952,7 +3953,11 @@ export class OrderService {
     return {
       message:
         'Claim marked as handed over. Your earnings are scheduled for release.',
-      data: order,
+      data: orderContactForVendor(
+        typeof (order as any)?.toObject === 'function'
+          ? (order as any).toObject()
+          : order,
+      ),
     };
   }
 
