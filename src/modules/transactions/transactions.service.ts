@@ -344,6 +344,37 @@ export class TransactionService {
   }
 
   /**
+   * A transaction for whoever is asking, never anyone else's ("not found",
+   * so references can't be tried to read other people's payments):
+   * - a store (vendor app) sees only transactions on ITS wallet, whoever on
+   *   the team made them;
+   * - a shopper sees ones they made or on their own wallet.
+   * A person with both a shop and a store account (same email) has two
+   * separate user ids and wallets, so the two never mix.
+   */
+  async findByReferenceFor(
+    reference: string,
+    who: { userId?: string; businessId?: string },
+  ) {
+    const tx = await this.transactionModel.findOne({ reference });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    const same = (a: unknown, b?: string) => !!b && !!a && String(a) === String(b);
+    if (!who.businessId && same(tx.initiator, who.userId)) return tx;
+    if (tx.wallet) {
+      const wallet: any = await this.transactionModel.db
+        .collection('wallets')
+        .findOne({ _id: new Types.ObjectId(String(tx.wallet)) });
+      const mine = who.businessId
+        ? same(wallet?.business, who.businessId)
+        : same(wallet?.customer, who.userId);
+      if (mine) {
+        return tx;
+      }
+    }
+    throw new NotFoundException('Transaction not found');
+  }
+
+  /**
    * Find the original payment transaction for an order.
    * Searches for successful checkout or wallet_checkout transactions.
    */

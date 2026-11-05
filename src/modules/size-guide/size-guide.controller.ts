@@ -1,3 +1,4 @@
+import { vendorRolesFor } from '../../common/access/vendor-access';
 import {
   Controller,
   Get,
@@ -108,7 +109,7 @@ export class SizeGuideController {
 
   @Post()
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({ summary: 'Create a new size guide' })
   @ApiCreatedResponse({ type: SizeGuideResponseDto })
   create(@Body() dto: CreateSizeGuideDto, @Req() req: any) {
@@ -134,7 +135,7 @@ export class SizeGuideController {
 
   @Patch(':id')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.TAILOR)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({ summary: 'Update a size guide' })
   @ApiParam({ name: 'id', description: 'Size Guide ID' })
   @ApiOkResponse({ type: SizeGuideResponseDto })
@@ -148,7 +149,7 @@ export class SizeGuideController {
 
   @Delete(':id')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({
     summary: 'Delete a size guide and remove it from all products',
   })
@@ -163,7 +164,7 @@ export class SizeGuideController {
 
   @Post(':id/include/:productId')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({
     summary: 'Manually include a product in a size guide',
     description:
@@ -181,7 +182,7 @@ export class SizeGuideController {
 
   @Post(':id/exclude/:productId')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({
     summary: 'Manually exclude a product from a size guide',
     description:
@@ -207,7 +208,7 @@ export class SizeGuideController {
 
   @Post('apply/:id')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
+  @VendorRoles(...vendorRolesFor('size_guides.manage'))
   @ApiOperation({
     summary: 'Manually trigger size guide application to matching products',
   })

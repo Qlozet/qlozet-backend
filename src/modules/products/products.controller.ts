@@ -1,3 +1,4 @@
+import { hideMoneyUnlessAllowed, vendorRolesFor } from '../../common/access/vendor-access';
 import { ProductDocument } from './schemas';
 import {
   Controller,
@@ -114,11 +115,13 @@ export class ProductsController {
     @Query('kind') kind: 'clothing' | 'fabric' | 'accessory',
     @Query('days') days?: string,
   ) {
-    return this.productService.salesByProductType(
+    const body = await this.productService.salesByProductType(
       req.business?.id,
       kind,
       days ? Number(days) : undefined,
     );
+    // Order counts for everyone; revenue only for money.view roles.
+    return hideMoneyUnlessAllowed(body, req.vendorRole, req.currentMember?.is_owner);
   }
 
   @Get('stats/counts')
@@ -241,7 +244,11 @@ export class ProductsController {
       'accessory',
     );
   }
-  @Patch(':product_id/accessories/:accessoryId/variants')
+  // Stock by hand: the store's own listings only, by the roles that manage
+  // products (products.manage in common/access/vendor-access.ts).
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
+  @Patch(':product_id/accessories/:accessory_id/variants')
   @ApiOperation({ summary: 'Update accessory variant stock' })
   @ApiParam({ name: 'product_id', required: true })
   @ApiParam({ name: 'accessory_id', required: true })
@@ -252,24 +259,29 @@ export class ProductsController {
     @Param('product_id') product_id: Types.ObjectId,
     @Param('accessory_id') accessory_id: Types.ObjectId,
     @Body() body: UpdateAccessoryVariantStockDto,
+    @Req() req: any,
   ) {
-    return this.productService.updateAccessoryVariantStock(
+    return this.productService.updateAccessoryVariantStockForVendor(
       { ...body, accessory_id, product_id },
-      null,
+      req.business?.id,
     );
   }
+
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
   @Patch(':product_id/fabrics/:fabric_id/stock')
   @ApiOperation({ summary: 'Update fabric yard length stock' })
   async updateFabricStock(
     @Param() params: FabricParamDto,
     @Body() body: UpdateFabricStockDto,
+    @Req() req: any,
   ) {
     const { product_id, fabric_id } = params;
-    return this.productService.updateFabricStock(
-      new Types.ObjectId(product_id),
-      new Types.ObjectId(fabric_id),
+    return this.productService.updateFabricStockForVendor(
+      String(product_id),
+      String(fabric_id),
       body.new_yard_length,
-      null, // optional session
+      req.business?.id,
     );
   }
   @Public()
@@ -374,7 +386,7 @@ export class ProductsController {
 
   @Delete(':id')
   @Roles(UserType.VENDOR, UserType.ADMIN)
-  @VendorRoles(VendorRole.OWNER)
+  @VendorRoles(...vendorRolesFor('products.manage'))
   @ApiOperation({ summary: 'Delete a product by ID' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })

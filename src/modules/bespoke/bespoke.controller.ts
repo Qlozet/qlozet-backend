@@ -1,3 +1,5 @@
+import { VendorRoles } from '../../common/decorators/vendor-roles.decorator';
+import { vendorRolesFor } from '../../common/access/vendor-access';
 import {
   Controller,
   Post,
@@ -222,6 +224,9 @@ export class BespokeController {
 
   @Patch('quotes/:id/draft')
   @Roles(UserType.VENDOR)
+  // Commits the store to a price: the roles that handle orders, same as
+  // the assistant's reply_to_quote (orders.fulfil).
+  @VendorRoles(...vendorRolesFor('orders.fulfil'))
   @ApiOperation({ summary: 'Save quote as draft' })
   @ApiParam({ name: 'id', description: 'Quote ID' })
   async saveQuoteDraft(
@@ -234,6 +239,9 @@ export class BespokeController {
 
   @Post('quotes/:id/submit')
   @Roles(UserType.VENDOR)
+  // Commits the store to a price: the roles that handle orders, same as
+  // the assistant's reply_to_quote (orders.fulfil).
+  @VendorRoles(...vendorRolesFor('orders.fulfil'))
   @ApiOperation({ summary: 'Submit a completed quote' })
   @ApiParam({ name: 'id', description: 'Quote ID' })
   async submitQuote(

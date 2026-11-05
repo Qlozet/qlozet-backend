@@ -66,6 +66,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { ObjectIdUtils } from '../../common/utils/objectId.utils';
 
 // Who at a vendor hears about their catalogue: the people who manage listings.
 // The owner is always included by the resolver.
@@ -2045,16 +2046,58 @@ export class ProductService {
     }
   }
 
+  /**
+   * A vendor setting stock by hand: only on a listing of their own store,
+   * and only stock that lives on that listing. (These routes once took any
+   * id from anyone signed in.)
+   */
+  async updateFabricStockForVendor(
+    productId: string,
+    fabricId: string,
+    newYardLength: number,
+    businessId: string,
+  ) {
+    await this.assertProductOfBusiness(productId, businessId);
+    return this.updateFabricStock(
+      new Types.ObjectId(productId),
+      new Types.ObjectId(fabricId),
+      newYardLength,
+      null,
+      { productOnly: true },
+    );
+  }
+
+  async updateAccessoryVariantStockForVendor(
+    dto: UpdateAccessoryVariantStockDto,
+    businessId: string,
+  ) {
+    await this.assertProductOfBusiness(String(dto.product_id), businessId);
+    return this.updateAccessoryVariantStock(dto, null, { productOnly: true });
+  }
+
+  private async assertProductOfBusiness(productId: string, businessId: string) {
+    if (!businessId || !Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException('Product not found');
+    }
+    const owned = await this.productModel.exists({
+      _id: new Types.ObjectId(productId),
+      ...ObjectIdUtils.refMatch('business', businessId),
+    });
+    if (!owned) throw new NotFoundException('Product not found');
+  }
+
   async updateFabricStock(
     productId: Types.ObjectId,
     fabricId: Types.ObjectId,
     newYardLength: number,
     session?: any,
+    opts: { productOnly?: boolean } = {},
   ) {
-    // 1) Standalone fabric document.
-    const standalone = await this.fabricModel
-      .findById(fabricId)
-      .session(session);
+    // 1) Standalone fabric document (never for a vendor's own edit: those
+    //    documents carry no store, so ownership can't be checked).
+    const standalone = opts.productOnly
+      ? null
+      : await this.fabricModel.findById(fabricId).session(session);
     if (standalone) {
       standalone.yard_length = newYardLength;
       await standalone.save({ session });
@@ -2268,6 +2311,7 @@ export class ProductService {
   async updateAccessoryVariantStock(
     dto: UpdateAccessoryVariantStockDto,
     session: any,
+    opts: { productOnly?: boolean } = {},
   ) {
     const { product_id, accessory_id, variant_id, new_stock } = dto;
     this.logger.log(
@@ -2277,7 +2321,7 @@ export class ProductService {
     // 1️⃣ Try standalone accessory first
     let accessory: any = null;
 
-    if (this.accessoryModel) {
+    if (this.accessoryModel && !opts.productOnly) {
       accessory = await this.accessoryModel
         .findOne({ _id: accessory_id, 'variants._id': variant_id })
         .session(session);

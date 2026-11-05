@@ -8,7 +8,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { User, UserDocument, UserType } from '../schemas/user.schema';
-import { Role, RoleDocument } from '../schemas/role.schema';
+import { Role, RoleDocument, RoleType } from '../schemas/role.schema';
 import { TeamMember, TeamMemberDocument } from '../schemas/team.schema';
 import { MailService } from '../../notifications/mail/mail.service';
 import { InviteTeamMemberDto } from '../dto/team.dto';
@@ -44,51 +44,92 @@ export class TeamService {
     private readonly vendorRecipients: VendorRecipientsService,
   ) {}
 
+  /**
+   * A role the owner may hand out: a vendor role, never owner. The app hides
+   * owner, but the API used to take any role id (owner, or even a staff
+   * role), and an "owner" member skips every permission check.
+   */
+  private async assignableRole(roleId: string, session?: any) {
+    const role = Types.ObjectId.isValid(roleId)
+      ? await this.roleModel.findById(roleId).session(session ?? null)
+      : null;
+    if (!role || role.type !== RoleType.VENDOR) {
+      throw new BadRequestException('Choose one of the team roles.');
+    }
+    if (String(role.name).toLowerCase() === VendorRole.OWNER) {
+      throw new BadRequestException(
+        'A store has one owner. Choose another role for this member.',
+      );
+    }
+    return role;
+  }
+
   async inviteTeamMember(
     dto: InviteTeamMemberDto,
     inviter: UserDocument,
     business: BusinessDocument,
   ) {
+    const role = await this.assignableRole(dto.role);
+
+    // Who this is, by EMAIL only. Matching by phone too could attach someone
+    // else's account (a typo, or a shared shop phone) under this email.
+    const sameEmail = await this.userModel
+      .find({ email: dto.email })
+      .select('+hashed_password');
+    if (sameEmail.some((u) => u.type === UserType.PLATFORM)) {
+      throw new BadRequestException(
+        `${dto.email} belongs to a Qlozet staff account. Invite a different email address.`,
+      );
+    }
+    let user: UserDocument | null =
+      sameEmail.find((u) => u.type === UserType.VENDOR) ?? null;
+    if (user && user.status && user.status !== 'active') {
+      throw new BadRequestException(
+        `${dto.email} belongs to an account that has been closed. Invite a different email address.`,
+      );
+    }
+
+    // A number already on another person's store account is refused, not
+    // used to find them.
+    if (dto.phone_number) {
+      const holder = await this.userModel.findOne({
+        phone_number: dto.phone_number,
+        type: UserType.VENDOR,
+      });
+      if (holder && String(holder._id) !== String(user?._id)) {
+        throw new BadRequestException(
+          'That phone number belongs to another Qlozet account. Leave it empty or use a different number.',
+        );
+      }
+    }
+
+    if (user) {
+      const already = await this.teamMemberModel.findOne({
+        ...ObjectIdUtils.refMatch('business', String(business.id)),
+        ...ObjectIdUtils.refMatch('user', String(user._id)),
+      });
+      if (already) {
+        throw new BadRequestException(
+          already.is_active === false
+            ? `${already.full_name} is already on this team but switched off. Use Reactivate on their row.`
+            : `${already.full_name} is already a member of this team.`,
+        );
+      }
+    }
+
+    // Only a brand-NEW person gets a temporary password; anyone who already
+    // has a Qlozet login keeps it.
+    let tempPassword: string | null = null;
+    let isNewUser = false;
+    let teamMember: TeamMemberDocument;
+
     const session = await this.connection.startSession();
     session.startTransaction();
-
     try {
-      const token = randomBytes(24).toString('hex');
-      const expires = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h
-      // Only a brand-NEW user gets a temporary password; an existing Qlozet user
-      // keeps their own credentials. Generated inside the new-user branch below.
-      let tempPassword: string | null = null;
-
-      const role = await this.roleModel.findById(dto.role).session(session);
-      if (!role) throw new BadRequestException('Role not found.');
-
-      // The STORE account for this email, or for this number (only check
-      // provided fields). Shopping accounts don't count: a shopper gets a
-      // linked store account below (modules/auth/linked-accounts.ts).
-      const userOrConditions: Record<string, string>[] = [{ email: dto.email }];
-      if (dto.phone_number) userOrConditions.push({ phone_number: dto.phone_number });
-
-      let user = await this.userModel
-        .findOne({ $or: userOrConditions, type: UserType.VENDOR })
-        .session(session);
-
-      let isNewUser = false; // 👈 track user creation
-
       if (!user) {
-        const sameEmail = await this.userModel
-          .find({ email: dto.email })
-          .select('+hashed_password')
-          .session(session);
-        // Staff belong to Qlozet itself, never to a store's team.
-        if (sameEmail.some((u) => u.type === UserType.PLATFORM)) {
-          throw new BadRequestException(
-            `${dto.email} belongs to a Qlozet staff account. Invite a different email address.`,
-          );
-        }
         // Someone who shops on Qlozet: a store account on the same email and
-        // password, so they sign in to the vendor app the way they sign in
-        // to the shop. Without a password (Google only) they are treated as
-        // new and get a temporary one.
+        // password (modules/auth/linked-accounts.ts). Without a password
+        // (Google only) they're treated as new and get a temporary one.
         const shopper = sameEmail.find((u) => u.type === UserType.CUSTOMER);
         if (shopper?.hashed_password) {
           user = new this.userModel({
@@ -97,70 +138,54 @@ export class TeamService {
             ...(dto.phone_number && { phone_number: dto.phone_number }),
             hashed_password: shopper.hashed_password,
             business: ObjectIdUtils.toObjectId(business.id),
-            role: dto.role,
+            role: role._id,
             type: UserType.VENDOR,
             email_verified: shopper.email_verified === true,
             status: 'active',
           });
-          await user.save({ session });
+        } else {
+          isNewUser = true;
+          tempPassword = randomBytes(6).toString('hex');
+          user = new this.userModel({
+            full_name: dto.full_name,
+            email: dto.email,
+            ...(dto.phone_number && { phone_number: dto.phone_number }),
+            hashed_password: await bcrypt.hash(tempPassword, 10),
+            business: ObjectIdUtils.toObjectId(business.id),
+            role: role._id,
+            type: UserType.VENDOR,
+            email_verified: true,
+            status: 'active',
+            must_change_password: true,
+          });
         }
-      }
-
-      if (!user) {
-        isNewUser = true; // 👈 mark as new
-        tempPassword = randomBytes(6).toString('hex');
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
-        user = new this.userModel({
-          full_name: dto.full_name,
-          email: dto.email,
-          ...(dto.phone_number && { phone_number: dto.phone_number }),
-          hashed_password: hashedPassword,
-          business: ObjectIdUtils.toObjectId(business.id),
-          role: dto.role,
-          type: UserType.VENDOR,
-          email_verified: true,
-          status: 'active',
-          must_change_password: true,
-          profile_picture: 'https://default-profile-picture.png',
-        });
         await user.save({ session });
       } else if (!user.business) {
-        // Someone already on another vendor's team keeps that store open and
-        // switches to this one from the store picker; only an account with no
-        // store yet is pointed here.
+        // Someone already on another store's team keeps that store open and
+        // switches here from the store picker; an account with no store yet
+        // (e.g. removed from their last one) is pointed here.
         user.business = ObjectIdUtils.toObjectId(business.id) as Types.ObjectId;
         await user.save({ session });
       }
 
-      // ✅ Check if user already a team member
-      const existingTeamMember = await this.teamMemberModel
-        .findOne({ business: business.id, user: user._id })
-        .session(session);
-
-      if (existingTeamMember) {
-        throw new BadRequestException(
-          `${dto.full_name} is already a member of this team.`,
-        );
-      }
-
-      // ✅ Create team member record
-      const teamMember = new this.teamMemberModel({
+      teamMember = new this.teamMemberModel({
         business: ObjectIdUtils.toObjectId(business.id),
-        role: dto.role,
+        role: role._id,
         user: user._id,
-        email: dto.email,
-        full_name: dto.full_name,
-        ...(dto.phone_number && { phone_number: dto.phone_number }),
+        // The account's own name and email, so the row and every email agree
+        // with who actually signs in.
+        email: user.email,
+        full_name: isNewUser ? dto.full_name : user.full_name || dto.full_name,
+        ...((dto.phone_number || user.phone_number) && {
+          phone_number: dto.phone_number || user.phone_number,
+        }),
         invited_by: ObjectIdUtils.toObjectId(inviter.id),
-        invite_token: token,
-        invite_expires: expires,
         accepted: true,
         is_owner: false,
         is_active: true,
       });
       await teamMember.save({ session });
 
-      // ✅ Add to business
       await this.businessModel.findByIdAndUpdate(
         business.id,
         { $addToSet: { team_members: teamMember._id } },
@@ -168,82 +193,73 @@ export class TeamService {
       );
 
       await session.commitTransaction();
-      session.endSession();
-
-      // ✅ Send email after transaction. A brand-new user gets a temporary
-      // password to sign in with. An EXISTING Qlozet user was NOT given a new
-      // password (resetting it would break their existing login), so they get a
-      // "use your existing login" email instead — previously the temp password
-      // was emailed to them too but never saved, so it never worked.
-      // Waited for, so the owner hears when it didn't go: a new member can't
-      // sign in without the temporary password in this email. Its own
-      // try/catch, because the transaction above is already committed.
-      let emailSent = true;
-      try {
-        if (isNewUser && tempPassword) {
-          await this.mailService.sendTeamInviteEmail(
-            dto.email,
-            dto.full_name,
-            role.name,
-            business.business_name,
-            tempPassword,
-          );
-        } else {
-          await this.mailService.sendTeamAddedEmail(
-            dto.email,
-            dto.full_name,
-            role.name,
-            business.business_name,
-          );
-        }
-      } catch (err: any) {
-        emailSent = false;
-        this.logger.warn(`Failed to send team invite email: ${err?.message}`);
-      }
-
-      // Deliberately owner-only: who is on the team is an owner's business,
-      // not something to tell the team about each other. Resolved through the
-      // team records rather than created_by, which is the same lookup every
-      // other vendor notification now uses.
-      const owner = await this.vendorRecipients.owner(
-        (business as any)._id?.toString(),
-      );
-      if (owner) {
-      this.notificationsService.create({
-        recipient: owner.userId,
-        recipient_business: (business as any)._id?.toString(),
-        category: NotificationCategory.TEAM,
-        type: NotificationType.TEAM_MEMBER_JOINED,
-        title: 'New Team Member Added',
-        body: `${dto.full_name} has been invited as ${role.name}.`,
-        metadata: {
-          member_name: dto.full_name,
-          member_email: dto.email,
-          role: role.name,
-        },
-        action_url: '/settings',
-      }).catch((err) => this.logger.warn(`Failed to create team notification: ${err.message}`));
-      }
-
-      return {
-        message: !emailSent
-          ? `${dto.full_name} was added, but we couldn't send their invite email. Use Resend invite on their row.`
-          : isNewUser
-            ? 'New user invited successfully.'
-            : 'Existing user has been added to the team successfully.',
-        email_sent: emailSent,
-        teamMember,
-        user,
-      };
     } catch (error) {
       await session.abortTransaction();
-      session.endSession();
-      this.logger.error(
-        `Invite team member failed: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Invite team member failed: ${error.message}`, error.stack);
+      if (error?.code === 11000) {
+        throw new BadRequestException(
+          'That email or phone number is already on another Qlozet store account.',
+        );
+      }
       throw error;
+    } finally {
+      session.endSession();
     }
+
+    // Everything below runs after the commit: the member IS added, so nothing
+    // here may turn that into an error.
+    const name = teamMember.full_name;
+    let emailSent = true;
+    try {
+      if (isNewUser && tempPassword) {
+        await this.mailService.sendTeamInviteEmail(
+          user.email,
+          name,
+          role.name,
+          business.business_name,
+          tempPassword,
+        );
+      } else {
+        await this.mailService.sendTeamAddedEmail(
+          user.email,
+          name,
+          role.name,
+          business.business_name,
+        );
+      }
+    } catch (err: any) {
+      emailSent = false;
+      this.logger.warn(`Failed to send team invite email: ${err?.message}`);
+    }
+
+    // Owner-only: who is on the team is the owner's business.
+    try {
+      const owner = await this.vendorRecipients.owner(String((business as any)._id));
+      if (owner) {
+        await this.notificationsService.create({
+          recipient: owner.userId,
+          recipient_business: String((business as any)._id),
+          category: NotificationCategory.TEAM,
+          type: NotificationType.TEAM_MEMBER_JOINED,
+          title: 'New Team Member Added',
+          body: `${name} has been invited as ${role.name}.`,
+          metadata: { member_name: name, member_email: user.email, role: role.name },
+          action_url: '/settings',
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to create team notification: ${err?.message}`);
+    }
+
+    return {
+      message: !emailSent
+        ? `${name} was added, but we couldn't send their invite email. Use Resend invite on their row.`
+        : isNewUser
+          ? `${name} is invited. They'll get an email with a temporary password.`
+          : `${name} is added. They sign in with their existing Qlozet password.`,
+      // Never the user document: it holds the password hash.
+      data: { email_sent: emailSent, teamMember },
+    };
   }
 
   async listTeamMembers(businessId: string) {
@@ -281,26 +297,17 @@ export class TeamService {
     if (dto.phone_number !== undefined) member.phone_number = dto.phone_number;
     if (dto.is_active !== undefined) member.is_active = dto.is_active;
     if (dto.role !== undefined) {
-      member.role = ObjectIdUtils.toObjectId(dto.role) as Types.ObjectId;
+      const role = await this.assignableRole(dto.role);
+      member.role = role._id as Types.ObjectId;
     }
 
     await member.save();
 
-    // Deactivated while this store is the one they have open: move them to
-    // another store they still work in, so their next sign-in lands there.
-    if (dto.is_active === false && member.user) {
-      const user = await this.userModel.findById(member.user);
-      if (user && String(user.business) === String(member.business)) {
-        const next = await this.teamMemberModel.findOne({
-          user: member.user,
-          _id: { $ne: member._id },
-          is_active: { $ne: false },
-        });
-        await this.userModel.findByIdAndUpdate(member.user, {
-          business: next ? next.business : null,
-        });
-      }
-    }
+    // The member's open store is left as it is. Moving it here used to switch
+    // a signed-in member to another store mid-session while their screen
+    // still showed this one; now their next action is refused with "the
+    // store owner has turned off your access", and their next sign-in picks
+    // a store they can still use. Reactivating needs nothing undone.
 
     return { message: 'Team member updated successfully', data: member };
   }
@@ -339,15 +346,17 @@ export class TeamService {
     user.hashed_password = await bcrypt.hash(tempPassword, 10);
     await user.save();
 
+    // To the ACCOUNT's email, never the team row's copy: a new password for
+    // an account must only ever go to that account's own inbox.
     await this.mailService.sendTeamInviteEmail(
-      member.email,
+      user.email,
       member.full_name,
       (member.role as any)?.name ?? 'team member',
       business.business_name,
       tempPassword,
     );
 
-    return { message: `A new invite has been sent to ${member.email}.` };
+    return { message: `A new invite has been sent to ${user.email}.` };
   }
 
   async removeMember(teamId: string, scopeBusinessId?: string) {
@@ -362,7 +371,6 @@ export class TeamService {
       throw new BadRequestException('The business owner cannot be removed.');
     }
 
-    const userId = team.user;
     const businessId = team.business;
 
     // Delete the team member record
@@ -373,21 +381,10 @@ export class TeamService {
       $pull: { team_members: team._id },
     });
 
-    // If the user's active business was this one, switch to their next available
-    if (userId) {
-      const user = await this.userModel.findById(userId);
-      if (user && user.business?.toString() === businessId.toString()) {
-        // Find next available team membership
-        const nextMembership = await this.teamMemberModel.findOne({
-          user: userId,
-          business: { $ne: businessId },
-        });
-        await this.userModel.findByIdAndUpdate(userId, {
-          business: nextMembership ? nextMembership.business : null,
-        });
-      }
-    }
+    // Their open store is left as it is (see updateMember): their next
+    // action here is refused, and their next sign-in picks a store they're
+    // still on. Their Qlozet account stays, so they can be invited again.
 
-    return { message: 'Team member removed successfully' };
+    return { message: `${team.full_name} has been removed from the team.` };
   }
 }

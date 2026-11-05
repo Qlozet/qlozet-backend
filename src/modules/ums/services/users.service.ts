@@ -1908,38 +1908,38 @@ export class UserService {
       .filter(Boolean);
 
     // A vendor's role is per store: the team member record on the store they
-    // have open, falling back to the account's own role for an owner.
+    // have open, read exactly as the roles guard reads it (no fallbacks the
+    // guard doesn't have), so the app never shows what the server refuses.
     let vendor: {
       business_id: string;
       role: string | null;
       is_owner: boolean;
+      is_active: boolean;
       areas: string[];
     } | null = null;
     if (user.type === UserType.VENDOR && user.business) {
       const biz: any = await this.businessModel
         .findById(user.business)
-        .select('team_members created_by')
+        .select('team_members')
         .populate({
           path: 'team_members',
-          select: 'user role is_owner',
+          select: 'user role is_owner is_active',
           populate: { path: 'role', select: 'name' },
         })
         .lean();
       const member = (biz?.team_members ?? []).find(
         (tm: any) => String(tm?.user) === String(user._id),
       );
-      const memberRole: string | null =
-        member?.role?.name?.toLowerCase() ?? (roleName || null);
-      const owner = isVendorOwner(
-        memberRole,
-        Boolean(member?.is_owner) ||
-          (biz?.created_by && String(biz.created_by) === String(user._id)),
-      );
+      const memberRole: string | null = member?.role?.name?.toLowerCase() ?? null;
+      const owner = Boolean(member) && isVendorOwner(memberRole, Boolean(member?.is_owner));
+      // Not on the team, or switched off: no areas at all.
+      const active = Boolean(member) && (owner || member?.is_active !== false);
       vendor = {
         business_id: String(user.business),
         role: memberRole,
         is_owner: owner,
-        areas: vendorAreasFor(memberRole, owner),
+        is_active: active,
+        areas: active ? vendorAreasFor(memberRole, owner) : [],
       };
     }
 

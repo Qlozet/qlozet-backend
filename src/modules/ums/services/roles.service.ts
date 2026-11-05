@@ -74,7 +74,9 @@ export class RolesService {
     return this.roleModel
       .find({
         type: RoleType.VENDOR,
-        name: { $ne: 'Owner' }, // exclude owner
+        // Owner is never handed out. Names are stored lower-case, so the old
+        // 'Owner' filter matched nothing and listed it.
+        name: { $not: /^owner$/i },
       })
       .sort({ createdAt: 1 })
       .exec();
