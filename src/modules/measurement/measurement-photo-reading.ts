@@ -189,8 +189,8 @@ export interface ReadValue {
 
 export interface ReadPerson {
   label: string;
-  /** The unit the page used ('unknown' if it could not be told). */
-  unit: 'cm' | 'inch' | 'unknown';
+  /** The unit the values were read in: written on the page, or worked out. */
+  unit: 'cm' | 'inch';
   /** True when the unit was not written and was worked out from the numbers. */
   unit_guessed: boolean;
   values: Partial<Record<PhotoField, ReadValue>>;
@@ -288,7 +288,7 @@ export function parsePhotoReading(response: any): PhotoReading | null {
         String(p?.label ?? '')
           .trim()
           .slice(0, 60) || `Person ${i + 1}`,
-      unit: said ?? 'unknown',
+      unit,
       unit_guessed: !said,
       values,
       unmatched,

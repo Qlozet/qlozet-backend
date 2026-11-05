@@ -86,6 +86,7 @@ describe('reading a measurement book photo', () => {
     )!;
     expect(r.people[0].label).toBe('Person 1');
     expect(r.people[0].unit_guessed).toBe(true);
+    expect(r.people[0].unit).toBe('inch');
     expect(r.people[0].values.waist?.value_cm).toBe(86.4);
   });
 
