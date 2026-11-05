@@ -8,7 +8,9 @@
  */
 
 /** How a set was taken, as far as Qlozet knows. */
-export type MeasurementMethod = 'manual' | 'estimate' | 'mixed' | 'scan';
+// photo: read from a tailor's measurement book (or a document) and checked
+// by the customer before saving.
+export type MeasurementMethod = 'manual' | 'estimate' | 'mixed' | 'scan' | 'photo';
 
 export interface MeasurementSnapshot {
   body_type: string | null;

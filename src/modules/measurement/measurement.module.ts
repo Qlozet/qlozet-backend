@@ -17,6 +17,7 @@ import { StyleLibraryModule } from '../style-library/style-library.module';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { AnthropicAuthService } from '../assistant/llm/anthropic-auth.service';
 import { FabricVisionService } from './fabric-vision.service';
+import { MeasurementPhotoService } from './measurement-photo.service';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { FabricVisionService } from './fabric-vision.service';
     OutfitProcessor,
     AnthropicAuthService,
     FabricVisionService,
+    MeasurementPhotoService,
   ],
 })
 export class MeasurementModule {}

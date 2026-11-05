@@ -131,12 +131,12 @@ export class AddMeasurementSetDto {
   >;
 
   @ApiPropertyOptional({
-    enum: ['manual', 'estimate', 'scan'],
+    enum: ['manual', 'estimate', 'scan', 'photo'],
     description: 'How the set was taken: tape measure (manual), estimate from height and weight, or scan.',
   })
   @IsOptional()
-  @IsIn(['manual', 'estimate', 'scan'])
-  method?: 'manual' | 'estimate' | 'scan';
+  @IsIn(['manual', 'estimate', 'scan', 'photo'])
+  method?: 'manual' | 'estimate' | 'scan' | 'photo';
 }
 
 export class UpdateMeasurementSetDto {
@@ -163,10 +163,10 @@ export class UpdateMeasurementSetDto {
   >;
 
   @ApiPropertyOptional({
-    enum: ['manual', 'estimate', 'scan'],
+    enum: ['manual', 'estimate', 'scan', 'photo'],
     description: 'How the new numbers were taken, when the shop knows.',
   })
   @IsOptional()
-  @IsIn(['manual', 'estimate', 'scan'])
-  method?: 'manual' | 'estimate' | 'scan';
+  @IsIn(['manual', 'estimate', 'scan', 'photo'])
+  method?: 'manual' | 'estimate' | 'scan' | 'photo';
 }
