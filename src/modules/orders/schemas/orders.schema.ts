@@ -100,11 +100,13 @@ class FabricSelection {
 class StyleSelection {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Style', required: true })
   style_id: Types.ObjectId;
-  @Prop({ type: Number, min: 1 })
+  // A style can be free (a plain round neck), and a free default is filled
+  // in on every order that leaves its part empty.
+  @Prop({ type: Number, min: 0 })
   price: number;
   @Prop({ type: Number, min: 1 })
   quantity: number;
-  @Prop({ type: Number, min: 1 })
+  @Prop({ type: Number, min: 0 })
   total_amount: number;
 }
 

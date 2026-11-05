@@ -1,3 +1,4 @@
+import { DefaultStylesBackfill } from './default-styles-backfill';
 import { EventSchema } from '../recommendations/events/schemas/event.schema';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -59,6 +60,7 @@ import { DiscoverVendorsService } from './discover-vendors.service';
     DiscountService,
     CollectionService,
     DiscoverVendorsService,
+    DefaultStylesBackfill,
   ],
   exports: [JwtService, ProductService, DiscountService, CollectionService, MongooseModule],
 })

@@ -3,6 +3,11 @@ import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { Fabric, FabricSchema } from './fabric.schema';
 import { Accessory, AccessorySchema } from './accessory.schema';
 import { Clothing, ClothingSchema } from './clothing.schema';
+import {
+  defaultStylesPrice,
+  keepOneDefaultPerPart,
+  usesDefaultStyles,
+} from '../style-defaults';
 
 export type ProductDocument = Product & Document;
 import { ProductStatus } from '../enums/product-status.enum';
@@ -56,6 +61,13 @@ export class Product extends Document {
 
   @Prop({ type: Number, default: null })
   discount_percentage: number;
+
+  /**
+   * Made-to-order clothing: what the default styles add to base_price, so a
+   * listing shows the outfit as pictured. Kept by the save hook below.
+   */
+  @Prop({ type: Number, default: 0 })
+  default_styles_price: number;
 
   @Prop({ type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Collection' }], default: [] })
   collections: Types.ObjectId[];
@@ -140,3 +152,15 @@ export class Product extends Document {
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
+
+// One marked default per part, and the listing's default-styles price kept in
+// step with the styles on every save (create, vendor edit, admin edit).
+ProductSchema.pre('save', function () {
+  const doc = this as any;
+  if (usesDefaultStyles(doc)) {
+    keepOneDefaultPerPart(doc.clothing.styles);
+    doc.default_styles_price = defaultStylesPrice(doc.clothing.styles);
+  } else {
+    doc.default_styles_price = 0;
+  }
+});

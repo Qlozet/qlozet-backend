@@ -1,3 +1,4 @@
+import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
 // src/services/price-calculation.service.ts
 import {
   BadRequestException,
@@ -215,8 +216,16 @@ export class PriceCalculationService {
   ): Promise<number> {
     let total = 0;
 
-    const styles = selections;
-    if (!styles) return 0;
+    // Parts the customer left empty are priced at their default style, so a
+    // made-to-order outfit is never sold for its craftsmanship alone.
+    const styles = usesDefaultStyles(product as any)
+      ? withDefaultStyles(
+          selections,
+          product.clothing!.styles as any[],
+          (st: any) => ({ style_id: st._id, quantity: 1 }) as any,
+        )
+      : selections;
+    if (!styles?.length) return 0;
 
     if (product.clothing && product.clothing?.styles) {
       for (const s of styles) {
@@ -284,9 +293,9 @@ export class PriceCalculationService {
         product,
       );
     total += variantTotal;
-    if (selections.style_selection)
+    if (selections.style_selection || usesDefaultStyles(product as any))
       total += await this.calculateStyleCost(
-        selections.style_selection,
+        selections.style_selection ?? [],
         product,
       );
     if (selections.addon_selection)
@@ -346,9 +355,10 @@ export class PriceCalculationService {
           ? product.discounted_price
           : product.base_price || 0;
 
-      const styles = sel.style_selection?.length
-        ? await this.calculateStyleCost(sel.style_selection, product)
-        : 0;
+      const styles =
+        sel.style_selection?.length || usesDefaultStyles(product as any)
+          ? await this.calculateStyleCost(sel.style_selection ?? [], product)
+          : 0;
       const fabric = sel.fabric_selection?.length
         ? await this.calculateFabricCost(sel.fabric_selection, product)
         : 0;

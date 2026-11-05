@@ -1,3 +1,4 @@
+import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
 import { orderContactForVendor } from '../../common/utils/customer-privacy';
 import { Length } from 'class-validator';
 import {
@@ -1155,6 +1156,16 @@ export class OrderService {
         total_amount: style.price * quantity,
       });
     }
+    // Every part the customer left empty gets its default, stored on the
+    // order so the tailor sees exactly what to make and what was paid for.
+    const stylesOnOrder = usesDefaultStyles(product)
+      ? withDefaultStyles(normalizedStyles, clothing!.styles as any[], (st: any) => ({
+          style_id: new Types.ObjectId(st._id),
+          price: st.price ?? 0,
+          quantity: 1,
+          total_amount: st.price ?? 0,
+        }))
+      : normalizedStyles;
 
     // --- Fabrics ---
     const normalizedFabrics: FabricSelectionDto[] = [];
@@ -1260,7 +1271,7 @@ export class OrderService {
 
     return {
       color_variant_selection: normalizedColorVariants,
-      style_selection: normalizedStyles,
+      style_selection: stylesOnOrder,
       fabric_selection: normalizedFabrics,
       accessory_selection: normalizedAccessories,
       addon_selection: normalizedAddons,
