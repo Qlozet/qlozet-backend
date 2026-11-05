@@ -1,3 +1,12 @@
+import {
+  DEADLINE_PASSED_MESSAGE,
+  MANUAL_CHECK_LABELS,
+  fullCheckDueAt,
+  graceDays,
+  missingManualChecks,
+  pastFullCheckDeadline,
+  verificationMode,
+} from '../qoreid/manual-verification';
 import { customerForVendor } from '../../common/utils/customer-privacy';
 import {
   BadRequestException,
@@ -1316,6 +1325,11 @@ export class BusinessService {
     businessId: string,
     decision: 'approved' | 'action_required' | 'rejected',
     message?: string,
+    manual?: {
+      checks?: Record<string, boolean> | null;
+      note?: string | null;
+      admin_id?: string | null;
+    },
   ) {
     const business = await this.businessModel.findById(businessId);
     if (!business) throw new NotFoundException('Business not found');
@@ -1333,6 +1347,38 @@ export class BusinessService {
       verification_decided_at: new Date(),
     };
 
+    // A manual submission is approved only once the reviewer has ticked
+    // every check (qoreid/manual-verification.ts). The ticks are kept, with
+    // who ticked them, whatever the decision.
+    const method = (business as any).verification_method;
+    if (method === 'manual') {
+      const checks = { ...((business as any).verification?.manual?.checks ?? {}), ...(manual?.checks ?? {}) };
+      if (decision === 'approved') {
+        const missing = missingManualChecks(checks);
+        if (missing.length) {
+          throw new BadRequestException(
+            'Tick every check before approving: ' +
+              missing.map((m) => MANUAL_CHECK_LABELS[m]).join('; ') + '.',
+          );
+        }
+      }
+      update['verification.manual.checks'] = checks;
+      update['verification.manual.note'] = (manual?.note ?? '').trim() || null;
+      update['verification.manual.checked_by'] = manual?.admin_id ?? null;
+      update['verification.manual.checked_at'] = new Date();
+      // Approved by hand while QoreID is already back: the clock to finish
+      // the full checks starts now.
+      if (decision === 'approved') {
+        const settings = await this.platformSettingsModel.findOne().lean();
+        if (verificationMode(settings as any) === 'qoreid') {
+          update.full_verification_due_at = fullCheckDueAt(new Date(), graceDays(settings as any));
+        }
+      }
+    } else if (decision === 'approved') {
+      update.verification_method = 'qoreid';
+      update.full_verification_due_at = null;
+    }
+
     if (decision === 'action_required') {
       // One more run, not unlimited: the allowance is what a retry costs.
       update.verification_attempts_allowed =
@@ -1347,9 +1393,14 @@ export class BusinessService {
     //
     // action_required goes back to PENDING — not sellable, and not sitting in
     // the review queue either, because the next move is the vendor's.
+    //
+    // A manual approval is APPROVED, not VERIFIED: just as sellable, but no
+    // Verified badge until the identity checks pass (the webhook upgrades it).
     const tradingStatus: BusinessStatus =
       decision === 'approved'
-        ? BusinessStatus.VERIFIED
+        ? method === 'manual'
+          ? BusinessStatus.APPROVED
+          : BusinessStatus.VERIFIED
         : decision === 'rejected'
           ? BusinessStatus.REJECTED
           : BusinessStatus.PENDING;
@@ -1371,6 +1422,81 @@ export class BusinessService {
         verification_message: update.verification_message,
       },
     };
+  }
+
+  /**
+   * The platform switched back to QoreID: every manually approved vendor
+   * without a deadline gets one, and is told. Returns how many.
+   */
+  async startFullVerificationClock(): Promise<number> {
+    const settings = await this.platformSettingsModel.findOne().lean();
+    if (verificationMode(settings as any) !== 'qoreid') return 0;
+    const due = fullCheckDueAt(new Date(), graceDays(settings as any));
+    const pending = await this.businessModel
+      .find({
+        verification_method: 'manual',
+        verification_state: 'approved',
+        full_verification_due_at: null,
+      })
+      .select('_id')
+      .lean();
+    if (!pending.length) return 0;
+    await this.businessModel.updateMany(
+      { _id: { $in: pending.map((b: any) => b._id) } },
+      { $set: { full_verification_due_at: due } },
+    );
+    const when = due.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    for (const b of pending) {
+      void this.verificationNotifier?.notify(
+        String((b as any)._id),
+        'full_check_required',
+        `Finish your identity checks on the Verification page by ${when}. ` +
+          'You can keep selling until then; after that your products are hidden until you finish.',
+      );
+    }
+    return pending.length;
+  }
+
+  /**
+   * Once a day: a manually approved vendor past their deadline is paused
+   * (listings hidden, no new orders) until they finish the checks and are
+   * approved again. Orders already placed carry on.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_7AM, { timeZone: 'Africa/Lagos' })
+  async pauseOverdueManualVendors(now = new Date()): Promise<number> {
+    const overdue = await this.businessModel
+      .find({
+        verification_method: 'manual',
+        verification_state: 'approved',
+        full_verification_due_at: { $ne: null, $lte: now },
+      })
+      .select('_id verification_method verification_state full_verification_due_at verification_attempts verification_attempts_allowed')
+      .lean();
+    let paused = 0;
+    for (const b of overdue as any[]) {
+      if (!pastFullCheckDeadline(b, now)) continue;
+      const used = Number(b.verification_attempts ?? 0);
+      const claim = await this.businessModel.updateOne(
+        { _id: b._id, verification_state: 'approved', verification_method: 'manual' },
+        {
+          $set: {
+            verification_state: 'action_required',
+            verification_message: DEADLINE_PASSED_MESSAGE,
+            // From here they are a QoreID vendor: they come back by passing
+            // the checks, not by another manual approval.
+            verification_method: 'qoreid',
+            // They need a run to finish; give one if none is left.
+            verification_attempts_allowed: Math.max(Number(b.verification_attempts_allowed ?? 1), used + 1),
+          },
+        },
+      );
+      if (claim.modifiedCount !== 1) continue;
+      await this.updateBusinessStatus(String(b._id), BusinessStatus.PENDING);
+      void this.verificationNotifier?.notify(String(b._id), 'action_required', DEADLINE_PASSED_MESSAGE);
+      paused++;
+    }
+    if (paused) this.logger.log(`Paused ${paused} vendors past their verification deadline`);
+    return paused;
   }
 
   /**

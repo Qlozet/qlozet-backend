@@ -13,7 +13,7 @@ import {
   Business,
   BusinessDocument,
 } from '../business/schemas/business.schema';
-import { VerificationState } from '../business/schemas/business.schema';
+import { BusinessStatus, VerificationState } from '../business/schemas/business.schema';
 import { QoreIdService } from './qoreid.service';
 import { nextVerificationState } from './verification-state';
 import { VendorVerificationNotifier } from '../notifications/vendor-verification-notifier.service';
@@ -227,7 +227,8 @@ export class QoreIdWebhookController {
       .findById(business._id)
       .select(
         'verification verification_state verification_attempts ' +
-          'verification_auto_retry_granted verification_failure_flagged_attempt',
+          'verification_auto_retry_granted verification_failure_flagged_attempt ' +
+          'verification_method',
       )
       .lean();
 
@@ -251,6 +252,77 @@ export class QoreIdWebhookController {
         { _id: business._id },
         { $set: { verification_state: next } },
       );
+    }
+
+    const workflowDone =
+      (body?.event ?? '') === 'workflow' &&
+      eventType === 'verification_completed';
+
+    // A manually approved vendor finishing the full checks: they stay
+    // approved and live throughout (qoreid/manual-verification.ts). Passing
+    // makes them fully verified with no second review - the team already
+    // approved them, and the checks are what was missing. Failing tells them
+    // and, the first time, gives one more run.
+    if (
+      (fresh as any)?.verification_method === 'manual' &&
+      (fresh as any)?.verification_state === VerificationState.APPROVED
+    ) {
+      const complete =
+        nextVerificationState((fresh as any)?.verification, null) ===
+        VerificationState.PROVIDER_COMPLETE;
+      if (complete) {
+        const upgraded = await this.businessModel.updateOne(
+          { _id: business._id, verification_method: 'manual' },
+          {
+            $set: {
+              verification_method: 'qoreid',
+              full_verification_due_at: null,
+              verification_message: null,
+              'verification.manual.upgraded_at': new Date(),
+              // Now actually identity-checked: the Verified badge.
+              status: BusinessStatus.VERIFIED,
+            },
+          },
+        );
+        if (upgraded.modifiedCount === 1) {
+          void this.verificationNotifier.notify(
+            String(business._id),
+            'approved',
+            'Your identity checks passed. Your store is now fully verified.',
+          );
+        }
+      } else if (
+        workflowDone &&
+        (fresh as any)?.verification_failure_flagged_attempt !== attemptsSpent
+      ) {
+        const outstanding = failures.length ? failures.join(', ') : 'one or more checks';
+        const autoRetry = !(fresh as any)?.verification_auto_retry_granted;
+        const message = autoRetry
+          ? `We could not confirm ${outstanding}. Check the tips on the Verification page and try again. You have one more attempt, and your store stays open meanwhile.`
+          : `We could not confirm ${outstanding}. Contact support and we will reopen your verification.`;
+        const claim = await this.businessModel.updateOne(
+          {
+            _id: business._id,
+            verification_failure_flagged_attempt: { $ne: attemptsSpent },
+          },
+          {
+            $set: {
+              verification_message: message,
+              verification_failure_flagged_attempt: attemptsSpent,
+              ...(autoRetry
+                ? {
+                    verification_auto_retry_granted: true,
+                    verification_attempts_allowed: attemptsSpent + 1,
+                  }
+                : {}),
+            },
+          },
+        );
+        if (claim.modifiedCount === 1) {
+          void this.verificationNotifier.notify(String(business._id), 'action_required', message);
+        }
+      }
+      return { received: true, matched: true };
     }
 
     // The whole workflow finishing is the one moment we know nothing more is

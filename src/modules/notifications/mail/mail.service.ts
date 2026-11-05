@@ -930,7 +930,7 @@ export class MailService {
     to: string,
     vendorName: string,
     businessName: string,
-    outcome: 'approved' | 'action_required' | 'rejected',
+    outcome: 'approved' | 'action_required' | 'rejected' | 'full_check_required',
     message: string,
   ) {
     try {
@@ -942,6 +942,8 @@ export class MailService {
           ? `${businessName} is approved on Qlozet`
           : outcome === 'action_required'
             ? `${businessName}: your verification needs attention`
+            : outcome === 'full_check_required'
+            ? `${businessName}: finish your verification`
             : `${businessName} was not approved`;
       const base =
         process.env.VENDOR_FRONTEND_URL ||
@@ -952,7 +954,8 @@ export class MailService {
         vendorName,
         businessName,
         approved: outcome === 'approved',
-        actionRequired: outcome === 'action_required',
+        actionRequired:
+          outcome === 'action_required' || outcome === 'full_check_required',
         message,
         companyName: process.env.COMPANY_NAME || 'Qlozet',
         subject,

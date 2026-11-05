@@ -534,12 +534,26 @@ export class PlatformController {
   @ApiResponse({ status: 404, description: 'Business not found' })
   decideVerification(
     @Param('id') id: string,
-    @Body() body: { decision: 'approved' | 'action_required' | 'rejected'; message?: string },
+    @Body()
+    body: {
+      decision: 'approved' | 'action_required' | 'rejected';
+      message?: string;
+      /** Manual submissions: the reviewer's ticks (cac_register, payout_name, owner_call). */
+      manual_checks?: Record<string, boolean>;
+      /** Manual submissions: what the reviewer found, for the record. */
+      manual_note?: string;
+    },
+    @Req() req: any,
   ) {
     return this.businessService.decideVerification(
       id,
       body?.decision,
       body?.message,
+      {
+        checks: body?.manual_checks ?? null,
+        note: body?.manual_note ?? null,
+        admin_id: String(req?.user?.id ?? req?.user?._id ?? '') || null,
+      },
     );
   }
 
@@ -994,7 +1008,13 @@ export class PlatformController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   @ApiOperation({ summary: 'Update platform settings' })
   async updateSettings(@Body() dto: UpdatePlatformSettingsDto) {
-    return this.platformService.update(dto);
+    const result = await this.platformService.update(dto);
+    // Back to QoreID: manually approved vendors get their deadline to finish
+    // the full checks (qoreid/manual-verification.ts). Safe to repeat.
+    if (dto.vendor_verification_mode === 'qoreid') {
+      await this.businessService.startFullVerificationClock();
+    }
+    return result;
   }
   @Roles(UserType.PLATFORM)
   @Get('settings')
