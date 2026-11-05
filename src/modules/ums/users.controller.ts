@@ -554,6 +554,10 @@ export class UserController {
     return await this.platformService.getSettings();
   }
 
+  // Staff only: this sets commission, payout timing, deposits, token prices
+  // and listing review. It had no @Roles, so any signed-in customer or vendor
+  // could change it. Which staff may is the console grid (settings.edit).
+  @Roles(PlatformRole.ADMIN, PlatformRole.SUPER_ADMIN)
   @Put('platform-settings')
   @ApiOperation({ summary: 'Update payout settings' })
   @ApiResponse({

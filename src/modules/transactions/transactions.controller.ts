@@ -1,3 +1,4 @@
+import { vendorRolesFor } from '../../common/access/vendor-access';
 import {
   Controller,
   Get,
@@ -85,15 +86,17 @@ export class TransactionController {
     }
   }
   @Roles(UserType.CUSTOMER, UserType.VENDOR)
+  @VendorRoles(...vendorRolesFor('money.view'))
   @Get('reference/:reference')
   @ApiOperation({ summary: 'Get transaction by reference' })
   @ApiResponse({ status: 200, description: 'Transaction found' })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
-  async getByReference(@Param('reference') reference: string) {
-    try {
-      return this.transactionService.findByReference(reference);
-    } catch (error: any) {
-      throw new HttpException(error.message, HttpStatus.NOT_FOUND);
-    }
+  async getByReference(@Param('reference') reference: string, @Req() req: any) {
+    // Only the caller's own: a transaction they made, or on their wallet
+    // (customer) or their store's wallet (vendor).
+    return this.transactionService.findByReferenceFor(reference, {
+      userId: req.user?._id ? String(req.user._id) : req.user?.id,
+      businessId: req.business?.id,
+    });
   }
 }

@@ -174,6 +174,16 @@ export class RolesGuard implements CanActivate {
         );
       }
 
+      // Still on the emailed temporary password: nothing in the store until
+      // they set their own (POST /auth/change-password has no @Roles, so it
+      // stays open). The app sends them to that screen; this makes the
+      // server hold the line too.
+      if ((user as any).must_change_password) {
+        throw new ForbiddenException(
+          'Set your own password before using the store.',
+        );
+      }
+
       // Check @VendorRoles() for granular role enforcement
       const requiredVendorRoles = this.reflector.get<string[]>(
         VENDOR_ROLES_KEY,

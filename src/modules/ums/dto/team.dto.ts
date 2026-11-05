@@ -6,7 +6,10 @@ import {
   IsMongoId,
   IsOptional,
   IsBoolean,
+  IsPhoneNumber,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { PHONE_MESSAGE, phoneTransform } from '../../../common/utils/phone';
 import { Types } from 'mongoose';
 
 export class InviteTeamMemberDto {
@@ -15,7 +18,8 @@ export class InviteTeamMemberDto {
   role: string;
 
   @ApiProperty({ description: 'Email of the member to invite' })
-  @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsEmail({}, { message: 'Enter a valid email address.' })
   email: string;
 
   @ApiProperty({ description: 'Full name of the member' })
@@ -25,7 +29,8 @@ export class InviteTeamMemberDto {
 
   @ApiPropertyOptional({ description: 'Phone number of the member (optional)' })
   @IsOptional()
-  @IsString()
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
   phone_number?: string;
 }
 
@@ -38,7 +43,8 @@ export class UpdateTeamMemberDto {
 
   @ApiPropertyOptional({ description: 'Phone number of the member' })
   @IsOptional()
-  @IsString()
+  @Transform(phoneTransform)
+  @IsPhoneNumber(undefined, { message: PHONE_MESSAGE })
   phone_number?: string;
 
   @ApiPropertyOptional({ description: 'Role ID to assign to the member' })

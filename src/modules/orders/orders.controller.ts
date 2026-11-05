@@ -1,3 +1,4 @@
+import { hideMoneyUnlessAllowed } from '../../common/access/vendor-access';
 import {
   Controller,
   Get,
@@ -430,14 +431,16 @@ export class OrderController {
   @ApiOperation({ summary: 'Vendor dashboard: summary, breakdowns and order series over one window' })
   @ApiQuery({ name: 'range', required: false, enum: ['7d', '30d', '12w', '12m'], description: 'Default 7d.' })
   async getOrderChartData(@Req() req: any, @Query('range') range?: string) {
-    return this.orderService.getBusinessChart(req.business?.id, range);
+    const body = await this.orderService.getBusinessChart(req.business?.id, range);
+    return hideMoneyUnlessAllowed(body, req.vendorRole, req.currentMember?.is_owner);
   }
 
   @Roles(UserType.VENDOR)
   @Get('dashboard')
   @ApiOperation({ summary: 'Get comprehensive vendor dashboard metrics' })
   async getVendorDashboard(@Req() req: any) {
-    return this.orderService.getVendorDashboardMetrics(req.business?.id);
+    const body = await this.orderService.getVendorDashboardMetrics(req.business?.id);
+    return hideMoneyUnlessAllowed(body, req.vendorRole, req.currentMember?.is_owner);
   }
 
   @Roles(UserType.VENDOR, UserType.ADMIN)

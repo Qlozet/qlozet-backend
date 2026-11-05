@@ -1156,6 +1156,19 @@ export class AuthService {
         'The store owner has turned off your access to this store.',
       );
     }
+    // The store must still exist, and list this member (the roles guard
+    // checks that list on every request, so a switch it would refuse is
+    // refused here instead of succeeding and then failing everywhere).
+    const target: any = membership.business;
+    const listed = target?._id
+      ? await this.businessModel.exists({
+          _id: target._id,
+          team_members: membership._id,
+        })
+      : null;
+    if (!listed) {
+      throw new UnauthorizedException('You are not a member of this business.');
+    }
 
     // Update active business
     await this.userModel.findByIdAndUpdate(userId, {
@@ -1913,6 +1926,9 @@ export class AuthService {
 
     user.hashed_password = await bcrypt.hash(newPassword, 10);
     user.password_reset_code = undefined; // single-use: consume it
+    // They chose their own password now: no more forced change, and the
+    // owner's "Resend invite" can no longer overwrite it.
+    user.must_change_password = false;
     await user.save();
     // One email, one password: the linked shop / store account too.
     await this.syncLinkedPassword(user, user.hashed_password);

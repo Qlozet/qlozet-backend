@@ -28,7 +28,11 @@ export const VENDOR_AREAS = {
   'size_guides.manage': [VendorRole.OPERATIONS, VendorRole.TAILOR],
   'styles.manage': [VendorRole.OPERATIONS, VendorRole.TAILOR],
   // Money
-  'money.view': [VendorRole.OPERATIONS, VendorRole.DATA_ANALYST, VendorRole.SALES],
+  'money.view': [
+    VendorRole.OPERATIONS,
+    VendorRole.DATA_ANALYST,
+    VendorRole.SALES,
+  ],
   'wallet.fund': [VendorRole.OPERATIONS],
   'wallet.withdraw': [VendorRole.OPERATIONS],
   'payout_account.manage': [],
@@ -75,6 +79,53 @@ export const vendorAreasFor = (
     vendorAreaAllows(area, roleName, isOwnerFlag),
   );
 
+/**
+ * The @VendorRoles() list for an area, owner included, so a route takes its
+ * roles from this table and can't drift from what the vendor app shows.
+ * Usage: @VendorRoles(...vendorRolesFor('discounts.manage')).
+ */
+export const vendorRolesFor = (area: VendorArea): VendorRole[] => {
+  const grant: Grant = VENDOR_AREAS[area];
+  if (grant.includes(ALL)) {
+    throw new Error(`${area} is open to every member; use no @VendorRoles`);
+  }
+  return [VendorRole.OWNER, ...(grant as VendorRole[])];
+};
+
+/** Keys that carry the store's money on shared dashboards. */
+const MONEY_KEYS = new Set([
+  'gross_sales',
+  'totalEarnings',
+  'totalEarningsChange',
+  'revenue',
+  'total_revenue',
+]);
+
+/**
+ * Dashboards every member opens (home, catalogue) also carry sales figures.
+ * A member without money.view gets the same response with those figures as
+ * null, rather than a refused page.
+ */
+export const hideMoneyUnlessAllowed = <T>(
+  body: T,
+  roleName: string | null | undefined,
+  isOwnerFlag?: boolean | null,
+): T => {
+  if (vendorAreaAllows('money.view', roleName, isOwnerFlag)) return body;
+  const strip = (v: any): any => {
+    if (Array.isArray(v)) return v.map(strip);
+    if (v && typeof v === 'object' && !(v instanceof Date) && !v._bsontype) {
+      const out: Record<string, any> = {};
+      for (const [k, val] of Object.entries(v)) {
+        out[k] = MONEY_KEYS.has(k) ? null : strip(val);
+      }
+      return out;
+    }
+    return v;
+  };
+  return strip(body);
+};
+
 /** The area each assistant action stands in for; the confirm step checks it. */
 export const ASSISTANT_ACTION_AREA: Record<string, VendorArea> = {
   confirm_order: 'orders.fulfil',
@@ -97,8 +148,13 @@ const AREA_LABEL: Partial<Record<VendorArea, string>> = {
 /** "Only the owner or operations can confirm or fulfil orders." */
 export const vendorAreaDeniedMessage = (area: VendorArea): string => {
   const grant: Grant = VENDOR_AREAS[area];
-  const who = ['the owner', ...grant.filter((r) => r !== ALL).map((r) => String(r).replace(/_/g, ' '))];
+  const who = [
+    'the owner',
+    ...grant.filter((r) => r !== ALL).map((r) => String(r).replace(/_/g, ' ')),
+  ];
   const list =
-    who.length <= 1 ? who[0] : `${who.slice(0, -1).join(', ')} or ${who[who.length - 1]}`;
+    who.length <= 1
+      ? who[0]
+      : `${who.slice(0, -1).join(', ')} or ${who[who.length - 1]}`;
   return `Only ${list} can ${AREA_LABEL[area] ?? `use ${area}`}.`;
 };

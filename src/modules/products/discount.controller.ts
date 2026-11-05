@@ -1,3 +1,4 @@
+import { vendorRolesFor } from '../../common/access/vendor-access';
 import {
   Controller,
   Get,
@@ -154,7 +155,7 @@ export class DiscountController {
    */
   @Post('apply/:id')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
+  @VendorRoles(...vendorRolesFor('discounts.manage'))
   @ApiOperation({ summary: 'Manually trigger discount application to matching products' })
   @ApiParam({ name: 'id', description: 'Discount ID' })
   async applyDiscount(@Param('id') id: string) {
@@ -199,7 +200,7 @@ export class DiscountController {
    */
   @Post(':discountId/include/:productId')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
+  @VendorRoles(...vendorRolesFor('discounts.manage'))
   @ApiOperation({ summary: 'Manually include a product in a discount' })
   @ApiParam({ name: 'discountId', description: 'Discount ID' })
   @ApiParam({ name: 'productId', description: 'Product ID to include' })
@@ -216,7 +217,7 @@ export class DiscountController {
    */
   @Post(':discountId/exclude/:productId')
   @Roles(UserType.VENDOR)
-  @VendorRoles(VendorRole.OWNER, VendorRole.MARKETING)
+  @VendorRoles(...vendorRolesFor('discounts.manage'))
   @ApiOperation({ summary: 'Manually exclude a product from a discount' })
   @ApiParam({ name: 'discountId', description: 'Discount ID' })
   @ApiParam({ name: 'productId', description: 'Product ID to exclude' })

@@ -14,9 +14,14 @@ export function normalizePhone(value: unknown): unknown {
   return parsed?.isValid() ? parsed.number : v;
 }
 
-/** For class-transformer: `@Transform(phoneTransform)`. */
+/**
+ * For class-transformer: `@Transform(phoneTransform)`. A blank field counts
+ * as not given (forms send "" for an empty optional phone).
+ */
 export const phoneTransform = ({ value }: { value: unknown }) =>
-  normalizePhone(value);
+  typeof value === 'string' && !value.trim()
+    ? undefined
+    : normalizePhone(value);
 
 /** The validation message for a bad number, in words a person can act on. */
 export const PHONE_MESSAGE =
