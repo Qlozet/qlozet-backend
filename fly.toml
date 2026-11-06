@@ -4,10 +4,12 @@
 #
 
 app = 'qlozet-backend'
-# Must match where the machines actually are: min_machines_running only counts
-# machines in the primary region. It said 'lhr' while every machine was in 'iad',
-# so the keep-one-on rule never applied and the app went to sleep.
-primary_region = 'iad'
+# London: next to the database (MongoDB Atlas, AWS Ireland eu-west-1).
+# Every product list makes several database trips one after another, so the
+# server must sit near the database. From iad each trip crossed the Atlantic.
+# min_machines_running only counts machines in this region, so the machine
+# must live here too (fly scale count 1 --region lhr).
+primary_region = 'lhr'
 
 # No [deploy] release_command on purpose.
 #
