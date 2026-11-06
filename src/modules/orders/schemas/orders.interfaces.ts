@@ -47,12 +47,16 @@ export interface AccessorySelection {
 }
 
 // MAIN ORDER ITEM INTERFACE
+import type { GarmentKind } from '../../../common/utils/garment-measurements';
+
 export interface ProcessedOrderItem {
   product_id: Types.ObjectId;
   product_name: string;
   business: Types.ObjectId;
   product_kind?: ProductKind;
   clothing_type?: ClothingType; // Only for clothing products
+  /** What the garment is, for the measurements it needs (garment-measurements.ts). */
+  garment?: GarmentKind | null;
   note?: string;
   quantity?: number;
   total_price: number;

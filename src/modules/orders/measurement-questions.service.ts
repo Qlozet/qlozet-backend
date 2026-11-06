@@ -92,10 +92,54 @@ export class MeasurementQuestionsService {
     for (const c of changes) {
       measurements[c.body_part] = Math.round(c.to * factor * 10) / 10;
     }
-    await this.users.updateMeasurementSet(customerId, (set as any).name, {
-      measurements,
-    } as any);
+    // The answer is logged once, as the tailor's question (see answer()).
+    await this.users.updateMeasurementSet(
+      customerId,
+      (set as any).name,
+      { measurements } as any,
+      { correctionSource: null },
+    );
     return { set: (set as any).name };
+  }
+
+  /**
+   * Keep what the tailor's question corrected (measurement/corrections), with
+   * the saved set's estimate inputs when it still has them. Best effort.
+   */
+  private async logCorrections(
+    customerId: string,
+    order: any,
+    q: any,
+    before: { unit: string; method: string | null; meta: any; set_name: string | null },
+    changes: { body_part: string; from: number | null; to: number }[],
+  ) {
+    if (!this.users) return;
+    try {
+      let inputs: any = null;
+      try {
+        const { sets } = await this.users.getAllMeasurementSets(customerId);
+        const set = before.set_name
+          ? sets.find((s: any) => s.name === before.set_name)
+          : sets.find((s: any) => s.active);
+        inputs = (set as any)?.inputs ?? null;
+      } catch {
+        inputs = null;
+      }
+      await this.users.recordMeasurementCorrections({
+        source: 'tailor_question',
+        user: customerId,
+        set_name: before.set_name,
+        unit: before.unit,
+        set_method: before.method,
+        meta: before.meta,
+        inputs,
+        changes: changes.map((c) => ({ part: c.body_part, before: c.from, after: c.to })),
+        order: String(order._id),
+        business: q.business ? String(q.business) : null,
+      });
+    } catch (e: any) {
+      this.logger.warn(`Measurement correction log failed: ${e?.message}`);
+    }
   }
 
   /** The copy a question is about: one made-to-order line, or the order's own. */
@@ -277,6 +321,13 @@ export class MeasurementQuestionsService {
     }
 
     const changes: { body_part: string; from: number | null; to: number }[] = [];
+    // How the numbers were taken before the answer, for the correction log.
+    const before = {
+      unit: target.profile.unit ?? 'cm',
+      method: target.profile.method ?? null,
+      meta: target.profile.tailoring_meta ? { ...target.profile.tailoring_meta } : null,
+      set_name: target.profile.set_name ?? null,
+    };
     const apply = (profile: any) => {
       const m = { ...(profile.measurements || {}) };
       const meta = profile.tailoring_meta ? { ...profile.tailoring_meta } : null;
@@ -327,6 +378,8 @@ export class MeasurementQuestionsService {
     // Optional: the same corrections into the customer's saved set, so the
     // next order doesn't start from the wrong number again. Never fails the
     // answer — the order copy is what the tailor needs right now.
+    if (changes.length) void this.logCorrections(String(customerId), order, q, before, changes);
+
     let savedTo: string | null = null;
     let notSavedReason: string | undefined;
     if (dto.save_to_profile && changes.length) {
