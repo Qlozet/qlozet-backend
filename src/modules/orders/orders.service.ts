@@ -140,6 +140,12 @@ import type { AdminProfileOverviewDto } from '../platform/dto/admin-profile.dto'
 import { Ticket, TicketStatus } from '../ticket/schema/ticket.schema';
 import { isCustomerVisible } from '../products/customer-visibility';
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
+import { cleanFitIssues, isMadeToFit, type FitIssue } from './fit-feedback';
+import {
+  checkGarment,
+  garmentKindOf,
+  missingMeasurementsMessage,
+} from '../../common/utils/garment-measurements';
 import { resolveFabricPurchase, roundToSellable, sellsPieces } from '../products/fabric-pieces';
 
 @Injectable()
@@ -225,14 +231,21 @@ export class OrderService {
 
       const normalizedItems = processedItems.map((item, itemIdx) => {
         const selections = item.selections || {};
+        const bodyProfile =
+          item.clothing_type === ClothingType.CUSTOMIZE
+            ? resolveBodyProfile(
+                itemSetName(itemIdx, item.product_id) ??
+                  orderData.measurement_set_name,
+              )
+            : null;
 
         return {
-          body_profile:
-            item.clothing_type === ClothingType.CUSTOMIZE
-              ? resolveBodyProfile(
-                  itemSetName(itemIdx, item.product_id) ??
-                    orderData.measurement_set_name,
-                )
+          body_profile: bodyProfile,
+          // Which of the garment's needed measurements are rough, and which
+          // extras the tailor may want (missing ones refuse the order below).
+          measurement_check:
+            bodyProfile && item.garment
+              ? checkGarment(item.garment, bodyProfile.measurements, bodyProfile.tailoring_meta)
               : null,
           product: item.product_id,
           business: item.business,
@@ -421,14 +434,16 @@ export class OrderService {
 
       // A piece made to fit cannot be cut from nothing: refuse the order
       // before anything is saved or charged when a custom item would carry
-      // no measurements (no saved set, or an empty one).
-      const customWithoutMeasurements = normalizedItems.some(
-        (it: any) =>
-          it.clothing_type === ClothingType.CUSTOMIZE &&
-          !hasUsableMeasurements(it.body_profile?.measurements),
-      );
-      if (customWithoutMeasurements) {
-        throw new BadRequestException(NO_MEASUREMENTS_MESSAGE);
+      // no measurements (no saved set, or an empty one), or lacks a point
+      // its garment needs (an agbada without a sleeve length).
+      for (const it of normalizedItems as any[]) {
+        if (it.clothing_type !== ClothingType.CUSTOMIZE) continue;
+        if (!hasUsableMeasurements(it.body_profile?.measurements)) {
+          throw new BadRequestException(NO_MEASUREMENTS_MESSAGE);
+        }
+        if (it.measurement_check?.missing?.length) {
+          throw new BadRequestException(missingMeasurementsMessage(it.measurement_check));
+        }
       }
 
       // Check if any item is bespoke/customize to attach body profile
@@ -1028,6 +1043,7 @@ export class OrderService {
           business: product?.business,
           product_kind: product.kind as ProductKind,
           clothing_type: product.clothing?.type as ClothingType,
+          garment: garmentKindOf((product as any).clothing?.taxonomy),
           note: item.note,
           quantity: item.quantity,
           selections: finalSelections,
@@ -3732,25 +3748,37 @@ export class OrderService {
   }
 
   /**
-   * Post-delivery fit feedback (bespoke). One submission per order; the
-   * outcome aggregates onto the vendor's fit_stats — the platform's real
-   * measure of "did it fit?".
+   * Post-delivery fit feedback on a piece made to fit (bespoke, or a custom
+   * line). One submission per order; the outcome aggregates onto the
+   * vendor's fit_stats — the platform's real measure of "did it fit?". When
+   * it wasn't perfect, `issues` say where (orders/fit-feedback.ts), with the
+   * garment, so a tailor's cut can be learned from later.
    */
   async submitFitFeedback(
     reference: string,
     customerId: string,
-    dto: { fit: 'perfect' | 'minor_issues' | 'poor'; comment?: string },
+    dto: {
+      fit: 'perfect' | 'minor_issues' | 'poor';
+      comment?: string;
+      issues?: { area: string; problem: string }[];
+    },
   ) {
     if (!['perfect', 'minor_issues', 'poor'].includes(dto.fit)) {
       throw new BadRequestException('fit must be perfect, minor_issues or poor.');
+    }
+    let issues: FitIssue[] = [];
+    try {
+      issues = dto.fit === 'perfect' ? [] : cleanFitIssues(dto.issues);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Check where the piece was off.');
     }
     const order = await this.orderModel.findOne({
       reference,
       customer: new Types.ObjectId(customerId),
     });
     if (!order) throw new NotFoundException('Order not found');
-    if ((order as any).type !== 'bespoke') {
-      throw new BadRequestException('Fit feedback applies to bespoke orders.');
+    if (!isMadeToFit(order)) {
+      throw new BadRequestException('Fit feedback applies to pieces made to your measurements.');
     }
     if (order.status !== OrderStatus.COMPLETED) {
       throw new BadRequestException('You can rate the fit once the order is delivered.');
@@ -3758,15 +3786,21 @@ export class OrderService {
     if ((order as any).fit_feedback) {
       throw new BadRequestException('Fit feedback was already recorded for this order.');
     }
+    // The made-to-fit line: the bespoke order's one line, or the custom one.
+    const fitted: any =
+      (order.items || []).find((i: any) => i?.clothing_type === 'customize') ??
+      order.items?.[0];
     (order as any).fit_feedback = {
       fit: dto.fit,
       comment: dto.comment?.trim() || null,
+      issues,
+      garment: fitted?.measurement_check?.garment ?? null,
       created_at: new Date(),
     };
     order.markModified('fit_feedback');
     await order.save();
 
-    const businessId = order.items?.[0]?.business?.toString();
+    const businessId = fitted?.business?.toString();
     if (businessId) {
       await this.businessModel
         .updateOne(

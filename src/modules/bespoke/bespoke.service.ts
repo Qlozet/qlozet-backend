@@ -75,6 +75,11 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { hasUsableMeasurements, NO_MEASUREMENTS_MESSAGE } from '../../common/utils/usable-measurements';
+import {
+  checkGarment,
+  garmentKindOf,
+  missingMeasurementsMessage,
+} from '../../common/utils/garment-measurements';
 import { roundToSellable } from '../products/fabric-pieces';
 import {
   FABRIC_ROLE_NAMES,
@@ -712,6 +717,15 @@ export class BespokeService {
     if (!hasUsableMeasurements(measuredFor?.measurements)) {
       throw new BadRequestException(NO_MEASUREMENTS_MESSAGE);
     }
+    // The design's garment ("Agbada", "Dresses") says which points it needs.
+    const garment = garmentKindOf({ category: design.category });
+    const measurementCheck =
+      garment && measuredFor
+        ? checkGarment(garment, measuredFor.measurements, measuredFor.tailoring_meta)
+        : null;
+    if (measurementCheck?.missing.length) {
+      throw new BadRequestException(missingMeasurementsMessage(measurementCheck));
+    }
 
     // Double-charge guard: if ANOTHER quote on this design has a checkout in
     // flight (pending order touched recently), block a second acceptance —
@@ -761,6 +775,7 @@ export class BespokeService {
       order.customer_body_profile = bodyProfile as any;
       if (order.items?.[0]) {
         (order.items[0] as any).body_profile = bodyProfile;
+        (order.items[0] as any).measurement_check = measurementCheck;
         order.markModified('items');
       }
       await order.save();
@@ -972,6 +987,7 @@ export class BespokeService {
             total_price: tailorCharge,
             note: quote.vendor_notes,
             body_profile: bodyProfile,
+            measurement_check: measurementCheck,
             ...(fabricProduct && !fabricForeign
               ? {
                   fabric_selections: [
@@ -1361,8 +1377,14 @@ export class BespokeService {
         ...fabricOffer(doc, businessId, name),
       });
     }
+    // Which of the garment's points are rough, and extras worth asking for.
+    const garment = garmentKindOf({ category: (quote as any).design?.category });
+    const measurement_check =
+      garment && measurements
+        ? checkGarment(garment, measurements.measurements, measurements.tailoring_meta)
+        : null;
     return {
-      data: { ...quote, measurements, deposit_percent, fabric_offer, extra_fabric_offers },
+      data: { ...quote, measurements, measurement_check, deposit_percent, fabric_offer, extra_fabric_offers },
     };
   }
 

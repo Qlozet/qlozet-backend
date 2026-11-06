@@ -27,6 +27,10 @@ import { Wallet, WalletSchema } from '../wallets/schema/wallet.schema';
 import { Token, TokenSchema } from '../wallets/schema/token.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import {
+  MeasurementCorrection,
+  MeasurementCorrectionSchema,
+} from '../measurement/corrections/measurement-correction.schema';
+import {
   FabricReservation,
   FabricReservationSchema,
 } from '../fabric-reservation/schemas/fabric-reservation.schema';
@@ -49,6 +53,8 @@ import {
       { name: Token.name, schema: TokenSchema },
       { name: Product.name, schema: ProductSchema },
       { name: FabricReservation.name, schema: FabricReservationSchema },
+      // Append-only: corrections of estimated measurements (measurement/corrections).
+      { name: MeasurementCorrection.name, schema: MeasurementCorrectionSchema },
     ]),
     LogisticsModule,   // provides LogisticsService (needed by UserService)
     ProductModule,     // provides ProductService

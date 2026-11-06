@@ -70,6 +70,7 @@ describe('resolveConsoleCell', () => {
 
   it('an unknown /admin route needs dashboard to read and settings to write', () => {
     expect(cell('GET', '/api/admin/some-new-report')).toEqual({ resource: 'dashboard', action: 'view' });
+    expect(cell('GET', '/api/admin/measurements/accuracy')).toEqual({ resource: 'dashboard', action: 'view' });
     expect(cell('POST', '/api/admin/some-new-tool')).toEqual({ resource: 'settings', action: 'create' });
   });
 

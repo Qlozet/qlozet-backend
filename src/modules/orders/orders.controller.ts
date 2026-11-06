@@ -596,11 +596,17 @@ export class OrderController {
 
   @Roles(UserType.CUSTOMER)
   @Post(':reference/fit-feedback')
-  @ApiOperation({ summary: 'Rate how the delivered bespoke piece fit' })
+  @ApiOperation({ summary: 'Rate how a delivered made-to-fit piece fit, and where it was off' })
   @ApiParam({ name: 'reference', description: 'Order reference' })
   async fitFeedback(
     @Param('reference') reference: string,
-    @Body() body: { fit: 'perfect' | 'minor_issues' | 'poor'; comment?: string },
+    @Body()
+    body: {
+      fit: 'perfect' | 'minor_issues' | 'poor';
+      comment?: string;
+      /** e.g. [{ area: 'chest', problem: 'tight' }]; ignored when perfect. */
+      issues?: { area: string; problem: string }[];
+    },
     @Req() req: any,
   ) {
     return this.orderService.submitFitFeedback(

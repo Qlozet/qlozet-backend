@@ -18,6 +18,12 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { AnthropicAuthService } from '../assistant/llm/anthropic-auth.service';
 import { FabricVisionService } from './fabric-vision.service';
 import { MeasurementPhotoService } from './measurement-photo.service';
+import { MeasurementAccuracyController } from './corrections/measurement-accuracy.controller';
+import {
+  MeasurementCorrection,
+  MeasurementCorrectionSchema,
+} from './corrections/measurement-correction.schema';
+import { Order, OrderSchema } from '../orders/schemas/orders.schema';
 
 @Module({
   imports: [
@@ -25,6 +31,9 @@ import { MeasurementPhotoService } from './measurement-photo.service';
       { name: JobStatus.name, schema: JobStatusSchema },
       // Fabric suggestions from a reference photo rank the fabric listings.
       { name: Product.name, schema: ProductSchema },
+      // The admin accuracy view reads the correction log and fit feedback.
+      { name: MeasurementCorrection.name, schema: MeasurementCorrectionSchema },
+      { name: Order.name, schema: OrderSchema },
     ]),
     WalletsModule,
     UmsModule,
@@ -43,7 +52,7 @@ import { MeasurementPhotoService } from './measurement-photo.service';
       },
     }),
   ],
-  controllers: [MeasurementController],
+  controllers: [MeasurementController, MeasurementAccuracyController],
   providers: [
     MeasurementService,
     GradioService,

@@ -261,6 +261,18 @@ export class OrderItem {
     /** Set when the customer corrected these numbers for this order. */
     updated_by_customer_at?: Date | null;
   } | null;
+
+  // How the snapshot above covers this garment (common/utils/
+  // garment-measurements.ts): which needed points are only rough estimates
+  // and which extras the tailor may want to ask for. Null when the garment
+  // isn't known or the line isn't made to fit.
+  @Prop({ type: Object, default: null })
+  measurement_check?: {
+    garment: string;
+    missing: string[];
+    rough: string[];
+    helpful_missing: string[];
+  } | null;
 }
 
 
@@ -541,6 +553,10 @@ export class Order {
   fit_feedback?: {
     fit: 'perfect' | 'minor_issues' | 'poor';
     comment?: string | null;
+    /** Where it was off (orders/fit-feedback.ts); empty when perfect. */
+    issues?: { area: string; problem: string }[];
+    /** The garment kind (garment-measurements.ts), when known. */
+    garment?: string | null;
     created_at: Date;
   } | null;
 

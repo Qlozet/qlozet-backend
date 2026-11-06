@@ -6,8 +6,19 @@ import {
   NotFoundException,
   ConflictException,
   HttpException,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
+import {
+  MeasurementCorrection,
+  MeasurementCorrectionDocument,
+} from '../../measurement/corrections/measurement-correction.schema';
+import {
+  CorrectionInput,
+  CorrectionSource,
+  correctionEntries,
+  estimatedOnly,
+} from '../../measurement/corrections/measurement-corrections';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
@@ -83,7 +94,36 @@ export class UserService {
     private readonly logisticService: LogisticsService,
     @Inject(forwardRef(() => SizeGuideService))
     private readonly sizeGuideService: SizeGuideService,
+    @Optional()
+    @InjectModel(MeasurementCorrection.name)
+    private readonly correctionModel?: Model<MeasurementCorrectionDocument>,
   ) {}
+
+  /**
+   * Keep the pairs where a number we had was replaced by a better one
+   * (measurement/corrections). Profile edits keep only replaced estimates.
+   * Never fails the caller: the log is for learning, not for the order.
+   */
+  async recordMeasurementCorrections(input: CorrectionInput): Promise<number> {
+    if (!this.correctionModel) return 0;
+    try {
+      let entries = correctionEntries(input);
+      if (input.source === 'profile_edit') entries = estimatedOnly(entries);
+      if (!entries.length) return 0;
+      await this.correctionModel.insertMany(
+        entries.map((e) => ({
+          ...e,
+          user: new Types.ObjectId(e.user),
+          order: e.order ? new Types.ObjectId(e.order) : null,
+          business: e.business ? new Types.ObjectId(e.business) : null,
+        })),
+      );
+      return entries.length;
+    } catch (e: any) {
+      this.logger.warn(`Recording measurement corrections failed: ${e?.message}`);
+      return 0;
+    }
+  }
 
   async fetchCustomers(
     page = 1,
@@ -1669,6 +1709,9 @@ export class UserService {
     userId: string,
     setName: string,
     dto: UpdateMeasurementSetDto,
+    // Who changed it, for the correction log. null: the caller logs it
+    // (a tailor-question answer copied into the profile).
+    opts: { correctionSource?: CorrectionSource | null } = {},
   ) {
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
@@ -1685,15 +1728,27 @@ export class UserService {
     if (dto.unit) set.unit = dto.unit;
     const changed: string[] = [];
     const previousMeta: Record<string, any> = { ...((set.tailoring_meta as any) ?? {}) };
+    const previousMethod =
+      (set as any).method ??
+      (set.inputs || Object.keys(previousMeta).length ? 'estimate' : null);
+    const previousUnit = set.unit;
+    const replaced: { part: string; before: number; after: number }[] = [];
     if (dto.measurements) {
       // measurements is a Mongoose Map — use .set() for each key
       for (const [key, value] of Object.entries(dto.measurements)) {
         if (value === undefined || value === null) continue;
         const before = (set.measurements as any).get?.(key) ?? (set.measurements as any)[key];
-        if (Number(before) !== Number(value)) changed.push(key);
+        if (Number(before) !== Number(value)) {
+          changed.push(key);
+          replaced.push({ part: key, before: Number(before), after: Number(value) });
+        }
         (set.measurements as any).set(key, value);
       }
     }
+    // A new estimate replacing the old one isn't a correction, nor is a
+    // switch of unit (every number changes, none was wrong).
+    const freshEstimate = Boolean(dto.inputs);
+    const unitSwitched = Boolean(dto.unit && dto.unit !== previousUnit);
     if (dto.inputs) set.inputs = dto.inputs;
     if (dto.tailoring_meta) {
       set.tailoring_meta = {
@@ -1750,6 +1805,25 @@ export class UserService {
     }
 
     await user.save();
+
+    const source = opts.correctionSource === undefined ? 'profile_edit' : opts.correctionSource;
+    if (source && replaced.length && !freshEstimate && !unitSwitched) {
+      // Only values the shop didn't send fresh notes for were typed over.
+      const sent = (dto.tailoring_meta as any) ?? {};
+      const typed = replaced.filter(
+        (r) => !(sent[r.part] && JSON.stringify(sent[r.part]) !== JSON.stringify(previousMeta[r.part])),
+      );
+      void this.recordMeasurementCorrections({
+        source,
+        user: String(userId),
+        set_name: set.name,
+        unit: previousUnit,
+        set_method: previousMethod,
+        meta: previousMeta,
+        inputs: (set.inputs as any) ?? null,
+        changes: typed,
+      });
+    }
     return set;
   }
 
