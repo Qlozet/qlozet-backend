@@ -23,6 +23,7 @@ import { percentageChange } from '../../common/utils/percentageChange';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
 import { assertPublishable, listingCandidateFor } from './listing-rules';
+import { vendorListQuery } from './vendor-list';
 import {
   activationProblems,
   BulkPlan,
@@ -1056,23 +1057,15 @@ export class ProductService {
     kind: string,
     page: number = 1,
     size: number = 10,
+    opts: { search?: string; sortBy?: string; order?: string } = {},
   ) {
-    const filter: any = {
-      $or: [
-        { business: new Types.ObjectId(vendor) },
-        { business: vendor },
-      ],
-      deleted_at: null,
-    };
-    if (kind) {
-      filter.kind = kind;
-    }
+    const { filter, sort } = vendorListQuery({ vendor, kind, ...opts });
     const { take, skip } = await Utils.getPagination(page, size);
 
     const [rows, count] = await Promise.all([
       this.productModel
         .find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sort)
         .skip(skip)
         .limit(take)
         .exec(),
@@ -2536,6 +2529,10 @@ export class ProductService {
             }
           : { 'moderation.status': dto.moderation_status },
       );
+      // Nothing to review in a listing its vendor has deleted.
+      if (dto.moderation_status === ProductModerationStatus.PENDING) {
+        and.push({ deleted_at: null });
+      }
     }
 
     if (dto.business_id) {

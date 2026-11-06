@@ -511,11 +511,13 @@ export class AdminAnalyticsToolsService {
   private async moderationQueue() {
     const [pendingProducts, oldestProduct, pendingVendors, oldestVendor] =
       await Promise.all([
+        // Same queue as the review page: a deleted listing needs no review.
         this.productModel.countDocuments({
           $or: [
             { 'moderation.status': 'pending' },
             { moderation: { $exists: false } },
           ],
+          deleted_at: null,
         }),
         this.productModel
           .findOne({
@@ -523,6 +525,7 @@ export class AdminAnalyticsToolsService {
               { 'moderation.status': 'pending' },
               { moderation: { $exists: false } },
             ],
+            deleted_at: null,
           })
           .sort({ createdAt: 1 })
           .select('createdAt'),

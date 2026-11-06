@@ -359,6 +359,9 @@ export class ProductsController {
     @Query('kind') kind: string,
     @Query('page') page = 1,
     @Query('size') size = 10,
+    @Query('search') search?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('order') order?: string,
   ) {
     const businessId = req.business?.id || req.business?._id;
     if (!businessId) {
@@ -370,6 +373,7 @@ export class ProductsController {
       kind,
       Number(page),
       Number(size),
+      { search, sortBy, order },
     );
   }
   @Public()
