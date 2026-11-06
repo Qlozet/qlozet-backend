@@ -231,7 +231,7 @@ export class AdminOpsToolsService {
     const omitted: string[] = [];
 
     if (can('products_pending_review')) {
-      const filter = { $or: [{ 'moderation.status': 'pending' }, { moderation: { $exists: false } }], status: { $ne: 'archived' } };
+      const filter = { $or: [{ 'moderation.status': 'pending' }, { moderation: { $exists: false } }], status: { $ne: 'archived' }, deleted_at: null };
       const [count, rows] = await Promise.all([
         this.productModel.countDocuments(filter),
         this.productModel.find(filter).sort({ createdAt: 1 }).limit(limit).select('kind status business createdAt clothing.name fabric.name accessory.name').lean(),
@@ -438,7 +438,8 @@ export class AdminOpsToolsService {
     const now = new Date();
 
     const [products, orders, openDisputes, openTickets, unreleased, lifetimeEarned, wallet, recent, fulfilment, team] = await Promise.all([
-      this.productModel.aggregate([{ $match: { business: bid } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
+      // Vendor-deleted products are kept for orders but are not in the catalogue.
+      this.productModel.aggregate([{ $match: { business: bid, deleted_at: null } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
       this.orderModel.countDocuments({ 'items.business': bid, status: { $ne: 'pending' } }),
       this.disputeModel.countDocuments({ business: bid, status: { $in: ['open', 'under_review'] } }),
       this.ticketModel.countDocuments({ business: bid, status: { $in: ['open', 'in_progress'] } }),
