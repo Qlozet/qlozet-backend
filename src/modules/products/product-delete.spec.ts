@@ -49,17 +49,30 @@ describe('ProductService.delete — who is allowed, and what it does', () => {
     expect(productModel.findOneAndDelete).toHaveBeenCalledTimes(1);
   });
 
-  it('archives rather than deletes for a vendor', async () => {
+  it('for a vendor, takes their own product off sale and out of their list', async () => {
     const { service, productModel } = makeService();
+    const businessId = new Types.ObjectId().toHexString();
 
-    await service.delete(id, userId, UserType.VENDOR);
+    await service.delete(id, userId, UserType.VENDOR, businessId);
 
     expect(productModel.findOneAndDelete).not.toHaveBeenCalled();
-    expect(productModel.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: new Types.ObjectId(id) },
-      { $set: { status: ProductStatus.ARCHIVED } },
-      { new: true },
-    );
+    const [filter, update] = productModel.findOneAndUpdate.mock.calls[0];
+    // Scoped to the vendor's own store; it used to take any product id.
+    expect(filter).toEqual({
+      _id: new Types.ObjectId(id),
+      business: { $in: [new Types.ObjectId(businessId), businessId] },
+      deleted_at: null,
+    });
+    expect(update.$set.status).toBe(ProductStatus.ARCHIVED);
+    expect(update.$set.deleted_at).toBeInstanceOf(Date);
+  });
+
+  it('refuses a vendor delete with no store on the session', async () => {
+    const { service, productModel } = makeService();
+    await expect(
+      service.delete(id, userId, UserType.VENDOR),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(productModel.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('refuses an unrecognised user type instead of reporting "not found"', async () => {

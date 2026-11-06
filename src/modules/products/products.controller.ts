@@ -43,6 +43,7 @@ import { FindAllProductsDto } from './dto/find-all-products.dto';
 import {
   ScheduleActivationDto,
   UpdateStatusDto,
+  BulkProductActionDto,
 } from './dto/update-status.dto';
 import { UpdateAccessoryVariantStockDto } from './dto/accessory.dto';
 import { Types } from 'mongoose';
@@ -397,7 +398,12 @@ export class ProductsController {
     // `user_type` was the only reference to that name in the codebase and
     // always read undefined, so delete() matched neither of its branches and
     // 404'd every caller, admin and vendor alike.
-    await this.productService.delete(id, req.user.id, req.user.type);
+    await this.productService.delete(
+      id,
+      req.user.id,
+      req.user.type,
+      req.business?.id,
+    );
     return { message: 'Product deleted successfully' };
   }
   @Post(':id/rate')
@@ -514,6 +520,19 @@ export class ProductsController {
   })
   async getTrendingProductsThisWeek() {
     return this.productService.getTrendingProductsThisWeek();
+  }
+
+  // Activate, archive or delete several products at once (Products tables).
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS, VendorRole.SALES)
+  @Post('bulk')
+  @ApiOperation({ summary: 'Activate, archive or delete several products at once' })
+  async bulkAction(@Body() dto: BulkProductActionDto, @Req() req: any) {
+    return this.productService.bulkAction(
+      req.business.id,
+      dto.product_ids,
+      dto.action,
+    );
   }
 
   @Roles(UserType.VENDOR)
