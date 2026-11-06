@@ -53,6 +53,11 @@ export class Product extends Document {
   @Prop({ type: Date, default: null })
   scheduled_activation_date?: Date;
 
+  // Set when the vendor deletes it: off sale and out of their list, but kept
+  // because orders, carts, returns and reservations point at it.
+  @Prop({ type: Date, default: null })
+  deleted_at?: Date | null;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Discount', default: null })
   applied_discount: Types.ObjectId;
 

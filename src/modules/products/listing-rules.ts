@@ -212,6 +212,42 @@ ${description}`);
  * problem is already a sentence, so joining them reads correctly and survives
  * the trip to the vendor intact.
  */
+/**
+ * What the rules check, read from a listing's own block (product.clothing,
+ * product.fabric or product.accessory) - the same shape whether it arrives
+ * in a save request or is already stored.
+ */
+export function listingCandidateFor(
+  kind: string,
+  detail: any,
+  fallbackTitle?: string | null,
+): ListingCandidate {
+  const d = detail ?? {};
+  return {
+    title: d.name ?? fallbackTitle,
+    description: d.description,
+    images: d.images,
+    // Clothing carries its sizes under colour variants; fabric and accessory
+    // keep a flat variant list. Flatten both to the one shape the stock
+    // check needs.
+    variants: Array.isArray(d.color_variants)
+      ? d.color_variants.flatMap((c: any) => c?.variants ?? [])
+      : (d.variants ?? []),
+    // Only when it says which kind of clothing it is.
+    clothing:
+      kind === 'clothing' && d.type
+        ? {
+            made_to_order: d.type === 'customize',
+            turnaround_days: d.turnaround_days,
+            option_count: ['styles', 'fabrics', 'accessories', 'addons'].reduce(
+              (n, k) => n + (Array.isArray(d[k]) ? d[k].length : 0),
+              0,
+            ),
+          }
+        : null,
+  };
+}
+
 export function assertPublishable(listing: ListingCandidate): void {
   const problems = findListingViolations(listing);
   if (problems.length === 0) return;

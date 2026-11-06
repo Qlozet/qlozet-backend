@@ -22,7 +22,13 @@ import { Utils } from '../../common/utils/pagination';
 import { percentageChange } from '../../common/utils/percentageChange';
 import { ClothingType } from './dto/clothing.dto';
 import { ProductStatus } from './enums/product-status.enum';
-import { assertPublishable } from './listing-rules';
+import { assertPublishable, listingCandidateFor } from './listing-rules';
+import {
+  activationProblems,
+  BulkPlan,
+  BulkProductAction,
+  planBulkAction,
+} from './bulk-actions';
 
 /**
  * Order statuses that count as revenue. Matches the assistant's analytics
@@ -550,30 +556,9 @@ export class ProductService {
         );
       }
 
-      const detail = (dto as any)[kind] ?? {};
-      assertPublishable({
-        title: detail.name ?? dto.seo?.title,
-        description: detail.description,
-        images: detail.images,
-        // Clothing carries its sizes under colour variants; fabric and
-        // accessory keep a flat variant list. Flatten both to the one shape
-        // the stock check needs.
-        variants: Array.isArray(detail.color_variants)
-          ? detail.color_variants.flatMap((c: any) => c?.variants ?? [])
-          : (detail.variants ?? []),
-        // Only when the payload says which kind of clothing it is.
-        clothing:
-          kind === 'clothing' && detail.type
-            ? {
-                made_to_order: detail.type === 'customize',
-                turnaround_days: detail.turnaround_days,
-                option_count: ['styles', 'fabrics', 'accessories', 'addons'].reduce(
-                  (n, k) => n + (Array.isArray(detail[k]) ? detail[k].length : 0),
-                  0,
-                ),
-              }
-            : null,
-      });
+      assertPublishable(
+        listingCandidateFor(kind, (dto as any)[kind], dto.seo?.title),
+      );
     };
 
     // Reject duplicate SKUs before anything is written, so a clash can never
@@ -1008,7 +993,12 @@ export class ProductService {
    * every delete reported "product not found" instead of saying it had no idea
    * who was asking.
    */
-  async delete(id: string, userId: string, userType: string): Promise<void> {
+  async delete(
+    id: string,
+    userId: string,
+    userType: string,
+    businessId?: string,
+  ): Promise<void> {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid product id');
     }
@@ -1022,10 +1012,26 @@ export class ProductService {
       );
     }
 
+    // A vendor's delete keeps the record (orders, carts, returns and
+    // reservations point at it) but takes it off sale and out of their list.
+    // Scoped to their own store: it used to accept any product id.
+    if (isVendor && !businessId) {
+      throw new ForbiddenException('No store on this session.');
+    }
     const result = isVendor
       ? await this.productModel.findOneAndUpdate(
-          { _id: new Types.ObjectId(id) },
-          { $set: { status: ProductStatus.ARCHIVED } },
+          {
+            _id: new Types.ObjectId(id),
+            business: { $in: [new Types.ObjectId(String(businessId)), String(businessId)] },
+            deleted_at: null,
+          },
+          {
+            $set: {
+              status: ProductStatus.ARCHIVED,
+              deleted_at: new Date(),
+              scheduled_activation_date: null,
+            },
+          },
           { new: true },
         )
       : await this.productModel.findOneAndDelete({
@@ -1056,6 +1062,7 @@ export class ProductService {
         { business: new Types.ObjectId(vendor) },
         { business: vendor },
       ],
+      deleted_at: null,
     };
     if (kind) {
       filter.kind = kind;
@@ -1569,12 +1576,24 @@ export class ProductService {
     status: ProductStatus,
   ) {
     const product = await this.productModel.findById(productId);
-    if (!product) throw new NotFoundException('Product not found');
+    if (!product || (product as any).deleted_at) {
+      throw new NotFoundException('Product not found');
+    }
 
     if (product.business.toString() !== business.toString()) {
       throw new ForbiddenException(
         'You do not have permission to update this product',
       );
+    }
+    // Activating from the list must clear the same floor as publishing from
+    // the edit form, or a half-finished draft could go on sale.
+    if (status === ProductStatus.ACTIVE) {
+      const problems = activationProblems(product.toObject());
+      if (problems.length) {
+        throw new BadRequestException(
+          ['This listing is not ready to go live.', ...problems].join(' '),
+        );
+      }
     }
     product.status = status;
 
@@ -1586,6 +1605,56 @@ export class ProductService {
     return {
       message: `Product status updated to ${status}`,
       data: updatedProduct.toJSON(),
+    };
+  }
+
+  /**
+   * Activate, archive or delete several of a store's products at once.
+   * Applies to the ones that qualify and names the rest with the reason
+   * (see bulk-actions.ts), so one unready draft never blocks the batch.
+   */
+  async bulkAction(
+    business: string,
+    productIds: string[],
+    action: BulkProductAction,
+  ): Promise<{ message: string; data: BulkPlan & { action: BulkProductAction } }> {
+    const owner = {
+      $in: [new Types.ObjectId(String(business)), String(business)],
+    };
+    const ids = productIds.filter((id) => Types.ObjectId.isValid(id));
+    const found = await this.productModel
+      .find({
+        _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
+        business: owner,
+        deleted_at: null,
+      })
+      .lean();
+
+    const plan = planBulkAction(productIds, found, action);
+
+    if (plan.apply.length) {
+      const set: Record<string, unknown> = {
+        status:
+          action === 'activate' ? ProductStatus.ACTIVE : ProductStatus.ARCHIVED,
+        scheduled_activation_date: null,
+        ...(action === 'delete' ? { deleted_at: new Date() } : {}),
+      };
+      await this.productModel.updateMany(
+        {
+          _id: { $in: plan.apply.map((id) => new Types.ObjectId(id)) },
+          business: owner,
+          deleted_at: null,
+        },
+        { $set: set },
+      );
+    }
+
+    const verb = { activate: 'activated', archive: 'archived', delete: 'deleted' }[action];
+    const n = plan.apply.length;
+    const skipped = plan.skipped.length ? `, ${plan.skipped.length} skipped` : '';
+    return {
+      message: `${n} ${n === 1 ? 'product' : 'products'} ${verb}${skipped}.`,
+      data: { action, ...plan },
     };
   }
 
@@ -3483,7 +3552,7 @@ export class ProductService {
     kind: 'clothing' | 'fabric' | 'accessory',
   ): Promise<{ message: string; data: Record<string, number> }> {
     const rows = await this.productModel.aggregate([
-      { $match: { business: new Types.ObjectId(String(business)), kind } },
+      { $match: { business: new Types.ObjectId(String(business)), kind, deleted_at: null } },
       { $group: { _id: '$status', n: { $sum: 1 } } },
     ]);
 
