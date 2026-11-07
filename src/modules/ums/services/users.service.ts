@@ -1,3 +1,4 @@
+import { ADMIN_COUNTED_ORDER, IS_ADMIN_COUNTED_ORDER } from '../../orders/admin-order-scope';
 import {
   BadRequestException,
   Injectable,
@@ -239,7 +240,8 @@ export class UserService {
       total_orders: number;
       last_order_at: Date;
     }>([
-      { $match: { customer: { $in: ids } } },
+      // Paid orders only (admin-order-scope.ts): an abandoned checkout is not an order.
+      { $match: { ...ADMIN_COUNTED_ORDER, customer: { $in: ids } } },
       {
         $group: {
           _id: '$customer',
@@ -381,8 +383,11 @@ export class UserService {
           {
             $group: {
               _id: null,
-              total_orders: { $sum: 1 },
-              last_order_at: { $max: '$createdAt' },
+              // Paid orders only; returns below still see every order.
+              total_orders: { $sum: { $cond: [IS_ADMIN_COUNTED_ORDER, 1, 0] } },
+              last_order_at: {
+                $max: { $cond: [IS_ADMIN_COUNTED_ORDER, '$createdAt', null] },
+              },
               // Spend is what they actually paid for: an abandoned unpaid
               // order must not inflate their lifetime value.
               lifetime_spending: {

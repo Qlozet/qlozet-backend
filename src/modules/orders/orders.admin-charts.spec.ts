@@ -103,12 +103,14 @@ describe('OrderService platform series', () => {
     expect(projectOf(orderPipelines[0]).value).toEqual({ $ifNull: ['$total', 0] });
   });
 
-  it('counts every order for volume, paid or not, and sums commission for platform earnings', async () => {
+  // An abandoned card checkout leaves an unpaid order behind; it is not an order.
+  it('counts paid orders for volume (no reservation fees), and sums commission for platform earnings', async () => {
     const { service, orderPipelines } = buildService({});
     const range = service.dashboardRange('30d', NOW);
 
     await service.getPlatformOrderCountSeries(range);
-    expect(matchOf(orderPipelines[0]).payment_status).toBeUndefined();
+    expect(matchOf(orderPipelines[0]).payment_status).toBe('paid');
+    expect(matchOf(orderPipelines[0]).type).toEqual({ $ne: 'reservation' });
     expect(projectOf(orderPipelines[0]).value).toBe(1);
 
     await service.getPlatformCommissionSeries(range);

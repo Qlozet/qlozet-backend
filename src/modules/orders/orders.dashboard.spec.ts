@@ -1,4 +1,5 @@
 import { OrderService } from './orders.service';
+import { ADMIN_COUNTED_ORDER } from './admin-order-scope';
 import { OrderStatus } from './schemas/orders.schema';
 import { BusinessStatus } from '../business/schemas/business.schema';
 import { UserType } from '../ums/schemas';
@@ -41,10 +42,11 @@ const buildService = (overrides: {
       aggregate: jest.fn((pipeline: unknown[]) => {
         aggregations.push(pipeline);
         if (isFacet(pipeline)) return Promise.resolve(overrides.trend ?? [{}]);
-        // The gross sales pipeline is the one that groups; the other is the
-        // must-purchase product roll-up.
+        // The gross sales pipeline groups everything into one row (_id null);
+        // the other is the must-purchase product roll-up.
         const isGrossSales = pipeline.some(
-          (stage) => (stage as Record<string, unknown>).$match !== undefined,
+          (stage) =>
+            (stage as { $group?: { _id?: unknown } }).$group?._id === null,
         );
         return Promise.resolve(
           isGrossSales
@@ -133,13 +135,24 @@ describe('OrderService.getAdminDashboardMetrics', () => {
     });
   });
 
-  it('counts orders by delivered and in-transit status', async () => {
+  // An abandoned card checkout leaves an unpaid order behind; it is not an
+  // order. "In transit" means shipped, not still being made.
+  it('counts paid orders only, by delivered and in-transit (shipped) status', async () => {
     const { service, orderCountQueries } = buildService({});
     await service.getAdminDashboardMetrics();
 
-    expect(orderCountQueries[0]).toBeUndefined(); // every order
-    expect(orderCountQueries[1]).toEqual({ status: OrderStatus.COMPLETED });
-    expect(orderCountQueries[2]).toEqual({ status: OrderStatus.PROCESSING });
+    expect(orderCountQueries[0]).toEqual(ADMIN_COUNTED_ORDER);
+    expect(orderCountQueries[1]).toEqual({ ...ADMIN_COUNTED_ORDER, status: OrderStatus.COMPLETED });
+    expect(orderCountQueries[2]).toEqual({ ...ADMIN_COUNTED_ORDER, status: OrderStatus.IN_TRANSIT });
+  });
+
+  it('ranks top products from paid orders only', async () => {
+    const { service, aggregations } = buildService({});
+    await service.getAdminDashboardMetrics();
+    const productPipeline = aggregations.find((pipeline) =>
+      pipeline.some((stage) => (stage as Record<string, unknown>).$unwind === '$items'),
+    );
+    expect(productPipeline?.[0]).toEqual({ $match: ADMIN_COUNTED_ORDER });
   });
 
   it('counts all vendors and, separately, the verified ones', async () => {
@@ -168,7 +181,8 @@ describe('OrderService.getAdminDashboardMetrics', () => {
 
     const grossSalesPipeline = aggregations.find((pipeline) =>
       pipeline.some(
-        (stage) => (stage as Record<string, unknown>).$match !== undefined,
+        (stage) =>
+          (stage as { $group?: { _id?: unknown } }).$group?._id === null,
       ),
     );
     expect(grossSalesPipeline?.[0]).toEqual({

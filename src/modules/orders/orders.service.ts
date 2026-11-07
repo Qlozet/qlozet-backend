@@ -1,3 +1,4 @@
+import { ADMIN_COUNTED_ORDER } from './admin-order-scope';
 import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
 import { orderContactForVendor } from '../../common/utils/customer-privacy';
 import { Length } from 'class-validator';
@@ -2469,10 +2470,14 @@ export class OrderService {
       grossSales,
       trend,
     ] = await Promise.all([
-      this.orderModel.countDocuments(), // total orders
-      this.orderModel.countDocuments({ status: OrderStatus.COMPLETED }), // delivered
-      this.orderModel.countDocuments({ status: OrderStatus.PROCESSING }), // in transit
+      // Paid orders only (admin-order-scope.ts): an abandoned card checkout
+      // leaves an unpaid order behind and is not an order.
+      this.orderModel.countDocuments(ADMIN_COUNTED_ORDER), // total orders
+      this.orderModel.countDocuments({ ...ADMIN_COUNTED_ORDER, status: OrderStatus.COMPLETED }), // delivered
+      // Shipped and on the road. This counted PROCESSING (still being made).
+      this.orderModel.countDocuments({ ...ADMIN_COUNTED_ORDER, status: OrderStatus.IN_TRANSIT }), // in transit
       this.orderModel.aggregate([
+        { $match: ADMIN_COUNTED_ORDER },
         { $unwind: '$items' },
         {
           $group: {
@@ -2613,22 +2618,26 @@ export class OrderService {
       this.orderModel.aggregate<Record<string, { n: number }[]>>([
         {
           $facet: {
-            ordersCurrent: count({ createdAt: current }),
-            ordersPrevious: count({ createdAt: previous }),
+            ordersCurrent: count({ ...ADMIN_COUNTED_ORDER, createdAt: current }),
+            ordersPrevious: count({ ...ADMIN_COUNTED_ORDER, createdAt: previous }),
             deliveredCurrent: count({
+              ...ADMIN_COUNTED_ORDER,
               status: OrderStatus.COMPLETED,
               updatedAt: current,
             }),
             deliveredPrevious: count({
+              ...ADMIN_COUNTED_ORDER,
               status: OrderStatus.COMPLETED,
               updatedAt: previous,
             }),
             inTransitCurrent: count({
-              status: OrderStatus.PROCESSING,
+              ...ADMIN_COUNTED_ORDER,
+              status: OrderStatus.IN_TRANSIT,
               updatedAt: current,
             }),
             inTransitPrevious: count({
-              status: OrderStatus.PROCESSING,
+              ...ADMIN_COUNTED_ORDER,
+              status: OrderStatus.IN_TRANSIT,
               updatedAt: previous,
             }),
             grossSalesCurrent: sum({
@@ -6577,9 +6586,14 @@ export class OrderService {
   }
 
   /** `{ $match }` on the window - the first stage of every windowed admin pipeline. */
+  // Paid orders only, inside the window: the admin order charts (status,
+  // audience, location, product kind) count what customers paid for.
   private windowStage(range?: DashboardRange): { $match: Record<string, unknown> } {
     return {
-      $match: range ? { createdAt: { $gte: range.start, $lt: range.end } } : {},
+      $match: {
+        ...ADMIN_COUNTED_ORDER,
+        ...(range ? { createdAt: { $gte: range.start, $lt: range.end } } : {}),
+      },
     };
   }
 
@@ -6628,7 +6642,7 @@ export class OrderService {
   /** Order volume over the window - every order, paid or not. */
   getPlatformOrderCountSeries(range: DashboardRange) {
     return this.platformSeries(range, {
-      match: {},
+      match: ADMIN_COUNTED_ORDER,
       value: 1,
       title: 'Order Count',
       key: 'order_count',
