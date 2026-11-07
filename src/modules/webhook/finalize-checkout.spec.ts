@@ -18,6 +18,7 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
   let creditWallet: jest.Mock;
   let createTxn: jest.Mock;
   let notify: jest.Mock;
+  let announce: jest.Mock;
   const WALLET_ID = new Types.ObjectId();
 
   beforeAll(async () => {
@@ -36,6 +37,7 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
     creditWallet = jest.fn().mockResolvedValue(undefined);
     createTxn = jest.fn().mockResolvedValue({});
     notify = jest.fn().mockResolvedValue({});
+    announce = jest.fn().mockResolvedValue(undefined);
 
     // Real model + stubbed collaborators: the service is built without its
     // constructor so only the fields these flows touch need to exist.
@@ -57,6 +59,7 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
       notificationsService: { create: notify },
       paymentService: {},
       stripeProvider: {},
+      orderService: { announcePaidOrder: announce },
     });
   });
 
@@ -86,6 +89,25 @@ describe('WebhookService.finalizeCheckoutOrder', () => {
     expect(saved.payment_status).toBe('paid');
     expect(recordEarnings).toHaveBeenCalledTimes(1);
     expect(updateInventory).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces a card order (confirmation email, vendor alerts) only once it is paid, and only once', async () => {
+    // A card order exists before its charge. Announcing it at creation sent
+    // "order confirmed" for a Flutterwave payment that then failed.
+    const order = await makeOrder();
+    await Promise.all([
+      service.finalizeCheckoutOrder(checkoutTxn(order) as any), // webhook
+      service.finalizeCheckoutOrder(checkoutTxn(order) as any), // verify page
+    ]);
+    await service.finalizeCheckoutOrder(checkoutTxn(order) as any); // retry
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(String(announce.mock.calls[0][0])).toBe(String(order._id));
+  });
+
+  it('bespoke orders are not announced as new orders on payment', async () => {
+    const order = await makeOrder({ type: 'bespoke' });
+    await service.finalizeCheckoutOrder(checkoutTxn(order) as any);
+    expect(announce).not.toHaveBeenCalled();
   });
 
   it('bespoke orders go straight to processing (tailor already committed)', async () => {
