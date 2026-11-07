@@ -1,3 +1,4 @@
+import { shipbubbleContactName } from './contact-name';
 import { Injectable, HttpException, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -41,7 +42,8 @@ export class LogisticsService {
         await firstValueFrom(
           this.httpService.post(
             this.buildUrl('/shipping/address/validate'),
-            address,
+            // Live Shipbubble refuses a name that isn't a letters-only full name.
+            { ...address, name: shipbubbleContactName(address.name) },
             { headers: this.headers },
           ),
         );
