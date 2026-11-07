@@ -818,13 +818,15 @@ export class UserService {
       this.userModel.countDocuments({ ...isCustomer, createdAt: previous }),
       // "Unique" customers are the ones who have actually bought something, as
       // opposed to the registered accounts counted above.
-      this.orderModel.distinct('customer'),
-      this.orderModel.distinct('customer', { createdAt: current }),
-      this.orderModel.distinct('customer', { createdAt: previous }),
+      // Paid orders only (admin-order-scope.ts): an abandoned checkout is not a purchase.
+      this.orderModel.distinct('customer', ADMIN_COUNTED_ORDER),
+      this.orderModel.distinct('customer', { ...ADMIN_COUNTED_ORDER, createdAt: current }),
+      this.orderModel.distinct('customer', { ...ADMIN_COUNTED_ORDER, createdAt: previous }),
       // Location comes from the ORDER's shipping state: a user's profile
       // address is almost always unset. Counts distinct customers per state, so
       // one customer ordering ten times does not make their state the busiest.
       this.orderModel.aggregate<{ _id: string; count: number }>([
+        { $match: ADMIN_COUNTED_ORDER },
         {
           $group: {
             _id: {
@@ -845,6 +847,7 @@ export class UserService {
       ]),
       // The product customers order most, by units.
       this.orderModel.aggregate<{ name: string | null; totalOrdered: number }>([
+        { $match: ADMIN_COUNTED_ORDER },
         { $unwind: '$items' },
         {
           $group: {
