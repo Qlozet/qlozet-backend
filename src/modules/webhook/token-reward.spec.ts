@@ -32,6 +32,7 @@ describe('order-payment token reward', () => {
     service = Object.create(WebhookService.prototype);
     Object.assign(service, {
       logger: stubLogger,
+      orderService: { announcePaidOrder: jest.fn().mockResolvedValue(undefined) },
       orderModel,
       businessService: {
         recordBusinessEarnings: jest.fn().mockResolvedValue(undefined),

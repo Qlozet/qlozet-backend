@@ -684,15 +684,8 @@ export class OrderService {
             );
           }
 
-          this.notifyNewOrder(savedOrder, customer).catch((err) =>
-            this.logger.error('Failed to send new order notifications', err),
-          );
-          this.notifyFabricTransfers(savedOrder).catch((err) =>
-            this.logger.error(
-              'Failed to send fabric transfer notifications',
-              err,
-            ),
-          );
+          // No order emails or vendor alerts yet: nothing is paid. They go
+          // out from announcePaidOrder once the charge settles.
 
           return {
             message: 'Order created successfully. Redirect to payment.',
@@ -735,15 +728,8 @@ export class OrderService {
           customer.email,
         );
 
-        // Notify vendor(s) about new order
-        this.notifyNewOrder(savedOrder, customer).catch((err) =>
-          this.logger.error('Failed to send new order notifications', err),
-        );
-
-        // Notify vendors about fabric transfers (if any)
-        this.notifyFabricTransfers(savedOrder).catch((err) =>
-          this.logger.error('Failed to send fabric transfer notifications', err),
-        );
+        // No order emails or vendor alerts yet: a card payment can still
+        // fail. They go out from announcePaidOrder once the charge settles.
 
         return {
           message: 'Order created successfully. Redirect to payment.',
@@ -8052,9 +8038,25 @@ export class OrderService {
   // ==================== NOTIFICATION HELPERS ====================
 
   /**
-   * Notify all vendors in an order that a new order was placed.
-   * Finds the vendor user (owner) for each business via User.business reference.
+   * A card-paid order has just been paid for the first time: now tell the
+   * customer and the vendors. Card orders are created before the charge, and
+   * announcing them then sent "order confirmed" for payments that failed.
    */
+  async announcePaidOrder(orderId: string | Types.ObjectId): Promise<void> {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) return;
+    const customer = await this.userModel.findById(order.customer).lean();
+    if (!customer) return;
+    await Promise.all([
+      this.notifyNewOrder(order, customer as unknown as User).catch((err) =>
+        this.logger.error('Failed to send new order notifications', err),
+      ),
+      this.notifyFabricTransfers(order).catch((err) =>
+        this.logger.error('Failed to send fabric transfer notifications', err),
+      ),
+    ]);
+  }
+
   /**
    * Everything that tells someone an order exists: the vendors in-app and by
    * email, and the customer's confirmation.

@@ -73,6 +73,9 @@ export class FlutterwaveService {
       currency: input.currency || 'NGN',
       customer: { email: input.email },
       customizations: { title: 'Qlozet' },
+      // Fixed here, not left to the dashboard: NQR (scan-to-pay) failed for
+      // customers whose bank app could not complete it.
+      payment_options: 'card,banktransfer,ussd',
       meta: { reference: input.reference },
     };
     if (input.redirectUrl) payload.redirect_url = input.redirectUrl;

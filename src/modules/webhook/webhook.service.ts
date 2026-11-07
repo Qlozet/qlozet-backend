@@ -19,6 +19,7 @@ import {
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { ProductService } from '../products/products.service';
+import { OrderService } from '../orders/orders.service';
 import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
@@ -55,6 +56,7 @@ export class WebhookService {
     private readonly vendorRecipients: VendorRecipientsService,
     private readonly mailService: MailService,
     private readonly stripeProvider: StripeProvider,
+    private readonly orderService: OrderService,
 
     @InjectModel('Order') private orderModel: Model<Order>,
     @InjectModel(BusinessEarning.name)
@@ -521,11 +523,24 @@ export class WebhookService {
     // lifecycle status — an order the customer has since cancelled (or that
     // has moved on to shipping) must stay where it is.
     if (!alreadyPaid) {
-      // Record the payment itself regardless of the order's state.
-      await this.orderModel.updateOne(
-        { _id: orderId },
+      // Record the payment itself regardless of the order's state. Claimed
+      // (only an unpaid order matches) so that when the webhook and the
+      // verify page race, exactly one of them announces the order.
+      const claim = await this.orderModel.updateOne(
+        { _id: orderId, payment_status: { $ne: 'paid' } },
         { payment_status: 'paid' },
       );
+      // A card checkout announces itself only now that it is paid; at
+      // creation a payment can still fail. Bespoke and fabric-claim orders
+      // were never announced this way, so they keep their own notices.
+      const type = (order as any)?.type ?? 'standard';
+      if (claim.modifiedCount === 1 && type === 'standard') {
+        this.orderService.announcePaidOrder(orderId).catch((e: any) =>
+          this.logger.error(
+            `Failed to announce paid order ${(order as any)?.reference}: ${e?.message}`,
+          ),
+        );
+      }
       // Move into fulfilment only from the pre-payment state.
       await this.orderModel.updateOne(
         { _id: orderId, status: 'pending' },
