@@ -56,6 +56,8 @@ const RULES: Rule[] = [
   { test: /^\/admin\/[^/]+\/(approve|verify|reject|verification-decision|in-review)$/, resource: 'vendors', action: 'edit' },
   { test: /^\/admin\/customer\/[^/]+\/transactions$/, resource: 'payments' },
   { test: /^\/admin\/customer(\/|$)/, resource: 'customers' },
+  // People's contact details, so it sits with customers.
+  { test: /^\/admin\/waitlist(\/|$)/, resource: 'customers' },
   { test: /^\/admin\/vendor\/orders(\/|$)/, resource: 'orders' },
   { test: /^\/admin\/(products|bespoke)(\/|$)/, resource: 'products' },
   { test: /^\/admin\/[^/]+\/(assign|reply)$/, resource: 'tickets', action: 'edit' },

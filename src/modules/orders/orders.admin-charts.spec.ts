@@ -110,7 +110,7 @@ describe('OrderService platform series', () => {
 
     await service.getPlatformOrderCountSeries(range);
     expect(matchOf(orderPipelines[0]).payment_status).toBe('paid');
-    expect(matchOf(orderPipelines[0]).type).toEqual({ $ne: 'reservation' });
+    expect((matchOf(orderPipelines[0]) as Record<string, unknown>).type).toEqual({ $ne: 'reservation' });
     expect(projectOf(orderPipelines[0]).value).toBe(1);
 
     await service.getPlatformCommissionSeries(range);
