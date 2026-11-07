@@ -204,6 +204,19 @@ export class PlatformSettings extends Document {
   @Prop({ type: Number, default: 0 })
   low_fabric_yards: number; // 0 → fall back to 2× the fabric's min_cut
 
+  // What people can buy: admin-set packs (wallets/token-packs.ts). Unset =
+  // DEFAULT_TOKEN_PACKS. Round naira prices, bonus tokens on bigger packs.
+  @Prop({ type: [Object], default: undefined })
+  token_packs?: {
+    id: string;
+    name: string;
+    tokens: number;
+    bonus_tokens: number;
+    price_ngn: number;
+    tag: string | null;
+    active: boolean;
+  }[];
+
   @Prop({
     type: {
       usd: {

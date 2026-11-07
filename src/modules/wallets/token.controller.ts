@@ -14,6 +14,7 @@ import { VendorRoles } from 'src/common/decorators/vendor-roles.decorator';
 import { UserType } from '../auth/dto/base-login.dto';
 import { VendorRole } from '../ums/schemas/role.schema';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
+import { Public } from '../../common/decorators/public.decorator';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Tokens')
@@ -33,10 +34,18 @@ export class TokenController {
     return { tokens };
   }
 
+  // Public: the shop shows the packs before sign-in too.
+  @Public()
+  @Get('packs')
+  @ApiOperation({ summary: 'Token packs on sale (admin-set), with how many AI designs each covers' })
+  async packs() {
+    return this.service.packs();
+  }
+
   @Post('customer/purchase')
-  @ApiOperation({ summary: 'Purchase tokens for customer' })
+  @ApiOperation({ summary: 'Buy a token pack (pack_id) for a customer, from the wallet' })
   async customerPurchase(@Body() dto: PurchaseDto, @Req() req: any) {
-    return this.service.purchase(dto.amount, undefined, req.user.id);
+    return this.service.purchase(dto.amount, undefined, req.user.id, dto.pack_id);
   }
 
   @Roles(UserType.VENDOR)
@@ -44,6 +53,6 @@ export class TokenController {
   @Post('vendor/purchase')
   @ApiOperation({ summary: 'Purchase tokens for vendor business' })
   async VendorPurchase(@Body() dto: PurchaseDto, @Req() req: any) {
-    return this.service.purchase(dto.amount, req.business.id);
+    return this.service.purchase(dto.amount, req.business.id, undefined, dto.pack_id);
   }
 }

@@ -29,9 +29,16 @@ export class SpendDto {
 }
 
 export class PurchaseDto {
+  /** The pack to buy (GET /token/packs). The server sets price and tokens. */
+  @IsOptional()
+  @IsString()
+  pack_id?: string;
+
+  /** Old apps only: a bare token count, at the dearest per-token rate, no bonus. */
+  @IsOptional()
   @IsNumber()
   @Min(1)
-  amount: number;
+  amount?: number;
 }
 
 export class HistoryQueryDto {

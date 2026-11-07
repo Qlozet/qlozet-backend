@@ -1,4 +1,5 @@
 // src/token/token.service.ts
+import { legacyTokenPrice, normalizeTokenPacks, publicTokenPacks } from './token-packs';
 import {
   Injectable,
   NotFoundException,
@@ -253,14 +254,58 @@ export class TokenService {
     return tokenWallet;
   }
 
-  async purchase(tokenAmount: number, business?: string, customer?: string) {
-    if (tokenAmount <= 0) throw new BadRequestException('Invalid token amount');
+  /** The packs on sale, with totals and how many AI designs each covers. */
+  async packs() {
+    const settings: any = await this.platformService.getSettings();
+    const designPrice = Number(settings?.outfit_generation_token_price ?? 45);
+    return {
+      packs: publicTokenPacks(settings?.token_packs, designPrice),
+      design_token_price: designPrice,
+    };
+  }
 
-    const [wallet, tokenPrice] = await Promise.all([
-      this.walletService.getWallet(customer, business),
-      this.getTokenPurchasePrice(tokenAmount, 'NGN'),
-    ]);
+  /**
+   * Buy tokens from the wallet balance. `packId` is the normal way: the server
+   * prices the pack and adds its bonus. A bare `tokenAmount` is for apps that
+   * predate packs; it pays the dearest per-token rate and gets no bonus.
+   */
+  async purchase(
+    tokenAmount: number | undefined,
+    business?: string,
+    customer?: string,
+    packId?: string,
+  ) {
+    const settings: any = await this.platformService.getSettings();
+    let price: number;
+    let paidTokens: number;
+    let bonusTokens = 0;
+    let label: string;
 
+    if (packId) {
+      const pack = normalizeTokenPacks(settings?.token_packs).find(
+        (p) => p.id === packId && p.active,
+      );
+      if (!pack) {
+        throw new BadRequestException(
+          'That token pack is no longer on sale. Refresh and choose again.',
+        );
+      }
+      price = pack.price_ngn;
+      paidTokens = pack.tokens;
+      bonusTokens = pack.bonus_tokens;
+      label = `${pack.name} pack`;
+    } else {
+      if (!tokenAmount || tokenAmount <= 0) {
+        throw new BadRequestException('Choose a token pack.');
+      }
+      price = legacyTokenPrice(settings?.token_packs, tokenAmount);
+      paidTokens = tokenAmount;
+      label = 'tokens';
+    }
+    const totalTokens = paidTokens + bonusTokens;
+    const tokenPrice = { amount: price };
+
+    const wallet = await this.walletService.getWallet(customer, business);
     if (!wallet || wallet.balance < tokenPrice.amount) {
       throw new BadRequestException('Insufficient balance');
     }
@@ -278,7 +323,7 @@ export class TokenService {
 
     const tokenWallet = await this.tokenModel.findOneAndUpdate(
       tokenWalletFilter,
-      { $inc: { tokens: tokenAmount, lifetimeEarned: tokenAmount } },
+      { $inc: { tokens: totalTokens, lifetimeEarned: totalTokens } },
       { new: true, upsert: true },
     );
 
@@ -286,7 +331,10 @@ export class TokenService {
     await this.tokenTransactionModel.create({
       token: tokenWallet._id,
       type: TokenTransactionType.PURCHASE,
-      amount: tokenAmount,
+      amount: totalTokens,
+      ...(packId
+        ? { feature: `pack:${packId}`, metadata: { paid_tokens: paidTokens, bonus_tokens: bonusTokens } }
+        : {}),
     });
 
     // Record wallet transaction (visible in transaction history)
@@ -297,10 +345,16 @@ export class TokenService {
       type: TransactionType.DEBIT,
       status: TransactionStatus.SUCCESS,
       channel: 'wallet_topup',
-      description: `Purchased ${tokenAmount} token${tokenAmount > 1 ? 's' : ''}`,
+      description: packId
+        ? `Bought the ${label}: ${totalTokens} tokens${bonusTokens ? ` (${bonusTokens} free)` : ''}`
+        : `Purchased ${paidTokens} token${paidTokens > 1 ? 's' : ''}`,
     });
 
-    return { wallet: updatedWallet, tokenWallet };
+    return {
+      wallet: updatedWallet,
+      tokenWallet,
+      purchased: { tokens: totalTokens, paid_tokens: paidTokens, bonus_tokens: bonusTokens, price_ngn: price },
+    };
   }
 
   async history(userId: string, page = 1, size = 20) {

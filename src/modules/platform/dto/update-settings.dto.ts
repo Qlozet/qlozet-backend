@@ -14,6 +14,44 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+// One pack people can buy (wallets/token-packs.ts cleans and orders the list).
+class TokenPackDto {
+  @ApiPropertyOptional({ example: 'popular' })
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @ApiPropertyOptional({ example: 'Popular' })
+  @IsString()
+  name: string;
+
+  @ApiPropertyOptional({ example: 400, description: 'Tokens paid for' })
+  @IsInt()
+  @Min(1)
+  tokens: number;
+
+  @ApiPropertyOptional({ example: 40, description: 'Extra tokens given free' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  bonus_tokens?: number;
+
+  @ApiPropertyOptional({ example: 5000, description: 'Price in whole naira' })
+  @IsInt()
+  @Min(100)
+  price_ngn: number;
+
+  @ApiPropertyOptional({ example: 'Most popular', nullable: true })
+  @IsOptional()
+  @IsString()
+  tag?: string | null;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
 // One side of the token price (USD base / NGN derived).
 class TokenCurrencyDto {
   @ApiPropertyOptional({ description: 'Price amount', example: 0.01 })
@@ -455,6 +493,17 @@ export class UpdatePlatformSettingsDto {
   @IsNumber()
   @Min(1)
   max_quote_vendors_per_design?: number;
+
+  // ── Token packs ──
+  @ApiPropertyOptional({
+    type: [TokenPackDto],
+    description: 'The packs people can buy (up to 8). Saved as sent; cleaned on read.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TokenPackDto)
+  token_packs?: TokenPackDto[];
 
   // ── Token price (FX) ──
   @ApiPropertyOptional({
