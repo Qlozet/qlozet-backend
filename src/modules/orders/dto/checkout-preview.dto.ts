@@ -38,11 +38,27 @@ export class CourierRateDto {
   @ApiProperty({ example: 2500, description: 'Shipping rate in kobo/smallest unit' })
   rate_amount: number;
 
-  @ApiProperty({ example: '2025-12-20' })
+  @ApiProperty({ example: 'Within 2 - 3 days', description: "The courier's own phrase" })
   delivery_eta: string;
 
-  @ApiProperty({ example: '3-5 business days' })
+  @ApiProperty({ example: '2025-12-20 18:00:00', description: "The courier's expected arrival, counted from pickup today" })
   delivery_eta_time: string;
+
+  @ApiProperty({
+    example: '2025-12-24',
+    description: "Earliest arrival: the vendor's making time plus this courier's days on the road",
+  })
+  arrives_from: string;
+
+  @ApiProperty({ example: '2025-12-29', description: 'Latest arrival, same sum' })
+  arrives_to: string;
+
+  @ApiProperty({
+    nullable: true,
+    example: { min: 2, max: 3 },
+    description: "Days on the road read from the courier's quote; null when it gave none (platform days used)",
+  })
+  transit_days: { min: number; max: number } | null;
 
   @ApiProperty({ example: 150 })
   insurance_fee: number;
@@ -71,6 +87,12 @@ export class VendorShippingRateDto {
 
   @ApiProperty({ example: 'req_abc123', description: 'Shipbubble rate token (pass to create order)' })
   request_token: string;
+
+  @ApiProperty({
+    example: { min: 0, max: 3 },
+    description: "Days before this vendor's parcel is ready to ship (slowest item decides)",
+  })
+  making_days: { min: number; max: number };
 
   @ApiProperty({ type: [CourierRateDto], description: 'Available couriers for this vendor' })
   rates: CourierRateDto[];

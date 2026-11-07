@@ -88,6 +88,7 @@ import {
 } from '../platform/schema/platformSettings.schema';
 import { ProviderRouter } from '../payment-providers/provider-router.service';
 import { CurrencyService } from '../currency/currency.service';
+import { arrivalWindow, courierTransitDays, makingWindow } from './delivery-window';
 import { buildPurchaseEvents } from '../recommendations/events/purchase-events.util';
 import {
   CheckoutPreviewResponse,
@@ -5846,6 +5847,7 @@ export class OrderService {
       {
         business: BusinessDocument;
         items: Array<{ product_id: string; product_name: string; pkg: any }>;
+        products: any[];
       }
     >();
 
@@ -5863,7 +5865,7 @@ export class OrderService {
       if (!bizId || !bizMap.has(bizId)) continue;
 
       if (!vendorGroups.has(bizId)) {
-        vendorGroups.set(bizId, { business: bizMap.get(bizId)!, items: [] });
+        vendorGroups.set(bizId, { business: bizMap.get(bizId)!, items: [], products: [] });
       }
 
       const { name } = await this.getProductDetails(product);
@@ -5888,7 +5890,32 @@ export class OrderService {
         product_name: name,
         pkg,
       });
+      vendorGroups.get(bizId)!.products.push(product);
     }
+
+    // Arrival dates per courier: the vendor's making time plus the courier's
+    // days on the road (delivery-window.ts). Platform transit days stand in
+    // when a courier's quote says nothing usable.
+    const defaultMakingDays = await this.defaultTurnaroundDays();
+    const transitSettings: any = await this.platformSettingsModel
+      .findOne({}, { delivery_transit_min_days: 1, delivery_transit_max_days: 1 })
+      .lean()
+      .catch(() => null);
+    const fallbackTransit = {
+      min: Number(transitSettings?.delivery_transit_min_days ?? 2),
+      max: Math.max(
+        Number(transitSettings?.delivery_transit_min_days ?? 2),
+        Number(transitSettings?.delivery_transit_max_days ?? 5),
+      ),
+    };
+    const quotedAt = new Date();
+    const withArrival = (c: any, making: { min: number; max: number }) => {
+      const transit = courierTransitDays(c.delivery_eta, c.delivery_eta_time, quotedAt);
+      return {
+        ...arrivalWindow(making, transit, fallbackTransit, quotedAt),
+        transit_days: transit,
+      };
+    };
 
     // 5. Fetch rates per vendor — PARALLEL
     const pickupDate = new Date().toISOString().split('T')[0];
@@ -5923,6 +5950,7 @@ export class OrderService {
             ratePayload,
           );
 
+          const making = makingWindow(group.products, defaultMakingDays);
           const rates = (rateResponse.couriers || []).map((c) => ({
             courier_id: String(c.courier_id),
             courier_name: c.courier_name,
@@ -5933,6 +5961,7 @@ export class OrderService {
             delivery_eta_time: c.delivery_eta_time,
             insurance_fee: c.insurance?.fee || 0,
             insurance_code: c.insurance?.code || '',
+            ...withArrival(c, making),
           }));
 
           return {
@@ -5943,6 +5972,7 @@ export class OrderService {
               product_name: i.product_name,
             })),
             request_token: rateResponse.request_token,
+            making_days: making,
             rates,
             cheapest_rate: rateResponse.cheapest_courier?.total || 0,
             fastest_rate: rateResponse.fastest_courier?.total || 0,
@@ -6043,6 +6073,8 @@ export class OrderService {
           delivery_eta_time: c.delivery_eta_time,
           insurance_fee: c.insurance?.fee || 0,
           insurance_code: c.insurance?.code || '',
+          // Fabric is stock: it leaves the fabric vendor within the default.
+          ...withArrival(c, makingWindow([fabricProduct], defaultMakingDays)),
         }));
 
         fabricTransfers.push({
@@ -6063,6 +6095,26 @@ export class OrderService {
           `Failed to fetch fabric transfer rates (${fabricBiz.business_name} → ${tailorBiz.business_name}): ${error.message}`,
         );
       }
+    }
+
+    // A tailor making with fabric from another vendor starts once it arrives:
+    // push their arrival dates back by the fabric's own trip (its cheapest
+    // courier, which checkout picks by default).
+    const dayOf = (iso: string) =>
+      Math.max(0, Math.round((Date.parse(iso) - Date.parse(quotedAt.toISOString().slice(0, 10))) / 86_400_000));
+    for (const ft of fabricTransfers) {
+      const tailor = vendorShipping.find((v) => v.business_id === ft.tailor_vendor_id);
+      if (!tailor || !ft.rates.length) continue;
+      const first = ft.rates.reduce((a, b) => (a.rate_amount <= b.rate_amount ? a : b));
+      const making = {
+        min: tailor.making_days.min + dayOf(first.arrives_from),
+        max: tailor.making_days.max + dayOf(first.arrives_to),
+      };
+      tailor.making_days = making;
+      tailor.rates = tailor.rates.map((r) => ({
+        ...r,
+        ...arrivalWindow(making, r.transit_days, fallbackTransit, quotedAt),
+      }));
     }
 
     // 6. Calculate totals (include fabric transfer fees)
