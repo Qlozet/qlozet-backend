@@ -70,21 +70,25 @@ import { closeSharedRedis, sharedRedis } from './common/redis/shared-redis';
 
     ScheduleModule.forRoot({}),
     EventEmitterModule.forRoot(),
+    // Per client address. The vendor dashboard alone makes ~25 requests as it
+    // opens, and many Nigerian phones share one carrier address, so the old
+    // 3/s and 20/10s refused normal use. Sign-in, codes and uploads keep
+    // their own strict @Throttle limits.
     ThrottlerModule.forRoot([
       {
         name: 'short',
         ttl: 1000,   // 1 second
-        limit: 3,    // 3 requests per second
+        limit: 15,
       },
       {
         name: 'medium',
         ttl: 10000,  // 10 seconds
-        limit: 20,   // 20 requests per 10 seconds
+        limit: 120,
       },
       {
         name: 'long',
         ttl: 60000,  // 1 minute
-        limit: 100,  // 100 requests per minute
+        limit: 400,
       },
     ]),
     MailerModule.forRoot({

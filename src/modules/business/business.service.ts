@@ -1,3 +1,4 @@
+import { shipbubbleContactName } from '../logistics/contact-name';
 import {
   DEADLINE_PASSED_MESSAGE,
   MANUAL_CHECK_LABELS,
@@ -1139,7 +1140,11 @@ export class BusinessService {
     try {
       const validateAddress = await this.logisticService.validateAddress({
         ...dto,
-        name: business.business_name,
+        // A person's full name: the owner's, else one made from the store name.
+        name: shipbubbleContactName(
+          (business as any).created_by?.name,
+          business.business_name,
+        ),
         phone: business.business_phone_number as string,
         email: business.business_email,
       });
