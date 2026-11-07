@@ -1,11 +1,15 @@
 // What the admin console's Waitlist page asks for, as plain functions so the
 // rules are testable without Mongo.
 
+import { BOT_FILTER } from './waitlist-bot';
+
 export type WaitlistTypeFilter = 'all' | 'customer' | 'vendor';
 
 export interface WaitlistQuery {
   type?: string;
   search?: string;
+  /** 'people' (default) hides likely bots; 'bots' shows only them. */
+  show?: string;
   page?: number;
   size?: number;
 }
@@ -14,16 +18,24 @@ export const WAITLIST_MAX_PAGE_SIZE = 100;
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The Mongo filter for a type + search; search matches name, email or business. */
+/** People only, or likely bots only (waitlist-bot.ts). */
+export function botScope(show?: string): Record<string, unknown> {
+  return show === 'bots' ? BOT_FILTER : { $nor: BOT_FILTER.$or };
+}
+
+/**
+ * The Mongo filter for the page: people or bots, then type, then a search
+ * across name, email or business.
+ */
 export function waitlistFilter(q: WaitlistQuery): Record<string, unknown> {
-  const filter: Record<string, unknown> = {};
-  if (q.type === 'customer' || q.type === 'vendor') filter.type = q.type;
+  const and: Record<string, unknown>[] = [botScope(q.show)];
+  if (q.type === 'customer' || q.type === 'vendor') and.push({ type: q.type });
   const search = String(q.search ?? '').trim();
   if (search) {
     const rx = new RegExp(escapeRegex(search), 'i');
-    filter.$or = [{ fullName: rx }, { email: rx }, { businessName: rx }];
+    and.push({ $or: [{ fullName: rx }, { email: rx }, { businessName: rx }] });
   }
-  return filter;
+  return { $and: and };
 }
 
 export function waitlistPaging(q: WaitlistQuery) {
@@ -52,6 +64,7 @@ export interface WaitlistRow {
   businessType?: string | null;
   createdAt?: Date | string | null;
   signed_up: boolean;
+  likely_bot?: boolean;
 }
 
 const CSV_COLUMNS: [string, (r: WaitlistRow) => unknown][] = [

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards';
@@ -27,17 +27,20 @@ export class WaitlistAdminController {
   })
   @ApiQuery({ name: 'type', required: false, enum: ['all', 'customer', 'vendor'] })
   @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'show', required: false, enum: ['people', 'bots'] })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'size', required: false })
   async list(
     @Query('type') type?: string,
     @Query('search') search?: string,
+    @Query('show') show?: string,
     @Query('page') page?: string,
     @Query('size') size?: string,
   ) {
     return this.waitlistService.adminList({
       type,
       search,
+      show,
       page: Number(page),
       size: Number(size),
     });
@@ -49,11 +52,18 @@ export class WaitlistAdminController {
     @Res() res: Response,
     @Query('type') type?: string,
     @Query('search') search?: string,
+    @Query('show') show?: string,
   ) {
-    const csv = await this.waitlistService.adminExportCsv({ type, search });
+    const csv = await this.waitlistService.adminExportCsv({ type, search, show });
     const day = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="qlozet-waitlist-${day}.csv"`);
     res.send(csv);
+  }
+
+  @Delete('bots')
+  @ApiOperation({ summary: 'Delete every likely-bot entry (customers delete permission)' })
+  async deleteBots() {
+    return this.waitlistService.adminDeleteBots();
   }
 }

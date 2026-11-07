@@ -1,7 +1,20 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
-export class CustomerWaitlistDto {
+/** Bot checks the landing form sends (waitlist-bot.ts). */
+class BotSignalsDto {
+  @ApiProperty({ required: false, description: 'Hidden field; leave empty' })
+  @IsOptional()
+  @IsString()
+  website?: string;
+
+  @ApiProperty({ required: false, description: 'Milliseconds from the form showing to it being sent' })
+  @IsOptional()
+  @IsNumber()
+  form_ms?: number;
+}
+
+export class CustomerWaitlistDto extends BotSignalsDto {
   @ApiProperty({ example: 'John Doe', description: 'Full name of the customer' })
   @IsString()
   @IsNotEmpty()
@@ -13,7 +26,7 @@ export class CustomerWaitlistDto {
   email: string;
 }
 
-export class VendorWaitlistDto {
+export class VendorWaitlistDto extends BotSignalsDto {
   @ApiProperty({ example: 'Jane Smith', description: 'Full name of the vendor' })
   @IsString()
   @IsNotEmpty()

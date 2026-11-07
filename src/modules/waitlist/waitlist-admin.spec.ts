@@ -1,15 +1,26 @@
 import { signedUpKey, waitlistCsv, waitlistFilter, waitlistPaging } from './waitlist-admin';
+import { BOT_FILTER } from './waitlist-bot';
 import { normalisePath, resolveConsoleCell } from '../../common/access/console-access';
 
 describe('the admin waitlist', () => {
   it('filters by type and searches name, email or business, treating the text literally', () => {
-    expect(waitlistFilter({ type: 'vendor' })).toEqual({ type: 'vendor' });
-    expect(waitlistFilter({ type: 'everyone' })).toEqual({});
-    const f = waitlistFilter({ search: ' ada (lagos) ' }) as any;
-    const rx: RegExp = f.$or[0].fullName;
+    const parts = (q: object) => (waitlistFilter(q) as any).$and as Record<string, any>[];
+    expect(parts({ type: 'vendor' })).toContainEqual({ type: 'vendor' });
+    expect(parts({ type: 'everyone' })).toHaveLength(1);
+    const or = parts({ search: ' ada (lagos) ' })[1].$or;
+    const rx: RegExp = or[0].fullName;
     expect(rx.test('Ada (Lagos) Okafor')).toBe(true);
     expect(rx.test('ada lagos')).toBe(false);
-    expect(f.$or.map((c: object) => Object.keys(c)[0])).toEqual(['fullName', 'email', 'businessName']);
+    expect(or.map((c: object) => Object.keys(c)[0])).toEqual(['fullName', 'email', 'businessName']);
+  });
+
+  it('hides likely bots unless asked for them', () => {
+    expect((waitlistFilter({}) as any).$and[0]).toEqual({ $nor: BOT_FILTER.$or });
+    expect((waitlistFilter({ show: 'bots' }) as any).$and[0]).toBe(BOT_FILTER);
+  });
+
+  it('is a customers delete to clear the bots', () => {
+    expect(resolveConsoleCell('DELETE', normalisePath('/api/admin/waitlist/bots'))).toEqual({ resource: 'customers', action: 'delete' });
   });
 
   it('pages within limits', () => {
