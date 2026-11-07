@@ -7,6 +7,7 @@ import {
   type WaitlistQuery,
   type WaitlistRow,
 } from './waitlist-admin';
+import { BOT_FILTER, botJoinReason, looksLikeBot } from './waitlist-bot';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -41,6 +42,7 @@ export class WaitlistService {
       businessType: r.businessType ?? null,
       createdAt: r.createdAt ?? null,
       signed_up: have.has(signedUpKey(r.email, r.type)),
+      likely_bot: looksLikeBot(r),
     }));
   }
 
@@ -48,13 +50,16 @@ export class WaitlistService {
     const filter = waitlistFilter(q);
     const { page, size, skip } = waitlistPaging(q);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-    const [rows, matching, total, customers, vendors, thisWeek] = await Promise.all([
+    // Totals count people; likely bots are counted on their own.
+    const people = { $nor: BOT_FILTER.$or };
+    const [rows, matching, total, customers, vendors, thisWeek, bots] = await Promise.all([
       this.waitlistModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(size).lean(),
       this.waitlistModel.countDocuments(filter),
-      this.waitlistModel.countDocuments({}),
-      this.waitlistModel.countDocuments({ type: WaitlistType.CUSTOMER }),
-      this.waitlistModel.countDocuments({ type: WaitlistType.VENDOR }),
-      this.waitlistModel.countDocuments({ createdAt: { $gte: weekAgo } }),
+      this.waitlistModel.countDocuments(people),
+      this.waitlistModel.countDocuments({ ...people, type: WaitlistType.CUSTOMER }),
+      this.waitlistModel.countDocuments({ ...people, type: WaitlistType.VENDOR }),
+      this.waitlistModel.countDocuments({ ...people, createdAt: { $gte: weekAgo } }),
+      this.waitlistModel.countDocuments(BOT_FILTER),
     ]);
     return {
       data: await this.withSignedUp(rows),
@@ -62,7 +67,7 @@ export class WaitlistService {
       size,
       total_items: matching,
       has_next_page: skip + rows.length < matching,
-      totals: { total, customers, vendors, this_week: thisWeek },
+      totals: { total, customers, vendors, this_week: thisWeek, likely_bots: bots },
     };
   }
 
@@ -71,8 +76,25 @@ export class WaitlistService {
     return waitlistCsv(await this.withSignedUp(rows));
   }
 
+  /** Delete every likely-bot entry (waitlist-bot.ts). People are never touched. */
+  async adminDeleteBots(): Promise<{ deleted: number }> {
+    const res = await this.waitlistModel.deleteMany(BOT_FILTER);
+    this.logger.log(`Deleted ${res.deletedCount} likely-bot waitlist entries`);
+    return { deleted: res.deletedCount ?? 0 };
+  }
+
+  /** A bot gets the same success reply, so it cannot tell it was dropped. */
+  private droppedBot(dto: { fullName?: string; website?: string; form_ms?: number }, email: string, type: string): boolean {
+    const reason = botJoinReason({ ...dto, email });
+    if (reason) this.logger.warn(`Dropped ${type} waitlist bot (${reason}): ${email}`);
+    return !!reason;
+  }
+
   async joinCustomerWaitlist(dto: CustomerWaitlistDto) {
     try {
+      if (this.droppedBot(dto, dto.email, 'customer')) {
+        return { message: 'Successfully joined the customer waitlist!' };
+      }
       const existing = await this.waitlistModel.findOne({ email: dto.email });
       if (existing) {
         // Return success even if they already joined to avoid leaking emails
@@ -94,6 +116,9 @@ export class WaitlistService {
 
   async joinVendorWaitlist(dto: VendorWaitlistDto) {
     try {
+      if (this.droppedBot(dto, dto.businessEmail, 'vendor')) {
+        return { message: 'Successfully joined the vendor waitlist!' };
+      }
       const existing = await this.waitlistModel.findOne({ email: dto.businessEmail });
       if (existing) {
         return { message: 'Successfully joined the vendor waitlist!' };
