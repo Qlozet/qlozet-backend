@@ -22,6 +22,13 @@ import {
   PlatformSettings,
   PlatformSettingsSchema,
 } from '../platform/schema/platformSettings.schema';
+import { Business, BusinessSchema } from '../business/schemas/business.schema';
+import {
+  PlatformStyle,
+  PlatformStyleSchema,
+} from '../style-library/schemas/platform-style.schema';
+import { OnboardingController } from './onboarding/onboarding.controller';
+import { OnboardingService } from './onboarding/onboarding.service';
 
 @Module({
   imports: [
@@ -31,6 +38,9 @@ import {
       { name: User.name, schema: UserSchema },
       // Stock thresholds for the availability attached to hydrated products.
       { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      // Sign-up style steps: stores to suggest, platform styles as looks.
+      { name: Business.name, schema: BusinessSchema },
+      { name: PlatformStyle.name, schema: PlatformStyleSchema },
     ]),
     EventsModule,
     CatalogModule,
@@ -44,7 +54,7 @@ import {
     EvaluationModule,
     BusinessModule,
   ],
-  controllers: [RecommendationsController],
-  providers: [RecommendationsService, FeedMixerService],
+  controllers: [RecommendationsController, OnboardingController],
+  providers: [RecommendationsService, FeedMixerService, OnboardingService],
 })
 export class RecommendationsModule {}
