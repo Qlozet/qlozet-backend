@@ -1710,6 +1710,8 @@ export class AuthService {
     let existing: UserDocument | null = await this.userModel
       .findOne({ email, type: UserType.CUSTOMER })
       .select('+google_id');
+    // A shopping account made just now, so the shop can run its welcome steps.
+    let isNewUser = false;
     if (!existing) {
       if (await this.userModel.exists({ email, type: UserType.PLATFORM })) {
         throw new UnauthorizedException(
@@ -1719,6 +1721,7 @@ export class AuthService {
       existing = await this.shoppingAccountForStoreOwner(email, {
         google: { sub: payload.sub, picture: payload.picture },
       });
+      isNewUser = !!existing;
     }
 
     if (existing) {
@@ -1745,7 +1748,7 @@ export class AuthService {
       });
       return {
         message: 'Login successful. Welcome back!',
-        data: { user: sanitizeUser(existing), token },
+        data: { user: sanitizeUser(existing), token, is_new_user: isNewUser },
       };
     }
 
@@ -1788,7 +1791,7 @@ export class AuthService {
       this.logger.log(`Customer registered via Google: ${email}`);
       return {
         message: 'Welcome to Qlozet!',
-        data: { user: sanitizeUser(newUser), token },
+        data: { user: sanitizeUser(newUser), token, is_new_user: true },
       };
     } catch (error) {
       await session.abortTransaction();
