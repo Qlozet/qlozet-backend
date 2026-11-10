@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsNumber,
   IsIn,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -62,6 +63,10 @@ export class UpdateBusinessProfileDto {
   })
   @IsOptional()
   @IsString()
+  // The shop reads it as six-digit hex to pick light or dark text.
+  @Matches(/^#[0-9a-fA-F]{6}$/, {
+    message: 'theme_color must be a colour code like #8D7F72',
+  })
   theme_color?: string;
 
   @ApiPropertyOptional({
