@@ -578,6 +578,11 @@ export class Order {
   })
   refund_status?: 'none' | 'partial' | 'refunded';
 
+  // When the customer's order token reward was paid (or claimed, for orders
+  // rewarded at payment by older code). Set once; see OrderTokenRewardCron.
+  @Prop({ type: Date, default: null })
+  token_reward_granted_at?: Date | null;
+
   // ── Multi-currency legs (plan Phase 1) ──
   // Presentment = what the customer saw/paid; settlement = what the vendor
   // earns (their business.default_currency); fx_rate is LOCKED at checkout

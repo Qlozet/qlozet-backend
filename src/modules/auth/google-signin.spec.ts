@@ -149,6 +149,11 @@ describe('AuthService.loginWithGoogle', () => {
       expect(result.data.token).toBeDefined();
     });
 
+    it('says the account is new, so the shop shows its welcome steps', async () => {
+      const result = await service.loginWithGoogle('token');
+      expect(result.data.is_new_user).toBe(true);
+    });
+
     it('does not leak google_id back to the client', async () => {
       const result = await service.loginWithGoogle('token');
       expect((result.data.user as Record<string, unknown>).google_id).toBeUndefined();
@@ -229,6 +234,8 @@ describe('AuthService.loginWithGoogle', () => {
       expect(created.email_verified).toBe(true);
       expect(walletModel.create).toHaveBeenCalledTimes(1);
       expect(result.data.token).toBeDefined();
+      // New to the shop, so it gets the welcome steps too.
+      expect(result.data.is_new_user).toBe(true);
     });
   });
 
@@ -261,6 +268,8 @@ describe('AuthService.loginWithGoogle', () => {
         }),
       );
       expect(result.data.token).toBeDefined();
+      // Not new: no welcome steps.
+      expect(result.data.is_new_user).toBe(false);
     });
   });
 });

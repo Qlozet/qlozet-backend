@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { WebhookService } from './webhook.service';
 import { WebhookController } from './webhook.controller';
+import { OrderTokenRewardCron } from './order-token-reward.cron';
 import { JobStatusService } from '../measurement/job-status.service';
 import { JobStatus, JobStatusSchema } from '../../common/schemas/job-status.schema';
 import { BusinessEarning, BusinessEarningSchema } from '../business/schemas/business-earnings.schema';
@@ -54,6 +55,7 @@ import { PaymentProvidersModule } from '../payment-providers/payment-providers.m
   providers: [
     WebhookService,
     JobStatusService,
+    OrderTokenRewardCron, // order token reward after delivery + return window
   ],
 })
 export class WebhookModule {}
