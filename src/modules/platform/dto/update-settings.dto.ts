@@ -457,7 +457,7 @@ export class UpdatePlatformSettingsDto {
 
   @ApiPropertyOptional({
     description:
-      'Tokens granted to the customer each time an order settles as paid (0 = off)',
+      'Tokens granted to the customer once an order is delivered and its return window has closed (0 = off)',
     example: 0,
   })
   @IsOptional()
