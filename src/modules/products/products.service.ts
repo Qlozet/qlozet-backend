@@ -83,6 +83,7 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 import { customerVisibleModeration, isApprovedForCustomers } from './customer-visibility';
+import { signProductPreview, verifyProductPreview } from './product-preview';
 import { normaliseFabricPieces } from './fabric-pieces';
 
 @Injectable()
@@ -234,16 +235,82 @@ export class ProductService {
     };
   }
 
-  /** A product by id with its computed `availability` (for the PDP). */
-  async findByIdWithAvailability(id: string): Promise<any> {
+  /**
+   * A product by id with its computed `availability` (for the PDP).
+   *
+   * With a valid preview token (see createPreviewLink) the vendor's own
+   * listing shows even when it isn't live, and the answer carries
+   * `preview: { live, reason }` so the shop can say so and switch buying off.
+   */
+  async findByIdWithAvailability(
+    id: string,
+    previewToken?: string,
+  ): Promise<any> {
     const [product, thresholds] = await Promise.all([
       this.findById(id),
       this.getStockThresholds(),
     ]);
+    if (
+      previewToken &&
+      !(product as any).deleted_at &&
+      verifyProductPreview(
+        this.previewSecret(),
+        String(product._id),
+        previewToken,
+      )
+    ) {
+      const reason = await this.whyNotLive(product);
+      return {
+        ...withAvailability(product, thresholds),
+        preview: { live: !reason, reason },
+      };
+    }
     // Customer-facing PDP: a draft/archived product, or one from an unapproved
     // vendor, must not be viewable — treat it as not found.
     await this.assertPubliclyVisible(product);
     return withAvailability(product, thresholds);
+  }
+
+  private previewSecret(): string {
+    return process.env.JWT_SECRET ?? '';
+  }
+
+  /**
+   * A 30-minute link to the shop page for one of this store's listings,
+   * live or not. Any team member may preview; it changes nothing.
+   */
+  async createPreviewLink(
+    id: string,
+    businessId: string,
+  ): Promise<{
+    token: string;
+    expires_at: Date;
+    live: boolean;
+    reason: string | null;
+  }> {
+    if (!Types.ObjectId.isValid(id))
+      throw new NotFoundException('Product not found');
+    const product = await this.productModel
+      .findById(id)
+      .select('business status moderation deleted_at')
+      .lean();
+    if (
+      !product ||
+      (product as any).deleted_at ||
+      String((product as any).business) !== String(businessId)
+    ) {
+      throw new NotFoundException('Product not found');
+    }
+    const secret = this.previewSecret();
+    if (!secret) {
+      throw new BadRequestException('Previews are not available right now.');
+    }
+    const reason = await this.whyNotLive(product);
+    return {
+      ...signProductPreview(secret, String(product._id)),
+      live: !reason,
+      reason,
+    };
   }
 
   /**
@@ -291,12 +358,30 @@ export class ProductService {
    * findById itself stays ungated so internal callers can resolve any product.
    */
   private async assertPubliclyVisible(product: any): Promise<void> {
-    if (!product || product.status !== ProductStatus.ACTIVE) {
+    if (!product || (await this.whyNotLive(product))) {
       throw new NotFoundException('Product not found');
     }
+  }
+
+  /**
+   * Why shoppers can't see this listing, or null when they can. The one rule
+   * for the PDP and the vendor's preview, so the two always agree.
+   */
+  private async whyNotLive(
+    product: any,
+  ): Promise<
+    | 'not_active'
+    | 'in_review'
+    | 'rejected'
+    | 'store_not_approved'
+    | null
+  > {
+    if (product.status !== ProductStatus.ACTIVE) return 'not_active';
     // Review first: only approved listings (or ones that predate moderation).
     if (!isApprovedForCustomers(product)) {
-      throw new NotFoundException('Product not found');
+      return product?.moderation?.status === 'rejected'
+        ? 'rejected'
+        : 'in_review';
     }
     const bizId = (product.business as any)?._id ?? product.business;
     const biz = await this.businessModel
@@ -307,7 +392,7 @@ export class ProductService {
       !!biz &&
       ['approved', 'verified'].includes((biz as any).status) &&
       (biz as any).is_active !== false;
-    if (!approved) throw new NotFoundException('Product not found');
+    return approved ? null : 'store_not_approved';
   }
 
   /**

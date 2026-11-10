@@ -385,8 +385,27 @@ export class ProductsController {
     description: 'Product found',
   })
   @ApiResponse({ status: 404, description: 'Product not found' })
-  async findById(@Param('id') id: string) {
-    return this.productService.findByIdWithAvailability(id);
+  @ApiQuery({
+    name: 'preview',
+    required: false,
+    description:
+      'A preview token from POST /products/:id/preview-link: shows the listing even when it is not live',
+  })
+  async findById(@Param('id') id: string, @Query('preview') preview?: string) {
+    return this.productService.findByIdWithAvailability(id, preview);
+  }
+
+  @Post(':id/preview-link')
+  @Roles(UserType.VENDOR)
+  @ApiOperation({
+    summary:
+      'A 30-minute link token to view one of your listings on the shop, live or not',
+  })
+  async createPreviewLink(@Param('id') id: string, @Req() req: any) {
+    return {
+      message: 'Preview link ready',
+      data: await this.productService.createPreviewLink(id, req.business?.id),
+    };
   }
 
   @Delete(':id')
