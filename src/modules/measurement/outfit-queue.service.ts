@@ -17,7 +17,16 @@ export class OutfitQueueService {
   ) {}
 
   /** Queue outfit generation */
-  async queueEditGarmentGeneration(payload: EditGarmentDto) {
+  /**
+   * `unbilled`: an admin's job, never charged, so a failure refunds nothing.
+   */
+  async queueEditGarmentGeneration(
+    payload: EditGarmentDto & {
+      business?: string;
+      customer?: string;
+      unbilled?: boolean;
+    },
+  ) {
     const jobId = randomUUID();
     await this.queue.add(
       'editGarment',
@@ -64,7 +73,11 @@ export class OutfitQueueService {
     };
   }
   async queueOutfitGeneration(
-    payload: GenerateOutfitRequestDto & { business?: string; customer?: string },
+    payload: GenerateOutfitRequestDto & {
+      business?: string;
+      customer?: string;
+      unbilled?: boolean;
+    },
   ) {
     const jobId = randomUUID();
     await this.queue.add(
@@ -96,6 +109,7 @@ export class OutfitQueueService {
     model?: string;
     business?: string;
     customer?: string;
+    unbilled?: boolean;
   }) {
     const jobId = randomUUID();
     await this.queue.add(

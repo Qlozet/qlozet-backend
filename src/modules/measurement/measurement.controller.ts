@@ -281,6 +281,7 @@ export class MeasurementController {
       ...payload,
       business,
       customer,
+      unbilled: isPlatformAdmin || undefined,
     });
   }
 
@@ -373,6 +374,7 @@ export class MeasurementController {
       model,
       business,
       customer,
+      unbilled: analyzeActor?.type === UserType.PLATFORM || undefined,
     });
   }
 
@@ -411,29 +413,37 @@ export class MeasurementController {
     };
   }
 
-  @Roles(UserType.CUSTOMER)
+  // PLATFORM: admins refine template images and draw their backs — free.
+  @Roles(UserType.CUSTOMER, UserType.PLATFORM)
   @Post('edit-garment-image')
   async editGarmentImage(@Body() payload: EditGarmentDto, @Req() req: any) {
     const business = req.business?.id;
     const customer = req.user?.id;
 
-    const [settings, tokenBalance] = await Promise.all([
-      this.platformService.getSettings(),
-      this.tokenService.balance(business, customer),
-    ]);
-    if (tokenBalance < settings.edit_garment_token_price) {
-      throw new BadRequestException(
-        'Insufficient tokens, please fund your wallet',
-      );
-    }
+    const actor = customer ? await this.userService.findById(customer) : null;
+    const isPlatformAdmin = actor?.type === UserType.PLATFORM;
 
-    // Pre-deduct tokens before queuing
-    await this.tokenService.spend('edit', business, customer);
+    if (!isPlatformAdmin) {
+      const [settings, tokenBalance] = await Promise.all([
+        this.platformService.getSettings(),
+        this.tokenService.balance(business, customer),
+      ]);
+      if (tokenBalance < settings.edit_garment_token_price) {
+        throw new BadRequestException(
+          'Insufficient tokens, please fund your wallet',
+        );
+      }
+
+      // Pre-deduct tokens before queuing
+      await this.tokenService.spend('edit', business, customer);
+    }
 
     return this.outfitService.queueEditGarmentGeneration({
       ...payload,
       business,
       customer,
+      // Nothing was charged, so a failure refunds nothing.
+      unbilled: isPlatformAdmin || undefined,
     });
     // return this.measurement.editGarmentWithImageEditor(payload);
   }

@@ -23,6 +23,13 @@ export class BespokeTemplate {
   @Prop({ type: [String], default: [] })
   design_images: string[];
 
+  // The back of an image, one per front (same shape as BespokeDesign).
+  @Prop({
+    type: [{ _id: false, front: String, back: String }],
+    default: [],
+  })
+  back_views: { front: string; back: string }[];
+
   // Admin-uploaded inspiration photos — seeded into the customer's studio
   // Photo & Notes alongside the prompt.
   @Prop({ type: [String], default: [] })
