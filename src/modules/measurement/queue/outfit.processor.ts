@@ -144,8 +144,9 @@ export class OutfitProcessor extends WorkerHost {
 
       // Refund the tokens that were charged up-front for this generation, so a
       // failed job never costs the customer.
+      // Admin jobs were never charged (`unbilled`), so nothing goes back.
       const refundKey = REFUND_KEY_BY_TYPE[job.data.type];
-      if (refundKey) {
+      if (refundKey && !(job.data as any).unbilled) {
         const business = (job.data as any).business;
         const customer = (job.data as any).customer;
         await this.tokenService

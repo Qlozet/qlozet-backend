@@ -1778,6 +1778,7 @@ export class BespokeService {
       category: dto.category,
       gender: dto.gender,
       design_images: dto.design_images ?? [],
+      back_views: backViewsFor(dto.back_views, dto.design_images ?? []),
       reference_images: dto.reference_images ?? [],
       description: dto.description ?? null,
       status: dto.status === 'active' ? 'active' : 'inactive',
@@ -1798,6 +1799,15 @@ export class BespokeService {
       'status',
     ]) {
       if (dto[key] !== undefined) update[key] = dto[key];
+    }
+    // Back views only for images the template still has.
+    if (dto.back_views !== undefined || dto.design_images !== undefined) {
+      const current = await this.templateModel.findById(id).lean();
+      if (!current) throw new NotFoundException('Template not found');
+      update.back_views = backViewsFor(
+        dto.back_views ?? (current as any).back_views,
+        dto.design_images ?? current.design_images ?? [],
+      );
     }
     const template = await this.templateModel.findByIdAndUpdate(id, update, {
       new: true,
