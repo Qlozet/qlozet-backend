@@ -51,7 +51,7 @@ describe('ProductService preview', () => {
   let product: any;
   let business: any;
   let service: ProductService;
-  const oldSecret = process.env.JWT_SECRET;
+  const oldSecret = process.env.ACCESS_SECRET;
 
   const chain = (value: () => any) => ({
     select: () => chain(value),
@@ -63,7 +63,7 @@ describe('ProductService preview', () => {
   });
 
   beforeEach(() => {
-    process.env.JWT_SECRET = SECRET;
+    process.env.ACCESS_SECRET = SECRET;
     setListingReviewMode('review_first');
     product = {
       _id: productId,
@@ -84,7 +84,8 @@ describe('ProductService preview', () => {
   });
 
   afterAll(() => {
-    process.env.JWT_SECRET = oldSecret;
+    if (oldSecret === undefined) delete process.env.ACCESS_SECRET;
+    else process.env.ACCESS_SECRET = oldSecret;
   });
 
   it('hides a draft from the shop without a token', async () => {
