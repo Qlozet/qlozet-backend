@@ -271,8 +271,13 @@ export class ProductService {
     return withAvailability(product, thresholds);
   }
 
+  /**
+   * The server's sign-in secret (ACCESS_SECRET, as the auth guards use).
+   * Preview signatures carry their own purpose tag, so one can never pass as
+   * a sign-in token or the other way round.
+   */
   private previewSecret(): string {
-    return process.env.JWT_SECRET ?? '';
+    return process.env.ACCESS_SECRET || process.env.JWT_SECRET || '';
   }
 
   /**
