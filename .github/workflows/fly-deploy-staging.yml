@@ -1,0 +1,48 @@
+# Staging deploys: push (or merge) to the `staging` branch → the same flow
+# tests as production → deploy to qlozet-backend-staging. Setup: docs/staging.md.
+#
+# Uses its own token (FLY_API_TOKEN_STAGING, a deploy token for the staging
+# app only), so a staging deploy can never touch production.
+name: Fly Deploy (staging)
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+jobs:
+  test:
+    name: Flow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Cache mongodb-memory-server binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+      - run: npm ci
+      - run: npm run test:flows
+
+  deploy:
+    name: Deploy to staging
+    needs: test
+    runs-on: ubuntu-latest
+    # Queue, never cancel: see the note in fly-deploy.yml.
+    concurrency: deploy-staging-group
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flyctl
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - run: |
+          flyctl deploy --remote-only --config fly.staging.toml || {
+            echo "::warning::Depot build failed - retrying with the classic Fly builder"
+            flyctl deploy --remote-only --depot=false --config fly.staging.toml
+          }
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_STAGING }}
