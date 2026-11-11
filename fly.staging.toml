@@ -1,0 +1,50 @@
+# Staging: a copy of the backend to try changes on before they reach
+# production. Deployed from the `staging` branch by
+# .github/workflows/fly-deploy-staging.yml. Setup and secrets: docs/staging.md.
+#
+# It must never share production's database (MONGO_URI) or Redis (REDIS_URL):
+# the job queues and scheduled jobs would act on live orders and money.
+
+app = 'qlozet-backend-staging'
+# Same region as production, next to the database (Atlas, AWS eu-west-1).
+primary_region = 'lhr'
+
+[env]
+  PORT = "5000"
+  NODE_ENV = "production"
+  # Never book real couriers from staging.
+  SHIPBUBBLE_DRY_RUN = "true"
+  # No assistant morning brief / digest emails from staging.
+  ASSISTANT_DIGEST_ENABLED = "false"
+
+[build]
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  # Sleeps when nobody is using it, so it costs little. The trade-off: while
+  # asleep, scheduled jobs (payout releases, reminders, auto-reject) don't run
+  # and background work (style pictures) pauses. To test a scheduled job, set
+  # auto_stop_machines = 'off' and min_machines_running = 1, like production.
+  # Keep it at one machine either way: the scheduled jobs have no lock.
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/api"
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
