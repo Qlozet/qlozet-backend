@@ -119,7 +119,6 @@
     "aliases": ["Asymmetric Neckline"],
     "attributes": ["dramatic", "evening", "modern"]
   },
-
   {
     "name": "Short Sleeve",
     "style_code": "SLV_SHORT",
@@ -220,7 +219,6 @@
     "aliases": [],
     "attributes": ["relaxed", "flowing", "elegant"]
   },
-
   {
     "name": "Mandarin Collar",
     "style_code": "COL_MANDARIN",
@@ -281,7 +279,6 @@
     "aliases": ["Windsor Collar"],
     "attributes": ["formal", "business", "classic"]
   },
-
   {
     "name": "A-Line Skirt",
     "style_code": "SKT_A_LINE",
@@ -362,7 +359,6 @@
     "aliases": [],
     "attributes": ["feminine", "flattering", "structured"]
   },
-
   {
     "name": "Straight Trouser",
     "style_code": "TRS_STRAIGHT",
@@ -413,7 +409,6 @@
     "aliases": ["Boot Cut", "Bell Bottom"],
     "attributes": ["retro", "trendy", "elongating"]
   },
-
   {
     "name": "Agbada",
     "style_code": "FB_AGBADA",
@@ -503,5 +498,675 @@
     "description": "A fitted dress made from traditional African print fabric (Ankara, Adire), often with modern styling elements",
     "aliases": ["Ankara Dress"],
     "attributes": ["modern", "feminine", "african-print", "versatile"]
+  },
+  {
+    "name": "Fit-and-Flare Dress",
+    "style_code": "FB_DRESS_FIT_FLARE",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "Fitted through the bodice and waist, then flaring out from the waist into a fuller skirt that stops around the knee",
+    "aliases": ["Skater Dress", "Fit and Flare"],
+    "attributes": ["feminine", "flattering", "versatile", "classic"]
+  },
+  {
+    "name": "Sheath Dress",
+    "style_code": "FB_DRESS_SHEATH",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A straight, close-fitting dress shaped with darts, following the body from shoulder to hem without a waist seam",
+    "aliases": ["Pencil Dress", "Column Dress"],
+    "attributes": ["structured", "business", "elegant", "classic"]
+  },
+  {
+    "name": "Ball Gown",
+    "style_code": "FB_DRESS_BALL_GOWN",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A fitted bodice joined to a very full, floor-length skirt held out with layers or a petticoat",
+    "aliases": ["Princess Gown", "Full Gown"],
+    "attributes": ["dramatic", "formal", "bridal", "evening"]
+  },
+  {
+    "name": "Bodycon Dress",
+    "style_code": "FB_DRESS_BODYCON",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A figure-hugging dress cut close to the body all over, usually in a stretch fabric, ending at or above the knee",
+    "aliases": ["Body-Con", "Body Hugging Dress"],
+    "attributes": ["modern", "evening", "sleek", "trendy"]
+  },
+  {
+    "name": "Flowing Maxi Dress",
+    "style_code": "FB_DRESS_MAXI",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A long, loose dress that falls to the ankle or floor from the bust or waist, with soft movement",
+    "aliases": ["Maxi Gown", "Long Dress"],
+    "attributes": ["flowing", "relaxed", "summer", "elegant"]
+  },
+  {
+    "name": "Shirt Dress",
+    "style_code": "FB_DRESS_SHIRT",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A dress cut like a long shirt, with a collar, button front and often a belt or tie at the waist",
+    "aliases": ["Shirtwaist Dress"],
+    "attributes": ["casual", "smart-casual", "classic", "versatile"]
+  },
+  {
+    "name": "Slip Dress",
+    "style_code": "FB_DRESS_SLIP",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A simple bias-cut dress on thin straps that skims the body and drapes softly",
+    "aliases": ["Cami Dress"],
+    "attributes": ["sleek", "evening", "soft", "modern"]
+  },
+  {
+    "name": "Empire-Waist Dress",
+    "style_code": "FB_DRESS_EMPIRE",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A raised waistline sitting just under the bust, with the skirt falling loosely from there",
+    "aliases": ["Empire Line Dress", "High-Waist Dress"],
+    "attributes": ["romantic", "flattering", "flowing", "modest"]
+  },
+  {
+    "name": "Kimono Gown",
+    "style_code": "FB_DRESS_KIMONO",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A wrap-front gown with wide, kimono-style sleeves cut in one with the body, tied or belted at the waist",
+    "aliases": ["Wrap Kimono Dress"],
+    "attributes": ["flowing", "elegant", "relaxed", "modern"]
+  },
+  {
+    "name": "Corset Gown",
+    "style_code": "FB_DRESS_CORSET",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A structured, boned bodice that shapes the waist, joined to a long skirt",
+    "aliases": ["Boned Bodice Gown", "Corset Dress"],
+    "attributes": ["structured", "dramatic", "evening", "bridal"]
+  },
+  {
+    "name": "Peplum Dress",
+    "style_code": "FB_DRESS_PEPLUM",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A fitted dress with a short flared ruffle or panel at the waist that falls over the hips",
+    "aliases": ["Peplum Gown"],
+    "attributes": ["feminine", "flattering", "formal", "elegant"]
+  },
+  {
+    "name": "Tiered Dress",
+    "style_code": "FB_DRESS_TIERED",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A dress whose skirt is built from horizontal layers, each gathered and slightly fuller than the one above",
+    "aliases": ["Ruffle Tier Dress"],
+    "attributes": ["playful", "bohemian", "summer", "feminine"]
+  },
+  {
+    "name": "Mermaid Gown",
+    "style_code": "FB_DRESS_MERMAID_GOWN",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "Fitted from the bust through the hips and knees, then flaring dramatically below the knee into a fishtail",
+    "aliases": ["Fishtail Gown", "Trumpet Gown"],
+    "attributes": ["dramatic", "evening", "bridal", "flattering"]
+  },
+  {
+    "name": "Asymmetric Hem Dress",
+    "style_code": "FB_DRESS_ASYMMETRIC",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A dress whose hem is cut at an angle or longer on one side, for movement and a modern line",
+    "aliases": ["Uneven Hem Dress"],
+    "attributes": ["modern", "evening", "trendy", "elegant"]
+  },
+  {
+    "name": "Bubu Kaftan Gown",
+    "style_code": "FB_DRESS_KAFTAN_GOWN",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A wide, flowing floor-length gown cut as one generous piece with deep armholes, often embellished at the neck",
+    "aliases": ["Bubu Gown", "Boubou Dress"],
+    "attributes": ["flowing", "traditional", "relaxed", "elegant"]
+  },
+  {
+    "name": "Wide-Leg Jumpsuit",
+    "style_code": "FB_JUMPSUIT_WIDE",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A one-piece jumpsuit with a fitted top and wide, flowing trouser legs",
+    "aliases": ["Palazzo Jumpsuit"],
+    "attributes": ["elegant", "flowing", "evening", "modern"]
+  },
+  {
+    "name": "Wrap Jumpsuit",
+    "style_code": "FB_JUMPSUIT_WRAP",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A jumpsuit with a crossover wrap front tied at the waist, and straight or tapered legs",
+    "aliases": ["Crossover Jumpsuit"],
+    "attributes": ["flattering", "versatile", "smart-casual", "feminine"]
+  },
+  {
+    "name": "Tailored Jumpsuit",
+    "style_code": "FB_JUMPSUIT_TAILORED",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A sharply cut jumpsuit with a collar or lapels, defined waist and pressed straight legs",
+    "aliases": ["Boiler Jumpsuit", "Utility Jumpsuit"],
+    "attributes": ["tailored", "business", "structured", "modern"]
+  },
+  {
+    "name": "Playsuit",
+    "style_code": "FB_PLAYSUIT",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A one-piece outfit with a top joined to shorts, light and easy to wear",
+    "aliases": ["Romper"],
+    "attributes": ["playful", "summer", "casual", "youthful"]
+  },
+  {
+    "name": "Fitted Buba & Iro",
+    "style_code": "FB_BUBA_IRO_FITTED",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A shaped, close-fitting buba blouse worn with a wrapped iro skirt, more tailored than the loose traditional cut",
+    "aliases": ["Fitted Iro and Buba"],
+    "attributes": ["traditional", "elegant", "yoruba", "flattering"]
+  },
+  {
+    "name": "Off-Shoulder Buba & Iro",
+    "style_code": "FB_BUBA_IRO_OFF_SHOULDER",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A buba blouse cut off the shoulders with a wrapped iro, a modern take on the traditional set",
+    "aliases": ["Off Shoulder Iro and Buba"],
+    "attributes": ["traditional", "modern", "yoruba", "evening"]
+  },
+  {
+    "name": "Skirt and Blouse Set",
+    "style_code": "FB_SKIRT_BLOUSE_SET",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "female",
+    "description": "A matching top and skirt in the same fabric, often ankara or lace, worn together as one look",
+    "aliases": ["Two-Piece Skirt Set", "Ankara Set"],
+    "attributes": ["traditional", "versatile", "african-print", "elegant"]
+  },
+  {
+    "name": "Embroidered Agbada",
+    "style_code": "FB_AGBADA_EMBROIDERED",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A wide flowing agbada robe with heavy embroidery around the neck, chest and pocket, worn over an inner top and trousers",
+    "aliases": ["Embroidered Grand Agbada"],
+    "attributes": ["traditional", "ceremonial", "luxury", "yoruba"]
+  },
+  {
+    "name": "Minimalist Agbada",
+    "style_code": "FB_AGBADA_MINIMAL",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A clean agbada robe with little or no embroidery, letting the fabric and the drape do the talking",
+    "aliases": ["Plain Agbada", "Modern Agbada"],
+    "attributes": ["traditional", "modern", "elegant", "subtle"]
+  },
+  {
+    "name": "Knee-Length Agbada",
+    "style_code": "FB_AGBADA_KNEE",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A shorter agbada robe that ends around the knee, lighter and easier to move in than the full-length robe",
+    "aliases": ["Short Agbada"],
+    "attributes": ["traditional", "modern", "formal", "yoruba"]
+  },
+  {
+    "name": "Babban Riga Agbada",
+    "style_code": "FB_AGBADA_BABBAN_RIGA",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "The northern grand robe: a very wide, floor-length agbada with large embroidered panels on the chest and back",
+    "aliases": ["Babbanriga", "Hausa Agbada"],
+    "attributes": ["traditional", "ceremonial", "luxury", "west-african"]
+  },
+  {
+    "name": "Jalabiya Kaftan",
+    "style_code": "FB_KAFTAN_JALABIYA",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "An ankle-length, loose kaftan with long sleeves and a simple collarless neck",
+    "aliases": ["Jalabiya", "Long Kaftan"],
+    "attributes": ["traditional", "relaxed", "modest", "elegant"]
+  },
+  {
+    "name": "Embroidered-Neck Kaftan",
+    "style_code": "FB_KAFTAN_EMBROIDERED_NECK",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A knee-length kaftan with embroidery framing the neck opening and the front placket",
+    "aliases": ["Embroidered Kaftan"],
+    "attributes": ["traditional", "elegant", "detail", "formal"]
+  },
+  {
+    "name": "Short Kaftan",
+    "style_code": "FB_KAFTAN_SHORT",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A hip-length kaftan tunic worn over matching trousers, sharper and more casual than the long kaftan",
+    "aliases": ["Kaftan Top", "Short Senator"],
+    "attributes": ["modern", "smart-casual", "versatile", "traditional"]
+  },
+  {
+    "name": "Mandarin-Collar Kaftan",
+    "style_code": "FB_KAFTAN_MANDARIN",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A kaftan finished with a short standing collar instead of an open neck",
+    "aliases": ["Band Collar Kaftan"],
+    "attributes": ["modern", "tailored", "smart-casual", "classic"]
+  },
+  {
+    "name": "Double-Breasted Senator",
+    "style_code": "FB_SENATOR_DOUBLE_BREASTED",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A senator top that closes across the chest with two rows of buttons, worn with matching trousers",
+    "aliases": ["Double Breasted Kaftan"],
+    "attributes": ["tailored", "formal", "structured", "modern"]
+  },
+  {
+    "name": "Senator with Chest Pocket",
+    "style_code": "FB_SENATOR_POCKET",
+    "category": "full_body",
+    "type": "full_body",
+    "gender": "male",
+    "description": "A straight senator top with a single chest pocket and a side-buttoned placket, worn with matching trousers",
+    "aliases": ["Pocket Senator"],
+    "attributes": ["classic", "business", "smart-casual", "tailored"]
+  },
+  {
+    "name": "Henley Placket",
+    "style_code": "NECK_HENLEY",
+    "category": "neckline",
+    "type": "top",
+    "gender": "male",
+    "description": "A round neck with a short buttoned placket opening at the front",
+    "aliases": ["Henley Neck", "Button Placket Neck"],
+    "attributes": ["casual", "smart-casual", "classic", "relaxed"]
+  },
+  {
+    "name": "Split Neck",
+    "style_code": "NECK_SPLIT",
+    "category": "neckline",
+    "type": "top",
+    "gender": "male",
+    "description": "A round neck with a straight slit down the centre front, common on kaftans and tunics",
+    "aliases": ["Slit Neck", "Notch Neck"],
+    "attributes": ["traditional", "relaxed", "classic", "versatile"]
+  },
+  {
+    "name": "Embroidered Neck Placket",
+    "style_code": "NECK_EMBROIDERED_PLACKET",
+    "category": "neckline",
+    "type": "top",
+    "gender": "male",
+    "description": "A neck opening framed by a panel of embroidery down the front, the classic finish on a kaftan",
+    "aliases": ["Embroidered Neck"],
+    "attributes": ["traditional", "detail", "elegant", "ceremonial"]
+  },
+  {
+    "name": "Polo Placket",
+    "style_code": "NECK_POLO",
+    "category": "neckline",
+    "type": "top",
+    "gender": "male",
+    "description": "A soft folded collar with a two- or three-button placket at the front",
+    "aliases": ["Polo Neck Placket"],
+    "attributes": ["casual", "sporty", "preppy", "classic"]
+  },
+  {
+    "name": "Button-Down Collar",
+    "style_code": "COL_BUTTON_DOWN",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A shirt collar whose points fasten to the shirt with small buttons",
+    "aliases": ["Oxford Collar"],
+    "attributes": ["classic", "smart-casual", "preppy", "business"]
+  },
+  {
+    "name": "Cutaway Collar",
+    "style_code": "COL_CUTAWAY",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A shirt collar with points cut wide apart, made for a larger tie knot",
+    "aliases": ["Wide Spread Collar"],
+    "attributes": ["formal", "business", "tailored", "modern"]
+  },
+  {
+    "name": "Wing Collar",
+    "style_code": "COL_WING",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A short standing collar with small points folded down, worn for black-tie and ceremonies",
+    "aliases": ["Tuxedo Collar"],
+    "attributes": ["formal", "ceremonial", "evening", "classic"]
+  },
+  {
+    "name": "Club Collar",
+    "style_code": "COL_CLUB",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A shirt collar with rounded points",
+    "aliases": ["Rounded Collar", "Eton Collar"],
+    "attributes": ["retro", "smart-casual", "classic", "subtle"]
+  },
+  {
+    "name": "Cuban Collar",
+    "style_code": "COL_CUBAN",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A flat, open collar that lies against the chest with no top button, for relaxed shirts",
+    "aliases": ["Camp Collar", "Resort Collar"],
+    "attributes": ["relaxed", "summer", "casual", "retro"]
+  },
+  {
+    "name": "Peak Lapel",
+    "style_code": "COL_PEAK_LAPEL",
+    "category": "collar",
+    "type": "top",
+    "gender": "male",
+    "description": "A jacket lapel whose points sweep up toward the shoulders, sharper and more formal than a notch",
+    "aliases": ["Pointed Lapel"],
+    "attributes": ["formal", "tailored", "structured", "evening"]
+  },
+  {
+    "name": "Buttoned Cuff Sleeve",
+    "style_code": "SLV_BUTTON_CUFF",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "male",
+    "description": "A long shirt sleeve finished with a buttoned cuff at the wrist",
+    "aliases": ["Barrel Cuff", "Shirt Cuff"],
+    "attributes": ["classic", "business", "versatile", "tailored"]
+  },
+  {
+    "name": "French Cuff Sleeve",
+    "style_code": "SLV_FRENCH_CUFF",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "male",
+    "description": "A long sleeve with a deep cuff folded back and closed with cufflinks",
+    "aliases": ["Double Cuff"],
+    "attributes": ["formal", "luxury", "ceremonial", "tailored"]
+  },
+  {
+    "name": "Wide Kaftan Sleeve",
+    "style_code": "SLV_WIDE_KAFTAN",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "male",
+    "description": "A long, straight sleeve that widens toward the wrist with an open, unbuttoned end",
+    "aliases": ["Open Kaftan Sleeve"],
+    "attributes": ["traditional", "relaxed", "flowing", "classic"]
+  },
+  {
+    "name": "Pleated Trouser",
+    "style_code": "TRS_PLEATED",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "male",
+    "description": "A tailored trouser with front pleats at the waist for room through the hip and thigh",
+    "aliases": ["Pleated Pants"],
+    "attributes": ["classic", "formal", "tailored", "comfortable"]
+  },
+  {
+    "name": "Slim-Fit Trouser",
+    "style_code": "TRS_SLIM",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "male",
+    "description": "A trouser cut close through the thigh and narrowing to the ankle",
+    "aliases": ["Skinny Trouser", "Slim Pants"],
+    "attributes": ["modern", "sleek", "smart-casual", "tailored"]
+  },
+  {
+    "name": "Sokoto Trouser",
+    "style_code": "TRS_SOKOTO",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "male",
+    "description": "A traditional trouser with a drawstring waist, roomy through the leg and gathered at the ankle, worn under agbada and kaftan",
+    "aliases": ["Sokoto", "Drawstring Trouser"],
+    "attributes": ["traditional", "comfortable", "yoruba", "relaxed"]
+  },
+  {
+    "name": "Cropped Ankle Trouser",
+    "style_code": "TRS_CROPPED",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "unisex",
+    "description": "A straight or tapered trouser that stops just above the ankle",
+    "aliases": ["Ankle Trouser", "Cropped Pants"],
+    "attributes": ["modern", "smart-casual", "summer", "trendy"]
+  },
+  {
+    "name": "High Neck",
+    "style_code": "NECK_HIGH",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A neckline that rises up the neck, covering the collarbone",
+    "aliases": ["Funnel Neck", "Mock Neck"],
+    "attributes": ["elegant", "modest", "modern", "sleek"]
+  },
+  {
+    "name": "Asymmetric Neck",
+    "style_code": "NECK_ASYMMETRIC",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A neckline cut at a slant, higher on one side than the other",
+    "aliases": ["Slanted Neckline"],
+    "attributes": ["modern", "dramatic", "evening", "trendy"]
+  },
+  {
+    "name": "Strapless",
+    "style_code": "NECK_STRAPLESS",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A straight or gently curved top edge with no straps, held in place by a fitted bodice",
+    "aliases": ["Bandeau Neck", "Tube Neck"],
+    "attributes": ["evening", "bridal", "dramatic", "sleek"]
+  },
+  {
+    "name": "Queen Anne Neck",
+    "style_code": "NECK_QUEEN_ANNE",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A high collar at the back of the neck that opens into a sweetheart or V shape at the front",
+    "aliases": ["Queen Anne Neckline"],
+    "attributes": ["romantic", "bridal", "elegant", "formal"]
+  },
+  {
+    "name": "Bow Tie Neck",
+    "style_code": "NECK_BOW",
+    "category": "neckline",
+    "type": "top",
+    "gender": "female",
+    "description": "A neckline finished with long ties that knot into a soft bow at the throat",
+    "aliases": ["Pussy Bow", "Tie Neck"],
+    "attributes": ["feminine", "business", "retro", "elegant"]
+  },
+  {
+    "name": "Bishop Sleeve",
+    "style_code": "SLV_BISHOP",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "A long sleeve that is fitted at the shoulder, widens toward the wrist and is gathered into a cuff",
+    "aliases": ["Peasant Sleeve"],
+    "attributes": ["romantic", "feminine", "flowing", "bohemian"]
+  },
+  {
+    "name": "Lantern Sleeve",
+    "style_code": "SLV_LANTERN",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "A sleeve that balloons out in the middle and narrows again at the wrist or elbow, like a lantern",
+    "aliases": ["Balloon Sleeve"],
+    "attributes": ["dramatic", "modern", "feminine", "trendy"]
+  },
+  {
+    "name": "Leg-of-Mutton Sleeve",
+    "style_code": "SLV_LEG_OF_MUTTON",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "A sleeve full and puffed at the shoulder that tapers to a fitted forearm and wrist",
+    "aliases": ["Gigot Sleeve"],
+    "attributes": ["dramatic", "romantic", "retro", "bridal"]
+  },
+  {
+    "name": "Cold-Shoulder Sleeve",
+    "style_code": "SLV_COLD_SHOULDER",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "A sleeve with a cut-out at the top of the shoulder, leaving the shoulder bare",
+    "aliases": ["Cut-Out Shoulder"],
+    "attributes": ["trendy", "summer", "playful", "modern"]
+  },
+  {
+    "name": "Ruffle Sleeve",
+    "style_code": "SLV_RUFFLE",
+    "category": "sleeve",
+    "type": "top",
+    "gender": "female",
+    "description": "A short sleeve made of layered ruffles that fall over the upper arm",
+    "aliases": ["Frill Sleeve"],
+    "attributes": ["feminine", "playful", "romantic", "summer"]
+  },
+  {
+    "name": "Tulip Skirt",
+    "style_code": "SKT_TULIP",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt with overlapping front panels that curve like tulip petals, fuller at the hip and narrower at the hem",
+    "aliases": ["Petal Skirt"],
+    "attributes": ["feminine", "modern", "elegant", "flattering"]
+  },
+  {
+    "name": "Full Circle Skirt",
+    "style_code": "SKT_CIRCLE",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt cut as a full circle of fabric, so it falls in deep folds and swirls when you move",
+    "aliases": ["Circle Skirt", "Swing Skirt"],
+    "attributes": ["playful", "romantic", "flowing", "retro"]
+  },
+  {
+    "name": "Tiered Skirt",
+    "style_code": "SKT_TIERED",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A skirt built from layered tiers, each gathered and fuller than the one above",
+    "aliases": ["Ruffle Tier Skirt"],
+    "attributes": ["bohemian", "playful", "summer", "feminine"]
+  },
+  {
+    "name": "Front-Slit Skirt",
+    "style_code": "SKT_SLIT",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A straight or fitted skirt with a slit at the front or side for movement",
+    "aliases": ["Split Skirt", "Side-Slit Skirt"],
+    "attributes": ["evening", "modern", "sleek", "dramatic"]
+  },
+  {
+    "name": "Trumpet Skirt",
+    "style_code": "SKT_TRUMPET",
+    "category": "skirt",
+    "type": "bottom",
+    "gender": "female",
+    "description": "Fitted through the hip and thigh, flaring gradually from mid-thigh to the hem",
+    "aliases": ["Godet Skirt"],
+    "attributes": ["elegant", "evening", "flattering", "formal"]
+  },
+  {
+    "name": "Cigarette Trouser",
+    "style_code": "TRS_CIGARETTE",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A slim, straight trouser that ends at the ankle, neat and narrow all the way down",
+    "aliases": ["Slim Ankle Trouser"],
+    "attributes": ["sleek", "business", "classic", "tailored"]
+  },
+  {
+    "name": "Culottes",
+    "style_code": "TRS_CULOTTES",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A wide, cropped trouser that falls to mid-calf and moves like a skirt",
+    "aliases": ["Culotte Trouser"],
+    "attributes": ["modern", "relaxed", "summer", "versatile"]
+  },
+  {
+    "name": "Paperbag-Waist Trouser",
+    "style_code": "TRS_PAPERBAG",
+    "category": "trouser",
+    "type": "bottom",
+    "gender": "female",
+    "description": "A high-waisted trouser gathered at the waist with a ruffled top edge and a tie belt",
+    "aliases": ["Paperbag Pants"],
+    "attributes": ["trendy", "feminine", "modern", "casual"]
   }
 ]
