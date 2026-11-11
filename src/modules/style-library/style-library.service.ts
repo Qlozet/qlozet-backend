@@ -275,44 +275,61 @@ export class StyleLibraryService implements OnModuleInit {
     return style;
   }
 
-  async seed(): Promise<{ created: number; skipped: number; failed: number }> {
-    let created = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const styleData of seedData) {
-      const existing = await this.styleModel.findOne({
-        style_code: styleData.style_code,
-      });
-
-      if (existing) {
-        skipped++;
-        continue;
-      }
-
-      // Auto-generate image
-      let image_url: string | undefined;
-      try {
-        image_url = await this.generateStyleImage(
-          styleData.name,
-          styleData.category,
-          styleData.description,
-        );
-      } catch (err) {
-        this.logger.warn(`Image generation failed for ${styleData.name}: ${err.message}`);
-        failed++;
-      }
-
-      await this.styleModel.create({
-        ...styleData,
-        image_url,
-        is_active: true,
-      });
-      created++;
+  /**
+   * Add the starter styles (data/seed-styles.json) the platform library is
+   * missing. Safe to run again: a code already in the platform library is
+   * skipped, so an admin's edits to a style are never overwritten and a
+   * style they deleted comes back only if they run this again.
+   *
+   * Styles are saved straight away and their pictures drawn in the
+   * background (one at a time, as regenerate-images does), so the request
+   * returns in a second instead of timing out on dozens of images.
+   */
+  async seed(): Promise<{
+    created: number;
+    skipped: number;
+    images_pending: number;
+  }> {
+    const existing = new Set(
+      (
+        await this.styleModel
+          .find({ business: null })
+          .select('style_code')
+          .lean()
+      ).map((s: any) => s.style_code),
+    );
+    const missing = (seedData as any[]).filter(
+      (s) => !existing.has(s.style_code),
+    );
+    if (!missing.length) {
+      return { created: 0, skipped: seedData.length, images_pending: 0 };
     }
 
-    this.logger.log(`Seed complete: ${created} created, ${skipped} skipped, ${failed} image failures`);
-    return { created, skipped, failed };
+    let created: PlatformStyleDocument[] = [];
+    try {
+      created = (await this.styleModel.insertMany(
+        missing.map((s) => ({ ...s, business: null, is_active: true })),
+        { ordered: false },
+      )) as unknown as PlatformStyleDocument[];
+    } catch (err: any) {
+      // ordered:false keeps going past a duplicate (another admin seeding at
+      // the same moment); keep what did go in.
+      created = (err?.insertedDocs ?? []) as PlatformStyleDocument[];
+    }
+
+    if (created.length) {
+      this.processImageGeneration(created).catch((err) =>
+        this.logger.error(`Seed image generation failed: ${err.message}`),
+      );
+    }
+    this.logger.log(
+      `Seed: ${created.length} created, ${seedData.length - missing.length} already there`,
+    );
+    return {
+      created: created.length,
+      skipped: seedData.length - created.length,
+      images_pending: created.length,
+    };
   }
 
   async regenerateImages(): Promise<{ message: string; total: number }> {
