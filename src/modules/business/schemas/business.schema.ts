@@ -43,6 +43,17 @@ export class Business extends Document {
   @Prop({ required: true, trim: true })
   business_name: string;
 
+  // The store's address on the shop: shop.qlozet.app/s/<slug>. Rules and
+  // assignment in ../store-slug.ts. No default: the unique index is sparse, so
+  // stores without one yet must not all share a null.
+  @Prop({ type: String, unique: true, sparse: true, lowercase: true, trim: true })
+  slug?: string;
+
+  // Addresses this store used before; they redirect to the current one and
+  // nobody else can take them while kept (PREVIOUS_SLUGS_KEPT).
+  @Prop({ type: [String], default: [], index: true })
+  previous_slugs?: string[];
+
   @Prop({ required: false, unique: true, sparse: true, lowercase: true, trim: true })
   business_email: string;
 

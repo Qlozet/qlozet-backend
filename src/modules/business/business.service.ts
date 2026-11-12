@@ -11,6 +11,7 @@ import {
 import { customerForVendor } from '../../common/utils/customer-privacy';
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   Injectable,
   Logger,
@@ -73,6 +74,14 @@ import {
   CLASSIFIER_VERSION,
 } from '../../common/utils/body-type-classifier';
 import { VendorVerificationNotifier } from '../notifications/vendor-verification-notifier.service';
+import {
+  PREVIOUS_SLUGS_KEPT,
+  ensureStoreSlug,
+  freeSlugFor,
+  normalizeSlug,
+  slugOwnerFilter,
+  slugProblem,
+} from './store-slug';
 
 /** Orderings the public vendor list accepts. */
 export type PublicVendorSort = 'active' | 'newest' | 'name';
@@ -747,7 +756,7 @@ export class BusinessService {
         .find(filter)
         .sort(BusinessService.PUBLIC_VENDOR_SORTS[sort])
         .select(
-          'business_name business_logo_url business_logo_svg_url cover_image_url ' +
+          'business_name slug business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category business_address city state country ' +
           // website omitted here for the same reason it is omitted from the
           // public detail projection below: it is a competing checkout.
@@ -792,15 +801,22 @@ export class BusinessService {
    * Public storefront: get a single vendor's profile with product count.
    * Excludes revenue, internal fields, and vendor user details.
    */
-  async getPublicProfile(businessId: string) {
-    if (!Types.ObjectId.isValid(businessId)) {
+  async getPublicProfile(idOrSlug: string) {
+    // Either the store id (old /vendor/<id> links) or its shop address, current
+    // or previous (/s/<slug>). Slugs are never 24-hex, so the two can't clash.
+    const key = String(idOrSlug ?? '').trim();
+    const byId = /^[0-9a-fA-F]{24}$/.test(key);
+    const slug = normalizeSlug(key);
+    if (!byId && !slug) {
       throw new NotFoundException('Business not found');
     }
 
     const result = await this.businessModel.aggregate([
       {
         $match: {
-          _id: new Types.ObjectId(businessId),
+          ...(byId
+            ? { _id: new Types.ObjectId(key) }
+            : slugOwnerFilter(slug)),
           status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
         },
       },
@@ -901,6 +917,9 @@ export class BusinessService {
       {
         $project: {
           business_name: 1,
+          // The current address. A visit by an old one gets this back and the
+          // shop moves the browser to it.
+          slug: 1,
           business_logo_url: 1,
           business_logo_svg_url: 1,
           cover_image_url: 1,
@@ -945,7 +964,9 @@ export class BusinessService {
 
     // Storefronts show "fully booked" from this rather than letting the
     // customer discover it at checkout. Cheap: one count on an indexed field.
-    const capacity = await this.getCapacity(businessId).catch(() => null);
+    const capacity = await this.getCapacity(String(result[0]._id)).catch(
+      () => null,
+    );
 
     return { ...result[0], at_capacity: capacity?.at_capacity ?? false };
   }
@@ -1175,6 +1196,92 @@ export class BusinessService {
     );
     if (!business) throw new NotFoundException('Business not found');
     return business;
+  }
+
+  /**
+   * The store's shop address. A store made before addresses existed gets one
+   * here on first look, so the vendor never sees an empty field.
+   */
+  async getStoreAddress(businessId: string) {
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('business_name slug previous_slugs')
+      .lean();
+    if (!business) throw new NotFoundException('Business not found');
+    const slug = await ensureStoreSlug(this.businessModel.collection, business);
+    return { slug, previous_slugs: business.previous_slugs ?? [] };
+  }
+
+  /** Whether this store could take an address, and a free one if not. */
+  async checkStoreSlug(businessId: string, raw: unknown) {
+    const slug = normalizeSlug(raw);
+    const problem = slugProblem(slug);
+    if (problem) return { slug, available: false, reason: problem };
+
+    const owner = await this.businessModel
+      .findOne(slugOwnerFilter(slug))
+      .select('_id')
+      .lean();
+    if (!owner || String(owner._id) === String(businessId)) {
+      return { slug, available: true, reason: null };
+    }
+    const suggestion = await freeSlugFor(slug, async (s) =>
+      !!(await this.businessModel.exists(slugOwnerFilter(s))),
+    );
+    return {
+      slug,
+      available: false,
+      reason: 'Another store has that address.',
+      suggestion,
+    };
+  }
+
+  /**
+   * Change the store's address. The old one keeps redirecting (up to
+   * PREVIOUS_SLUGS_KEPT of them), so links the vendor already shared work.
+   */
+  async updateStoreSlug(businessId: string, raw: unknown) {
+    const slug = normalizeSlug(raw);
+    const problem = slugProblem(slug);
+    if (problem) throw new BadRequestException(problem);
+
+    const business = await this.businessModel
+      .findById(businessId)
+      .select('slug previous_slugs')
+      .lean();
+    if (!business) throw new NotFoundException('Business not found');
+    if (business.slug === slug) {
+      return { slug, previous_slugs: business.previous_slugs ?? [] };
+    }
+
+    const owner = await this.businessModel
+      .findOne(slugOwnerFilter(slug))
+      .select('_id')
+      .lean();
+    if (owner && String(owner._id) !== String(businessId)) {
+      throw new ConflictException('Another store has that address.');
+    }
+
+    // Going back to an old address takes it off the old list.
+    const previous_slugs = [
+      ...(business.slug ? [business.slug] : []),
+      ...(business.previous_slugs ?? []),
+    ]
+      .filter((s, i, all) => s && s !== slug && all.indexOf(s) === i)
+      .slice(0, PREVIOUS_SLUGS_KEPT);
+
+    try {
+      await this.businessModel.updateOne(
+        { _id: business._id },
+        { $set: { slug, previous_slugs } },
+      );
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new ConflictException('Another store has that address.');
+      }
+      throw err;
+    }
+    return { slug, previous_slugs };
   }
 
   /**
@@ -1678,6 +1785,7 @@ export class BusinessService {
     const sanitizedBusinesses = businesses.map((business: any) => ({
       _id: business._id,
       business_name: business.business_name,
+      slug: business.slug,
       business_logo_url: business.business_logo_url,
       display_picture_url: business.display_picture_url,
       cover_image_url: business.cover_image_url,

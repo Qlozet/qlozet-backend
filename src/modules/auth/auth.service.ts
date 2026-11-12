@@ -39,6 +39,7 @@ import {
   BusinessDocument,
   Business,
 } from '../business/schemas/business.schema';
+import { ensureStoreSlug } from '../business/store-slug';
 import { Token, TokenDocument } from '../wallets/schema/token.schema';
 import {
   PlatformSettings,
@@ -624,6 +625,19 @@ export class AuthService {
       (vendorUser as any).business = business._id;
 
       await session.commitTransaction();
+
+      // The store's shop address. After the commit and never fatal: a store
+      // without one is still reachable at /vendor/<id>, and the backfill
+      // script picks it up.
+      const slug = await ensureStoreSlug(this.businessModel.collection, business)
+        .catch((err) => {
+          this.logger.warn(
+            `No store address for ${business._id}: ${err?.message || err}`,
+          );
+          return undefined;
+        });
+      if (slug) business.slug = slug;
+
       return { user: vendorUser, business };
     } catch (error) {
       await session.abortTransaction();

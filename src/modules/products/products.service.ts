@@ -1040,7 +1040,7 @@ export class ProductService {
     const [rows, count] = await Promise.all([
       this.productModel
         .find(filter)
-        .populate('business', 'business_name business_logo_url business_logo_svg_url cover_image_url theme_color description')
+        .populate('business', 'business_name slug business_logo_url business_logo_svg_url cover_image_url theme_color description')
         .sort(sort)
         .skip(skip)
         .limit(take)
@@ -1064,7 +1064,7 @@ export class ProductService {
   async findById(id: string): Promise<ProductDocument> {
     const product = await this.productModel
       .findById(id)
-      .populate('business', 'business_name business_logo_url business_logo_svg_url cover_image_url theme_color description accepts_external_fabric')
+      .populate('business', 'business_name slug business_logo_url business_logo_svg_url cover_image_url theme_color description accepts_external_fabric')
       .exec();
     if (!product) throw new NotFoundException('Product not found');
     return product;

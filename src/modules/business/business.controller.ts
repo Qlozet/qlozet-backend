@@ -217,11 +217,54 @@ export class BusinessController {
       'Updates non-address fields like business_name, logo, cover image, description, social handles, etc.',
   })
   @ApiOkResponse({ description: 'Business profile updated successfully' })
+  // The service $sets the body as is, so only the DTO's own fields may get
+  // through. Without whitelist a vendor could send status: 'verified' (or
+  // slug, revenue, payout details …) and write it straight onto the store.
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async updateBusinessProfile(
     @Body() dto: UpdateBusinessProfileDto,
     @Req() req: any,
   ) {
     return this.businessService.updateBusinessProfile(req.business.id, dto);
+  }
+
+  // ─── Store address (shop.qlozet.app/s/<slug>) ───
+
+  @Roles(UserType.VENDOR)
+  @Get('store-address')
+  @ApiOperation({
+    summary: "This store's shop address",
+    description:
+      'The slug in shop.qlozet.app/s/<slug>, plus old ones that still redirect. ' +
+      'A store without one is given one from its name.',
+  })
+  async getStoreAddress(@Req() req: any) {
+    return this.businessService.getStoreAddress(req.business.id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Get('store-address/check')
+  @ApiOperation({
+    summary: 'Can this store take an address?',
+    description:
+      'Returns { slug, available, reason, suggestion? }. Never errors on a bad value - ' +
+      'reason says what to fix.',
+  })
+  async checkStoreAddress(@Query('slug') slug: string, @Req() req: any) {
+    return this.businessService.checkStoreSlug(req.business.id, slug);
+  }
+
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Patch('store-address')
+  @ApiOperation({
+    summary: "Change this store's shop address",
+    description:
+      'Body { slug }. The old address keeps redirecting. 400 with the reason ' +
+      'when the format is wrong, 409 when another store has it.',
+  })
+  async updateStoreAddress(@Body('slug') slug: string, @Req() req: any) {
+    return this.businessService.updateStoreSlug(req.business.id, slug);
   }
 
   @Roles(UserType.VENDOR)

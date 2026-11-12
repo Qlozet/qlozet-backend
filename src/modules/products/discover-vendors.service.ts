@@ -99,7 +99,7 @@ export class DiscoverVendorsService {
         status: { $in: [BusinessStatus.APPROVED, BusinessStatus.VERIFIED] },
       })
       .select(
-        'business_name business_logo_url business_logo_svg_url cover_image_url ' +
+        'business_name slug business_logo_url business_logo_svg_url cover_image_url ' +
           'theme_color description business_category city state status createdAt',
       )
       .lean();
