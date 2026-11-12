@@ -138,6 +138,9 @@ export class WebhookService {
         break;
 
       case 'transfer.success':
+        // A success that arrives after the transfer was reversed (webhooks can
+        // come out of order) must not mark the money as paid out again.
+        if ((transaction.metadata as any)?.payout_reversed === true) break;
         walletUpdated = await this.handleTransferSuccess(transaction);
         transaction.status = TransactionStatus.SUCCESS;
         break;
@@ -145,6 +148,11 @@ export class WebhookService {
       case 'transfer.failed':
         await this.handleTransferFailed(transaction);
         transaction.status = TransactionStatus.FAILED;
+        break;
+
+      case 'transfer.reversed':
+        await this.handleTransferReversed(transaction);
+        transaction.status = TransactionStatus.REVERSED;
         break;
 
       case 'charge.failed':
@@ -935,6 +943,47 @@ export class WebhookService {
           `[Payout] Failed to restore wallet on transfer.failed: ${error.message}`,
         );
       }
+    }
+  }
+
+  /**
+   * Paystack sends transfer.reversed when a transfer that went out (often one
+   * already reported as successful) is returned by the bank. The money is
+   * back in Qlozet's Paystack balance, so it goes back to the vendor's wallet
+   * exactly as for a failed transfer, once. If it had been counted as paid
+   * out, that bookkeeping is undone too.
+   */
+  private async handleTransferReversed(
+    transaction: TransactionDocument,
+  ): Promise<void> {
+    if (transaction.channel !== 'payout') return;
+    const wasPaidOut = transaction.status === TransactionStatus.SUCCESS;
+    const alreadyReversed =
+      (transaction.metadata as any)?.payout_reversed === true;
+
+    await this.handleTransferFailed(transaction);
+
+    const nowReversed = (transaction.metadata as any)?.payout_reversed === true;
+    if (!wasPaidOut || alreadyReversed || !nowReversed) return;
+
+    const businessId =
+      ((transaction.metadata as any)?.business_id as string) ??
+      (transaction.initiator as unknown as string);
+    try {
+      const business = await this.businessModel.findById(businessId);
+      if (!business) return;
+      business.lifetime_paid_out = Math.max(
+        0,
+        (business.lifetime_paid_out || 0) - transaction.amount,
+      );
+      business.payout_history = (business.payout_history || []).filter(
+        (ref: string) => ref !== transaction.reference,
+      );
+      await business.save();
+    } catch (error: any) {
+      this.logger.error(
+        `[Payout] transfer.reversed - could not undo payout totals for ${transaction.reference}: ${error?.message}`,
+      );
     }
   }
 

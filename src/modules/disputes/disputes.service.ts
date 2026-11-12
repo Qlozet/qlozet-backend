@@ -376,11 +376,42 @@ export class DisputesService {
           business: businessId,
           released: false,
         });
+        // Items already returned and refunded were paid back once; a full
+        // refund on a dispute must not pay them again.
+        const Return: any = (this.disputeModel.db as any).models?.Return;
+        const refundedReturns: any[] = Return
+          ? await Return.find({
+              order: dispute.order,
+              business: businessId,
+              status: { $in: ['received', 'refund_processed'] },
+            })
+              .select('items')
+              .lean()
+          : [];
+        const returnedProducts = new Set<string>();
+        refundedReturns.forEach((r) =>
+          (r.items || []).forEach((i: any) => returnedProducts.add(String(i))),
+        );
         const itemsGross = (order.items || [])
           .filter(
-            (i: any) => i.business?.toString() === businessId && !i.rejected,
+            (i: any) =>
+              i.business?.toString() === businessId &&
+              !i.rejected &&
+              !returnedProducts.has(String(i.product)),
           )
           .reduce((sum: number, i: any) => sum + (i.total_price || 0), 0);
+        const storeLines = (order.items || []).filter(
+          (i: any) => i.business?.toString() === businessId && !i.rejected,
+        );
+        if (
+          storeLines.length > 0 &&
+          storeLines.every((i: any) => returnedProducts.has(String(i.product)))
+        ) {
+          // Without this the refund fell back to the store's whole earnings.
+          throw new BadRequestException(
+            "Everything from this store on the order was already refunded through a return. Use a partial refund if more is owed.",
+          );
+        }
         const earningsNet = earnings.reduce((sum, e) => sum + (e.net_amount || 0), 0);
         // The fallback counts paid and unpaid earnings alike: payouts are not
         // held, so the vendor may already have been paid for this order.

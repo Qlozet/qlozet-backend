@@ -8,6 +8,7 @@ import { Product, ProductDocument } from './schemas';
 import { Utils } from 'src/common/utils/pagination';
 import { ProductKind } from './schemas/product.schema';
 import { OnEvent } from '@nestjs/event-emitter';
+import { discountAmount as discountAmountFor } from './discount-amount';
 
 @Injectable()
 export class DiscountService {
@@ -656,40 +657,8 @@ export class DiscountService {
       return { discountedPrice: 0, savingsPercent: 0 };
     }
 
-    let discountAmount = 0;
-
-    switch (discount.type) {
-      case 'percentage':
-      case 'flash_percentage':
-      case 'store_wide':
-        // Store-wide uses value_type to determine if it's percentage or fixed
-        // Default to percentage if value_type is not set for store_wide
-        if (discount.type === 'store_wide' && discount.value_type === 'fixed') {
-          discountAmount = discount.value || 0;
-        } else {
-          discountAmount = (basePrice * (discount.value || 0)) / 100;
-        }
-        break;
-
-      case 'fixed':
-      case 'flash_fixed':
-        discountAmount = discount.value || 0;
-        break;
-
-      case 'category_specific':
-        if (discount.value_type === 'percentage') {
-          discountAmount = (basePrice * (discount.value || 0)) / 100;
-        } else {
-          discountAmount = discount.value || 0;
-        }
-        break;
-
-      default:
-        discountAmount = 0;
-    }
-
-    // Cap discount at the base price (can't go below ₦0)
-    discountAmount = Math.min(discountAmount, basePrice);
+    // Same rule checkout uses for customizable items.
+    const discountAmount = discountAmountFor(basePrice, discount);
 
     const discountedPrice = basePrice - discountAmount;
     const savingsPercent = (discountAmount / basePrice) * 100;

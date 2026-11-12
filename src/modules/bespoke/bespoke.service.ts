@@ -62,6 +62,7 @@ import {
   BusinessStatus,
 } from '../business/schemas/business.schema';
 import { ProductDocument } from '../products/schemas';
+import { ProductService } from '../products/products.service';
 import { User } from '../ums/schemas';
 import { Utils } from '../../common/utils/pagination';
 import { customerForVendor } from '../../common/utils/customer-privacy';
@@ -149,6 +150,7 @@ export class BespokeService {
     private readonly mailService: MailService,
     private readonly notificationsService: NotificationsService,
     private readonly vendorRecipients: VendorRecipientsService,
+    private readonly productService: ProductService,
   ) {}
 
   /**
@@ -215,6 +217,21 @@ export class BespokeService {
       },
       { $set: { release_date: releaseDate } },
     );
+
+    // Take the fabric out of stock, as the card path does in the webhook.
+    // Without this a wallet-paid bespoke order left the tailor's (or the other
+    // shop's) yards on sale. The money is already taken, so a failure flags
+    // the order for a person rather than undoing the payment. Idempotent.
+    await this.productService
+      .updateInventory(order._id as Types.ObjectId)
+      .catch(async (error: any) => {
+        this.logger.error(
+          `[Bespoke] Fabric stock not deducted for paid order ${order._id}: ${error?.message} - flagged for reconciliation.`,
+        );
+        await this.orderModel
+          .updateOne({ _id: order._id }, { $set: { inventory_deduction_failed: true } })
+          .catch(() => undefined);
+      });
   }
 
   // ════════════════════════════════════════════════════════════════
