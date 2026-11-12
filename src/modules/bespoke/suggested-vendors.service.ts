@@ -162,7 +162,7 @@ export class SuggestedVendorsService {
         accepts_bespoke: { $ne: false },
       })
       .select(
-        'business_name business_logo_url business_logo_svg_url business_category ' +
+        'business_name slug business_logo_url business_logo_svg_url business_category ' +
           'city state success_rate total_items_sold accepts_external_fabric ' +
           'status createdAt',
       )

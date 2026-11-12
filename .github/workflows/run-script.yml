@@ -27,6 +27,8 @@ on:
           - "backfill:order-payment (apply)"
           - "fix:sparse-indexes (dry-run)"
           - "fix:sparse-indexes (apply)"
+          - "backfill:store-slugs (dry-run)"
+          - "backfill:store-slugs (apply)"
 
 concurrency: run-script-group
 
@@ -65,6 +67,11 @@ jobs:
               CMD="npm run fix:sparse-indexes -- --dry" ;;
             "fix:sparse-indexes (apply)")
               CMD="npm run fix:sparse-indexes" ;;
+            # Shop addresses for stores made before they existed.
+            "backfill:store-slugs (dry-run)")
+              CMD="npm run backfill:store-slugs -- --dry" ;;
+            "backfill:store-slugs (apply)")
+              CMD="npm run backfill:store-slugs" ;;
             *)
               echo "Unknown script: $SCRIPT_CHOICE"; exit 1 ;;
           esac
