@@ -566,10 +566,10 @@ export class DisputesService {
           title: 'Dispute Resolved',
           body:
             dto.resolution === DisputeResolution.RELEASE_TO_VENDOR
-              ? `The dispute on order #${dispute.order_reference} was settled in your favour. Your earnings for it are released.`
+              ? `The dispute on order #${dispute.order_reference} was settled in your favour. Nothing was taken from your earnings.`
               : dto.resolution === DisputeResolution.PARTIAL_REFUND
-                ? `The dispute on order #${dispute.order_reference} was settled with a partial refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. ₦${vendorLoses.toLocaleString()} came out of your earnings for it; the rest is released.`
-                : `The dispute on order #${dispute.order_reference} was settled with a full refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. Your earnings for it (₦${vendorLoses.toLocaleString()}) were cancelled.`,
+                ? `The dispute on order #${dispute.order_reference} was settled with a partial refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. ₦${vendorLoses.toLocaleString()} came out of your earnings for it.`
+                : `The dispute on order #${dispute.order_reference} was settled with a full refund of ₦${(dispute.refund_amount ?? 0).toLocaleString()} to the customer. ₦${vendorLoses.toLocaleString()} came out of your earnings for it (from your wallet balance if it had already been paid to you).`,
           metadata: {
             order_reference: dispute.order_reference,
             dispute_id: dispute._id,

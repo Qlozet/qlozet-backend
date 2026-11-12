@@ -407,6 +407,19 @@ export class Business extends Document {
     ip?: string | null;
   } | null;
 
+  /**
+   * "How orders work": the vendor read the order rules and ticked "I
+   * understand". The version names the wording and every number shown
+   * (business/order-rules.ts); `terms` keeps those numbers as they were.
+   */
+  @Prop({ type: Object, default: null })
+  order_rules_ack?: {
+    version: string;
+    terms: Record<string, number>;
+    accepted_at: Date;
+    accepted_by?: Types.ObjectId | string | null;
+  } | null;
+
   // QoreID verification results — storage-safe summaries only (verdict,
   // provider ref, verified name, masked id). Identity numbers are never
   // persisted; bank account details are (payouts need them) and the CAC RC

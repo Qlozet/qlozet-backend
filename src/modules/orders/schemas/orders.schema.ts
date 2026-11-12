@@ -388,6 +388,15 @@ export class VendorShipment {
   @Prop({ type: Date, default: null })
   confirm_warning_sent_at?: Date | null;
 
+  // The ship-by date the vendor was last reminded about, and the cancel date
+  // they were last warned about (OrderService.warnBeforeShipDeadlines).
+  // Stored as the date warned for, so a deadline that moves gets a new one.
+  @Prop({ type: Date, default: null })
+  ship_by_warning_for?: Date | null;
+
+  @Prop({ type: Date, default: null })
+  cancel_warning_for?: Date | null;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 

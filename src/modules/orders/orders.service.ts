@@ -8,6 +8,17 @@ import {
   confirmWarningLeadHours,
   withConfirmBy,
 } from './confirm-deadline';
+import {
+  cancelWarningDue,
+  daysLate as lateDaysSince,
+  latePenaltyBase,
+  latePenaltyTotal,
+  latePreviewFor,
+  lateRulesFrom,
+  shipByWarningDue,
+  SHIP_BY_WARNING_LEAD_HOURS,
+  withLatePreview,
+} from './late-penalty';
 import { Length } from 'class-validator';
 import {
   balanceDaysFrom,
@@ -1841,10 +1852,18 @@ export class OrderService {
 
       // The time each unconfirmed order cancels itself, for the vendor
       // app's countdown (rule in confirm-deadline.ts).
+      // And the ship-by date with what lateness would cost (late-penalty.ts).
       if (business) {
         const confirmHours = confirmHoursFrom(settings);
+        const lateRules = lateRulesFrom(settings);
+        const now = Date.now();
         scopedRows = scopedRows.map((r: any) =>
-          withConfirmBy(r, String(business), confirmHours),
+          withLatePreview(
+            withConfirmBy(r, String(business), confirmHours),
+            String(business),
+            lateRules,
+            now,
+          ),
         );
       }
 
@@ -5269,6 +5288,119 @@ export class OrderService {
     }
   }
 
+  /**
+   * Warn a vendor before the two late-shipping deadlines bite: a reminder in
+   * the last 24 hours before the ship-by date, and a warning in the last 2
+   * days before the order is cancelled for not shipping. The charges
+   * themselves are announced by checkLateFulfillments as they are taken.
+   * Each is claimed on the date it warns about, so it is sent once per date
+   * (late-penalty.ts shipByWarningDue / cancelWarningDue).
+   */
+  @Cron('20 * * * *', { timeZone: 'Africa/Lagos' })
+  async warnBeforeShipDeadlines() {
+    try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const rules = lateRulesFrom(settings);
+      const now = Date.now();
+      const oldest = new Date(now - Math.max(rules.abandonAfterDays, 0) * 86_400_000);
+      const newest = new Date(now + SHIP_BY_WARNING_LEAD_HOURS * 3_600_000);
+      const orders = await this.orderModel
+        .find({
+          status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+          'payment_plan.status': { $ne: 'awaiting_balance' },
+          shipments: {
+            $elemMatch: {
+              confirmed: true,
+              rejected: { $ne: true },
+              fulfillment_deadline: { $gt: oldest, $lte: newest },
+            },
+          },
+        })
+        .lean();
+
+      const naira = (n: number) => `₦${Math.round(n).toLocaleString('en-NG')}`;
+      const when = (d: Date) =>
+        d.toLocaleString('en-NG', {
+          timeZone: 'Africa/Lagos',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
+
+      for (const order of orders as any[]) {
+        for (const shipment of order.shipments ?? []) {
+          const preview = latePreviewFor(order, shipment, rules, now);
+          if (!preview) continue;
+
+          const shipBy = shipByWarningDue(order, shipment, now);
+          if (shipBy) {
+            const claim = await this.orderModel.updateOne(
+              {
+                _id: order._id,
+                shipments: {
+                  $elemMatch: { _id: shipment._id, ship_by_warning_for: { $ne: shipBy } },
+                },
+              },
+              { $set: { 'shipments.$.ship_by_warning_for': shipBy } },
+            );
+            if (claim.modifiedCount === 1) {
+              const cost =
+                preview.per_day > 0
+                  ? ` After that, each late day costs ${naira(preview.per_day)} from your earnings, up to ${naira(preview.cap)}, paid to the customer.`
+                  : '';
+              this.notifyVendorTeam(String(shipment.business), {
+                type: NotificationType.ORDER_STATUS_CHANGED,
+                title: 'This order is due to ship soon',
+                body: `Order #${order.reference} is due to ship by ${when(shipBy)}.${cost}`,
+                metadata: {
+                  order_id: order._id,
+                  order_reference: order.reference,
+                  ship_by: shipBy,
+                  reason: 'ship_by_warning',
+                },
+              });
+            }
+          }
+
+          const cancelOn = cancelWarningDue(order, shipment, rules, now);
+          if (cancelOn) {
+            const claim = await this.orderModel.updateOne(
+              {
+                _id: order._id,
+                shipments: {
+                  $elemMatch: { _id: shipment._id, cancel_warning_for: { $ne: cancelOn } },
+                },
+              },
+              { $set: { 'shipments.$.cancel_warning_for': cancelOn } },
+            );
+            if (claim.modifiedCount === 1) {
+              const charged =
+                preview.charged > 0
+                  ? ` ${naira(preview.charged)} has been taken in late charges so far.`
+                  : '';
+              this.notifyVendorTeam(String(shipment.business), {
+                type: NotificationType.ORDER_STATUS_CHANGED,
+                title: 'This order will be cancelled soon',
+                body: `Order #${order.reference} is late. If it has not shipped by ${when(cancelOn)}, it will be cancelled, the customer refunded in full and your earnings from it reversed.${charged}`,
+                metadata: {
+                  order_id: order._id,
+                  order_reference: order.reference,
+                  cancel_on: cancelOn,
+                  reason: 'abandon_warning',
+                },
+              });
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`[ShipWarning] Run failed: ${error?.message}`);
+    }
+  }
+
   @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
   async autoRejectStaleShipments() {
     try {
@@ -5529,8 +5661,8 @@ export class OrderService {
   async checkLateFulfillments() {
     try {
       const settings = await this.platformSettingsModel.findOne().lean();
-      const PENALTY_PERCENT_PER_DAY = (settings as any)?.late_penalty_percent_per_day ?? 5;
-      const MAX_PENALTY_PERCENT = (settings as any)?.late_penalty_max_percent ?? 25;
+      // Same rules the vendor app previews (late-penalty.ts).
+      const lateRules = lateRulesFrom(settings);
 
       // Find orders with confirmed shipments that have a deadline in the past
       const orders = await this.orderModel.find({
@@ -5561,29 +5693,26 @@ export class OrderService {
           const now = new Date();
           if (now <= shipment.fulfillment_deadline) continue;
 
-          // Calculate days late
-          const msLate = now.getTime() - shipment.fulfillment_deadline.getTime();
-          const daysLate = Math.ceil(msLate / (24 * 60 * 60 * 1000));
+          // Started days late: one minute late is day 1.
+          const daysLate = lateDaysSince(shipment.fulfillment_deadline, now.getTime());
 
           // Skip if we've already penalized for this many (or more) days
           if (daysLate <= (shipment.late_penalty_days || 0)) continue;
 
           const businessId = shipment.business.toString();
 
-          // Calculate vendor items total
-          const vendorItems = order.items.filter(
-            (i) => i.business?.toString() === businessId,
-          );
-          const vendorItemsTotal = vendorItems.reduce(
-            (sum, item) => sum + ((item as any).total_price || 0),
-            0,
-          );
+          // The store's items still on the order (items it already rejected
+          // were refunded, so they no longer count towards the penalty).
+          const vendorItemsTotal = latePenaltyBase(order, businessId);
 
           if (vendorItemsTotal <= 0) continue;
 
           // Calculate total penalty (cumulative)
-          const penaltyPercent = Math.min(daysLate * PENALTY_PERCENT_PER_DAY, MAX_PENALTY_PERCENT);
-          const totalPenaltyAmount = Math.round(vendorItemsTotal * (penaltyPercent / 100));
+          const penaltyPercent = Math.min(
+            daysLate * lateRules.perDayPercent,
+            lateRules.maxPercent,
+          );
+          const totalPenaltyAmount = latePenaltyTotal(vendorItemsTotal, daysLate, lateRules);
 
           // Calculate incremental penalty (what hasn't been applied yet)
           const previouslyApplied = shipment.late_penalty_amount || 0;
@@ -5783,7 +5912,7 @@ export class OrderService {
                 penalty_amount: incrementalPenalty,
                 total_penalty: totalPenaltyAmount,
                 days_late: daysLate,
-                max_penalty_percent: MAX_PENALTY_PERCENT,
+                max_penalty_percent: lateRules.maxPercent,
                 reason: 'late_fulfillment_penalty',
               },
               action_url: `/orders`,
@@ -8601,6 +8730,13 @@ export class OrderService {
     // Settled rather than awaited in sequence: one unreachable address must
     // not stop the rest, and none of them should delay the response.
     const emails: Promise<unknown>[] = [];
+    // The time to confirm, as the setting says (the email used to hard-code it).
+    const confirmSettings = await this.platformSettingsModel
+      .findOne()
+      .lean()
+      .catch(() => null);
+    const confirmHours = confirmHoursFrom(confirmSettings);
+    const confirmWindow = confirmHours > 0 ? confirmWindowText(confirmHours) : null;
 
     for (const biz of businesses as any[]) {
       const to = biz.created_by?.email;
@@ -8611,6 +8747,7 @@ export class OrderService {
           biz.created_by?.name || 'there',
           biz.business_name || 'your store',
           order,
+          confirmWindow,
         ),
       );
     }

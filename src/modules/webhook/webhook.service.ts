@@ -107,7 +107,7 @@ export class WebhookService {
           : NotificationType.ORDER_SHIPPED,
         title: delivered ? 'Order delivered ✅' : 'Order in transit 🚚',
         body: delivered
-          ? `Your shipment for order #${order.reference} was delivered. Payout will be scheduled shortly.`
+          ? `Your shipment for order #${order.reference} was delivered.`
           : `Your shipment for order #${order.reference} is on its way. Tracking: ${trackingNumber}`,
         metadata: {
           order_id: order._id,

@@ -240,8 +240,12 @@ describe('order emails', () => {
       );
     });
 
-    it('says the funds are still held, which is why speaking up now matters', () => {
-      expect(html()).toContain('still held');
+    // Payouts are never held (business/settlement.ts), so the email must not
+    // say they are; it states the real windows instead.
+    it('states the real windows and never claims the money is held', () => {
+      const out = html();
+      expect(out).toContain('30 days');
+      expect(out).not.toMatch(/held/i);
     });
 
     it('leaves no unresolved handlebars expressions', () => {
@@ -312,19 +316,31 @@ describe('order emails', () => {
   });
 
   describe('vendor alert', () => {
-    const html = () =>
+    const html = (confirmWindow: string | null = '48 hours') =>
       render('new-order-vendor', {
         ...orderFields,
         vendorName: 'Kemi',
         businessName: 'Kemi Couture',
+        confirmWindow,
+        confirmSubtitle: confirmWindow
+          ? `Confirm it within ${confirmWindow}`
+          : 'Confirm it as soon as you can',
       });
 
     it('compiles', () => {
       expect(() => html()).not.toThrow();
     });
 
-    it('leads with the deadline the agreement sets', () => {
+    it('states the time to confirm from the setting, and what happens after it', () => {
       expect(html()).toContain('48 hours');
+      expect(html('24 hours')).toContain('24 hours');
+      expect(html()).toContain('cancelled and the customer refunded');
+    });
+
+    it('names no deadline when auto-cancel is off', () => {
+      const out = html(null);
+      expect(out).toContain('as soon as you can');
+      expect(out).not.toMatch(/within \d/);
     });
 
     it('names the business and the order', () => {

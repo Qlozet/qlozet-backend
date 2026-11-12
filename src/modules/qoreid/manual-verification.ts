@@ -70,7 +70,13 @@ export function manualSubmitProblem(
     payout_account_number?: string | null;
     payout_account_name?: string | null;
   },
-  ctx: { mode: VerificationMode; agreementAccepted: boolean; rcNumber: string | null },
+  ctx: {
+    mode: VerificationMode;
+    agreementAccepted: boolean;
+    rcNumber: string | null;
+    /** False until "How orders work" is acknowledged. Left out = not checked. */
+    orderRulesAcknowledged?: boolean;
+  },
 ): string | null {
   if (ctx.mode !== 'manual') {
     return 'Verification runs through our identity checks now. Open Verification to start them.';
@@ -80,6 +86,9 @@ export function manualSubmitProblem(
   if (state === 'approved') return 'Your business is already approved.';
   if (state === 'rejected') return 'This business was rejected. Contact support to reopen it.';
   if (!ctx.agreementAccepted) return 'Accept the vendor agreement before submitting.';
+  if (ctx.orderRulesAcknowledged === false) {
+    return 'Read "How orders work" and tick "I understand" before submitting.';
+  }
   if (!ctx.rcNumber) return 'Enter your CAC registration number, such as RC1234567 or BN1234567.';
   if (!b.payout_account_number || !b.payout_account_name) {
     return 'Link your payout account under Settings → Payout first. We check its name with your bank.';
