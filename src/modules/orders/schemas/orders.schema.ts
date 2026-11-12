@@ -478,6 +478,12 @@ export class Order {
   @Prop({ type: Boolean, default: false })
   inventory_deduction_failed?: boolean;
 
+  // Claimed once when lines that sold out while the customer was paying are
+  // refunded (OrderService.refundSoldOutItems), so the webhook and the
+  // verify page cannot both refund them.
+  @Prop({ type: Boolean, default: false })
+  sold_out_refunded?: boolean;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', default: null })
   bespoke_design?: Types.ObjectId;
 

@@ -1828,6 +1828,9 @@ export class ProductService {
         }
 
         for (const item of order.items) {
+          // A line refunded before its stock was taken (sold out while the
+          // customer paid) is not deducted.
+          if ((item as any).rejected) continue;
           if ((item as any).product) {
             deductedProductIds.push(String((item as any).product));
           }
@@ -1875,6 +1878,46 @@ export class ProductService {
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * Which of an order's lines can no longer be taken from stock.
+   *
+   * Each line runs the real deduction (the same code as updateInventory)
+   * inside its own transaction, which is then rolled back, so nothing changes
+   * and the answer cannot drift from the deduction rules. Used when a card
+   * payment lands after another buyer took the last of an item.
+   */
+  async findItemsShortOfStock(orderId: Types.ObjectId): Promise<string[]> {
+    const order = await this.orderModel.findById(orderId);
+    if (!order?.items?.length) return [];
+    const short: string[] = [];
+    for (const item of order.items as any[]) {
+      if (item.rejected) continue;
+      const session = await this.connection.startSession();
+      try {
+        session.startTransaction();
+        await this.updateFabric(item, session);
+        await this.updateAccessory(item, session);
+        await this.updateColorVariant(item, session);
+        if (item.applied_fabric && item.applied_fabric_yards) {
+          const fabric = await this.productModel
+            .findById(item.applied_fabric)
+            .session(session);
+          if (fabric?.fabric && fabric.fabric.yard_length < item.applied_fabric_yards) {
+            throw new BadRequestException('Not enough applied fabric');
+          }
+        }
+      } catch {
+        short.push(String(item._id));
+      } finally {
+        if (session.inTransaction()) {
+          await session.abortTransaction().catch(() => undefined);
+        }
+        await session.endSession();
+      }
+    }
+    return short;
   }
 
   /**

@@ -597,6 +597,7 @@ export class WebhookService {
     // reconciliation problem for the vendor, not a reason to strand a paid
     // customer on an endless "Payment not confirmed" loop. Log loudly and flag
     // the order instead.
+    let stockShort = false;
     await Promise.all([
       this.businessService
         .recordBusinessEarnings(orderId)
@@ -612,6 +613,7 @@ export class WebhookService {
           )
         : this.productService.updateInventory(orderId)
       ).catch(async (error: any) => {
+        stockShort = !isReservationClaim;
         this.logger.error(
           `[Finalize] Inventory/claim settlement failed for PAID order ${orderId}: ${error?.message} — order stays paid; flagging for reconciliation.`,
         );
@@ -623,6 +625,18 @@ export class WebhookService {
           .catch(() => undefined);
       }),
     ]);
+
+    // A card payment can land after another buyer took the last of an item.
+    // Refund exactly the lines that ran out (earnings are recorded by now, so
+    // they are reversed with them), then take the rest from stock. Bespoke
+    // orders re-check stock at acceptance and keep the flag for a person.
+    if (stockShort && !isBespoke) {
+      await this.settleSoldOutLines(orderId).catch((error: any) =>
+        this.logger.error(
+          `[Finalize] Sold-out refund failed for order ${orderId}: ${error?.message}`,
+        ),
+      );
+    }
 
     if (!alreadyPaid && isBespoke) {
       // Release the tailor's UPFRONT milestone (funds materials).
@@ -944,6 +958,19 @@ export class WebhookService {
         );
       }
     }
+  }
+
+  /** Refund the lines that sold out, then deduct the rest and clear the flag. */
+  private async settleSoldOutLines(orderId: any) {
+    const short = await this.productService.findItemsShortOfStock(orderId);
+    if (!short.length) return; // not a sell-out: leave the flag for a person
+    const refunded = await this.orderService.refundSoldOutItems(orderId, short);
+    if (refunded === null) return; // the other finalisation got here first
+    await this.productService.updateInventory(orderId);
+    await this.orderModel.updateOne(
+      { _id: orderId },
+      { $set: { inventory_deduction_failed: false } },
+    );
   }
 
   /**

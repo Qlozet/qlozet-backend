@@ -4324,6 +4324,158 @@ export class OrderService {
   }
 
   /**
+   * Refund the lines of a paid order that sold out while the customer was
+   * paying by card. Another buyer took the last of the stock between
+   * checkout and payment; before this the order went through anyway and the
+   * vendor was left owing an item they did not have.
+   *
+   * Each store's sold-out lines go through the normal rejection path, so the
+   * refund lands in the customer's wallet, earnings for those lines are
+   * reversed and the order is cancelled if nothing is left. Runs once per
+   * order (claimed), returns the amount refunded, or null if already done.
+   */
+  async refundSoldOutItems(
+    orderId: Types.ObjectId | string,
+    itemIds: string[],
+  ): Promise<number | null> {
+    if (!itemIds.length) return 0;
+    const claim = await this.orderModel.updateOne(
+      { _id: orderId, sold_out_refunded: { $ne: true } },
+      { $set: { sold_out_refunded: true } },
+    );
+    if (claim.modifiedCount !== 1) return null;
+
+    const order = await this.orderModel.findById(orderId);
+    if (!order) return null;
+    const wanted = new Set(itemIds.map(String));
+    const byStore = new Map<string, any[]>();
+    for (const item of order.items as any[]) {
+      if (item.rejected || !wanted.has(String(item._id))) continue;
+      const store = item.business?.toString();
+      if (!store) continue;
+      byStore.set(store, [...(byStore.get(store) ?? []), item]);
+    }
+
+    const reason = 'Sold out before your payment went through';
+    let refunded = 0;
+    for (const [store, items] of byStore) {
+      const { refundAmount } = await this._rejectItems(order, store, items, reason);
+      refunded += refundAmount;
+    }
+    if (refunded > 0) {
+      this.notificationsService
+        .create({
+          recipient: order.customer.toString(),
+          audience: 'customer',
+          category: NotificationCategory.ORDER,
+          type: NotificationType.ORDER_CANCELLED,
+          title: 'Sold out while you were paying',
+          body: `Someone bought the last of an item on order #${order.reference} just before your payment went through, so it was removed from your order. ₦${refunded.toLocaleString()} has been refunded to your wallet.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            refund_amount: refunded,
+            reason: 'sold_out_before_payment',
+          },
+          action_url: '/orders',
+        })
+        .catch((err) =>
+          this.logger.error(`[SoldOut] Failed to notify customer: ${err.message}`),
+        );
+    }
+    return refunded;
+  }
+
+  /**
+   * Fabric bought from another shop for a tailor whose garment is cancelled.
+   *
+   * Every live fabric transfer heading to that tailor is closed and its
+   * shipping refunded. On a bespoke order the fabric is its own line, owned by
+   * the fabric shop, so that line is closed and refunded too; on a normal
+   * order the fabric money sits on the garment line (pricing.external_fabric)
+   * and the caller refunds it with the garment. Only changes the order in
+   * memory; the caller saves it, refunds, then runs `settleReleasedFabric`.
+   *
+   * Before this, a tailor rejecting or abandoning a bespoke piece left the
+   * customer paying for fabric for a garment that would never be made.
+   */
+  private releaseFabricForCancelledGarment(
+    order: OrderDocument,
+    tailorId: string,
+    reason: string,
+  ): {
+    goods: number;
+    shipping: number;
+    released: { item: any; business: string; legShipped: boolean }[];
+  } {
+    let goods = 0;
+    let shipping = 0;
+    const released: { item: any; business: string; legShipped: boolean }[] = [];
+    const moved: string[] = [
+      ShipmentStatus.SHIPPED,
+      ShipmentStatus.IN_TRANSIT,
+      ShipmentStatus.DELIVERED,
+    ];
+
+    // Only a bespoke order holds the fabric as its own line. On a normal order
+    // a line from the fabric shop is something the customer bought for
+    // themselves, and must never be cancelled with someone else's garment.
+    const isBespoke = (order as any).type === 'bespoke';
+
+    for (const leg of order.shipments) {
+      if (leg.shipment_type !== ShipmentType.FABRIC_TRANSFER) continue;
+      if (leg.destination_business?.toString() !== tailorId) continue;
+      const legShipped = moved.includes(String(leg.status));
+      // A leg the caller already closed (the garment's applied fabric) still
+      // has its fabric line to release below; it is not closed or paid twice.
+      if (!leg.rejected) {
+        leg.rejected = true;
+        leg.rejected_at = new Date();
+        leg.rejection_reason = 'The garment this fabric was for was cancelled';
+        if (!legShipped) leg.status = ShipmentStatus.FAILED;
+        shipping += leg.shipping_fee || 0;
+      }
+
+      const fabricShop = leg.business?.toString();
+      if (!isBespoke || !fabricShop || fabricShop === tailorId) continue;
+      for (const item of order.items as any[]) {
+        if (item.rejected) continue;
+        if (item.business?.toString() !== fabricShop) continue;
+        if (String(item.product) !== String(leg.fabric_product)) continue;
+        item.rejected = true;
+        item.rejected_at = new Date();
+        item.rejection_reason = reason;
+        goods += item.total_price || 0;
+        released.push({ item, business: fabricShop, legShipped });
+      }
+    }
+    return { goods, shipping, released };
+  }
+
+  /** Reverse the fabric shop's earnings and, if the fabric never left, its stock. */
+  private async settleReleasedFabric(
+    order: OrderDocument,
+    released: { item: any; business: string; legShipped: boolean }[],
+  ) {
+    for (const { item, business, legShipped } of released) {
+      const itemId = String(item._id);
+      await this.reverseBusinessEarnings(order, business, itemId).catch((err) =>
+        this.logger.error(
+          `[FabricRelease] Earnings reversal failed for item ${itemId} on ${order.reference}: ${err.message}`,
+        ),
+      );
+      if (legShipped) continue; // the fabric is with the tailor, not on the shelf
+      await this.productService
+        .restoreInventory(order._id as Types.ObjectId, business, itemId)
+        .catch((err) =>
+          this.logger.error(
+            `[FabricRelease] Stock restore failed for item ${itemId} on ${order.reference}: ${err.message}`,
+          ),
+        );
+    }
+  }
+
+  /**
    * Shared core for rejecting a set of a vendor's items. Marks each item
    * rejected, fails any fabric-transfer leg that fed it, and (once the vendor
    * has no active items left) fails their garment shipment. Refunds each item's
@@ -4366,7 +4518,14 @@ export class OrderService {
           leg.rejected = true;
           leg.rejected_at = new Date();
           leg.rejection_reason = 'Dependent garment item cancelled';
-          leg.status = ShipmentStatus.FAILED;
+          // A transfer that already moved keeps its status, so it still shows
+          // the fabric reached the tailor (and is not put back on sale).
+          const moved: string[] = [
+            ShipmentStatus.SHIPPED,
+            ShipmentStatus.IN_TRANSIT,
+            ShipmentStatus.DELIVERED,
+          ];
+          if (!moved.includes(String(leg.status))) leg.status = ShipmentStatus.FAILED;
           fabricLegShipping += leg.shipping_fee || 0;
         }
       }
@@ -4378,6 +4537,11 @@ export class OrderService {
       (i) => i.business?.toString() === businessId && !(i as any).rejected,
     );
     let vendorShipping = 0;
+    let fabricRelease: ReturnType<OrderService['releaseFabricForCancelledGarment']> = {
+      goods: 0,
+      shipping: 0,
+      released: [],
+    };
     if (!vendorHasActiveItems) {
       const vendorShipment = order.shipments.find(
         (s) =>
@@ -4392,15 +4556,29 @@ export class OrderService {
         vendorShipment.status = ShipmentStatus.FAILED;
         vendorShipping = vendorShipment.shipping_fee || 0;
       }
+      // Nothing left for this tailor to make: close the fabric still coming
+      // to them from other shops (bespoke main and extra fabrics).
+      fabricRelease = this.releaseFabricForCancelledGarment(order, businessId, reason);
     }
 
-    const refundAmount = itemsRefund + fabricLegShipping + vendorShipping;
+    const refundAmount =
+      itemsRefund +
+      fabricLegShipping +
+      vendorShipping +
+      fabricRelease.goods +
+      fabricRelease.shipping;
 
     // Adjust order totals.
-    order.subtotal = Math.max(0, (order.subtotal || 0) - itemsGoodsTotal);
+    order.subtotal = Math.max(
+      0,
+      (order.subtotal || 0) - itemsGoodsTotal - fabricRelease.goods,
+    );
     order.shipping_fee = Math.max(
       0,
-      (order.shipping_fee || 0) - fabricLegShipping - vendorShipping,
+      (order.shipping_fee || 0) -
+        fabricLegShipping -
+        vendorShipping -
+        fabricRelease.shipping,
     );
     order.total = Math.max(0, (order.total || 0) - refundAmount);
 
@@ -4447,6 +4625,7 @@ export class OrderService {
           ),
         );
     }
+    await this.settleReleasedFabric(order, fabricRelease.released);
 
     return { refundAmount, orderCancelled };
   }
@@ -5579,13 +5758,32 @@ export class OrderService {
             (sum, item) => sum + ((item as any).total_price || 0),
             0,
           );
+          // Fabric another shop sold for these garments: on a normal order it
+          // rides on the garment line; on a bespoke order it is its own line.
+          const appliedFabricTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).pricing?.external_fabric || 0),
+            0,
+          );
+          const fabricRelease = this.releaseFabricForCancelledGarment(
+            order as OrderDocument,
+            businessId,
+            reason,
+          );
           const vendorShippingFee = shipment.shipping_fee || 0;
-          const refundAmount = vendorItemsTotal + vendorShippingFee;
+          const refundAmount =
+            vendorItemsTotal +
+            appliedFabricTotal +
+            vendorShippingFee +
+            fabricRelease.goods +
+            fabricRelease.shipping;
 
-          order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+          order.subtotal = Math.max(
+            0,
+            (order.subtotal || 0) - vendorItemsTotal - fabricRelease.goods,
+          );
           order.shipping_fee = Math.max(
             0,
-            (order.shipping_fee || 0) - vendorShippingFee,
+            (order.shipping_fee || 0) - vendorShippingFee - fabricRelease.shipping,
           );
           order.total = Math.max(0, (order.total || 0) - refundAmount);
 
@@ -5614,6 +5812,24 @@ export class OrderService {
             this.logger.error(
               `[Abandoned] Earnings reversal failed for ${order.reference}: ${err.message}`,
             ),
+          );
+          // The fabric shop's earning on an applied fabric is keyed on the
+          // garment line, under the fabric shop's own id.
+          for (const item of vendorItems as any[]) {
+            if (!(item.pricing?.external_fabric > 0)) continue;
+            await this.reverseBusinessEarnings(
+              order as OrderDocument,
+              undefined,
+              String(item._id),
+            ).catch((err) =>
+              this.logger.error(
+                `[Abandoned] Fabric earnings reversal failed for ${order.reference}: ${err.message}`,
+              ),
+            );
+          }
+          await this.settleReleasedFabric(
+            order as OrderDocument,
+            fabricRelease.released,
           );
 
           await this.productService
