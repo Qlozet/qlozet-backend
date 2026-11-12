@@ -8,6 +8,13 @@ import {
   confirmWarningLeadHours,
   withConfirmBy,
 } from './confirm-deadline';
+import {
+  daysLate as lateDaysSince,
+  latePenaltyBase,
+  latePenaltyTotal,
+  lateRulesFrom,
+  withLatePreview,
+} from './late-penalty';
 import { Length } from 'class-validator';
 import {
   balanceDaysFrom,
@@ -1841,10 +1848,18 @@ export class OrderService {
 
       // The time each unconfirmed order cancels itself, for the vendor
       // app's countdown (rule in confirm-deadline.ts).
+      // And the ship-by date with what lateness would cost (late-penalty.ts).
       if (business) {
         const confirmHours = confirmHoursFrom(settings);
+        const lateRules = lateRulesFrom(settings);
+        const now = Date.now();
         scopedRows = scopedRows.map((r: any) =>
-          withConfirmBy(r, String(business), confirmHours),
+          withLatePreview(
+            withConfirmBy(r, String(business), confirmHours),
+            String(business),
+            lateRules,
+            now,
+          ),
         );
       }
 
@@ -5529,8 +5544,8 @@ export class OrderService {
   async checkLateFulfillments() {
     try {
       const settings = await this.platformSettingsModel.findOne().lean();
-      const PENALTY_PERCENT_PER_DAY = (settings as any)?.late_penalty_percent_per_day ?? 5;
-      const MAX_PENALTY_PERCENT = (settings as any)?.late_penalty_max_percent ?? 25;
+      // Same rules the vendor app previews (late-penalty.ts).
+      const lateRules = lateRulesFrom(settings);
 
       // Find orders with confirmed shipments that have a deadline in the past
       const orders = await this.orderModel.find({
@@ -5561,29 +5576,26 @@ export class OrderService {
           const now = new Date();
           if (now <= shipment.fulfillment_deadline) continue;
 
-          // Calculate days late
-          const msLate = now.getTime() - shipment.fulfillment_deadline.getTime();
-          const daysLate = Math.ceil(msLate / (24 * 60 * 60 * 1000));
+          // Started days late: one minute late is day 1.
+          const daysLate = lateDaysSince(shipment.fulfillment_deadline, now.getTime());
 
           // Skip if we've already penalized for this many (or more) days
           if (daysLate <= (shipment.late_penalty_days || 0)) continue;
 
           const businessId = shipment.business.toString();
 
-          // Calculate vendor items total
-          const vendorItems = order.items.filter(
-            (i) => i.business?.toString() === businessId,
-          );
-          const vendorItemsTotal = vendorItems.reduce(
-            (sum, item) => sum + ((item as any).total_price || 0),
-            0,
-          );
+          // The store's items still on the order (items it already rejected
+          // were refunded, so they no longer count towards the penalty).
+          const vendorItemsTotal = latePenaltyBase(order, businessId);
 
           if (vendorItemsTotal <= 0) continue;
 
           // Calculate total penalty (cumulative)
-          const penaltyPercent = Math.min(daysLate * PENALTY_PERCENT_PER_DAY, MAX_PENALTY_PERCENT);
-          const totalPenaltyAmount = Math.round(vendorItemsTotal * (penaltyPercent / 100));
+          const penaltyPercent = Math.min(
+            daysLate * lateRules.perDayPercent,
+            lateRules.maxPercent,
+          );
+          const totalPenaltyAmount = latePenaltyTotal(vendorItemsTotal, daysLate, lateRules);
 
           // Calculate incremental penalty (what hasn't been applied yet)
           const previouslyApplied = shipment.late_penalty_amount || 0;
@@ -5783,7 +5795,7 @@ export class OrderService {
                 penalty_amount: incrementalPenalty,
                 total_penalty: totalPenaltyAmount,
                 days_late: daysLate,
-                max_penalty_percent: MAX_PENALTY_PERCENT,
+                max_penalty_percent: lateRules.maxPercent,
                 reason: 'late_fulfillment_penalty',
               },
               action_url: `/orders`,
