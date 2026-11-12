@@ -8,6 +8,7 @@ import { Product, ProductDocument } from './schemas';
 import { Utils } from 'src/common/utils/pagination';
 import { ProductKind } from './schemas/product.schema';
 import { OnEvent } from '@nestjs/event-emitter';
+import { discountAmount as discountAmountFor } from './discount-amount';
 
 @Injectable()
 export class DiscountService {
@@ -180,12 +181,29 @@ export class DiscountService {
   // ─────────────────────────────────────────────────────────
 
   /** Manually include a product in this discount (force-apply even if rules don't match) */
+  /**
+   * A discount may only touch the store's own products. The discount was
+   * already checked as the store's; without this the product was not, so a
+   * store could put its discount on another store's listing.
+   */
+  private async assertOwnProduct(productId: string, business: string) {
+    if (!Types.ObjectId.isValid(productId) || !Types.ObjectId.isValid(business)) {
+      throw new NotFoundException('Product not found');
+    }
+    const owned = await this.productModel.exists({
+      _id: new Types.ObjectId(productId),
+      business: new Types.ObjectId(business),
+    });
+    if (!owned) throw new NotFoundException('Product not found');
+  }
+
   async includeProduct(discountId: string, productId: string, business: string) {
     const discount = await this.discountModel.findOne({
       _id: discountId,
       business: new Types.ObjectId(business),
     });
     if (!discount) throw new NotFoundException('Discount not found');
+    await this.assertOwnProduct(productId, business);
 
     const productObjectId = new Types.ObjectId(productId);
 
@@ -227,6 +245,7 @@ export class DiscountService {
       business: new Types.ObjectId(business),
     });
     if (!discount) throw new NotFoundException('Discount not found');
+    await this.assertOwnProduct(productId, business);
 
     const productObjectId = new Types.ObjectId(productId);
 
@@ -270,11 +289,16 @@ export class DiscountService {
    */
   async applyDiscountToMatchingProducts(
     discountId: string,
+    business?: string,
   ): Promise<number> {
     this.logger.log(`Applying discount: ${discountId}`);
 
     const discount = await this.discountModel.findById(discountId).exec();
     if (!discount) throw new NotFoundException('Discount not found');
+    // From the vendor route the discount must be the caller's own.
+    if (business !== undefined && String(discount.business) !== String(business)) {
+      throw new NotFoundException('Discount not found');
+    }
 
     const now = new Date();
     if (!discount.is_active) {
@@ -633,40 +657,8 @@ export class DiscountService {
       return { discountedPrice: 0, savingsPercent: 0 };
     }
 
-    let discountAmount = 0;
-
-    switch (discount.type) {
-      case 'percentage':
-      case 'flash_percentage':
-      case 'store_wide':
-        // Store-wide uses value_type to determine if it's percentage or fixed
-        // Default to percentage if value_type is not set for store_wide
-        if (discount.type === 'store_wide' && discount.value_type === 'fixed') {
-          discountAmount = discount.value || 0;
-        } else {
-          discountAmount = (basePrice * (discount.value || 0)) / 100;
-        }
-        break;
-
-      case 'fixed':
-      case 'flash_fixed':
-        discountAmount = discount.value || 0;
-        break;
-
-      case 'category_specific':
-        if (discount.value_type === 'percentage') {
-          discountAmount = (basePrice * (discount.value || 0)) / 100;
-        } else {
-          discountAmount = discount.value || 0;
-        }
-        break;
-
-      default:
-        discountAmount = 0;
-    }
-
-    // Cap discount at the base price (can't go below ₦0)
-    discountAmount = Math.min(discountAmount, basePrice);
+    // Same rule checkout uses for customizable items.
+    const discountAmount = discountAmountFor(basePrice, discount);
 
     const discountedPrice = basePrice - discountAmount;
     const savingsPercent = (discountAmount / basePrice) * 100;

@@ -24,6 +24,7 @@ import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { notifyQuoteAccepted } from '../bespoke/quote-accepted-notice';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { EmailStatus } from '../notifications/schemas/email-log.schema';
@@ -138,6 +139,9 @@ export class WebhookService {
         break;
 
       case 'transfer.success':
+        // A success that arrives after the transfer was reversed (webhooks can
+        // come out of order) must not mark the money as paid out again.
+        if ((transaction.metadata as any)?.payout_reversed === true) break;
         walletUpdated = await this.handleTransferSuccess(transaction);
         transaction.status = TransactionStatus.SUCCESS;
         break;
@@ -145,6 +149,11 @@ export class WebhookService {
       case 'transfer.failed':
         await this.handleTransferFailed(transaction);
         transaction.status = TransactionStatus.FAILED;
+        break;
+
+      case 'transfer.reversed':
+        await this.handleTransferReversed(transaction);
+        transaction.status = TransactionStatus.REVERSED;
         break;
 
       case 'charge.failed':
@@ -528,7 +537,8 @@ export class WebhookService {
       // verify page race, exactly one of them announces the order.
       const claim = await this.orderModel.updateOne(
         { _id: orderId, payment_status: { $ne: 'paid' } },
-        { payment_status: 'paid' },
+        // paid_at starts the vendor's time to confirm.
+        { payment_status: 'paid', paid_at: new Date() },
       );
       // A card checkout announces itself only now that it is paid; at
       // creation a payment can still fail. Bespoke and fabric-claim orders
@@ -589,6 +599,7 @@ export class WebhookService {
     // reconciliation problem for the vendor, not a reason to strand a paid
     // customer on an endless "Payment not confirmed" loop. Log loudly and flag
     // the order instead.
+    let stockShort = false;
     await Promise.all([
       this.businessService
         .recordBusinessEarnings(orderId)
@@ -604,6 +615,7 @@ export class WebhookService {
           )
         : this.productService.updateInventory(orderId)
       ).catch(async (error: any) => {
+        stockShort = !isReservationClaim;
         this.logger.error(
           `[Finalize] Inventory/claim settlement failed for PAID order ${orderId}: ${error?.message} — order stays paid; flagging for reconciliation.`,
         );
@@ -615,6 +627,18 @@ export class WebhookService {
           .catch(() => undefined);
       }),
     ]);
+
+    // A card payment can land after another buyer took the last of an item.
+    // Refund exactly the lines that ran out (earnings are recorded by now, so
+    // they are reversed with them), then take the rest from stock. Bespoke
+    // orders re-check stock at acceptance and keep the flag for a person.
+    if (stockShort && !isBespoke) {
+      await this.settleSoldOutLines(orderId).catch((error: any) =>
+        this.logger.error(
+          `[Finalize] Sold-out refund failed for order ${orderId}: ${error?.message}`,
+        ),
+      );
+    }
 
     if (!alreadyPaid && isBespoke) {
       // Release the tailor's UPFRONT milestone (funds materials).
@@ -859,6 +883,23 @@ export class WebhookService {
       { _id: quote.design },
       { $set: { accepted_quote: quote._id } },
     );
+
+    const plan: any = order?.payment_plan;
+    await notifyQuoteAccepted(
+      {
+        notificationsService: this.notificationsService,
+        vendorRecipients: this.vendorRecipients,
+        logger: this.logger,
+      },
+      {
+      tailorId: String(quote.vendor),
+      orderId: String(order._id),
+      orderReference: order.reference,
+      quoteId: String(quote._id),
+      quoteTotal: Number(quote.total) || 0,
+      depositAmount: plan ? Number(plan.deposit_amount) || 0 : null,
+      },
+    );
   }
 
   // Schedule the vendor's UPFRONT milestone earnings for a bespoke order so the
@@ -935,6 +976,60 @@ export class WebhookService {
           `[Payout] Failed to restore wallet on transfer.failed: ${error.message}`,
         );
       }
+    }
+  }
+
+  /** Refund the lines that sold out, then deduct the rest and clear the flag. */
+  private async settleSoldOutLines(orderId: any) {
+    const short = await this.productService.findItemsShortOfStock(orderId);
+    if (!short.length) return; // not a sell-out: leave the flag for a person
+    const refunded = await this.orderService.refundSoldOutItems(orderId, short);
+    if (refunded === null) return; // the other finalisation got here first
+    await this.productService.updateInventory(orderId);
+    await this.orderModel.updateOne(
+      { _id: orderId },
+      { $set: { inventory_deduction_failed: false } },
+    );
+  }
+
+  /**
+   * Paystack sends transfer.reversed when a transfer that went out (often one
+   * already reported as successful) is returned by the bank. The money is
+   * back in Qlozet's Paystack balance, so it goes back to the vendor's wallet
+   * exactly as for a failed transfer, once. If it had been counted as paid
+   * out, that bookkeeping is undone too.
+   */
+  private async handleTransferReversed(
+    transaction: TransactionDocument,
+  ): Promise<void> {
+    if (transaction.channel !== 'payout') return;
+    const wasPaidOut = transaction.status === TransactionStatus.SUCCESS;
+    const alreadyReversed =
+      (transaction.metadata as any)?.payout_reversed === true;
+
+    await this.handleTransferFailed(transaction);
+
+    const nowReversed = (transaction.metadata as any)?.payout_reversed === true;
+    if (!wasPaidOut || alreadyReversed || !nowReversed) return;
+
+    const businessId =
+      ((transaction.metadata as any)?.business_id as string) ??
+      (transaction.initiator as unknown as string);
+    try {
+      const business = await this.businessModel.findById(businessId);
+      if (!business) return;
+      business.lifetime_paid_out = Math.max(
+        0,
+        (business.lifetime_paid_out || 0) - transaction.amount,
+      );
+      business.payout_history = (business.payout_history || []).filter(
+        (ref: string) => ref !== transaction.reference,
+      );
+      await business.save();
+    } catch (error: any) {
+      this.logger.error(
+        `[Payout] transfer.reversed - could not undo payout totals for ${transaction.reference}: ${error?.message}`,
+      );
     }
   }
 

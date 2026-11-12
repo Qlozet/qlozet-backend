@@ -383,6 +383,11 @@ export class VendorShipment {
   @Prop({ type: Boolean, default: false })
   refunded: boolean;
 
+  // When the vendor was warned that this shipment cancels itself soon if not
+  // confirmed (OrderService.warnUnconfirmedShipments). Set once.
+  @Prop({ type: Date, default: null })
+  confirm_warning_sent_at?: Date | null;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 
@@ -478,6 +483,12 @@ export class Order {
   @Prop({ type: Boolean, default: false })
   inventory_deduction_failed?: boolean;
 
+  // Claimed once when lines that sold out while the customer was paying are
+  // refunded (OrderService.refundSoldOutItems), so the webhook and the
+  // verify page cannot both refund them.
+  @Prop({ type: Boolean, default: false })
+  sold_out_refunded?: boolean;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'BespokeDesign', default: null })
   bespoke_design?: Types.ObjectId;
 
@@ -570,6 +581,12 @@ export class Order {
   // order list can render Paid/Refunded without joining the transactions coll).
   @Prop({ type: String, enum: ['unpaid', 'paid'], default: 'unpaid' })
   payment_status?: 'unpaid' | 'paid';
+
+  // When the payment landed. The vendor's time to confirm counts from here,
+  // not from order creation (a slow card payment used to eat into it).
+  // Orders from before this field fall back to createdAt.
+  @Prop({ type: Date, default: null })
+  paid_at?: Date | null;
 
   @Prop({
     type: String,

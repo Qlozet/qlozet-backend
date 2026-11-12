@@ -35,6 +35,7 @@ import {
 } from '../business/order-earning-totals';
 import { ProductService } from '../products/products.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { customerForVendor } from '../../common/utils/customer-privacy';
 
 @Injectable()
 export class ReturnsService {
@@ -141,6 +142,30 @@ export class ReturnsService {
       throw new BadRequestException('You already have an active return request for this vendor');
     }
 
+    // An item that was already returned and refunded cannot be returned
+    // again. Before this a finished return no longer blocked a new request,
+    // so the same item could be refunded twice.
+    const finished = await this.returnModel
+      .find({
+        order: order._id,
+        business: dto.business_id,
+        status: { $in: [ReturnStatus.RECEIVED, ReturnStatus.REFUND_PROCESSED] },
+      })
+      .select('items')
+      .lean();
+    const alreadyReturned = new Set<string>();
+    finished.forEach((r: any) =>
+      (r.items || []).forEach((i: any) => alreadyReturned.add(String(i))),
+    );
+    const again = lines.filter((i: any) => alreadyReturned.has(String(i.product)));
+    if (again.length) {
+      throw new BadRequestException(
+        again.length === lines.length
+          ? 'These items have already been returned and refunded.'
+          : 'Some of these items have already been returned and refunded. Choose only the others.',
+      );
+    }
+
     // Payouts are not held for a return (settlement.ts). If the vendor has
     // been paid by the time it is approved, the refund is recovered from
     // their balance.
@@ -150,7 +175,10 @@ export class ReturnsService {
       order_reference: order.reference,
       customer: customerId,
       business: dto.business_id,
-      items: dto.item_ids.map((id) => new Types.ObjectId(id)),
+      // Only this vendor's lines on this order, not whatever ids were sent.
+      items: [...new Set(lines.map((i: any) => String(i.product)))].map(
+        (id) => new Types.ObjectId(id),
+      ),
       reason: dto.reason,
       description: dto.description || '',
       evidence_urls: dto.evidence_urls || [],
@@ -344,8 +372,20 @@ export class ReturnsService {
       throw new BadRequestException('Return must be approved or shipped before marking as received');
     }
 
+    // Claim it in one step so two quick presses cannot both refund.
+    const receivedAt = new Date();
+    const claim = await this.returnModel.updateOne(
+      {
+        _id: returnReq._id,
+        status: { $in: [ReturnStatus.VENDOR_APPROVED, ReturnStatus.RETURN_SHIPPED] },
+      },
+      { $set: { status: ReturnStatus.RECEIVED, received_at: receivedAt } },
+    );
+    if (claim.modifiedCount !== 1) {
+      throw new BadRequestException('This return has already been marked as received');
+    }
     returnReq.status = ReturnStatus.RECEIVED;
-    returnReq.received_at = new Date();
+    returnReq.received_at = receivedAt;
 
     // Calculate refund: item total_price for returned items
     const order = await this.orderModel.findById(returnReq.order);
@@ -590,10 +630,12 @@ export class ReturnsService {
     if (status && Object.values(ReturnStatus).includes(status as ReturnStatus)) {
       filter.status = status;
     }
-    return this.returnModel
+    // Vendors get a short name only, never the customer's email or phone.
+    const returns = await this.returnModel
       .find(filter)
       .sort({ createdAt: -1 })
-      .populate('customer', 'full_name email')
+      .populate('customer', 'full_name username')
       .lean();
+    return returns.map((r: any) => ({ ...r, customer: customerForVendor(r.customer) }));
   }
 }

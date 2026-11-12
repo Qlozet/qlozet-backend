@@ -158,8 +158,11 @@ export class DiscountController {
   @VendorRoles(...vendorRolesFor('discounts.manage'))
   @ApiOperation({ summary: 'Manually trigger discount application to matching products' })
   @ApiParam({ name: 'id', description: 'Discount ID' })
-  async applyDiscount(@Param('id') id: string) {
-    const count = await this.discountService.applyDiscountToMatchingProducts(id);
+  async applyDiscount(@Param('id') id: string, @Req() req: any) {
+    const count = await this.discountService.applyDiscountToMatchingProducts(
+      id,
+      String(req.business?.id ?? ''),
+    );
     return { message: `Discount applied to ${count} products` };
   }
 

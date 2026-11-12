@@ -33,6 +33,7 @@ import {
   StyleSelectionDto,
 } from './dto/selection.dto';
 import { piecesOnly, resolveFabricPurchase, roundToSellable } from '../products/fabric-pieces';
+import { discountAmount } from '../products/discount-amount';
 
 @Injectable()
 export class PriceCalculationService {
@@ -450,19 +451,8 @@ export class PriceCalculationService {
    * Apply a discount to a total amount based on discount type.
    */
   private applyDiscountToTotal(total: number, discount: any): number {
-    if (!discount) return 0;
-
-    switch (discount.type) {
-      case 'percentage':
-      case 'flash_percentage':
-      case 'store_wide':
-        return (total * (discount.value || 0)) / 100;
-      case 'fixed':
-      case 'flash_fixed':
-        return Math.min(discount.value || 0, total);
-      default:
-        return 0;
-    }
+    // Same rule as the listing's sale price (products/discount-amount.ts).
+    return discountAmount(total, discount);
   }
 
   // ========== FABRIC ==========

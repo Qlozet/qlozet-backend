@@ -1,6 +1,13 @@
 import { ADMIN_COUNTED_ORDER } from './admin-order-scope';
 import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
 import { orderContactForVendor } from '../../common/utils/customer-privacy';
+import {
+  awaitingConfirmation,
+  confirmByFor,
+  confirmHoursFrom,
+  confirmWarningLeadHours,
+  withConfirmBy,
+} from './confirm-deadline';
 import { Length } from 'class-validator';
 import {
   balanceDaysFrom,
@@ -121,6 +128,16 @@ import { VendorRole } from '../ums/schemas/role.schema';
 // included by the resolver, so none of these lists name them.
 const FULFILMENT_ROLES = [VendorRole.OPERATIONS, VendorRole.TAILOR];
 const OPERATIONS_ROLES = [VendorRole.OPERATIONS];
+
+/** The vendor's time to confirm in words, from the auto_reject_hours setting. */
+export function confirmWindowText(hours: number): string {
+  if (hours < 1) {
+    const minutes = Math.max(1, Math.round(hours * 60));
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  const rounded = Math.round(hours * 10) / 10;
+  return `${rounded} hour${rounded === 1 ? '' : 's'}`;
+}
 import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
@@ -542,6 +559,7 @@ export class OrderService {
           // Mark order as in_review (awaiting vendor confirmation)
           savedOrder.status = OrderStatus.IN_REVIEW;
           (savedOrder as any).payment_status = 'paid';
+          (savedOrder as any).paid_at = new Date();
           await savedOrder.save();
 
           // Record vendor earnings (inventory already deducted above)
@@ -1821,6 +1839,15 @@ export class OrderService {
         }
       }
 
+      // The time each unconfirmed order cancels itself, for the vendor
+      // app's countdown (rule in confirm-deadline.ts).
+      if (business) {
+        const confirmHours = confirmHoursFrom(settings);
+        scopedRows = scopedRows.map((r: any) =>
+          withConfirmBy(r, String(business), confirmHours),
+        );
+      }
+
       return Utils.getPagingData(
         {
           count: total,
@@ -2854,19 +2881,29 @@ export class OrderService {
           (!item?.clothing_type && customProducts.has(String(item?.product)));
         if (!custom || !confirmed.has(String(item.business))) continue;
         // Deposit orders: the fee is on the full quote (capped by what was
-        // paid, below). Once the finished piece was shown and the balance
-        // asked for, cancelling keeps the whole deposit, as letting the
-        // balance window pass would.
+        // paid, below). Once the tailor has shown the finished piece, the
+        // tailor keeps at least the whole deposit, as letting the balance
+        // window pass would. That holds whether or not the balance has been
+        // paid: before, paying it dropped the fee back to the percentage, so
+        // a customer who had paid in full cancelled for less than one who
+        // had not. The vendor agreement and Terms describe this rule.
         const plan: any = (order as any).payment_plan;
         const planItem =
-          balanceOutstanding(plan) && String(item.business) === String(plan.tailor);
-        const base =
-          planItem && plan.status !== 'awaiting_balance'
-            ? Number(plan.quote_total) || 0
-            : item.total_price || 0;
-        const linePercent =
-          planItem && plan.status === 'awaiting_balance' ? 100 : percent;
-        const amount = Math.round((base * linePercent) / 100);
+          !!plan &&
+          plan.status !== 'forfeited' &&
+          String(item.business) === String(plan.tailor);
+        // Photos sent: the balance is asked for only after them.
+        const pieceShown =
+          Boolean((order as any).preship?.submitted_at) ||
+          plan?.status === 'awaiting_balance';
+        let amount: number;
+        if (planItem) {
+          const quoteFee = Math.round(((Number(plan.quote_total) || 0) * percent) / 100);
+          const deposit = Number(plan.deposit_amount) || 0;
+          amount = pieceShown ? Math.max(deposit, quoteFee) : quoteFee;
+        } else {
+          amount = Math.round(((item.total_price || 0) * percent) / 100);
+        }
         if (amount <= 0) continue;
         lines.push({
           item: String(item._id),
@@ -2928,7 +2965,31 @@ export class OrderService {
     };
   }
 
-  async cancelOrder(reference: string, opts?: { customerId?: string }) {
+  /**
+   * A store may cancel an order only when every live item in it is theirs.
+   * An order that also holds another store's items is cancelled per store by
+   * rejecting your own items, so the other store's sale is left alone.
+   */
+  private assertStoreMayCancel(order: any, businessId: string | undefined) {
+    const mine = String(businessId ?? '');
+    const owner = (item: any) =>
+      String(item?.business?._id ?? item?.business ?? '');
+    const items: any[] = (order.items ?? []).filter((i: any) => !i?.rejected);
+    if (!mine || !(order.items ?? []).some((i: any) => owner(i) === mine)) {
+      throw new ForbiddenException("You can only cancel your own store's orders");
+    }
+    if (items.some((i) => owner(i) !== mine)) {
+      throw new BadRequestException(
+        "This order includes another store's items, so it can't be cancelled " +
+          'as a whole. Reject your own items instead.',
+      );
+    }
+  }
+
+  async cancelOrder(
+    reference: string,
+    opts?: { customerId?: string; businessId?: string },
+  ) {
     const order = await this.orderModel.findOne({ reference });
     if (!order) throw new BadRequestException('Order not found');
 
@@ -2938,6 +2999,12 @@ export class OrderService {
       order.customer?.toString() !== String(opts.customerId)
     ) {
       throw new ForbiddenException('You can only cancel your own orders');
+    }
+
+    // When a store initiates the cancel, the whole order must be that store's.
+    // Without this any store could cancel and refund any order by reference.
+    if (opts && 'businessId' in opts) {
+      this.assertStoreMayCancel(order, opts.businessId);
     }
 
     // Prevent cancelling already cancelled orders.
@@ -4294,6 +4361,158 @@ export class OrderService {
   }
 
   /**
+   * Refund the lines of a paid order that sold out while the customer was
+   * paying by card. Another buyer took the last of the stock between
+   * checkout and payment; before this the order went through anyway and the
+   * vendor was left owing an item they did not have.
+   *
+   * Each store's sold-out lines go through the normal rejection path, so the
+   * refund lands in the customer's wallet, earnings for those lines are
+   * reversed and the order is cancelled if nothing is left. Runs once per
+   * order (claimed), returns the amount refunded, or null if already done.
+   */
+  async refundSoldOutItems(
+    orderId: Types.ObjectId | string,
+    itemIds: string[],
+  ): Promise<number | null> {
+    if (!itemIds.length) return 0;
+    const claim = await this.orderModel.updateOne(
+      { _id: orderId, sold_out_refunded: { $ne: true } },
+      { $set: { sold_out_refunded: true } },
+    );
+    if (claim.modifiedCount !== 1) return null;
+
+    const order = await this.orderModel.findById(orderId);
+    if (!order) return null;
+    const wanted = new Set(itemIds.map(String));
+    const byStore = new Map<string, any[]>();
+    for (const item of order.items as any[]) {
+      if (item.rejected || !wanted.has(String(item._id))) continue;
+      const store = item.business?.toString();
+      if (!store) continue;
+      byStore.set(store, [...(byStore.get(store) ?? []), item]);
+    }
+
+    const reason = 'Sold out before your payment went through';
+    let refunded = 0;
+    for (const [store, items] of byStore) {
+      const { refundAmount } = await this._rejectItems(order, store, items, reason);
+      refunded += refundAmount;
+    }
+    if (refunded > 0) {
+      this.notificationsService
+        .create({
+          recipient: order.customer.toString(),
+          audience: 'customer',
+          category: NotificationCategory.ORDER,
+          type: NotificationType.ORDER_CANCELLED,
+          title: 'Sold out while you were paying',
+          body: `Someone bought the last of an item on order #${order.reference} just before your payment went through, so it was removed from your order. ₦${refunded.toLocaleString()} has been refunded to your wallet.`,
+          metadata: {
+            order_id: order._id,
+            order_reference: order.reference,
+            refund_amount: refunded,
+            reason: 'sold_out_before_payment',
+          },
+          action_url: '/orders',
+        })
+        .catch((err) =>
+          this.logger.error(`[SoldOut] Failed to notify customer: ${err.message}`),
+        );
+    }
+    return refunded;
+  }
+
+  /**
+   * Fabric bought from another shop for a tailor whose garment is cancelled.
+   *
+   * Every live fabric transfer heading to that tailor is closed and its
+   * shipping refunded. On a bespoke order the fabric is its own line, owned by
+   * the fabric shop, so that line is closed and refunded too; on a normal
+   * order the fabric money sits on the garment line (pricing.external_fabric)
+   * and the caller refunds it with the garment. Only changes the order in
+   * memory; the caller saves it, refunds, then runs `settleReleasedFabric`.
+   *
+   * Before this, a tailor rejecting or abandoning a bespoke piece left the
+   * customer paying for fabric for a garment that would never be made.
+   */
+  private releaseFabricForCancelledGarment(
+    order: OrderDocument,
+    tailorId: string,
+    reason: string,
+  ): {
+    goods: number;
+    shipping: number;
+    released: { item: any; business: string; legShipped: boolean }[];
+  } {
+    let goods = 0;
+    let shipping = 0;
+    const released: { item: any; business: string; legShipped: boolean }[] = [];
+    const moved: string[] = [
+      ShipmentStatus.SHIPPED,
+      ShipmentStatus.IN_TRANSIT,
+      ShipmentStatus.DELIVERED,
+    ];
+
+    // Only a bespoke order holds the fabric as its own line. On a normal order
+    // a line from the fabric shop is something the customer bought for
+    // themselves, and must never be cancelled with someone else's garment.
+    const isBespoke = (order as any).type === 'bespoke';
+
+    for (const leg of order.shipments) {
+      if (leg.shipment_type !== ShipmentType.FABRIC_TRANSFER) continue;
+      if (leg.destination_business?.toString() !== tailorId) continue;
+      const legShipped = moved.includes(String(leg.status));
+      // A leg the caller already closed (the garment's applied fabric) still
+      // has its fabric line to release below; it is not closed or paid twice.
+      if (!leg.rejected) {
+        leg.rejected = true;
+        leg.rejected_at = new Date();
+        leg.rejection_reason = 'The garment this fabric was for was cancelled';
+        if (!legShipped) leg.status = ShipmentStatus.FAILED;
+        shipping += leg.shipping_fee || 0;
+      }
+
+      const fabricShop = leg.business?.toString();
+      if (!isBespoke || !fabricShop || fabricShop === tailorId) continue;
+      for (const item of order.items as any[]) {
+        if (item.rejected) continue;
+        if (item.business?.toString() !== fabricShop) continue;
+        if (String(item.product) !== String(leg.fabric_product)) continue;
+        item.rejected = true;
+        item.rejected_at = new Date();
+        item.rejection_reason = reason;
+        goods += item.total_price || 0;
+        released.push({ item, business: fabricShop, legShipped });
+      }
+    }
+    return { goods, shipping, released };
+  }
+
+  /** Reverse the fabric shop's earnings and, if the fabric never left, its stock. */
+  private async settleReleasedFabric(
+    order: OrderDocument,
+    released: { item: any; business: string; legShipped: boolean }[],
+  ) {
+    for (const { item, business, legShipped } of released) {
+      const itemId = String(item._id);
+      await this.reverseBusinessEarnings(order, business, itemId).catch((err) =>
+        this.logger.error(
+          `[FabricRelease] Earnings reversal failed for item ${itemId} on ${order.reference}: ${err.message}`,
+        ),
+      );
+      if (legShipped) continue; // the fabric is with the tailor, not on the shelf
+      await this.productService
+        .restoreInventory(order._id as Types.ObjectId, business, itemId)
+        .catch((err) =>
+          this.logger.error(
+            `[FabricRelease] Stock restore failed for item ${itemId} on ${order.reference}: ${err.message}`,
+          ),
+        );
+    }
+  }
+
+  /**
    * Shared core for rejecting a set of a vendor's items. Marks each item
    * rejected, fails any fabric-transfer leg that fed it, and (once the vendor
    * has no active items left) fails their garment shipment. Refunds each item's
@@ -4336,7 +4555,14 @@ export class OrderService {
           leg.rejected = true;
           leg.rejected_at = new Date();
           leg.rejection_reason = 'Dependent garment item cancelled';
-          leg.status = ShipmentStatus.FAILED;
+          // A transfer that already moved keeps its status, so it still shows
+          // the fabric reached the tailor (and is not put back on sale).
+          const moved: string[] = [
+            ShipmentStatus.SHIPPED,
+            ShipmentStatus.IN_TRANSIT,
+            ShipmentStatus.DELIVERED,
+          ];
+          if (!moved.includes(String(leg.status))) leg.status = ShipmentStatus.FAILED;
           fabricLegShipping += leg.shipping_fee || 0;
         }
       }
@@ -4348,6 +4574,11 @@ export class OrderService {
       (i) => i.business?.toString() === businessId && !(i as any).rejected,
     );
     let vendorShipping = 0;
+    let fabricRelease: ReturnType<OrderService['releaseFabricForCancelledGarment']> = {
+      goods: 0,
+      shipping: 0,
+      released: [],
+    };
     if (!vendorHasActiveItems) {
       const vendorShipment = order.shipments.find(
         (s) =>
@@ -4362,15 +4593,29 @@ export class OrderService {
         vendorShipment.status = ShipmentStatus.FAILED;
         vendorShipping = vendorShipment.shipping_fee || 0;
       }
+      // Nothing left for this tailor to make: close the fabric still coming
+      // to them from other shops (bespoke main and extra fabrics).
+      fabricRelease = this.releaseFabricForCancelledGarment(order, businessId, reason);
     }
 
-    const refundAmount = itemsRefund + fabricLegShipping + vendorShipping;
+    const refundAmount =
+      itemsRefund +
+      fabricLegShipping +
+      vendorShipping +
+      fabricRelease.goods +
+      fabricRelease.shipping;
 
     // Adjust order totals.
-    order.subtotal = Math.max(0, (order.subtotal || 0) - itemsGoodsTotal);
+    order.subtotal = Math.max(
+      0,
+      (order.subtotal || 0) - itemsGoodsTotal - fabricRelease.goods,
+    );
     order.shipping_fee = Math.max(
       0,
-      (order.shipping_fee || 0) - fabricLegShipping - vendorShipping,
+      (order.shipping_fee || 0) -
+        fabricLegShipping -
+        vendorShipping -
+        fabricRelease.shipping,
     );
     order.total = Math.max(0, (order.total || 0) - refundAmount);
 
@@ -4417,6 +4662,7 @@ export class OrderService {
           ),
         );
     }
+    await this.settleReleasedFabric(order, fabricRelease.released);
 
     return { refundAmount, orderCancelled };
   }
@@ -4919,18 +5165,130 @@ export class OrderService {
    * Runs every hour. Finds orders in 'in_review' with unconfirmed shipments
    * older than 24 hours, and auto-rejects those vendor shipments.
    */
+  /** In-app notice to everyone at a store who handles orders (owner always). */
+  private notifyVendorTeam(
+    businessId: string,
+    notice: { type: NotificationType; title: string; body: string; metadata: Record<string, any> },
+  ) {
+    this.vendorRecipients
+      .resolve(businessId, OPERATIONS_ROLES)
+      .then((members) =>
+        Promise.all(
+          members.map((member) =>
+            this.notificationsService.create({
+              recipient: member.userId,
+              recipient_business: businessId,
+              category: NotificationCategory.ORDER,
+              type: notice.type,
+              title: notice.title,
+              body: notice.body,
+              metadata: notice.metadata,
+              action_url: '/orders',
+            }),
+          ),
+        ),
+      )
+      .catch((err) =>
+        this.logger.error(`[Orders] Failed to notify store ${businessId}: ${err.message}`),
+      );
+  }
+
+  /**
+   * Warn a vendor before an unconfirmed order cancels itself: 4 hours ahead
+   * (a quarter of the window if it is shorter). Once per shipment, claimed
+   * on `confirm_warning_sent_at`. Runs every 15 minutes so the warning lands
+   * close to the 4-hour mark.
+   */
+  @Cron('*/15 * * * *', { timeZone: 'Africa/Lagos' })
+  async warnUnconfirmedShipments() {
+    try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const hours = confirmHoursFrom(settings);
+      if (!(hours > 0)) return; // auto-cancel is off, so nothing to warn about
+      const now = Date.now();
+      const lead = confirmWarningLeadHours(hours);
+      // Paid (or created, for older orders) long enough ago to be inside the
+      // warning window, but not yet past the deadline.
+      const warnFrom = new Date(now - (hours - lead) * 3_600_000);
+      const deadlineFrom = new Date(now - hours * 3_600_000);
+      const orders = await this.orderModel
+        .find({
+          status: OrderStatus.IN_REVIEW,
+          $or: [
+            { paid_at: { $lte: warnFrom, $gt: deadlineFrom } },
+            { paid_at: null, createdAt: { $lte: warnFrom, $gt: deadlineFrom } },
+          ],
+          shipments: {
+            $elemMatch: {
+              confirmed: { $ne: true },
+              rejected: { $ne: true },
+              confirm_warning_sent_at: null,
+            },
+          },
+        })
+        .lean();
+
+      for (const order of orders as any[]) {
+        for (const shipment of order.shipments ?? []) {
+          if (!awaitingConfirmation(order, shipment)) continue;
+          if (shipment.confirm_warning_sent_at) continue;
+          const by = confirmByFor(order, shipment, hours);
+          if (!by || by.getTime() <= now) continue;
+          const claim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: { _id: shipment._id, confirm_warning_sent_at: null },
+              },
+            },
+            { $set: { 'shipments.$.confirm_warning_sent_at': new Date() } },
+          );
+          if (claim.modifiedCount !== 1) continue;
+          const at = by.toLocaleString('en-NG', {
+            timeZone: 'Africa/Lagos',
+            weekday: 'short',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          this.notifyVendorTeam(String(shipment.business), {
+            type: NotificationType.ORDER_STATUS_CHANGED,
+            title: 'Confirm this order soon',
+            body: `Order #${order.reference} is waiting for you. Confirm or decline it by ${at}, or it will be cancelled and the customer refunded.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              confirm_by: by,
+              reason: 'confirm_deadline_warning',
+            },
+          });
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`[ConfirmWarning] Run failed: ${error?.message}`);
+    }
+  }
+
   @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
   async autoRejectStaleShipments() {
     try {
       const settings = await this.platformSettingsModel.findOne().lean();
-      const autoRejectHours = (settings as any)?.auto_reject_hours ?? 24;
+      const autoRejectHours = confirmHoursFrom(settings);
+      // 0 switches it off, as abandon_after_days = 0 does. It used to mean
+      // "cancel every unconfirmed order at the next run".
+      if (!(autoRejectHours > 0)) return;
       const STALE_THRESHOLD_MS = autoRejectHours * 60 * 60 * 1000;
       const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+      const confirmWindow = confirmWindowText(autoRejectHours);
 
-      // Find orders that are in_review and were created more than 24h ago
+      // Waiting on the vendor for longer than the window, counted from when
+      // the customer paid. Orders paid before paid_at existed use createdAt.
       const staleOrders = await this.orderModel.find({
         status: OrderStatus.IN_REVIEW,
-        createdAt: { $lte: cutoff },
+        $or: [
+          { paid_at: { $lte: cutoff } },
+          { paid_at: null, createdAt: { $lte: cutoff } },
+        ],
       });
 
       if (staleOrders.length === 0) return;
@@ -4975,7 +5333,7 @@ export class OrderService {
               await this.unwindRejectedFabricTransfer(
                 order as OrderDocument,
                 shipment,
-                'Auto-rejected: fabric vendor did not confirm within 24 hours',
+                `Auto-rejected: fabric vendor did not confirm within ${confirmWindow}`,
               );
             this.notificationsService
               .create({
@@ -4985,8 +5343,8 @@ export class OrderService {
                 type: NotificationType.ORDER_CANCELLED,
                 title: orderCancelled ? 'Order Cancelled' : 'Item Cancelled',
                 body: orderCancelled
-                  ? `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`
-                  : `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet; the rest of your order is unaffected.`,
+                  ? `${businessName} did not confirm the fabric for your order #${order.reference} within ${confirmWindow}. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`
+                  : `${businessName} did not confirm the fabric for your order #${order.reference} within ${confirmWindow}. The affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet; the rest of your order is unaffected.`,
                 metadata: {
                   order_id: order._id,
                   order_reference: order.reference,
@@ -5007,7 +5365,7 @@ export class OrderService {
           // Auto-reject this vendor's unconfirmed shipment
           shipment.rejected = true;
           shipment.rejected_at = new Date();
-          shipment.rejection_reason = 'Auto-rejected: vendor did not confirm within 24 hours';
+          shipment.rejection_reason = `Auto-rejected: vendor did not confirm within ${confirmWindow}`;
           shipment.status = ShipmentStatus.FAILED;
           orderChanged = true;
 
@@ -5065,7 +5423,7 @@ export class OrderService {
             this.processPartialRefund(
               order as OrderDocument,
               refundAmount,
-              `Auto-rejected: ${businessName} did not confirm within 24h`,
+              `Auto-rejected: ${businessName} did not confirm within ${confirmWindow}`,
             ).catch((err) =>
               this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
             );
@@ -5089,6 +5447,20 @@ export class OrderService {
                   `[AutoReject] Inventory restore failed for ${order.reference}: ${err.message}`,
                 ),
               );
+
+            // Tell the vendor too. Before, only the customer heard, so a
+            // vendor learned an order had gone only by spotting it missing.
+            this.notifyVendorTeam(shipment.business.toString(), {
+              type: NotificationType.ORDER_CANCELLED,
+              title: 'Order cancelled - not confirmed in time',
+              body: `Order #${order.reference} was not confirmed within ${confirmWindow} of payment, so it was cancelled and the customer refunded ₦${refundAmount.toLocaleString()}. Confirm new orders sooner to keep them.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                refund_amount: refundAmount,
+                reason: 'not_confirmed_in_time',
+              },
+            });
           } else {
             this.logger.warn(
               `[AutoReject] Refund for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,
@@ -5102,7 +5474,7 @@ export class OrderService {
             category: NotificationCategory.ORDER,
             type: NotificationType.ORDER_CANCELLED,
             title: 'Vendor Did Not Respond',
-            body: `${businessName} did not confirm your order #${order.reference} within 24 hours. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
+            body: `${businessName} did not confirm your order #${order.reference} within ${confirmWindow}. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
             metadata: {
               order_id: order._id,
               order_reference: order.reference,
@@ -5549,13 +5921,32 @@ export class OrderService {
             (sum, item) => sum + ((item as any).total_price || 0),
             0,
           );
+          // Fabric another shop sold for these garments: on a normal order it
+          // rides on the garment line; on a bespoke order it is its own line.
+          const appliedFabricTotal = vendorItems.reduce(
+            (sum, item) => sum + ((item as any).pricing?.external_fabric || 0),
+            0,
+          );
+          const fabricRelease = this.releaseFabricForCancelledGarment(
+            order as OrderDocument,
+            businessId,
+            reason,
+          );
           const vendorShippingFee = shipment.shipping_fee || 0;
-          const refundAmount = vendorItemsTotal + vendorShippingFee;
+          const refundAmount =
+            vendorItemsTotal +
+            appliedFabricTotal +
+            vendorShippingFee +
+            fabricRelease.goods +
+            fabricRelease.shipping;
 
-          order.subtotal = Math.max(0, (order.subtotal || 0) - vendorItemsTotal);
+          order.subtotal = Math.max(
+            0,
+            (order.subtotal || 0) - vendorItemsTotal - fabricRelease.goods,
+          );
           order.shipping_fee = Math.max(
             0,
-            (order.shipping_fee || 0) - vendorShippingFee,
+            (order.shipping_fee || 0) - vendorShippingFee - fabricRelease.shipping,
           );
           order.total = Math.max(0, (order.total || 0) - refundAmount);
 
@@ -5584,6 +5975,24 @@ export class OrderService {
             this.logger.error(
               `[Abandoned] Earnings reversal failed for ${order.reference}: ${err.message}`,
             ),
+          );
+          // The fabric shop's earning on an applied fabric is keyed on the
+          // garment line, under the fabric shop's own id.
+          for (const item of vendorItems as any[]) {
+            if (!(item.pricing?.external_fabric > 0)) continue;
+            await this.reverseBusinessEarnings(
+              order as OrderDocument,
+              undefined,
+              String(item._id),
+            ).catch((err) =>
+              this.logger.error(
+                `[Abandoned] Fabric earnings reversal failed for ${order.reference}: ${err.message}`,
+              ),
+            );
+          }
+          await this.settleReleasedFabric(
+            order as OrderDocument,
+            fabricRelease.released,
           );
 
           await this.productService

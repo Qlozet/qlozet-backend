@@ -153,6 +153,12 @@ export class NotificationsService {
 
       const saved = await this.notificationModel.insertMany(docs);
       this.logger.log(`Created ${saved.length} notifications in bulk`);
+      // Same realtime ping and phone push as create(). Without it the
+      // vendor's new-order and order-cancelled notices (the only bulk callers)
+      // reached the bell only on the next page load and never the phone.
+      for (const doc of saved) {
+        this.eventEmitter.emit('notification.created', doc);
+      }
       return saved as NotificationDocument[];
     } catch (error) {
       this.logger.error('Failed to create bulk notifications', error);
