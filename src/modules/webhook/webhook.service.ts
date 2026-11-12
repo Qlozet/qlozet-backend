@@ -24,6 +24,7 @@ import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { notifyQuoteAccepted } from '../bespoke/quote-accepted-notice';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../notifications/mail/mail.service';
 import { EmailStatus } from '../notifications/schemas/email-log.schema';
@@ -536,7 +537,8 @@ export class WebhookService {
       // verify page race, exactly one of them announces the order.
       const claim = await this.orderModel.updateOne(
         { _id: orderId, payment_status: { $ne: 'paid' } },
-        { payment_status: 'paid' },
+        // paid_at starts the vendor's time to confirm.
+        { payment_status: 'paid', paid_at: new Date() },
       );
       // A card checkout announces itself only now that it is paid; at
       // creation a payment can still fail. Bespoke and fabric-claim orders
@@ -880,6 +882,23 @@ export class WebhookService {
     await this.bespokeDesignModel.updateOne(
       { _id: quote.design },
       { $set: { accepted_quote: quote._id } },
+    );
+
+    const plan: any = order?.payment_plan;
+    await notifyQuoteAccepted(
+      {
+        notificationsService: this.notificationsService,
+        vendorRecipients: this.vendorRecipients,
+        logger: this.logger,
+      },
+      {
+      tailorId: String(quote.vendor),
+      orderId: String(order._id),
+      orderReference: order.reference,
+      quoteId: String(quote._id),
+      quoteTotal: Number(quote.total) || 0,
+      depositAmount: plan ? Number(plan.deposit_amount) || 0 : null,
+      },
     );
   }
 

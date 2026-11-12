@@ -69,6 +69,7 @@ import { customerForVendor } from '../../common/utils/customer-privacy';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { notifyQuoteAccepted } from './quote-accepted-notice';
 
 // Who at a vendor hears about a quote: the tailor is the person who can
 // judge the work and price it. The owner is always included by the resolver.
@@ -216,6 +217,23 @@ export class BespokeService {
         release_date: null,
       },
       { $set: { release_date: releaseDate } },
+    );
+
+    const plan: any = (order as any).payment_plan;
+    await notifyQuoteAccepted(
+      {
+        notificationsService: this.notificationsService,
+        vendorRecipients: this.vendorRecipients,
+        logger: this.logger,
+      },
+      {
+      tailorId: String(quote.vendor),
+      orderId: String(order._id),
+      orderReference: (order as any).reference,
+      quoteId: String(quote._id),
+      quoteTotal: Number(quote.total) || 0,
+      depositAmount: plan ? Number(plan.deposit_amount) || 0 : null,
+      },
     );
 
     // Take the fabric out of stock, as the card path does in the webhook.

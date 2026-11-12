@@ -121,6 +121,16 @@ import { VendorRole } from '../ums/schemas/role.schema';
 // included by the resolver, so none of these lists name them.
 const FULFILMENT_ROLES = [VendorRole.OPERATIONS, VendorRole.TAILOR];
 const OPERATIONS_ROLES = [VendorRole.OPERATIONS];
+
+/** The vendor's time to confirm in words, from the auto_reject_hours setting. */
+export function confirmWindowText(hours: number): string {
+  if (hours < 1) {
+    const minutes = Math.max(1, Math.round(hours * 60));
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  const rounded = Math.round(hours * 10) / 10;
+  return `${rounded} hour${rounded === 1 ? '' : 's'}`;
+}
 import { MailService } from '../notifications/mail/mail.service';
 import {
   NotificationCategory,
@@ -542,6 +552,7 @@ export class OrderService {
           // Mark order as in_review (awaiting vendor confirmation)
           savedOrder.status = OrderStatus.IN_REVIEW;
           (savedOrder as any).payment_status = 'paid';
+          (savedOrder as any).paid_at = new Date();
           await savedOrder.save();
 
           // Record vendor earnings (inventory already deducted above)
@@ -2854,19 +2865,29 @@ export class OrderService {
           (!item?.clothing_type && customProducts.has(String(item?.product)));
         if (!custom || !confirmed.has(String(item.business))) continue;
         // Deposit orders: the fee is on the full quote (capped by what was
-        // paid, below). Once the finished piece was shown and the balance
-        // asked for, cancelling keeps the whole deposit, as letting the
-        // balance window pass would.
+        // paid, below). Once the tailor has shown the finished piece, the
+        // tailor keeps at least the whole deposit, as letting the balance
+        // window pass would. That holds whether or not the balance has been
+        // paid: before, paying it dropped the fee back to the percentage, so
+        // a customer who had paid in full cancelled for less than one who
+        // had not. The vendor agreement and Terms describe this rule.
         const plan: any = (order as any).payment_plan;
         const planItem =
-          balanceOutstanding(plan) && String(item.business) === String(plan.tailor);
-        const base =
-          planItem && plan.status !== 'awaiting_balance'
-            ? Number(plan.quote_total) || 0
-            : item.total_price || 0;
-        const linePercent =
-          planItem && plan.status === 'awaiting_balance' ? 100 : percent;
-        const amount = Math.round((base * linePercent) / 100);
+          !!plan &&
+          plan.status !== 'forfeited' &&
+          String(item.business) === String(plan.tailor);
+        // Photos sent: the balance is asked for only after them.
+        const pieceShown =
+          Boolean((order as any).preship?.submitted_at) ||
+          plan?.status === 'awaiting_balance';
+        let amount: number;
+        if (planItem) {
+          const quoteFee = Math.round(((Number(plan.quote_total) || 0) * percent) / 100);
+          const deposit = Number(plan.deposit_amount) || 0;
+          amount = pieceShown ? Math.max(deposit, quoteFee) : quoteFee;
+        } else {
+          amount = Math.round(((item.total_price || 0) * percent) / 100);
+        }
         if (amount <= 0) continue;
         lines.push({
           item: String(item._id),
@@ -5132,14 +5153,22 @@ export class OrderService {
   async autoRejectStaleShipments() {
     try {
       const settings = await this.platformSettingsModel.findOne().lean();
-      const autoRejectHours = (settings as any)?.auto_reject_hours ?? 24;
+      const autoRejectHours = Number((settings as any)?.auto_reject_hours ?? 24);
+      // 0 switches it off, as abandon_after_days = 0 does. It used to mean
+      // "cancel every unconfirmed order at the next run".
+      if (!(autoRejectHours > 0)) return;
       const STALE_THRESHOLD_MS = autoRejectHours * 60 * 60 * 1000;
       const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+      const confirmWindow = confirmWindowText(autoRejectHours);
 
-      // Find orders that are in_review and were created more than 24h ago
+      // Waiting on the vendor for longer than the window, counted from when
+      // the customer paid. Orders paid before paid_at existed use createdAt.
       const staleOrders = await this.orderModel.find({
         status: OrderStatus.IN_REVIEW,
-        createdAt: { $lte: cutoff },
+        $or: [
+          { paid_at: { $lte: cutoff } },
+          { paid_at: null, createdAt: { $lte: cutoff } },
+        ],
       });
 
       if (staleOrders.length === 0) return;
@@ -5184,7 +5213,7 @@ export class OrderService {
               await this.unwindRejectedFabricTransfer(
                 order as OrderDocument,
                 shipment,
-                'Auto-rejected: fabric vendor did not confirm within 24 hours',
+                `Auto-rejected: fabric vendor did not confirm within ${confirmWindow}`,
               );
             this.notificationsService
               .create({
@@ -5194,8 +5223,8 @@ export class OrderService {
                 type: NotificationType.ORDER_CANCELLED,
                 title: orderCancelled ? 'Order Cancelled' : 'Item Cancelled',
                 body: orderCancelled
-                  ? `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`
-                  : `${businessName} did not confirm the fabric for your order #${order.reference} within 24 hours. The affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet; the rest of your order is unaffected.`,
+                  ? `${businessName} did not confirm the fabric for your order #${order.reference} within ${confirmWindow}. The order was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet.`
+                  : `${businessName} did not confirm the fabric for your order #${order.reference} within ${confirmWindow}. The affected garment was cancelled and ₦${refundAmount.toLocaleString()} refunded to your wallet; the rest of your order is unaffected.`,
                 metadata: {
                   order_id: order._id,
                   order_reference: order.reference,
@@ -5216,7 +5245,7 @@ export class OrderService {
           // Auto-reject this vendor's unconfirmed shipment
           shipment.rejected = true;
           shipment.rejected_at = new Date();
-          shipment.rejection_reason = 'Auto-rejected: vendor did not confirm within 24 hours';
+          shipment.rejection_reason = `Auto-rejected: vendor did not confirm within ${confirmWindow}`;
           shipment.status = ShipmentStatus.FAILED;
           orderChanged = true;
 
@@ -5311,7 +5340,7 @@ export class OrderService {
             category: NotificationCategory.ORDER,
             type: NotificationType.ORDER_CANCELLED,
             title: 'Vendor Did Not Respond',
-            body: `${businessName} did not confirm your order #${order.reference} within 24 hours. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
+            body: `${businessName} did not confirm your order #${order.reference} within ${confirmWindow}. A refund of ₦${refundAmount.toLocaleString()} for their items will be processed.`,
             metadata: {
               order_id: order._id,
               order_reference: order.reference,

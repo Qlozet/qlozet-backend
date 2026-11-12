@@ -577,6 +577,12 @@ export class Order {
   @Prop({ type: String, enum: ['unpaid', 'paid'], default: 'unpaid' })
   payment_status?: 'unpaid' | 'paid';
 
+  // When the payment landed. The vendor's time to confirm counts from here,
+  // not from order creation (a slow card payment used to eat into it).
+  // Orders from before this field fall back to createdAt.
+  @Prop({ type: Date, default: null })
+  paid_at?: Date | null;
+
   @Prop({
     type: String,
     enum: ['none', 'partial', 'refunded'],
