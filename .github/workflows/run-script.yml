@@ -29,6 +29,8 @@ on:
           - "fix:sparse-indexes (apply)"
           - "backfill:store-slugs (dry-run)"
           - "backfill:store-slugs (apply)"
+          - "backfill:product-codes (dry-run)"
+          - "backfill:product-codes (apply)"
 
 concurrency: run-script-group
 
@@ -72,6 +74,11 @@ jobs:
               CMD="npm run backfill:store-slugs -- --dry" ;;
             "backfill:store-slugs (apply)")
               CMD="npm run backfill:store-slugs" ;;
+            # Shop address codes for products made before they existed.
+            "backfill:product-codes (dry-run)")
+              CMD="npm run backfill:product-codes -- --dry" ;;
+            "backfill:product-codes (apply)")
+              CMD="npm run backfill:product-codes" ;;
             *)
               echo "Unknown script: $SCRIPT_CHOICE"; exit 1 ;;
           esac

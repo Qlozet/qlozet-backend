@@ -306,6 +306,7 @@ export class OnboardingService {
       {
         $project: {
           name: 1,
+          code: 1,
           business: 1,
           clothing: {
             name: '$clothing.name',

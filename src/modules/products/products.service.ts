@@ -84,6 +84,7 @@ import {
 } from '../notifications/schemas/notification.schema';
 import { customerVisibleModeration, isApprovedForCustomers } from './customer-visibility';
 import { signProductPreview, verifyProductPreview } from './product-preview';
+import { parseProductKey } from './product-code';
 import { normaliseFabricPieces } from './fabric-pieces';
 
 @Injectable()
@@ -246,8 +247,12 @@ export class ProductService {
     id: string,
     previewToken?: string,
   ): Promise<any> {
+    // The id (old /products/<id> links) or the code at the end of the shop
+    // address /p/<name>-<code>.
+    const key = parseProductKey(id);
+    if (!key) throw new NotFoundException('Product not found');
     const [product, thresholds] = await Promise.all([
-      this.findById(id),
+      'id' in key ? this.findById(key.id) : this.findByCode(key.code),
       this.getStockThresholds(),
     ]);
     if (
@@ -1070,6 +1075,16 @@ export class ProductService {
     return product;
   }
 
+  /** The product a shop address code points at (see product-code.ts). */
+  async findByCode(code: string): Promise<ProductDocument> {
+    const product = await this.productModel
+      .findOne({ code })
+      .populate('business', 'business_name slug business_logo_url business_logo_svg_url cover_image_url theme_color description accepts_external_fabric')
+      .exec();
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
+
   /**
    * Delete a product
    */
@@ -1638,6 +1653,7 @@ export class ProductService {
         $project: {
           id: '$_id',
           kind: 1,
+          code: 1,
           base_price: 1,
           average_rating: 1,
           createdAt: 1,
