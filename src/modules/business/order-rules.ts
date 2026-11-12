@@ -119,7 +119,7 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
     title: 'Ship by the date on the order',
     body:
       'Every order you confirm shows a ship-by date. It is counted from when you confirm, using the longest making time among your items; ' +
-      `an item without its own making time gets ${plural(terms.turnaround_days, 'day')}.`,
+      `an item without its own making time gets ${plural(terms.turnaround_days, 'day')}. You get a reminder before it is due.`,
   });
 
   if (terms.late_percent_per_day > 0 && terms.late_max_percent > 0) {
@@ -136,7 +136,9 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
     cards.push({
       key: 'abandon',
       title: `${plural(terms.abandon_after_days, 'day')} late, the order is cancelled`,
-      body: 'If it still has not shipped, the customer gets a full refund and your earnings from the order are reversed.',
+      body:
+        'If it still has not shipped, the customer gets a full refund and your earnings from the order are reversed. ' +
+        (terms.abandon_after_days >= 4 ? 'You are warned 2 days before.' : 'You are warned before it happens.'),
     });
   }
 

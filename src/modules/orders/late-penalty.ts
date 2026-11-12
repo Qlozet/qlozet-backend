@@ -124,3 +124,64 @@ export function withLatePreview<T extends Record<string, any>>(
   });
   return { ...order, shipments, late_preview: mine };
 }
+
+// ── Warnings before the deadlines (OrderService.warnBeforeShipDeadlines) ──
+
+/** Hours before the ship-by date that the vendor is reminded. */
+export const SHIP_BY_WARNING_LEAD_HOURS = 24;
+/** Days before the cancellation that the vendor is warned. */
+export const CANCEL_WARNING_LEAD_DAYS = 2;
+
+const HOUR = 60 * 60 * 1000;
+
+/** Still waiting to ship, and lateness counts (not paused on a balance). */
+function waitingToShip(order: any, shipment: any): boolean {
+  if (!shipment?.confirmed || shipment?.rejected) return false;
+  if (MOVED.includes(String(shipment?.status))) return false;
+  if (!['in_review', 'processing'].includes(String(order?.status))) return false;
+  return order?.payment_plan?.status !== 'awaiting_balance';
+}
+
+const sameTime = (a: any, b: Date) =>
+  !!a && new Date(a).getTime() === b.getTime();
+
+/**
+ * Whether to remind the vendor that the ship-by date is close: inside the
+ * last 24 hours (or the second half of a shorter window), not yet passed,
+ * and not already reminded for this deadline. A deadline that moves later
+ * (a bespoke balance paid) gets its own reminder.
+ */
+export function shipByWarningDue(order: any, shipment: any, now: number = Date.now()): Date | null {
+  if (!waitingToShip(order, shipment)) return null;
+  const deadline = shipment?.fulfillment_deadline ? new Date(shipment.fulfillment_deadline) : null;
+  if (!deadline || Number.isNaN(deadline.getTime())) return null;
+  if (now >= deadline.getTime()) return null;
+  if (sameTime(shipment?.ship_by_warning_for, deadline)) return null;
+  const start = shipment?.confirmed_at ? new Date(shipment.confirmed_at).getTime() : null;
+  const window = start ? deadline.getTime() - start : Infinity;
+  const lead = Math.min(SHIP_BY_WARNING_LEAD_HOURS * HOUR, window / 2);
+  return now >= deadline.getTime() - lead ? deadline : null;
+}
+
+/**
+ * Whether to warn the vendor that the order is about to be cancelled for
+ * not shipping: inside the last 2 days before it (half the stage if it is
+ * shorter), and once per cancellation date. Null when cancellation is off.
+ */
+export function cancelWarningDue(
+  order: any,
+  shipment: any,
+  rules: LateRules,
+  now: number = Date.now(),
+): Date | null {
+  if (!(rules.abandonAfterDays > 0)) return null;
+  if (shipment?.shipment_type === 'fabric_transfer') return null;
+  if (!waitingToShip(order, shipment)) return null;
+  const deadline = shipment?.fulfillment_deadline ? new Date(shipment.fulfillment_deadline) : null;
+  if (!deadline || Number.isNaN(deadline.getTime())) return null;
+  const cancelOn = new Date(deadline.getTime() + rules.abandonAfterDays * DAY);
+  if (now >= cancelOn.getTime()) return null;
+  if (sameTime(shipment?.cancel_warning_for, cancelOn)) return null;
+  const lead = Math.min(CANCEL_WARNING_LEAD_DAYS, rules.abandonAfterDays / 2) * DAY;
+  return now >= cancelOn.getTime() - lead ? cancelOn : null;
+}

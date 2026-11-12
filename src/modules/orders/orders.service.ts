@@ -9,10 +9,14 @@ import {
   withConfirmBy,
 } from './confirm-deadline';
 import {
+  cancelWarningDue,
   daysLate as lateDaysSince,
   latePenaltyBase,
   latePenaltyTotal,
+  latePreviewFor,
   lateRulesFrom,
+  shipByWarningDue,
+  SHIP_BY_WARNING_LEAD_HOURS,
   withLatePreview,
 } from './late-penalty';
 import { Length } from 'class-validator';
@@ -5281,6 +5285,119 @@ export class OrderService {
       }
     } catch (error: any) {
       this.logger.error(`[ConfirmWarning] Run failed: ${error?.message}`);
+    }
+  }
+
+  /**
+   * Warn a vendor before the two late-shipping deadlines bite: a reminder in
+   * the last 24 hours before the ship-by date, and a warning in the last 2
+   * days before the order is cancelled for not shipping. The charges
+   * themselves are announced by checkLateFulfillments as they are taken.
+   * Each is claimed on the date it warns about, so it is sent once per date
+   * (late-penalty.ts shipByWarningDue / cancelWarningDue).
+   */
+  @Cron('20 * * * *', { timeZone: 'Africa/Lagos' })
+  async warnBeforeShipDeadlines() {
+    try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const rules = lateRulesFrom(settings);
+      const now = Date.now();
+      const oldest = new Date(now - Math.max(rules.abandonAfterDays, 0) * 86_400_000);
+      const newest = new Date(now + SHIP_BY_WARNING_LEAD_HOURS * 3_600_000);
+      const orders = await this.orderModel
+        .find({
+          status: { $in: [OrderStatus.PROCESSING, OrderStatus.IN_REVIEW] },
+          'payment_plan.status': { $ne: 'awaiting_balance' },
+          shipments: {
+            $elemMatch: {
+              confirmed: true,
+              rejected: { $ne: true },
+              fulfillment_deadline: { $gt: oldest, $lte: newest },
+            },
+          },
+        })
+        .lean();
+
+      const naira = (n: number) => `₦${Math.round(n).toLocaleString('en-NG')}`;
+      const when = (d: Date) =>
+        d.toLocaleString('en-NG', {
+          timeZone: 'Africa/Lagos',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
+
+      for (const order of orders as any[]) {
+        for (const shipment of order.shipments ?? []) {
+          const preview = latePreviewFor(order, shipment, rules, now);
+          if (!preview) continue;
+
+          const shipBy = shipByWarningDue(order, shipment, now);
+          if (shipBy) {
+            const claim = await this.orderModel.updateOne(
+              {
+                _id: order._id,
+                shipments: {
+                  $elemMatch: { _id: shipment._id, ship_by_warning_for: { $ne: shipBy } },
+                },
+              },
+              { $set: { 'shipments.$.ship_by_warning_for': shipBy } },
+            );
+            if (claim.modifiedCount === 1) {
+              const cost =
+                preview.per_day > 0
+                  ? ` After that, each late day costs ${naira(preview.per_day)} from your earnings, up to ${naira(preview.cap)}, paid to the customer.`
+                  : '';
+              this.notifyVendorTeam(String(shipment.business), {
+                type: NotificationType.ORDER_STATUS_CHANGED,
+                title: 'This order is due to ship soon',
+                body: `Order #${order.reference} is due to ship by ${when(shipBy)}.${cost}`,
+                metadata: {
+                  order_id: order._id,
+                  order_reference: order.reference,
+                  ship_by: shipBy,
+                  reason: 'ship_by_warning',
+                },
+              });
+            }
+          }
+
+          const cancelOn = cancelWarningDue(order, shipment, rules, now);
+          if (cancelOn) {
+            const claim = await this.orderModel.updateOne(
+              {
+                _id: order._id,
+                shipments: {
+                  $elemMatch: { _id: shipment._id, cancel_warning_for: { $ne: cancelOn } },
+                },
+              },
+              { $set: { 'shipments.$.cancel_warning_for': cancelOn } },
+            );
+            if (claim.modifiedCount === 1) {
+              const charged =
+                preview.charged > 0
+                  ? ` ${naira(preview.charged)} has been taken in late charges so far.`
+                  : '';
+              this.notifyVendorTeam(String(shipment.business), {
+                type: NotificationType.ORDER_STATUS_CHANGED,
+                title: 'This order will be cancelled soon',
+                body: `Order #${order.reference} is late. If it has not shipped by ${when(cancelOn)}, it will be cancelled, the customer refunded in full and your earnings from it reversed.${charged}`,
+                metadata: {
+                  order_id: order._id,
+                  order_reference: order.reference,
+                  cancel_on: cancelOn,
+                  reason: 'abandon_warning',
+                },
+              });
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`[ShipWarning] Run failed: ${error?.message}`);
     }
   }
 
