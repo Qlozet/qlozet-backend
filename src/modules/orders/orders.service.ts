@@ -1,6 +1,13 @@
 import { ADMIN_COUNTED_ORDER } from './admin-order-scope';
 import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
 import { orderContactForVendor } from '../../common/utils/customer-privacy';
+import {
+  awaitingConfirmation,
+  confirmByFor,
+  confirmHoursFrom,
+  confirmWarningLeadHours,
+  withConfirmBy,
+} from './confirm-deadline';
 import { Length } from 'class-validator';
 import {
   balanceDaysFrom,
@@ -1830,6 +1837,15 @@ export class OrderService {
             };
           });
         }
+      }
+
+      // The time each unconfirmed order cancels itself, for the vendor
+      // app's countdown (rule in confirm-deadline.ts).
+      if (business) {
+        const confirmHours = confirmHoursFrom(settings);
+        scopedRows = scopedRows.map((r: any) =>
+          withConfirmBy(r, String(business), confirmHours),
+        );
       }
 
       return Utils.getPagingData(
@@ -5149,11 +5165,115 @@ export class OrderService {
    * Runs every hour. Finds orders in 'in_review' with unconfirmed shipments
    * older than 24 hours, and auto-rejects those vendor shipments.
    */
+  /** In-app notice to everyone at a store who handles orders (owner always). */
+  private notifyVendorTeam(
+    businessId: string,
+    notice: { type: NotificationType; title: string; body: string; metadata: Record<string, any> },
+  ) {
+    this.vendorRecipients
+      .resolve(businessId, OPERATIONS_ROLES)
+      .then((members) =>
+        Promise.all(
+          members.map((member) =>
+            this.notificationsService.create({
+              recipient: member.userId,
+              recipient_business: businessId,
+              category: NotificationCategory.ORDER,
+              type: notice.type,
+              title: notice.title,
+              body: notice.body,
+              metadata: notice.metadata,
+              action_url: '/orders',
+            }),
+          ),
+        ),
+      )
+      .catch((err) =>
+        this.logger.error(`[Orders] Failed to notify store ${businessId}: ${err.message}`),
+      );
+  }
+
+  /**
+   * Warn a vendor before an unconfirmed order cancels itself: 4 hours ahead
+   * (a quarter of the window if it is shorter). Once per shipment, claimed
+   * on `confirm_warning_sent_at`. Runs every 15 minutes so the warning lands
+   * close to the 4-hour mark.
+   */
+  @Cron('*/15 * * * *', { timeZone: 'Africa/Lagos' })
+  async warnUnconfirmedShipments() {
+    try {
+      const settings = await this.platformSettingsModel.findOne().lean();
+      const hours = confirmHoursFrom(settings);
+      if (!(hours > 0)) return; // auto-cancel is off, so nothing to warn about
+      const now = Date.now();
+      const lead = confirmWarningLeadHours(hours);
+      // Paid (or created, for older orders) long enough ago to be inside the
+      // warning window, but not yet past the deadline.
+      const warnFrom = new Date(now - (hours - lead) * 3_600_000);
+      const deadlineFrom = new Date(now - hours * 3_600_000);
+      const orders = await this.orderModel
+        .find({
+          status: OrderStatus.IN_REVIEW,
+          $or: [
+            { paid_at: { $lte: warnFrom, $gt: deadlineFrom } },
+            { paid_at: null, createdAt: { $lte: warnFrom, $gt: deadlineFrom } },
+          ],
+          shipments: {
+            $elemMatch: {
+              confirmed: { $ne: true },
+              rejected: { $ne: true },
+              confirm_warning_sent_at: null,
+            },
+          },
+        })
+        .lean();
+
+      for (const order of orders as any[]) {
+        for (const shipment of order.shipments ?? []) {
+          if (!awaitingConfirmation(order, shipment)) continue;
+          if (shipment.confirm_warning_sent_at) continue;
+          const by = confirmByFor(order, shipment, hours);
+          if (!by || by.getTime() <= now) continue;
+          const claim = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: {
+                $elemMatch: { _id: shipment._id, confirm_warning_sent_at: null },
+              },
+            },
+            { $set: { 'shipments.$.confirm_warning_sent_at': new Date() } },
+          );
+          if (claim.modifiedCount !== 1) continue;
+          const at = by.toLocaleString('en-NG', {
+            timeZone: 'Africa/Lagos',
+            weekday: 'short',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          this.notifyVendorTeam(String(shipment.business), {
+            type: NotificationType.ORDER_STATUS_CHANGED,
+            title: 'Confirm this order soon',
+            body: `Order #${order.reference} is waiting for you. Confirm or decline it by ${at}, or it will be cancelled and the customer refunded.`,
+            metadata: {
+              order_id: order._id,
+              order_reference: order.reference,
+              confirm_by: by,
+              reason: 'confirm_deadline_warning',
+            },
+          });
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`[ConfirmWarning] Run failed: ${error?.message}`);
+    }
+  }
+
   @Cron('0 * * * *', { timeZone: 'Africa/Lagos' }) // Every hour
   async autoRejectStaleShipments() {
     try {
       const settings = await this.platformSettingsModel.findOne().lean();
-      const autoRejectHours = Number((settings as any)?.auto_reject_hours ?? 24);
+      const autoRejectHours = confirmHoursFrom(settings);
       // 0 switches it off, as abandon_after_days = 0 does. It used to mean
       // "cancel every unconfirmed order at the next run".
       if (!(autoRejectHours > 0)) return;
@@ -5303,7 +5423,7 @@ export class OrderService {
             this.processPartialRefund(
               order as OrderDocument,
               refundAmount,
-              `Auto-rejected: ${businessName} did not confirm within 24h`,
+              `Auto-rejected: ${businessName} did not confirm within ${confirmWindow}`,
             ).catch((err) =>
               this.logger.error(`[AutoReject] Refund failed for ${order.reference}: ${err.message}`),
             );
@@ -5327,6 +5447,20 @@ export class OrderService {
                   `[AutoReject] Inventory restore failed for ${order.reference}: ${err.message}`,
                 ),
               );
+
+            // Tell the vendor too. Before, only the customer heard, so a
+            // vendor learned an order had gone only by spotting it missing.
+            this.notifyVendorTeam(shipment.business.toString(), {
+              type: NotificationType.ORDER_CANCELLED,
+              title: 'Order cancelled - not confirmed in time',
+              body: `Order #${order.reference} was not confirmed within ${confirmWindow} of payment, so it was cancelled and the customer refunded ₦${refundAmount.toLocaleString()}. Confirm new orders sooner to keep them.`,
+              metadata: {
+                order_id: order._id,
+                order_reference: order.reference,
+                refund_amount: refundAmount,
+                reason: 'not_confirmed_in_time',
+              },
+            });
           } else {
             this.logger.warn(
               `[AutoReject] Refund for order ${order.reference} shipment ${(shipment as any)._id} already claimed — skipping to avoid a duplicate.`,

@@ -383,6 +383,11 @@ export class VendorShipment {
   @Prop({ type: Boolean, default: false })
   refunded: boolean;
 
+  // When the vendor was warned that this shipment cancels itself soon if not
+  // confirmed (OrderService.warnUnconfirmedShipments). Set once.
+  @Prop({ type: Date, default: null })
+  confirm_warning_sent_at?: Date | null;
+
   @Prop({ type: Date })
   rate_fetched_at?: Date;
 
