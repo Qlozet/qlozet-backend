@@ -595,22 +595,34 @@ export class MailService {
    * notice was a bell in a dashboard they might not open that day - a
    * deadline enforced without ever being announced.
    */
+  /**
+   * @param confirmWindow the vendor's time to confirm in words ("48 hours"),
+   *   from the auto_reject_hours setting; null when auto-cancel is off.
+   */
   async sendNewOrderVendorEmail(
     to: string,
     vendorName: string,
     businessName: string,
     order: any,
+    confirmWindow: string | null = null,
   ) {
     try {
       if (!this.templates.newOrderVendor)
         throw new Error('New order vendor template not loaded');
 
       const fields = this.orderEmailFields(order);
+      const subject = confirmWindow
+        ? `New order ${fields.orderReference} — confirm within ${confirmWindow}`
+        : `New order ${fields.orderReference}`;
       const html = this.templates.newOrderVendor({
         ...fields,
         vendorName,
         businessName,
-        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        confirmWindow,
+        confirmSubtitle: confirmWindow
+          ? `Confirm it within ${confirmWindow}`
+          : 'Confirm it as soon as you can',
+        subject,
         orderUrl: `${
           process.env.VENDOR_FRONTEND_URL ||
           process.env.FRONTEND_URL ||
@@ -620,7 +632,7 @@ export class MailService {
 
       await this.dispatch({
         to,
-        subject: `New order ${fields.orderReference} — confirm within 48 hours`,
+        subject,
         html,
       });
       return true;

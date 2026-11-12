@@ -8601,6 +8601,13 @@ export class OrderService {
     // Settled rather than awaited in sequence: one unreachable address must
     // not stop the rest, and none of them should delay the response.
     const emails: Promise<unknown>[] = [];
+    // The time to confirm, as the setting says (the email used to hard-code it).
+    const confirmSettings = await this.platformSettingsModel
+      .findOne()
+      .lean()
+      .catch(() => null);
+    const confirmHours = confirmHoursFrom(confirmSettings);
+    const confirmWindow = confirmHours > 0 ? confirmWindowText(confirmHours) : null;
 
     for (const biz of businesses as any[]) {
       const to = biz.created_by?.email;
@@ -8611,6 +8618,7 @@ export class OrderService {
           biz.created_by?.name || 'there',
           biz.business_name || 'your store',
           order,
+          confirmWindow,
         ),
       );
     }

@@ -422,7 +422,7 @@ export class PlatformController {
   @ApiOperation({
     summary: "One vendor's wallet, earnings and payouts (admin)",
     description:
-      "Everything the console's vendor wallet panel shows in one read: balance, pending and owed, the open-return withdrawal hold and what is actually withdrawable, lifetime gross / commission / net from the earnings rows, the next scheduled release, payout totals by status with the last payout, and the linked payout account (number masked). Read-only: it never creates a wallet or settles debt. `pending_drift` is pending_balance minus the unreleased earnings rows; anything but 0 means the running total and the ledger disagree.",
+      "Everything the console's vendor wallet panel shows in one read: balance, pending and owed, what is actually withdrawable (withdrawal_hold is always 0: payouts are never held), lifetime gross / commission / net from the earnings rows, the next scheduled release, payout totals by status with the last payout, and the linked payout account (number masked). Read-only: it never creates a wallet or settles debt. `pending_drift` is pending_balance minus the unreleased earnings rows; anything but 0 means the running total and the ledger disagree.",
   })
   @ApiParam({ name: 'id', description: 'Business id', type: String })
   @ApiResponse({ status: 404, description: 'No vendor with that id' })

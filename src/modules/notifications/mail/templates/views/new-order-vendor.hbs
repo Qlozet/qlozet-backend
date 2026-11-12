@@ -1,4 +1,4 @@
-{{> header title="You have a new order" subtitle="Confirm it within 48 hours" }}
+{{> header title="You have a new order" subtitle=confirmSubtitle }}
 
 <p>Hello <strong>{{vendorName}}</strong>,</p>
 
@@ -31,9 +31,14 @@
 {{> button url=orderUrl text="Review the order" }}
 
 <div class="security-note" style="margin-top: 24px; background: #fff8e1; border-left-color: #f59e0b;">
-    <p style="margin: 0;"><strong>Confirm within 48 hours.</strong> That is the
-        commitment in your vendor agreement, and the customer is waiting on it.
-        Late confirmation can reduce how often your products are shown.</p>
+    {{#if confirmWindow}}
+    <p style="margin: 0;"><strong>Confirm or decline within {{confirmWindow}} of payment.</strong>
+        If you don't, the order is cancelled and the customer refunded. Your
+        orders page shows the exact time.</p>
+    {{else}}
+    <p style="margin: 0;"><strong>Confirm or decline it as soon as you can.</strong>
+        The customer is waiting on it.</p>
+    {{/if}}
 </div>
 
 <p style="margin-top: 28px;">The order value above is before commission and fees.
