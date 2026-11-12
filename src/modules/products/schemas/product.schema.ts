@@ -8,6 +8,7 @@ import {
   keepOneDefaultPerPart,
   usesDefaultStyles,
 } from '../style-defaults';
+import { newProductCode } from '../product-code';
 
 export type ProductDocument = Product & Document;
 import { ProductStatus } from '../enums/product-status.enum';
@@ -26,6 +27,13 @@ export enum ProductKind {
 export class Product extends Document {
   @Prop({ required: true, enum: ProductKind })
   kind: string;
+
+  // The short code in the product's shop address, /p/<name>-<code>
+  // (../product-code.ts). Set on create by the pre('validate') hook below; no
+  // schema default, because Mongoose would invent one in memory for every old
+  // product that has none, and a link built from it would lead nowhere.
+  @Prop({ type: String, unique: true, sparse: true })
+  code?: string;
 
   @Prop({ type: Object })
   seo?: Record<string, any>;
@@ -157,6 +165,13 @@ export class Product extends Document {
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
+
+// Every new product gets its address code, whichever way it is created
+// (create, save, insertMany all validate first).
+ProductSchema.pre('validate', function () {
+  const doc = this as any;
+  if (doc.isNew && !doc.code) doc.code = newProductCode();
+});
 
 // One marked default per part, and the listing's default-styles price kept in
 // step with the styles on every save (create, vendor edit, admin edit).
