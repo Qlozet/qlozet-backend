@@ -28,6 +28,10 @@ import {
   hasAcceptedCurrentAgreement,
 } from '../business/service-agreement';
 import { getVendorAgreement } from '../business/agreements';
+import {
+  hasAcknowledgedOrderRules,
+  orderRulesFrom,
+} from '../business/order-rules';
 import { nextVerificationState } from './verification-state';
 import { QoreIdService } from './qoreid.service';
 import {
@@ -75,6 +79,12 @@ class ManualSubmitDto {
 class AcceptAgreementDto {
   @IsString()
   @IsNotEmpty({ message: 'Which version are you accepting?' })
+  version: string;
+}
+
+class AcknowledgeOrderRulesDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Which version of the rules are you acknowledging?' })
   version: string;
 }
 
@@ -129,6 +139,11 @@ export class VerificationController {
       .lean<any>();
   }
 
+  /** "How orders work" as it stands, from the live settings. */
+  private async orderRules() {
+    return orderRulesFrom(await this.settingsModel.findOne().lean<any>());
+  }
+
   /** A manually approved vendor finishing the QoreID checks while still live. */
   private static isUpgrade(b: any): boolean {
     return (
@@ -175,7 +190,7 @@ export class VerificationController {
       .select(
         'verification status business_name verification_state ' +
           'verification_message verification_attempts ' +
-          'verification_attempts_allowed service_agreement ' +
+          'verification_attempts_allowed service_agreement order_rules_ack ' +
           'verification_method full_verification_due_at ' +
           'payout_account_number payout_account_name payout_bank_name',
       )
@@ -187,6 +202,8 @@ export class VerificationController {
     const settings = await this.settings();
     const mode = verificationMode(settings);
     const upgrade = VerificationController.isUpgrade(b);
+    const rules = await this.orderRules();
+    const rulesAcknowledged = hasAcknowledgedOrderRules(b, rules.version);
     const attemptsLeft =
       (b?.verification_attempts ?? 0) < (b?.verification_attempts_allowed ?? 1);
 
@@ -226,6 +243,7 @@ export class VerificationController {
           mode,
           agreementAccepted,
           rcNumber: 'RC0000',
+          orderRulesAcknowledged: rulesAcknowledged,
         }) === null,
       configured: this.qoreid.isConfigured(),
       /**
@@ -264,7 +282,67 @@ export class VerificationController {
         /** True when they signed an older version and must sign again. */
         outdated: Boolean(b?.service_agreement) && !agreementAccepted,
       },
+      /**
+       * "How orders work". Fetch the cards from GET /verification/order-rules.
+       * Needed before submitting for review.
+       */
+      order_rules: {
+        version: rules.version,
+        acknowledged: rulesAcknowledged,
+        acknowledged_at: b?.order_rules_ack?.accepted_at ?? null,
+        /** True when a rule changed since they acknowledged it. */
+        outdated: Boolean(b?.order_rules_ack) && !rulesAcknowledged,
+      },
     };
+  }
+
+  /**
+   * "How orders work": the order rules in plain words, with the numbers the
+   * platform runs on today (business/order-rules.ts). Any vendor role may
+   * read them; the owner acknowledges them.
+   */
+  @Roles(UserType.VENDOR)
+  @Get('order-rules')
+  @ApiOperation({ summary: 'How orders work: the order rules for vendors' })
+  async getOrderRules(@Req() req: any) {
+    const rules = await this.orderRules();
+    const business = await this.businessModel
+      .findById(req.business?.id)
+      .select('order_rules_ack')
+      .lean<any>();
+    return {
+      ...rules,
+      acknowledged: hasAcknowledgedOrderRules(business, rules.version),
+      acknowledged_at: business?.order_rules_ack?.accepted_at ?? null,
+    };
+  }
+
+  /**
+   * Tick "I understand". The version must match the rules in force, so a
+   * page shown before a rule changed cannot record agreement to it.
+   */
+  @Roles(UserType.VENDOR)
+  @VendorRoles(VendorRole.OWNER)
+  @Post('order-rules')
+  @ApiOperation({ summary: 'Acknowledge How orders work' })
+  async acknowledgeOrderRules(@Req() req: any, @Body() dto: AcknowledgeOrderRulesDto) {
+    const rules = await this.orderRules();
+    if (dto.version !== rules.version) {
+      throw new BadRequestException(
+        'The order rules changed since this page loaded. Reload and read them again.',
+      );
+    }
+    const ack = {
+      version: rules.version,
+      terms: { ...rules.terms },
+      accepted_at: new Date(),
+      accepted_by: req.user?.id ?? req.user?._id ?? null,
+    };
+    await this.businessModel.updateOne(
+      { _id: req.business.id },
+      { $set: { order_rules_ack: ack } },
+    );
+    return { message: 'Order rules acknowledged', order_rules_ack: ack };
   }
 
   // Handler-level: the RolesGuard reads roles from the handler, not the class.
@@ -516,7 +594,7 @@ export class VerificationController {
   async submitForReview(@Req() req: any) {
     const business = await this.businessModel
       .findById(req.business.id)
-      .select('verification_state service_agreement')
+      .select('verification_state service_agreement order_rules_ack')
       .lean();
 
     if (!business) throw new BadRequestException('Business not found');
@@ -524,6 +602,11 @@ export class VerificationController {
     if (!hasAcceptedCurrentAgreement(business as any)) {
       throw new BadRequestException(
         'Accept the vendor service agreement before submitting.',
+      );
+    }
+    if (!hasAcknowledgedOrderRules(business as any, (await this.orderRules()).version)) {
+      throw new BadRequestException(
+        'Read "How orders work" and tick "I understand" before submitting.',
       );
     }
 
@@ -578,7 +661,7 @@ export class VerificationController {
     const business = await this.businessModel
       .findById(req.business.id)
       .select(
-        'verification_state service_agreement payout_account_number ' +
+        'verification_state service_agreement order_rules_ack payout_account_number ' +
           'payout_account_name payout_bank_name',
       )
       .lean();
@@ -590,6 +673,7 @@ export class VerificationController {
       mode: verificationMode(await this.settings()),
       agreementAccepted: hasAcceptedCurrentAgreement(b),
       rcNumber,
+      orderRulesAcknowledged: hasAcknowledgedOrderRules(b, (await this.orderRules()).version),
     });
     if (problem) throw new BadRequestException(problem);
 
