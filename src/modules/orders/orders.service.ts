@@ -2928,7 +2928,31 @@ export class OrderService {
     };
   }
 
-  async cancelOrder(reference: string, opts?: { customerId?: string }) {
+  /**
+   * A store may cancel an order only when every live item in it is theirs.
+   * An order that also holds another store's items is cancelled per store by
+   * rejecting your own items, so the other store's sale is left alone.
+   */
+  private assertStoreMayCancel(order: any, businessId: string | undefined) {
+    const mine = String(businessId ?? '');
+    const owner = (item: any) =>
+      String(item?.business?._id ?? item?.business ?? '');
+    const items: any[] = (order.items ?? []).filter((i: any) => !i?.rejected);
+    if (!mine || !(order.items ?? []).some((i: any) => owner(i) === mine)) {
+      throw new ForbiddenException("You can only cancel your own store's orders");
+    }
+    if (items.some((i) => owner(i) !== mine)) {
+      throw new BadRequestException(
+        "This order includes another store's items, so it can't be cancelled " +
+          'as a whole. Reject your own items instead.',
+      );
+    }
+  }
+
+  async cancelOrder(
+    reference: string,
+    opts?: { customerId?: string; businessId?: string },
+  ) {
     const order = await this.orderModel.findOne({ reference });
     if (!order) throw new BadRequestException('Order not found');
 
@@ -2938,6 +2962,12 @@ export class OrderService {
       order.customer?.toString() !== String(opts.customerId)
     ) {
       throw new ForbiddenException('You can only cancel your own orders');
+    }
+
+    // When a store initiates the cancel, the whole order must be that store's.
+    // Without this any store could cancel and refund any order by reference.
+    if (opts && 'businessId' in opts) {
+      this.assertStoreMayCancel(order, opts.businessId);
     }
 
     // Prevent cancelling already cancelled orders.

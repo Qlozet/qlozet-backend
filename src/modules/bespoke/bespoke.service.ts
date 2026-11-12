@@ -59,10 +59,12 @@ import {
 import {
   Business,
   BusinessDocument,
+  BusinessStatus,
 } from '../business/schemas/business.schema';
 import { ProductDocument } from '../products/schemas';
 import { User } from '../ums/schemas';
 import { Utils } from '../../common/utils/pagination';
+import { customerForVendor } from '../../common/utils/customer-privacy';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
@@ -485,6 +487,25 @@ export class BespokeService {
    * `=== false` deliberately, not a falsy test - a business saved before the
    * field existed has it undefined and is still eligible.
    */
+  /**
+   * Bespoke work goes only to stores that have been approved, the same rule
+   * checkout applies to every other order. Without it a store still in
+   * review could take a paid deposit.
+   */
+  private assertVendorsMaySell(businesses: any[]): void {
+    const sellable: string[] = [BusinessStatus.APPROVED, BusinessStatus.VERIFIED];
+    const blocked = businesses.filter(
+      (b) => !b || b.is_active === false || !sellable.includes(String(b.status)),
+    );
+    if (blocked.length === 0) return;
+    const names = blocked.map((b) => b?.business_name ?? 'This store');
+    throw new BadRequestException(
+      names.length === 1
+        ? `${names[0]} has not completed verification yet, so it can't take bespoke orders.`
+        : `These stores have not completed verification yet: ${names.join(', ')}.`,
+    );
+  }
+
   private assertVendorsAcceptBespoke(businesses: any[]): void {
     const declined = businesses.filter((b) => b?.accepts_bespoke === false);
     if (declined.length === 0) return;
@@ -564,6 +585,7 @@ export class BespokeService {
     }
 
     this.assertVendorsAcceptBespoke(businesses);
+    this.assertVendorsMaySell(businesses);
 
     // Create quotes
     const expiresAt = new Date();
@@ -696,6 +718,13 @@ export class BespokeService {
         `Cannot accept a quote with status "${quote.status}". Only submitted quotes can be accepted.`,
       );
     }
+
+    // The store may have been paused since it quoted; check before any charge.
+    const tailorStore = await this.businessModel
+      .findById(quote.vendor)
+      .select('business_name status is_active')
+      .lean();
+    this.assertVendorsMaySell([tailorStore]);
 
     // Check expiry
     if (new Date() > quote.expires_at) {
@@ -1253,13 +1282,17 @@ export class BespokeService {
         .skip((page - 1) * size)
         .limit(size)
         .populate('design', 'name category gender design_images back_views show_other_versions reference_images description fabric extra_fabrics')
-        .populate('customer', 'first_name last_name email')
+        .populate('customer', 'full_name username first_name last_name')
         .lean(),
       this.quoteModel.countDocuments(filter),
     ]);
 
+    // Vendors get a short name only, never the customer's email or phone.
     return Utils.getPagingData(
-      { count: total, rows: quotes },
+      {
+        count: total,
+        rows: quotes.map((q: any) => ({ ...q, customer: customerForVendor(q.customer) })),
+      },
       page,
       size,
     );
@@ -1341,7 +1374,7 @@ export class BespokeService {
         path: 'design',
         populate: [{ path: 'fabric' }, { path: 'extra_fabrics.fabric' }],
       })
-      .populate('customer', 'first_name last_name email')
+      .populate('customer', 'full_name username first_name last_name')
       .lean();
 
     if (!quote) throw new NotFoundException('Quote not found');
@@ -1384,7 +1417,15 @@ export class BespokeService {
         ? checkGarment(garment, measurements.measurements, measurements.tailoring_meta)
         : null;
     return {
-      data: { ...quote, measurements, measurement_check, deposit_percent, fabric_offer, extra_fabric_offers },
+      data: {
+        ...quote,
+        customer: customerForVendor((quote as any).customer),
+        measurements,
+        measurement_check,
+        deposit_percent,
+        fabric_offer,
+        extra_fabric_offers,
+      },
     };
   }
 
@@ -1587,7 +1628,8 @@ export class BespokeService {
         _id: new Types.ObjectId(quoteId),
         vendor: new Types.ObjectId(businessId),
       })
-      .populate('customer', 'first_name last_name email')
+      // The email is for telling the customer; it never goes back to the vendor.
+      .populate('customer', 'full_name first_name last_name email')
       .populate('design', 'name');
 
     if (!quote) throw new NotFoundException('Quote not found');
@@ -1690,7 +1732,7 @@ export class BespokeService {
       const customerUser = quote.customer as any;
       await this.mailService.sendQuoteSubmittedEmail(
         customerUser.email,
-        customerUser.first_name,
+        customerUser.first_name || String(customerUser.full_name ?? '').split(' ')[0],
         business?.business_name || 'A vendor',
         customerPrice,
         dto.estimated_completion_days,
@@ -1724,7 +1766,10 @@ export class BespokeService {
       `Quote ${quote.reference} submitted by vendor ${businessId}`,
     );
 
-    return { message: 'Quote submitted successfully', data: quote };
+    return {
+      message: 'Quote submitted successfully',
+      data: { ...quote.toObject(), customer: customerForVendor(quote.customer) },
+    };
   }
 
   // ════════════════════════════════════════════════════════════════

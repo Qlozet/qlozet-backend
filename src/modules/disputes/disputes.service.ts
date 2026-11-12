@@ -33,6 +33,7 @@ import {
   syncOrderEarningTotals,
 } from '../business/order-earning-totals';
 import { TransactionType, TransactionStatus } from '../transactions/schema/transaction.schema';
+import { customerForVendor } from '../../common/utils/customer-privacy';
 
 @Injectable()
 export class DisputesService {
@@ -314,11 +315,13 @@ export class DisputesService {
     } else if (status && Object.values(DisputeStatus).includes(status as DisputeStatus)) {
       filter.status = status;
     }
-    return this.disputeModel
+    // Vendors get a short name only, never the customer's email or phone.
+    const disputes = await this.disputeModel
       .find(filter)
       .sort({ createdAt: -1 })
-      .populate('customer', 'full_name email')
+      .populate('customer', 'full_name username')
       .lean();
+    return disputes.map((d: any) => ({ ...d, customer: customerForVendor(d.customer) }));
   }
 
   /**

@@ -396,8 +396,10 @@ export class OrderController {
   @VendorRoles(VendorRole.OWNER, VendorRole.OPERATIONS)
   @Patch('cancel/:reference')
   @ApiOperation({ summary: 'Cancel an order and refund customer' })
-  async cancelOrder(@Param('reference') reference: string) {
-    return this.orderService.cancelOrder(reference);
+  async cancelOrder(@Param('reference') reference: string, @Req() req) {
+    return this.orderService.cancelOrder(reference, {
+      businessId: req.business?.id,
+    });
   }
 
   @Roles(UserType.CUSTOMER)

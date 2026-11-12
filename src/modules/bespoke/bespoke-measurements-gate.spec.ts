@@ -32,6 +32,14 @@ describe('Measurements are required for made-to-fit orders', () => {
     const build = (measurementSets: any[]) => {
       const orderLookups = jest.fn(async () => null);
       const service: any = Object.create(BespokeService.prototype);
+      // acceptQuote checks the tailor's store is approved before anything else.
+      service.businessModel = {
+        findById: () => ({
+          select: () => ({
+            lean: async () => ({ business_name: 'Tailor', status: 'approved' }),
+          }),
+        }),
+      };
       Object.assign(service, {
         logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
         quoteModel: {

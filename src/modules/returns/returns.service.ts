@@ -35,6 +35,7 @@ import {
 } from '../business/order-earning-totals';
 import { ProductService } from '../products/products.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { customerForVendor } from '../../common/utils/customer-privacy';
 
 @Injectable()
 export class ReturnsService {
@@ -590,10 +591,12 @@ export class ReturnsService {
     if (status && Object.values(ReturnStatus).includes(status as ReturnStatus)) {
       filter.status = status;
     }
-    return this.returnModel
+    // Vendors get a short name only, never the customer's email or phone.
+    const returns = await this.returnModel
       .find(filter)
       .sort({ createdAt: -1 })
-      .populate('customer', 'full_name email')
+      .populate('customer', 'full_name username')
       .lean();
+    return returns.map((r: any) => ({ ...r, customer: customerForVendor(r.customer) }));
   }
 }

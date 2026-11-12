@@ -180,12 +180,29 @@ export class DiscountService {
   // ─────────────────────────────────────────────────────────
 
   /** Manually include a product in this discount (force-apply even if rules don't match) */
+  /**
+   * A discount may only touch the store's own products. The discount was
+   * already checked as the store's; without this the product was not, so a
+   * store could put its discount on another store's listing.
+   */
+  private async assertOwnProduct(productId: string, business: string) {
+    if (!Types.ObjectId.isValid(productId) || !Types.ObjectId.isValid(business)) {
+      throw new NotFoundException('Product not found');
+    }
+    const owned = await this.productModel.exists({
+      _id: new Types.ObjectId(productId),
+      business: new Types.ObjectId(business),
+    });
+    if (!owned) throw new NotFoundException('Product not found');
+  }
+
   async includeProduct(discountId: string, productId: string, business: string) {
     const discount = await this.discountModel.findOne({
       _id: discountId,
       business: new Types.ObjectId(business),
     });
     if (!discount) throw new NotFoundException('Discount not found');
+    await this.assertOwnProduct(productId, business);
 
     const productObjectId = new Types.ObjectId(productId);
 
@@ -227,6 +244,7 @@ export class DiscountService {
       business: new Types.ObjectId(business),
     });
     if (!discount) throw new NotFoundException('Discount not found');
+    await this.assertOwnProduct(productId, business);
 
     const productObjectId = new Types.ObjectId(productId);
 
@@ -270,11 +288,16 @@ export class DiscountService {
    */
   async applyDiscountToMatchingProducts(
     discountId: string,
+    business?: string,
   ): Promise<number> {
     this.logger.log(`Applying discount: ${discountId}`);
 
     const discount = await this.discountModel.findById(discountId).exec();
     if (!discount) throw new NotFoundException('Discount not found');
+    // From the vendor route the discount must be the caller's own.
+    if (business !== undefined && String(discount.business) !== String(business)) {
+      throw new NotFoundException('Discount not found');
+    }
 
     const now = new Date();
     if (!discount.is_active) {

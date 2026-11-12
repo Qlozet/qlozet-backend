@@ -56,6 +56,14 @@ describe('accepting a quote for a garment with extra fabrics', () => {
     };
 
     const service: any = Object.create(BespokeService.prototype);
+    // acceptQuote checks the tailor's store is approved before anything else.
+    service.businessModel = {
+      findById: () => ({
+        select: () => ({
+          lean: async () => ({ business_name: 'Tailor', status: 'approved' }),
+        }),
+      }),
+    };
     Object.assign(service, {
       logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
       quoteModel: { findOne: async () => quote },
