@@ -107,10 +107,19 @@ export async function freeSlugFor(
     if (!(await taken(candidate))) return candidate;
   }
 
+  return randomSlugFor(name, taken);
+}
+
+/** The store name's slug plus a random ending, e.g. "ada-couture-k3x9q". */
+export async function randomSlugFor(
+  name: unknown,
+  taken: (slug: string) => Promise<boolean>,
+): Promise<string> {
+  const base = slugFromName(name);
   for (let i = 0; i < 10; i++) {
     const suffix = `-${Math.random().toString(36).slice(2, 7)}`;
     const candidate = `${base.slice(0, SLUG_MAX - suffix.length).replace(/-+$/g, '')}${suffix}`;
-    if (!(await taken(candidate))) return candidate;
+    if (!slugProblem(candidate) && !(await taken(candidate))) return candidate;
   }
   throw new Error(`No free store address for "${String(name)}"`);
 }
@@ -142,8 +151,14 @@ export async function ensureStoreSlug(
       projection: { _id: 1 },
     }));
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const slug = await freeSlugFor(business.business_name, taken);
+  // Stores signing up with the same name at the same moment all pick the
+  // same "next free" address and collide again on every round, so after two
+  // collisions switch to a random ending, which racing sign-ups can't share.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const slug =
+      attempt < 2
+        ? await freeSlugFor(business.business_name, taken)
+        : await randomSlugFor(business.business_name, taken);
     try {
       const res = await collection.updateOne(
         { _id: business._id, $or: [{ slug: { $exists: false } }, { slug: null }] },

@@ -91,12 +91,22 @@ describe('Store addresses - stored', () => {
     expect(await ensureStoreSlug(businessModel.collection, again)).toBe('ada-couture');
   });
 
-  it('two sign-ups with the same name at once still end up different', async () => {
-    const stores = await Promise.all([1, 2, 3, 4].map(() => store('Twin Tailors')));
-    const slugs = await Promise.all(
-      stores.map((s) => ensureStoreSlug(businessModel.collection, s)),
-    );
-    expect(new Set(slugs).size).toBe(4);
+  it('sign-ups with the same name at once still end up different', async () => {
+    // Racing sign-ups all pick the same "next free" address each round; this
+    // once failed in CI with four. Eight at once, many times over.
+    for (let round = 0; round < 15; round++) {
+      await businessModel.deleteMany({});
+      const stores = await Promise.all(
+        Array.from({ length: 8 }, () => store('Twin Tailors')),
+      );
+      const slugs = await Promise.all(
+        stores.map((s) => ensureStoreSlug(businessModel.collection, s)),
+      );
+      expect(new Set(slugs).size).toBe(8);
+      for (const slug of slugs) expect(slugProblem(slug)).toBeNull();
+      const saved = await businessModel.find({}).select('slug').lean();
+      expect(saved.map((s: any) => s.slug).sort()).toEqual([...slugs].sort());
+    }
   });
 
   it('many stores without an address do not clash on the unique index', async () => {
