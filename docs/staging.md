@@ -48,6 +48,18 @@ addresses — and keep the password strong.
 The connection string is staging's `MONGO_URI`. It starts empty; sign up on
 the staging shop and vendor sites to create test accounts.
 
+An empty database has no roles, so sign-up fails with "Customer role not
+found" until they are added. Once the backend is deployed (step 4), run the
+built seed inside the machine, which uses the staging database:
+
+```sh
+fly ssh console -a qlozet-backend-staging -C "sh -c 'cd /app && node dist/scripts/seed.js roles'"
+```
+
+Only `roles` (it adds the permissions too). Never `run` or `users`: they
+create sample accounts with a known password. Then, in the admin console, use
+the seed buttons on the categories and style library pages.
+
 To make yourself an admin on staging, do it the same way as on production,
 but against the staging database.
 
