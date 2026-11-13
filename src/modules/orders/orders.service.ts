@@ -8,6 +8,7 @@ import {
   confirmWarningLeadHours,
   withConfirmBy,
 } from './confirm-deadline';
+import { INCLUDED_CHANGE_ROUNDS } from '../bespoke/order-agreement';
 import {
   cancelWarningDue,
   daysLate as lateDaysSince,
@@ -3572,6 +3573,22 @@ export class OrderService {
         'Add at least one photo of the finished piece.',
       );
     }
+    // Earlier rounds are kept (what was shown, what was asked for): they
+    // are the record of what was agreed if there is ever a dispute.
+    const previous: any = (order as any).preship;
+    const history = [
+      ...(previous?.history ?? []),
+      ...(previous?.submitted_at
+        ? [{
+            photos: previous.photos ?? [],
+            note: previous.note ?? null,
+            status: previous.status,
+            submitted_at: previous.submitted_at,
+            reviewed_at: previous.reviewed_at ?? null,
+            customer_note: previous.customer_note ?? null,
+          }]
+        : []),
+    ];
     (order as any).preship = {
       photos: photos.slice(0, 8),
       note: dto.note?.trim() || null,
@@ -3579,6 +3596,8 @@ export class OrderService {
       submitted_at: new Date(),
       reviewed_at: null,
       customer_note: null,
+      changes_requested_count: previous?.changes_requested_count ?? 0,
+      history,
     };
     order.markModified('preship');
     // Deposit orders: the photos are the moment the balance falls due.
@@ -3635,6 +3654,15 @@ export class OrderService {
         `Pay the ₦${Number(plan.balance_amount).toLocaleString()} balance to approve. The tailor ships once it's paid.`,
       );
     }
+    // The price includes INCLUDED_CHANGE_ROUNDS rounds of changes (the order
+    // agreement says so); more is agreed with the tailor in the order chat.
+    const roundsUsed = Number(preship.changes_requested_count) || 0;
+    if (!dto.approve && roundsUsed >= INCLUDED_CHANGE_ROUNDS) {
+      throw new BadRequestException(
+        `Your price includes ${INCLUDED_CHANGE_ROUNDS} rounds of changes, and both have been used. Talk to your tailor in the order chat about anything else; further changes may need a new price.`,
+      );
+    }
+    if (!dto.approve) preship.changes_requested_count = roundsUsed + 1;
     if (!dto.approve && plan?.status === 'awaiting_balance') {
       // The balance clock waits while the tailor makes the changes.
       plan.balance_due_at = null;

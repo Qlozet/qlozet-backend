@@ -9,6 +9,7 @@ import {
   Min,
   ArrayMinSize,
 } from 'class-validator';
+import { IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { EXTRA_FABRIC_ROLES, type ExtraFabricRole } from '../quote-fabric';
 
@@ -71,4 +72,12 @@ export class SubmitQuoteDto {
   @IsOptional()
   @IsString()
   vendor_notes?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: "The tailor agrees to make this to Qlozet's bespoke terms (recorded with the quote).",
+  })
+  @IsOptional()
+  @IsBoolean()
+  accept_terms?: boolean;
 }

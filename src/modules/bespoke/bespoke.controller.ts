@@ -271,6 +271,8 @@ export class BespokeController {
       payment_method?: 'wallet' | 'paystack';
       address_id?: string;
       measurement_set_name?: string;
+      /** The version of the order agreement the customer agreed to. */
+      agreement_version?: string;
     },
   ) {
     return this.bespokeService.acceptQuote(
@@ -279,7 +281,23 @@ export class BespokeController {
       body?.payment_method === 'wallet' ? 'wallet' : 'paystack',
       body?.address_id,
       body?.measurement_set_name,
+      typeof body?.agreement_version === 'string' ? body.agreement_version : undefined,
     );
+  }
+
+  @Get('quotes/:id/agreement')
+  @Roles(UserType.CUSTOMER)
+  @ApiOperation({
+    summary: 'The order agreement for a quote, shown before paying (send its version when accepting)',
+  })
+  @ApiParam({ name: 'id', description: 'Quote ID' })
+  async quoteAgreement(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Query('address_id') addressId?: string,
+    @Query('measurement_set_name') measurementSetName?: string,
+  ) {
+    return this.bespokeService.quoteAgreement(id, req.user.id, addressId, measurementSetName);
   }
 
   @Get('quotes/:id/delivery')

@@ -37,9 +37,18 @@ import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
 import {
+  SHIP_AFTER_BALANCE_DAYS,
+  balanceDaysFrom,
   buildPaymentPlan,
   depositPercentFrom,
 } from '../orders/bespoke-payment-plan';
+import { lateRulesFrom } from '../orders/late-penalty';
+import { DISPUTE_WINDOW_DAYS } from '../business/settlement';
+import {
+  ORDER_AGREEMENT_TEXT_VERSION,
+  buildOrderAgreement,
+  type OrderAgreement,
+} from './order-agreement';
 import { WalletsService } from '../wallets/wallets.service';
 import { BusinessService } from '../business/business.service';
 import {
@@ -131,6 +140,11 @@ function backViewsFor(
 
 /** Recent delivery prices (quote:address), so the price shown is the price charged. */
 const deliveryCache = new Map<string, BespokeDelivery>();
+
+
+/** The customer agreed to an agreement that no longer matches the order. */
+const AGREEMENT_CHANGED =
+  'The order details changed since you looked (for example the delivery price). Check the agreement again before paying.';
 
 @Injectable()
 export class BespokeService {
@@ -755,6 +769,8 @@ export class BespokeService {
     paymentMethod: 'wallet' | 'paystack' = 'paystack',
     addressId?: string,
     measurementSetName?: string,
+    /** The agreement version the customer ticked "I agree" to (GET …/agreement). */
+    agreementVersion?: string,
   ) {
     const quote = await this.quoteModel.findOne({
       _id: new Types.ObjectId(quoteId),
@@ -848,6 +864,17 @@ export class BespokeService {
       customer.id,
       measurementSetName,
     );
+    if (order && (order as any).agreement) {
+      // Retry of an earlier checkout: the agreement is the one built then.
+      const existing: any = (order as any).agreement;
+      if (agreementVersion && agreementVersion !== existing.version) {
+        throw new BadRequestException(AGREEMENT_CHANGED);
+      }
+      if (agreementVersion) {
+        (order as any).agreement = { ...existing, customer_agreed_at: new Date() };
+        order.markModified('agreement');
+      }
+    }
     if (order && bodyProfile) {
       // Retry of an earlier checkout — refresh the snapshot in case the
       // customer picked a different measurement set this time.
@@ -1042,6 +1069,18 @@ export class BespokeService {
       const fabricLegFee = (product: any) =>
         deliveries.fabrics.find((f) => String(f.leg.product) === String(product))?.delivery.fee ?? 0;
 
+      // The agreement, from the same numbers as the charge. The customer
+      // ticked "I agree" to a version; refuse if it no longer matches.
+      const agreement = await this.agreementFor(quote, design, String(customer.id), address, {
+        bodyProfile,
+        deliveries,
+        planSettings,
+      });
+      if (agreementVersion && agreementVersion !== agreement.version) {
+        throw new BadRequestException(AGREEMENT_CHANGED);
+      }
+      if (agreementVersion) agreement.customer_agreed_at = new Date();
+
       // Only legs this order actually creates (a fabric now the tailor's own
       // has no transfer and no courier).
       const fabricLegsShipping =
@@ -1157,6 +1196,7 @@ export class BespokeService {
         shipping_fee: delivery.fee + fabricLegsShipping,
         total: tailorCharge + fabricCost + extraOnTop + delivery.fee + fabricLegsShipping,
         payment_plan: plan,
+        agreement,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
       }).save();
@@ -1255,6 +1295,81 @@ export class BespokeService {
         payment: paymentInit.data,
       },
     };
+  }
+
+  /**
+   * The order agreement for this quote and customer (order-agreement.ts):
+   * the same quote, fabric pricing, payment plan and delivery as the charge.
+   */
+  private async agreementFor(
+    quote: any,
+    design: any,
+    customerId: string,
+    address: any,
+    pre: { bodyProfile?: any; deliveries?: any; planSettings?: any; measurementSetName?: string } = {},
+  ): Promise<OrderAgreement> {
+    const settings: any = pre.planSettings ?? (await this.platformSettingsModel.findOne().lean());
+    const deliveries = pre.deliveries ?? (await this.allDeliveriesFor(quote, address));
+    const bodyProfile =
+      pre.bodyProfile !== undefined
+        ? pre.bodyProfile
+        : await this.buildBodyProfileSnapshot(customerId, pre.measurementSetName);
+    const tailor: any = await this.businessModel
+      .findById(quote.vendor?._id ?? quote.vendor)
+      .select('business_name')
+      .lean();
+    const plan = buildPaymentPlan(
+      String(quote.vendor?._id ?? quote.vendor),
+      quote.total,
+      depositPercentFrom(settings),
+      fabricDepositFloor(quoteFabrics(quote)),
+    );
+    const late = lateRulesFrom(settings);
+    return buildOrderAgreement({
+      design,
+      quote,
+      tailorName: tailor?.business_name ?? 'Your tailor',
+      plan,
+      delivery: { garment: deliveries.garment.fee, fabric: deliveries.fabricFee },
+      settings: {
+        cancellation_fee_percent: Math.min(Math.max(Number(settings?.custom_cancellation_fee_percent ?? 30), 0), 100),
+        balance_days: balanceDaysFrom(settings),
+        late_percent_per_day: late.perDayPercent,
+        late_max_percent: late.maxPercent,
+        abandon_after_days: late.abandonAfterDays,
+        dispute_window_days: DISPUTE_WINDOW_DAYS,
+        ship_after_balance_days: SHIP_AFTER_BALANCE_DAYS,
+      },
+      measurements: bodyProfile,
+      address,
+      // Only a tailor who ticked the terms (quotes from before 13 Nov 2026 have none).
+      tailorAgreedAt: quote.terms_accepted_at ?? null,
+    });
+  }
+
+  /**
+   * GET /bespoke/quotes/:id/agreement: the order agreement the customer is
+   * about to agree to, shown before paying. Send its `version` back as
+   * `agreement_version` when accepting.
+   */
+  async quoteAgreement(
+    quoteId: string,
+    customerId: string,
+    addressId?: string,
+    measurementSetName?: string,
+  ) {
+    if (!Types.ObjectId.isValid(quoteId)) throw new NotFoundException('Quote not found');
+    const quote: any = await this.quoteModel
+      .findOne({ _id: new Types.ObjectId(quoteId), customer: new Types.ObjectId(customerId) })
+      .lean();
+    if (!quote) throw new NotFoundException('Quote not found');
+    const design = await this.designModel.findById(quote.design).lean();
+    if (!design) throw new NotFoundException('Design not found');
+    const address = await this.customerAddress(customerId, addressId);
+    if (!address) {
+      throw new BadRequestException('Add a delivery address to see the order agreement.');
+    }
+    return this.agreementFor(quote, design, customerId, address, { measurementSetName });
   }
 
   /** The customer's address: the one asked for, else their default, else any. */
@@ -1919,6 +2034,10 @@ export class BespokeService {
     const previousStatus = quote.status;
     quote.status = BespokeQuoteStatus.SUBMITTED;
     quote.submitted_at = new Date();
+    if (dto.accept_terms) {
+      quote.terms_accepted_at = quote.submitted_at;
+      quote.terms_version = ORDER_AGREEMENT_TEXT_VERSION;
+    }
 
     // Restart the expiry clock from submission. expires_at was set at request
     // time, so a day-6 submission would leave the customer ~1 day to decide;

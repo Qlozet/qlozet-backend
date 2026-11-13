@@ -157,8 +157,9 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
     body: split
       ? `The customer pays ${terms.deposit_percent}% of your quote when they accept it, or the fabric cost if that is more. ` +
         'The rest is charged after you send photos of the finished piece. ' +
-        `If they do not pay it within ${plural(terms.balance_days, 'day')}, the order closes and you keep the deposit.`
-      : 'The customer pays your whole quote when they accept it. You are paid on the usual schedule.',
+        `If they do not pay it within ${plural(terms.balance_days, 'day')}, the order closes and you keep the deposit. ` +
+        'Your price includes 2 rounds of changes after the photos; agree anything more in the order chat.'
+      : 'The customer pays your whole quote when they accept it. You are paid on the usual schedule. Your price includes 2 rounds of changes after the photos.',
   });
 
   cards.push({
