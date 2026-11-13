@@ -1,57 +1,37 @@
-# fly.toml app configuration file generated for qlozet-backend on 2025-10-08T18:06:38+01:00
+# fly.toml app configuration file generated for qlozet-backend-staging on 2026-11-13T06:31:19Z
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+# See https://docs.fly.io/reference/configuration for information about how to use this file.
 #
 
-app = 'qlozet-backend'
-# London: next to the database (MongoDB Atlas, AWS Ireland eu-west-1).
-# Every product list makes several database trips one after another, so the
-# server must sit near the database. From iad each trip crossed the Atlantic.
-# min_machines_running only counts machines in this region, so the machine
-# must live here too (fly scale count 1 --region lhr).
+app = 'qlozet-backend-staging'
 primary_region = 'lhr'
 
-# No [deploy] release_command on purpose.
-#
-# normalize-refs and order-payment used to run here, before every release. Both
-# are idempotent, so re-running them was harmless — but it was never free: each
-# scans whole collections just to decide there is nothing left to convert.
-# `$expr` predicates cannot use an index, and `transactions` carries no index on
-# status/channel/type/order, so every deploy paid for ~18 full collection scans
-# whose cost grows with the data. On 2026-08-26 that wedged a deploy for 44
-# minutes and it was cancelled without ever rolling out.
-#
-# Run them on demand instead: Actions tab -> "Run maintenance script".
-
-[env]
-  PORT = "5000"
-
 [build]
+[env]
+  PORT = '5000'
 
 [http_service]
-  internal_port = 5000
+  internal_port = 8080
   force_https = true
-  # One machine, always on. The scheduled jobs (payouts, reminders, auto-reject…)
-  # have no lock, so a second machine would run each of them twice. Keep the app
-  # at exactly one machine (fly scale count 1) until the jobs get a lock.
   auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
   processes = ['app']
 
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 200
+    type = 'requests'
     hard_limit = 250
+    soft_limit = 200
 
-[[http_service.checks]]
-  grace_period = "30s"
-  interval = "15s"
-  method = "GET"
-  timeout = "5s"
-  path = "/api"
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/api'
 
 [[vm]]
   memory = '2gb'
   cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
