@@ -149,7 +149,7 @@ describe("BUG-07: the other shop's fabric is refunded when the garment is cancel
     expect(reverseBusinessEarnings).not.toHaveBeenCalledWith(order, fabricShop, String(fabricItem._id));
     expect(reconcileBusinessWallet).toHaveBeenCalledWith(
       tailor,
-      { balance: -20_000 },
+      { balance: -20_000 - 1_500 }, // the fabric and its courier to the tailor
       expect.objectContaining({ metadata: { reason: 'fabric_on_tailor' } }),
     );
   });

@@ -59,6 +59,38 @@ export function garmentParcel(name: string, value: number) {
   };
 }
 
+/** Fabric on its way to the tailor, for the courier's weight and value. */
+export function fabricParcel(name: string, yards: number, value: number) {
+  const y = Number(yards) > 0 ? Number(yards) : 1;
+  return {
+    name: `${name} — ${y} yd`,
+    description: `${name} — ${y} yd`,
+    unit_weight: Math.max(0.1, Math.round(y * 0.3 * 100) / 100),
+    unit_amount: Math.max(0, Math.round(value || 0)),
+    quantity: 1,
+  };
+}
+
+/**
+ * Fabric another shop sends to the tailor for this quote: the main fabric
+ * and each extra (contrast, lining, bottom) priced as `other_vendor`. The
+ * courier for each leg is charged with the deposit too.
+ */
+export function fabricLegsOf(quote: any): { product: string; yards: number; amount: number; name: string }[] {
+  const legs: { product: string; yards: number; amount: number; name: string }[] = [];
+  const all = [quote?.fabric_pricing, ...((quote?.extra_fabric_pricing ?? []) as any[])];
+  for (const p of all) {
+    if (!p || p.source !== 'other_vendor' || !p.product) continue;
+    legs.push({
+      product: String(p.product),
+      yards: Number(p.yards) || 1,
+      amount: Number(p.amount) || 0,
+      name: p.name || 'Fabric',
+    });
+  }
+  return legs;
+}
+
 /** The cheapest courier in a rate response, or null when none was offered. */
 export function cheapestCourier(rates: any): any | null {
   const couriers: any[] = Array.isArray(rates?.couriers) ? rates.couriers : [];

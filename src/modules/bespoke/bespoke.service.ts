@@ -73,6 +73,8 @@ import { LogisticsService } from '../logistics/logistics.service';
 import {
   DELIVERY_QUOTE_TTL_MS,
   deliveryFromRates,
+  fabricLegsOf,
+  fabricParcel,
   garmentParcel,
   unpricedDelivery,
   type BespokeDelivery,
@@ -1014,6 +1016,7 @@ export class BespokeService {
           status: ShipmentStatus.PENDING,
           confirmed: true,
           confirmed_at: new Date(),
+          // Set once delivery is priced, below.
           shipping_fee: 0,
         });
       }
@@ -1034,8 +1037,16 @@ export class BespokeService {
       const tailorCharge = plan ? plan.deposit_amount : quote.total;
       // Delivery from the tailor to this address, paid with the deposit
       // (bespoke-delivery.ts). ₦0 when it cannot be priced.
-      const delivery = await this.deliveryFor(quote, address);
+      const deliveries = await this.allDeliveriesFor(quote, address);
+      const delivery = deliveries.garment;
+      const fabricLegFee = (product: any) =>
+        deliveries.fabrics.find((f) => String(f.leg.product) === String(product))?.delivery.fee ?? 0;
 
+      // Only legs this order actually creates (a fabric now the tailor's own
+      // has no transfer and no courier).
+      const fabricLegsShipping =
+        (fabricForeign ? fabricLegFee(design.fabric) : 0) +
+        extraTransfers.reduce((t, x) => t + fabricLegFee(x.fabric_product), 0);
       order = await new this.orderModel({
         reference: orderReference,
         customer: new Types.ObjectId(customer.id),
@@ -1129,15 +1140,22 @@ export class BespokeService {
                   confirmed: true,
                   confirmed_at: new Date(),
                   fulfillment_deadline: fabricTransferDeadline,
-                  shipping_fee: 0,
+                  // The courier to the tailor, paid with the deposit.
+                  shipping_fee: fabricLegFee(design.fabric),
                 },
               ]
             : []),
-          ...extraTransfers.map((t) => ({ ...t, fulfillment_deadline: fabricTransferDeadline })),
+          ...extraTransfers.map((t) => ({
+            ...t,
+            fulfillment_deadline: fabricTransferDeadline,
+            shipping_fee: fabricLegFee(t.fabric_product),
+          })),
         ],
         subtotal: tailorCharge + fabricCost + extraOnTop,
-        shipping_fee: delivery.fee,
-        total: tailorCharge + fabricCost + extraOnTop + delivery.fee,
+        // Every courier leg, paid with the deposit: the outfit to the
+        // customer and each other-shop fabric to the tailor.
+        shipping_fee: delivery.fee + fabricLegsShipping,
+        total: tailorCharge + fabricCost + extraOnTop + delivery.fee + fabricLegsShipping,
         payment_plan: plan,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
@@ -1265,27 +1283,82 @@ export class BespokeService {
    * pays what they were shown. Never throws: ₦0 when it cannot be priced.
    */
   private async deliveryFor(quote: any, address: any): Promise<BespokeDelivery> {
-    const key = `${quote._id}:${address?._id}`;
+    return this.priceParcel(`${quote._id}:${address?._id}`, quote, async () => {
+      const tailor: any = await this.businessModel
+        .findById(quote.vendor)
+        .select('address_code business_name')
+        .lean();
+      if (!address?.address_code) return 'The delivery address has not been validated.';
+      if (!tailor?.address_code) return "The tailor's pickup address has not been validated.";
+      return {
+        sender: tailor.address_code,
+        receiver: address.address_code,
+        parcel: garmentParcel(`Bespoke outfit ${quote.reference ?? ''}`.trim(), quote.total),
+      };
+    });
+  }
+
+  /**
+   * The courier for fabric another shop sends to the tailor (one leg per
+   * fabric), charged with the deposit like the garment's own delivery.
+   */
+  private async fabricDeliveryFor(
+    quote: any,
+    leg: { product: string; yards: number; amount: number; name: string },
+  ): Promise<BespokeDelivery> {
+    return this.priceParcel(`${quote._id}:fabric:${leg.product}`, quote, async () => {
+      const product: any = await this.productModel.findById(leg.product).lean();
+      const shopId = product?.business;
+      if (!shopId) return 'The fabric could not be found.';
+      const [shop, tailor]: any[] = await Promise.all([
+        this.businessModel.findById(shopId).select('address_code').lean(),
+        this.businessModel.findById(quote.vendor).select('address_code').lean(),
+      ]);
+      if (!shop?.address_code) return "The fabric shop's pickup address has not been validated.";
+      if (!tailor?.address_code) return "The tailor's address has not been validated.";
+      return {
+        sender: shop.address_code,
+        receiver: tailor.address_code,
+        parcel: fabricParcel(product?.fabric?.name ?? leg.name, leg.yards, leg.amount),
+      };
+    });
+  }
+
+  /** Every leg's delivery for this quote and address: the garment's and each fabric's. */
+  private async allDeliveriesFor(quote: any, address: any) {
+    const garment = await this.deliveryFor(quote, address);
+    const fabrics = await Promise.all(
+      fabricLegsOf(quote).map(async (leg) => ({ leg, delivery: await this.fabricDeliveryFor(quote, leg) })),
+    );
+    const fabricFee = fabrics.reduce((t, f) => t + f.delivery.fee, 0);
+    return { garment, fabrics, fabricFee, total: garment.fee + fabricFee };
+  }
+
+  /**
+   * One courier price, reused for 20 minutes under `key` so the price shown
+   * is the price charged. Never throws: ₦0 and `unpriced` when it cannot be
+   * had (the route callback returns a reason instead of a route).
+   */
+  private async priceParcel(
+    key: string,
+    quote: any,
+    route: () => Promise<string | { sender: string; receiver: string; parcel: any }>,
+  ): Promise<BespokeDelivery> {
     const cached = deliveryCache.get(key);
     if (cached && Date.now() - cached.quoted_at.getTime() < DELIVERY_QUOTE_TTL_MS) {
       return cached;
     }
     let delivery: BespokeDelivery;
     try {
-      const tailor: any = await this.businessModel
-        .findById(quote.vendor)
-        .select('address_code business_name')
-        .lean();
-      if (!address?.address_code) {
-        delivery = unpricedDelivery('The delivery address has not been validated.');
-      } else if (!tailor?.address_code) {
-        delivery = unpricedDelivery("The tailor's pickup address has not been validated.");
+      const r = await route();
+      if (typeof r === 'string') {
+        delivery = unpricedDelivery(r);
       } else {
         const rates = await this.logistics.fetchRates([], {
-          sender_address_code: tailor.address_code,
-          reciever_address_code: address.address_code,
+          sender_address_code: r.sender,
+          reciever_address_code: r.receiver,
           pickup_date: new Date().toISOString().split('T')[0],
-          package_items: [garmentParcel(`Bespoke outfit ${quote.reference ?? ''}`.trim(), quote.total)],
+          package_items: [r.parcel],
           service_type: 'pickup',
           category_id: 74794423, // "Fashion wears"
           package_dimension: { length: 40, width: 30, height: 10 },
@@ -1297,7 +1370,7 @@ export class BespokeService {
     }
     if (delivery.unpriced) {
       this.logger.warn(
-        `[BespokeDelivery] No delivery price for quote ${quote.reference ?? quote._id}: ${delivery.reason} Qlozet pays the courier.`,
+        `[BespokeDelivery] No price for ${key} (quote ${quote?.reference ?? quote?._id}): ${delivery.reason} Qlozet pays the courier.`,
       );
     }
     if (deliveryCache.size > 500) {
@@ -1323,13 +1396,18 @@ export class BespokeService {
     if (!address) {
       throw new BadRequestException('Add a delivery address to see the delivery price.');
     }
-    const delivery = await this.deliveryFor(quote, address);
+    const all = await this.allDeliveriesFor(quote, address);
     return {
-      fee: delivery.fee,
-      courier_name: delivery.courier_name,
-      eta: delivery.eta,
-      /** No price could be had: delivery is free to the customer this time. */
-      unpriced: delivery.unpriced,
+      /** Everything charged for delivery with the deposit. */
+      fee: all.total,
+      /** The outfit from the tailor to the customer. */
+      garment_fee: all.garment.fee,
+      /** Fabric from other shops to the tailor (0 when there is none). */
+      fabric_fee: all.fabricFee,
+      courier_name: all.garment.courier_name,
+      eta: all.garment.eta,
+      /** The outfit's delivery could not be priced: it is free to the customer this time. */
+      unpriced: all.garment.unpriced,
       address_id: String(address._id),
     };
   }

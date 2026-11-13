@@ -143,6 +143,35 @@ describe('charged with the deposit', () => {
     expect(fetchRates).toHaveBeenCalledTimes(1);
   });
 
+  it('fabric from another shop: its courier to the tailor is charged too', async () => {
+    const fabricShop = new Types.ObjectId();
+    const fabricProduct = { _id: new Types.ObjectId(), business: fabricShop, fabric: { _id: new Types.ObjectId(), name: 'Gold lace', yard_length: 20 } };
+    const fetchRates = jest.fn().mockResolvedValue(rates);
+    const { service, quote, saved } = setup({ fetchRates });
+    Object.assign(quote, {
+      fabric_pricing: { role: 'main', source: 'other_vendor', product: String(fabricProduct._id), name: 'Gold lace', yards: 3, amount: 15_000, in_quote: false },
+    });
+    service.designModel = {
+      findById: async () => ({ _id: quote.design, reference: 'DSN-1', fabric: fabricProduct._id, extra_fabrics: [] }),
+    };
+    service.productModel = { findById: () => ({ lean: async () => fabricProduct }) };
+
+    const preview = await service.quoteDelivery(String(quote._id), customerId);
+    expect(preview).toMatchObject({ garment_fee: 4_500, fabric_fee: 4_500, fee: 9_000 });
+
+    await expect(service.acceptQuote(String(quote._id), { id: customerId }, 'paystack')).rejects.toThrow(
+      'stop after the order is built',
+    );
+    const order = saved[0];
+    const leg = order.shipments.find((s: any) => s.shipment_type === 'fabric_transfer');
+    expect(leg.shipping_fee).toBe(4_500);
+    expect(order.shipping_fee).toBe(9_000);
+    // Deposit ₦50,000 + the other shop's fabric ₦15,000 + both couriers.
+    expect(order.total).toBe(50_000 + 15_000 + 9_000);
+    // One lookup per leg, shared by the preview and the charge.
+    expect(fetchRates).toHaveBeenCalledTimes(2);
+  });
+
   it('no price to be had: the order goes ahead with ₦0 delivery', async () => {
     const { service, quote, saved } = setup({ fetchRates: jest.fn().mockRejectedValue(new Error('down')) });
     await expect(service.acceptQuote(String(quote._id), { id: customerId }, 'paystack')).rejects.toThrow(

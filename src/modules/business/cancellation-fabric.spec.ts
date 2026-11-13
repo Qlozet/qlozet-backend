@@ -92,7 +92,9 @@ describe('customer cancels a bespoke order', () => {
     expect(work.business).toBe(tailor);
     expect(work.amount).toBe(30_000); // 30% of the ₦100,000 quote
     expect(quote.total).toBe(50_000);
-    expect(quote.refund).toBe(20_000);
+    // The courier that took the fabric to the tailor is spent too.
+    expect(quote.kept_delivery).toBe(1_500);
+    expect(quote.refund).toBe(70_000 - 50_000 - 1_500);
   });
 
   it('fabric still at the shop is refunded as before', async () => {
@@ -100,6 +102,7 @@ describe('customer cancels a bespoke order', () => {
     const { svc } = service();
     const quote = await svc.quoteCancellation(order, 70_000);
     expect(quote.lines.some((l: any) => l.kind === 'fabric')).toBe(false);
+    expect(quote.kept_delivery).toBe(0);
     expect(quote.refund).toBe(40_000);
   });
 
@@ -110,7 +113,7 @@ describe('customer cancels a bespoke order', () => {
     const quote = await svc.quoteCancellation(order, 70_000);
     expect(quote.lines).toHaveLength(1);
     expect(quote.lines[0].kind).toBe('fabric');
-    expect(quote.refund).toBe(50_000);
+    expect(quote.refund).toBe(50_000 - 1_500);
   });
 });
 
@@ -124,14 +127,15 @@ describe('tailor walks away after the fabric went out', () => {
     expect(refundAmount).toBe(50_000 + 20_000 + 1_500);
     expect(processPartialRefund).toHaveBeenCalledWith(order, 71_500, 'Cannot make it');
     expect(reverseBusinessEarnings).not.toHaveBeenCalledWith(order, fabricShop, String(fabricItem._id));
+    // The fabric and the courier that took it to them.
     expect(reconcileBusinessWallet).toHaveBeenCalledWith(
       tailor,
-      { balance: -20_000 },
+      { balance: -21_500 },
       expect.objectContaining({ metadata: { reason: 'fabric_on_tailor' } }),
     );
     await new Promise((r) => setTimeout(r, 0));
     const notice = create.mock.calls.find((c: any[]) => c[0].title === 'Fabric charged to your balance');
-    expect(notice?.[0].body).toMatch(/₦20,000/);
+    expect(notice?.[0].body).toMatch(/₦21,500/);
   });
 
   it('not the tailor’s doing (a sell-out): the fabric shop is reversed as before', async () => {
