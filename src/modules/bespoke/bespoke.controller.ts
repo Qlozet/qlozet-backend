@@ -282,6 +282,20 @@ export class BespokeController {
     );
   }
 
+  @Get('quotes/:id/delivery')
+  @Roles(UserType.CUSTOMER)
+  @ApiOperation({
+    summary: 'Delivery price for a quote to an address (charged with the deposit)',
+  })
+  @ApiParam({ name: 'id', description: 'Quote ID' })
+  async quoteDelivery(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Query('address_id') addressId?: string,
+  ) {
+    return this.bespokeService.quoteDelivery(id, req.user.id, addressId);
+  }
+
   @Post('quotes/:id/revision')
   @Roles(UserType.CUSTOMER)
   @ApiOperation({ summary: 'Request revision on a quote' })

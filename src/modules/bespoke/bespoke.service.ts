@@ -69,6 +69,14 @@ import { customerForVendor } from '../../common/utils/customer-privacy';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { LogisticsService } from '../logistics/logistics.service';
+import {
+  DELIVERY_QUOTE_TTL_MS,
+  deliveryFromRates,
+  garmentParcel,
+  unpricedDelivery,
+  type BespokeDelivery,
+} from './bespoke-delivery';
 import { notifyQuoteAccepted } from './quote-accepted-notice';
 
 // Who at a vendor hears about a quote: the tailor is the person who can
@@ -118,6 +126,10 @@ function backViewsFor(
   }).map((v) => ({ front: v.front, back: v.back }));
 }
 
+
+/** Recent delivery prices (quote:address), so the price shown is the price charged. */
+const deliveryCache = new Map<string, BespokeDelivery>();
+
 @Injectable()
 export class BespokeService {
   private readonly logger = new Logger(BespokeService.name);
@@ -152,6 +164,7 @@ export class BespokeService {
     private readonly notificationsService: NotificationsService,
     private readonly vendorRecipients: VendorRecipientsService,
     private readonly productService: ProductService,
+    private readonly logistics: LogisticsService,
   ) {}
 
   /**
@@ -851,22 +864,7 @@ export class BespokeService {
       // (legacy) plain string — some address docs have a string-typed customer,
       // which a `new Types.ObjectId(...)` equality would silently miss. Compare
       // on the stringified value so both representations match.
-      const customerIdStr = String(customer.id);
-      const customerMatch = {
-        $expr: { $eq: [{ $toString: '$customer' }, customerIdStr] },
-      };
-      const address =
-        (addressId
-          ? await this.addressModel.findOne({
-              _id: new Types.ObjectId(addressId),
-              ...customerMatch,
-            })
-          : null) ||
-        (await this.addressModel.findOne({
-          ...customerMatch,
-          is_default: true,
-        })) ||
-        (await this.addressModel.findOne(customerMatch));
+      const address = await this.customerAddress(String(customer.id), addressId);
       if (!address) {
         const inCollection = await this.addressModel.estimatedDocumentCount();
         this.logger.warn(
@@ -1034,6 +1032,9 @@ export class BespokeService {
         fabricDepositFloor([pricing, ...extras.map((e) => e.pricing)].filter(Boolean) as QuoteFabric[]),
       );
       const tailorCharge = plan ? plan.deposit_amount : quote.total;
+      // Delivery from the tailor to this address, paid with the deposit
+      // (bespoke-delivery.ts). ₦0 when it cannot be priced.
+      const delivery = await this.deliveryFor(quote, address);
 
       order = await new this.orderModel({
         reference: orderReference,
@@ -1101,7 +1102,18 @@ export class BespokeService {
             // The quote's making time: restarts from the day fabric from
             // another shop arrives (orders/late-penalty.ts shipClock).
             making_days: quote.estimated_completion_days || 7,
-            shipping_fee: 0,
+            shipping_fee: delivery.fee,
+            ...(delivery.unpriced
+              ? {}
+              : {
+                  // The courier picked at acceptance. Its token goes stale in
+                  // minutes; fulfilment fetches a fresh one for the same courier.
+                  request_token: delivery.request_token ?? undefined,
+                  courier_id: delivery.courier_id ?? undefined,
+                  courier_name: delivery.courier_name ?? undefined,
+                  service_code: delivery.service_code ?? undefined,
+                  rate_fetched_at: delivery.quoted_at,
+                }),
           },
           ...(fabricForeign
             ? [
@@ -1124,8 +1136,8 @@ export class BespokeService {
           ...extraTransfers.map((t) => ({ ...t, fulfillment_deadline: fabricTransferDeadline })),
         ],
         subtotal: tailorCharge + fabricCost + extraOnTop,
-        shipping_fee: 0,
-        total: tailorCharge + fabricCost + extraOnTop,
+        shipping_fee: delivery.fee,
+        total: tailorCharge + fabricCost + extraOnTop + delivery.fee,
         payment_plan: plan,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
@@ -1224,6 +1236,101 @@ export class BespokeService {
         },
         payment: paymentInit.data,
       },
+    };
+  }
+
+  /** The customer's address: the one asked for, else their default, else any. */
+  private async customerAddress(customerId: string, addressId?: string) {
+    // Match the `customer` ref whether it's stored as an ObjectId or a
+    // (legacy) plain string: some address docs have a string-typed customer,
+    // which a `new Types.ObjectId(...)` equality would silently miss.
+    const customerMatch = {
+      $expr: { $eq: [{ $toString: '$customer' }, String(customerId)] },
+    };
+    return (
+      (addressId && Types.ObjectId.isValid(addressId)
+        ? await this.addressModel.findOne({
+            _id: new Types.ObjectId(addressId),
+            ...customerMatch,
+          })
+        : null) ||
+      (await this.addressModel.findOne({ ...customerMatch, is_default: true })) ||
+      (await this.addressModel.findOne(customerMatch))
+    );
+  }
+
+  /**
+   * Delivery from the quoting tailor to this address (bespoke-delivery.ts).
+   * Reused for 20 minutes for the same quote and address, so the customer
+   * pays what they were shown. Never throws: ₦0 when it cannot be priced.
+   */
+  private async deliveryFor(quote: any, address: any): Promise<BespokeDelivery> {
+    const key = `${quote._id}:${address?._id}`;
+    const cached = deliveryCache.get(key);
+    if (cached && Date.now() - cached.quoted_at.getTime() < DELIVERY_QUOTE_TTL_MS) {
+      return cached;
+    }
+    let delivery: BespokeDelivery;
+    try {
+      const tailor: any = await this.businessModel
+        .findById(quote.vendor)
+        .select('address_code business_name')
+        .lean();
+      if (!address?.address_code) {
+        delivery = unpricedDelivery('The delivery address has not been validated.');
+      } else if (!tailor?.address_code) {
+        delivery = unpricedDelivery("The tailor's pickup address has not been validated.");
+      } else {
+        const rates = await this.logistics.fetchRates([], {
+          sender_address_code: tailor.address_code,
+          reciever_address_code: address.address_code,
+          pickup_date: new Date().toISOString().split('T')[0],
+          package_items: [garmentParcel(`Bespoke outfit ${quote.reference ?? ''}`.trim(), quote.total)],
+          service_type: 'pickup',
+          category_id: 74794423, // "Fashion wears"
+          package_dimension: { length: 40, width: 30, height: 10 },
+        } as any);
+        delivery = deliveryFromRates(rates);
+      }
+    } catch (err: any) {
+      delivery = unpricedDelivery(`The courier service did not answer: ${err?.message ?? 'error'}`);
+    }
+    if (delivery.unpriced) {
+      this.logger.warn(
+        `[BespokeDelivery] No delivery price for quote ${quote.reference ?? quote._id}: ${delivery.reason} Qlozet pays the courier.`,
+      );
+    }
+    if (deliveryCache.size > 500) {
+      for (const [k, v] of deliveryCache) {
+        if (Date.now() - v.quoted_at.getTime() >= DELIVERY_QUOTE_TTL_MS) deliveryCache.delete(k);
+      }
+    }
+    deliveryCache.set(key, delivery);
+    return delivery;
+  }
+
+  /**
+   * GET /bespoke/quotes/:id/delivery: what delivery to this address costs,
+   * shown before the customer pays (the same price acceptance charges).
+   */
+  async quoteDelivery(quoteId: string, customerId: string, addressId?: string) {
+    if (!Types.ObjectId.isValid(quoteId)) throw new NotFoundException('Quote not found');
+    const quote = await this.quoteModel
+      .findOne({ _id: new Types.ObjectId(quoteId), customer: new Types.ObjectId(customerId) })
+      .lean();
+    if (!quote) throw new NotFoundException('Quote not found');
+    const address = await this.customerAddress(customerId, addressId);
+    if (!address) {
+      throw new BadRequestException('Add a delivery address to see the delivery price.');
+    }
+    const delivery = await this.deliveryFor(quote, address);
+    return {
+      fee: delivery.fee,
+      courier_name: delivery.courier_name,
+      eta: delivery.eta,
+      /** No price could be had: delivery is free to the customer this time. */
+      unpriced: delivery.unpriced,
+      address_id: String(address._id),
     };
   }
 
