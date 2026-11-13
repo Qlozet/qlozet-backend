@@ -1098,6 +1098,9 @@ export class BespokeService {
             confirmed: true,
             confirmed_at: new Date(),
             fulfillment_deadline: deadline,
+            // The quote's making time: restarts from the day fabric from
+            // another shop arrives (orders/late-penalty.ts shipClock).
+            making_days: quote.estimated_completion_days || 7,
             shipping_fee: 0,
           },
           ...(fabricForeign

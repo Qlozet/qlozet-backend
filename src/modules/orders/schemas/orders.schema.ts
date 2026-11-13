@@ -394,6 +394,12 @@ export class VendorShipment {
   @Prop({ type: Date, default: null })
   ship_by_warning_for?: Date | null;
 
+  // Days this vendor has to make and ship, as agreed (the quote's making
+  // time, or the longest item window). Lets the clock restart from the day
+  // fabric from another shop arrives (late-penalty.ts shipClock).
+  @Prop({ type: Number, default: null })
+  making_days?: number | null;
+
   @Prop({ type: Date, default: null })
   cancel_warning_for?: Date | null;
 
