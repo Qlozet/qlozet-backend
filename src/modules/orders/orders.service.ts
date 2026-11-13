@@ -23,6 +23,7 @@ import {
 } from './late-penalty';
 import { Length } from 'class-validator';
 import {
+  unusedDeliveryOnForfeit,
   balanceDaysFrom,
   balanceDueAt,
   balanceOutstanding,
@@ -3921,6 +3922,34 @@ export class OrderService {
     this.logger.warn(
       `[BespokeBalance] Order ${order.reference} closed: balance unpaid by ${now.toISOString()}; the tailor keeps the deposit.`,
     );
+    // The tailor keeps the deposit, but delivery paid with it that never
+    // happened (the outfit was never sent) goes back to the customer.
+    const unusedDelivery = unusedDeliveryOnForfeit(order);
+    let deliveryRefunded = 0;
+    if (unusedDelivery > 0) {
+      const result = await this.processPartialRefund(
+        order,
+        unusedDelivery,
+        'Delivery not used: the order closed before it shipped',
+      ).catch((err: any) => {
+        this.logger.error(
+          `[BespokeBalance] Delivery refund failed for ${order.reference}: ${err?.message}`,
+        );
+        return { success: false };
+      });
+      if (result?.success) {
+        deliveryRefunded = unusedDelivery;
+        await this.orderModel
+          .updateOne(
+            { _id: order._id },
+            {
+              $set: { refund_status: 'partial' },
+              $inc: { shipping_fee: -unusedDelivery, total: -unusedDelivery },
+            },
+          )
+          .catch(() => undefined);
+      }
+    }
     const plan = order.payment_plan;
     await this.notificationsService
       .create({
@@ -3929,7 +3958,11 @@ export class OrderService {
         category: NotificationCategory.ORDER,
         type: NotificationType.ORDER_CANCELLED,
         title: 'Order closed',
-        body: `The balance on order #${order.reference} wasn't paid in time, so the order is closed. The deposit covers the tailor's work.`,
+        body: `The balance on order #${order.reference} wasn't paid in time, so the order is closed. The deposit covers the tailor's work.${
+          deliveryRefunded > 0
+            ? ` The ₦${deliveryRefunded.toLocaleString()} you paid for delivery has been refunded to your wallet.`
+            : ''
+        }`,
         metadata: { order_reference: order.reference },
         action_url: '/profile?tab=orders',
       })

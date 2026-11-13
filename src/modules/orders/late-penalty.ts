@@ -39,14 +39,27 @@ export function lateRulesFrom(settings: any): LateRules {
   };
 }
 
-/** What the penalty is a percentage of: the store's items still on the order. */
+/**
+ * What the penalty is a percentage of: the store's items still on the order.
+ *
+ * A bespoke tailor's item carries only the deposit until the balance is paid
+ * (bespoke-payment-plan.ts), but the order agreement and How orders work say
+ * "a percentage of the order", so the unpaid balance counts too: a late
+ * tailor is charged on the quote, paid in full or not (BUG-16).
+ */
 export function latePenaltyBase(order: any, businessId: string): number {
-  return (order?.items ?? [])
-    .filter(
-      (i: any) =>
-        String(i?.business?._id ?? i?.business) === String(businessId) && !i?.rejected,
-    )
-    .reduce((sum: number, i: any) => sum + (Number(i?.total_price) || 0), 0);
+  const live = (order?.items ?? []).filter(
+    (i: any) =>
+      String(i?.business?._id ?? i?.business) === String(businessId) && !i?.rejected,
+  );
+  const items = live.reduce((sum: number, i: any) => sum + (Number(i?.total_price) || 0), 0);
+  const plan = order?.payment_plan;
+  const balanceUnpaid =
+    !!plan &&
+    live.length > 0 &&
+    String(plan.tailor) === String(businessId) &&
+    ['awaiting_deposit', 'deposit_paid', 'awaiting_balance'].includes(String(plan.status));
+  return items + (balanceUnpaid ? Number(plan.balance_amount) || 0 : 0);
 }
 
 /** Started days past the deadline: one minute late is day 1. */
