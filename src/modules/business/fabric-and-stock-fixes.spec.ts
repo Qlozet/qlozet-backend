@@ -118,11 +118,14 @@ describe("BUG-07: the other shop's fabric is refunded when the garment is cancel
   });
 
   it('a tailor abandoning the piece refunds the fabric too', async () => {
-    const { order, fabricItem } = bespokeOrder();
+    // The fabric arrived long ago, so the lateness is the tailor's own.
+    const { order, fabricItem } = bespokeOrder('delivered');
+    order.shipments[1].delivered_at = new Date(Date.now() - 40 * 86_400_000);
     order.shipments[0].fulfillment_deadline = new Date(Date.now() - 30 * 86_400_000);
     order.shipments[0].status = 'pending';
     order.shipments[0]._id = new Types.ObjectId();
     const { service, processPartialRefund, reverseBusinessEarnings } = orderService();
+    const reconcileBusinessWallet = jest.fn().mockResolvedValue(undefined);
     Object.assign(service, {
       platformSettingsModel: { findOne: () => ({ lean: async () => ({ abandon_after_days: 7 }) }) },
       orderModel: {
@@ -132,14 +135,23 @@ describe("BUG-07: the other shop's fabric is refunded when the garment is cancel
       businessModel: { findById: async () => ({ business_name: 'Tailor' }) },
       notificationsService: { create: jest.fn().mockResolvedValue({}) },
       vendorRecipients: { resolve: async () => [] },
+      walletsService: { reconcileBusinessWallet },
     });
 
     await service.cancelAbandonedShipments();
 
+    // The customer is refunded in full, fabric included...
     expect(processPartialRefund.mock.calls[0][1]).toBe(45_000 + 20_000 + 1_500);
     expect(fabricItem.rejected).toBe(true);
-    expect(reverseBusinessEarnings).toHaveBeenCalledWith(order, fabricShop, String(fabricItem._id));
     expect(order.status).toBe('cancelled');
+    // ...but the fabric already went out, and the tailor is at fault: the
+    // fabric shop keeps its payment and the tailor bears it (13 Nov 2026).
+    expect(reverseBusinessEarnings).not.toHaveBeenCalledWith(order, fabricShop, String(fabricItem._id));
+    expect(reconcileBusinessWallet).toHaveBeenCalledWith(
+      tailor,
+      { balance: -20_000 - 1_500 }, // the fabric and its courier to the tailor
+      expect.objectContaining({ metadata: { reason: 'fabric_on_tailor' } }),
+    );
   });
 });
 

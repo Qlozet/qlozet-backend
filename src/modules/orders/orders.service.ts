@@ -8,6 +8,7 @@ import {
   confirmWarningLeadHours,
   withConfirmBy,
 } from './confirm-deadline';
+import { INCLUDED_CHANGE_ROUNDS } from '../bespoke/order-agreement';
 import {
   cancelWarningDue,
   daysLate as lateDaysSince,
@@ -16,6 +17,7 @@ import {
   latePreviewFor,
   lateRulesFrom,
   shipByWarningDue,
+  shipClock,
   SHIP_BY_WARNING_LEAD_HOURS,
   withLatePreview,
 } from './late-penalty';
@@ -2870,7 +2872,14 @@ export class OrderService {
         .filter((s: any) => s?.confirmed && !s?.rejected)
         .map((s: any) => String(s.business)),
     );
-    const lines: { item: string; business: string; amount: number; name: string }[] = [];
+    const lines: {
+      item: string;
+      business: string;
+      amount: number;
+      name: string;
+      /** 'work': the tailor's share; 'fabric' / 'applied_fabric': fabric already sent. */
+      kind?: 'work' | 'fabric' | 'applied_fabric';
+    }[] = [];
     // Order items keep a product ref, not a name; name the pieces for the
     // customer from their products (bespoke work has no catalogue product).
     const names = new Map<string, string>();
@@ -2890,9 +2899,27 @@ export class OrderService {
         }
       }
     }
+    // A bespoke order's fabric from another shop is its own line. It is not
+    // work anyone started: it is kept in full once sent, refunded in full if
+    // not (below), and never charged the work percentage. It used to be.
+    const fabricLines = new Set<string>();
+    if ((order as any).type === 'bespoke') {
+      for (const leg of (order.shipments ?? []) as any[]) {
+        if (leg?.shipment_type !== ShipmentType.FABRIC_TRANSFER) continue;
+        for (const item of order.items as any[]) {
+          if (
+            String(item?.business) === String(leg.business) &&
+            String(item?.product) === String(leg.fabric_product)
+          ) {
+            fabricLines.add(String(item._id));
+          }
+        }
+      }
+    }
     if (percent > 0 && paidTotal > 0) {
       for (const item of order.items as any[]) {
         if (item?.rejected) continue;
+        if (fabricLines.has(String(item?._id))) continue;
         // Orders placed before items stored clothing_type: the product says.
         const custom =
           (order as any).type === 'bespoke' ||
@@ -2931,7 +2958,52 @@ export class OrderService {
           name:
             names.get(String(item.product)) ||
             ((order as any).type === 'bespoke' ? 'Bespoke design' : 'Custom piece'),
+          kind: 'work',
         });
+      }
+    }
+    let keptDelivery = 0;
+    // Fabric from another shop that has already gone out to the tailor was
+    // bought for this customer (and may be cut): it is not refunded, and the
+    // fabric shop keeps its payment. Decided with the bespoke review, 13 Nov
+    // 2026; the Terms and the vendor agreement say so.
+    if (paidTotal > 0) {
+      const sentStatuses: string[] = [
+        ShipmentStatus.SHIPPED,
+        ShipmentStatus.IN_TRANSIT,
+        ShipmentStatus.DELIVERED,
+      ];
+      const bespoke = (order as any).type === 'bespoke';
+      for (const leg of (order.shipments ?? []) as any[]) {
+        if (leg?.shipment_type !== ShipmentType.FABRIC_TRANSFER || leg?.rejected) continue;
+        if (!sentStatuses.includes(String(leg.status))) continue;
+        // The courier already took it to the tailor: that delivery is spent.
+        keptDelivery += Math.round(leg.shipping_fee || 0);
+        const shop = String(leg.business);
+        const tailorId = String(leg.destination_business);
+        const fabric = String(leg.fabric_product);
+        for (const item of order.items as any[]) {
+          if (item?.rejected) continue;
+          if (bespoke && String(item.business) === shop && String(item.product) === fabric) {
+            const amount = Math.round(item.total_price || 0);
+            if (amount > 0) {
+              lines.push({ item: String(item._id), business: shop, amount, name: 'Fabric already sent to the tailor', kind: 'fabric' });
+            }
+          } else if (
+            !bespoke &&
+            String(item.business) === tailorId &&
+            String(item.applied_fabric) === fabric &&
+            (item.pricing?.external_fabric || 0) > 0
+          ) {
+            lines.push({
+              item: String(item._id),
+              business: shop,
+              amount: Math.round(item.pricing.external_fabric),
+              name: 'Fabric already sent to the tailor',
+              kind: 'applied_fabric',
+            });
+          }
+        }
       }
     }
     let total = lines.reduce((sum, l) => sum + l.amount, 0);
@@ -2941,7 +3013,16 @@ export class OrderService {
       for (const l of lines) l.amount = Math.floor(l.amount * scale);
       total = lines.reduce((sum, l) => sum + l.amount, 0);
     }
-    return { percent, lines, total, refund: Math.max(0, paidTotal - total) };
+    // Delivery already used (fabric couriered to the tailor) is not refunded;
+    // it is not anyone's earning, it paid the courier.
+    keptDelivery = Math.max(0, Math.min(keptDelivery, paidTotal - total));
+    return {
+      percent,
+      lines,
+      total,
+      kept_delivery: keptDelivery,
+      refund: Math.max(0, paidTotal - total - keptDelivery),
+    };
   }
 
   /** GET /orders/customer/cancel-preview/:reference — what cancelling would cost. */
@@ -2974,12 +3055,16 @@ export class OrderService {
       paid_total: paid,
       fee_percent: quote.percent,
       fee_total: quote.total,
+      /** Delivery already used (fabric couriered to the tailor), not refunded. */
+      kept_delivery: quote.kept_delivery,
       refund_total: quote.refund,
       lines: quote.lines.map((l) => ({
         item_id: l.item,
         business_id: l.business,
         name: l.name,
         fee: l.amount,
+        /** 'work': the tailor's share; 'fabric' / 'applied_fabric': fabric already sent, kept in full. */
+        kind: l.kind ?? 'work',
       })),
     };
   }
@@ -3069,7 +3154,7 @@ export class OrderService {
       // refund: fall back to a full, free refund and log it.
       try {
         fee = await this.quoteCancellation(order, paidTotal);
-        if (!fee.total) fee = null;
+        if (!fee.total && !fee.kept_delivery) fee = null;
       } catch (feeErr: any) {
         fee = null;
         this.logger.error(
@@ -3162,11 +3247,13 @@ export class OrderService {
       );
     }
     if (refunded) {
-      (order as any).refund_status = fee && fee.total > 0 ? 'partial' : 'refunded';
+      (order as any).refund_status =
+        fee && (fee.total > 0 || fee.kept_delivery > 0) ? 'partial' : 'refunded';
       if (fee) {
         (order as any).cancellation_fee = {
           percent: fee.percent,
           total: fee.total,
+          kept_delivery: fee.kept_delivery,
           refunded: fee.refund,
           lines: fee.lines.map(({ item, business, amount }) => ({ item, business, amount })),
         };
@@ -3236,10 +3323,19 @@ export class OrderService {
       ).catch(() => undefined);
     }
 
-    // Restore inventory
+    // Restore inventory, except fabric that already went to the tailor.
     try {
+      const kept = fee && refunded ? fee.lines : [];
       await this.productService.restoreInventory(
         order._id as Types.ObjectId,
+        undefined,
+        undefined,
+        {
+          skipItems: kept.filter((l) => l.kind === 'fabric').map((l) => l.item),
+          skipAppliedFabricFor: kept
+            .filter((l) => l.kind === 'applied_fabric')
+            .map((l) => l.item),
+        },
       );
     } catch (err) {
       this.logger.error(
@@ -3254,7 +3350,11 @@ export class OrderService {
 
     return {
       message: fee
-        ? `Order cancelled. ₦${fee.refund.toLocaleString()} refunded to your wallet; ₦${fee.total.toLocaleString()} kept as the cancellation fee.`
+        ? `Order cancelled. ₦${fee.refund.toLocaleString()} refunded to your wallet; ₦${(fee.total + fee.kept_delivery).toLocaleString()} kept for work already started${
+            fee.lines.some((l) => l.kind !== 'work') || fee.kept_delivery > 0
+              ? ' and fabric already sent to the tailor'
+              : ''
+          }.`
         : 'Order cancelled and refunded successfully',
       data: {
         order_reference: order.reference,
@@ -3473,6 +3573,22 @@ export class OrderService {
         'Add at least one photo of the finished piece.',
       );
     }
+    // Earlier rounds are kept (what was shown, what was asked for): they
+    // are the record of what was agreed if there is ever a dispute.
+    const previous: any = (order as any).preship;
+    const history = [
+      ...(previous?.history ?? []),
+      ...(previous?.submitted_at
+        ? [{
+            photos: previous.photos ?? [],
+            note: previous.note ?? null,
+            status: previous.status,
+            submitted_at: previous.submitted_at,
+            reviewed_at: previous.reviewed_at ?? null,
+            customer_note: previous.customer_note ?? null,
+          }]
+        : []),
+    ];
     (order as any).preship = {
       photos: photos.slice(0, 8),
       note: dto.note?.trim() || null,
@@ -3480,6 +3596,8 @@ export class OrderService {
       submitted_at: new Date(),
       reviewed_at: null,
       customer_note: null,
+      changes_requested_count: previous?.changes_requested_count ?? 0,
+      history,
     };
     order.markModified('preship');
     // Deposit orders: the photos are the moment the balance falls due.
@@ -3536,6 +3654,15 @@ export class OrderService {
         `Pay the ₦${Number(plan.balance_amount).toLocaleString()} balance to approve. The tailor ships once it's paid.`,
       );
     }
+    // The price includes INCLUDED_CHANGE_ROUNDS rounds of changes (the order
+    // agreement says so); more is agreed with the tailor in the order chat.
+    const roundsUsed = Number(preship.changes_requested_count) || 0;
+    if (!dto.approve && roundsUsed >= INCLUDED_CHANGE_ROUNDS) {
+      throw new BadRequestException(
+        `Your price includes ${INCLUDED_CHANGE_ROUNDS} rounds of changes, and both have been used. Talk to your tailor in the order chat about anything else; further changes may need a new price.`,
+      );
+    }
+    if (!dto.approve) preship.changes_requested_count = roundsUsed + 1;
     if (!dto.approve && plan?.status === 'awaiting_balance') {
       // The balance clock waits while the tailor makes the changes.
       plan.balance_due_at = null;
@@ -4145,6 +4272,7 @@ export class OrderService {
     const deadline = new Date(shipment.confirmed_at);
     deadline.setDate(deadline.getDate() + maxTurnaroundDays);
     shipment.fulfillment_deadline = deadline;
+    (shipment as any).making_days = maxTurnaroundDays;
 
     this.logger.log(
       `[Confirm] Fulfillment deadline set to ${deadline.toISOString()} (${maxTurnaroundDays} days) for vendor ${businessId} on order ${orderReference}`,
@@ -4273,6 +4401,7 @@ export class OrderService {
       businessId,
       activeItems,
       reason || 'Vendor declined the order',
+      { vendorAtFault: true },
     );
 
     // Defensive: if the vendor had no catalog items, still fail the shipment.
@@ -4358,6 +4487,7 @@ export class OrderService {
       businessId,
       [item],
       reason || 'Vendor declined this item',
+      { vendorAtFault: true },
     );
 
     this.notifyCustomerVendorRejected(order, business, reason).catch((err) =>
@@ -4462,10 +4592,13 @@ export class OrderService {
   ): {
     goods: number;
     shipping: number;
+    /** Of `shipping`, the courier legs that already took fabric to the tailor. */
+    sentShipping: number;
     released: { item: any; business: string; legShipped: boolean }[];
   } {
     let goods = 0;
     let shipping = 0;
+    let sentShipping = 0;
     const released: { item: any; business: string; legShipped: boolean }[] = [];
     const moved: string[] = [
       ShipmentStatus.SHIPPED,
@@ -4490,6 +4623,7 @@ export class OrderService {
         leg.rejection_reason = 'The garment this fabric was for was cancelled';
         if (!legShipped) leg.status = ShipmentStatus.FAILED;
         shipping += leg.shipping_fee || 0;
+        if (legShipped) sentShipping += leg.shipping_fee || 0;
       }
 
       const fabricShop = leg.business?.toString();
@@ -4505,16 +4639,29 @@ export class OrderService {
         released.push({ item, business: fabricShop, legShipped });
       }
     }
-    return { goods, shipping, released };
+    return { goods, shipping, sentShipping, released };
   }
 
-  /** Reverse the fabric shop's earnings and, if the fabric never left, its stock. */
+  /**
+   * Reverse the fabric shop's earnings and, if the fabric never left, its
+   * stock. When the tailor is at fault (`chargeTailor`), fabric that already
+   * went out stays paid to its shop and its cost is taken from the tailor's
+   * balance instead (an owed amount if the balance is short): the customer is
+   * refunded in full either way.
+   */
   private async settleReleasedFabric(
     order: OrderDocument,
     released: { item: any; business: string; legShipped: boolean }[],
+    opts?: { chargeTailor?: string; sentShipping?: number },
   ) {
+    // The courier that already took the fabric to them is theirs to bear too.
+    let tailorOwes = opts?.chargeTailor ? Math.round(opts.sentShipping || 0) : 0;
     for (const { item, business, legShipped } of released) {
       const itemId = String(item._id);
+      if (legShipped && opts?.chargeTailor) {
+        tailorOwes += Math.round(item.total_price || 0);
+        continue;
+      }
       await this.reverseBusinessEarnings(order, business, itemId).catch((err) =>
         this.logger.error(
           `[FabricRelease] Earnings reversal failed for item ${itemId} on ${order.reference}: ${err.message}`,
@@ -4528,6 +4675,30 @@ export class OrderService {
             `[FabricRelease] Stock restore failed for item ${itemId} on ${order.reference}: ${err.message}`,
           ),
         );
+    }
+    if (tailorOwes > 0 && opts?.chargeTailor) {
+      const tailor = opts.chargeTailor;
+      await this.walletsService
+        .reconcileBusinessWallet(
+          tailor,
+          { balance: -tailorOwes },
+          {
+            order: order._id,
+            description: `Fabric already sent to you for order ${order.reference}, which you cancelled`,
+            metadata: { reason: 'fabric_on_tailor' },
+          },
+        )
+        .catch((err: any) =>
+          this.logger.error(
+            `[FabricRelease] Could not charge ₦${tailorOwes} fabric to ${tailor} on ${order.reference}: ${err.message}`,
+          ),
+        );
+      this.notifyVendorTeam(tailor, {
+        type: NotificationType.ORDER_CANCELLED,
+        title: 'Fabric charged to your balance',
+        body: `Order #${order.reference} was cancelled after the fabric from another shop had been sent to you. The fabric shop keeps its payment, so ₦${tailorOwes.toLocaleString()} for it and its delivery to you has been taken from your balance.`,
+        metadata: { order_id: order._id, order_reference: order.reference, amount: tailorOwes, reason: 'fabric_on_tailor' },
+      });
     }
   }
 
@@ -4546,6 +4717,8 @@ export class OrderService {
     businessId: string,
     items: any[],
     reason: string,
+    /** The vendor chose this (not, say, a sell-out): they bear fabric already sent to them. */
+    opts?: { vendorAtFault?: boolean },
   ): Promise<{ refundAmount: number; orderCancelled: boolean }> {
     let fabricLegShipping = 0;
     let itemsGoodsTotal = 0; // total_price only (for subtotal adjustment)
@@ -4596,6 +4769,7 @@ export class OrderService {
     let fabricRelease: ReturnType<OrderService['releaseFabricForCancelledGarment']> = {
       goods: 0,
       shipping: 0,
+      sentShipping: 0,
       released: [],
     };
     if (!vendorHasActiveItems) {
@@ -4681,7 +4855,13 @@ export class OrderService {
           ),
         );
     }
-    await this.settleReleasedFabric(order, fabricRelease.released);
+    await this.settleReleasedFabric(
+      order,
+      fabricRelease.released,
+      opts?.vendorAtFault
+        ? { chargeTailor: businessId, sentShipping: fabricRelease.sentShipping }
+        : undefined,
+    );
 
     return { refundAmount, orderCancelled };
   }
@@ -5302,7 +5482,9 @@ export class OrderService {
       const settings = await this.platformSettingsModel.findOne().lean();
       const rules = lateRulesFrom(settings);
       const now = Date.now();
-      const oldest = new Date(now - Math.max(rules.abandonAfterDays, 0) * 86_400_000);
+      // The clock can hold a vendor to a date later than the stored one
+      // (fabric arrived late, a measurement answer), so look further back.
+      const oldest = new Date(now - (Math.max(rules.abandonAfterDays, 0) + 60) * 86_400_000);
       const newest = new Date(now + SHIP_BY_WARNING_LEAD_HOURS * 3_600_000);
       const orders = await this.orderModel
         .find({
@@ -5691,10 +5873,14 @@ export class OrderService {
           ) continue;
 
           const now = new Date();
-          if (now <= shipment.fulfillment_deadline) continue;
+          // The date this vendor is held to: later if their fabric arrived
+          // late or they waited on a measurement answer; none while paused.
+          const clock = shipClock(order, shipment, now.getTime());
+          if (clock.paused || !clock.deadline) continue;
+          if (now <= clock.deadline) continue;
 
           // Started days late: one minute late is day 1.
-          const daysLate = lateDaysSince(shipment.fulfillment_deadline, now.getTime());
+          const daysLate = lateDaysSince(clock.deadline, now.getTime());
 
           // Skip if we've already penalized for this many (or more) days
           if (daysLate <= (shipment.late_penalty_days || 0)) continue;
@@ -5984,7 +6170,8 @@ export class OrderService {
         for (const shipment of order.shipments) {
           if (!shipment.confirmed || shipment.rejected) continue;
           if (!shipment.fulfillment_deadline) continue;
-          if (shipment.fulfillment_deadline > cutoff) continue;
+          // (Whether it is due is decided by its clock below: the stored date
+          // alone is wrong when fabric arrived late or never came.)
           if (
             shipment.status === ShipmentStatus.SHIPPED ||
             shipment.status === ShipmentStatus.IN_TRANSIT ||
@@ -5996,12 +6183,26 @@ export class OrderService {
           // own shipment, so it is not failed on its own here.
           if (shipment.shipment_type === ShipmentType.FABRIC_TRANSFER) continue;
 
+          // The date this vendor is held to (late-penalty.ts shipClock). While
+          // fabric from another shop is still on its way the vendor is not
+          // the one failing: the order closes only if that shop is
+          // abandon_after_days past its own send-by date.
+          const clock = shipClock(order, shipment, now.getTime());
+          if (clock.paused === 'measurements' || clock.paused === 'balance') continue;
+          const fabricNeverCame = clock.paused === 'fabric';
+          const basis = fabricNeverCame ? clock.fabric_due : clock.deadline;
+          if (!basis || basis > cutoff) continue;
+          const fabricShopName = fabricNeverCame && clock.fabric_shop
+            ? (await this.businessModel.findById(clock.fabric_shop).select('business_name').lean())?.business_name ?? 'The fabric shop'
+            : null;
+
           const businessId = shipment.business.toString();
           const daysPast = Math.floor(
-            (now.getTime() - shipment.fulfillment_deadline.getTime()) /
-              (24 * 60 * 60 * 1000),
+            (now.getTime() - basis.getTime()) / (24 * 60 * 60 * 1000),
           );
-          const reason = `Abandoned: vendor did not ship within ${abandonAfterDays} day(s) of the fulfilment deadline`;
+          const reason = fabricNeverCame
+            ? `Cancelled: ${fabricShopName} did not send the fabric within ${abandonAfterDays} day(s) of its deadline`
+            : `Abandoned: vendor did not ship within ${abandonAfterDays} day(s) of the fulfilment deadline`;
 
           // Atomically CLAIM the shipment: reject + mark refunded in one write
           // so a second instance loading the same order cannot refund twice.
@@ -6089,7 +6290,9 @@ export class OrderService {
           const refundResult = await this.processPartialRefund(
             order as OrderDocument,
             refundAmount,
-            `Abandoned: ${businessName} did not ship within ${abandonAfterDays} day(s) of the deadline`,
+            fabricNeverCame
+              ? reason
+              : `Abandoned: ${businessName} did not ship within ${abandonAfterDays} day(s) of the deadline`,
           ).catch((err) => {
             this.logger.error(
               `[Abandoned] Refund failed for ${order.reference}: ${err.message}`,
@@ -6122,6 +6325,9 @@ export class OrderService {
           await this.settleReleasedFabric(
             order as OrderDocument,
             fabricRelease.released,
+            fabricNeverCame
+              ? undefined
+              : { chargeTailor: businessId, sentShipping: fabricRelease.sentShipping },
           );
 
           await this.productService
@@ -6141,9 +6347,15 @@ export class OrderService {
               category: NotificationCategory.ORDER,
               type: NotificationType.ORDER_CANCELLED,
               title: 'Order Not Fulfilled',
-              body: refunded
-                ? `${businessName} did not ship your order #${order.reference} within ${abandonAfterDays} days of their deadline, so their items were cancelled. ₦${refundAmount.toLocaleString()} has been refunded to your wallet.`
-                : `${businessName} did not ship your order #${order.reference} within ${abandonAfterDays} days of their deadline, so their items were cancelled. A refund of ₦${refundAmount.toLocaleString()} is being processed.`,
+              body: `${
+                fabricNeverCame
+                  ? `${fabricShopName} did not send the fabric for your order #${order.reference}, so the piece could not be made and was cancelled.`
+                  : `${businessName} did not ship your order #${order.reference} within ${abandonAfterDays} days of their deadline, so their items were cancelled.`
+              } ${
+                refunded
+                  ? `₦${refundAmount.toLocaleString()} has been refunded to your wallet.`
+                  : `A refund of ₦${refundAmount.toLocaleString()} is being processed.`
+              }`,
               metadata: {
                 order_id: order._id,
                 order_reference: order.reference,
@@ -6171,15 +6383,17 @@ export class OrderService {
                 recipient_business: businessId,
                 category: NotificationCategory.ORDER,
                 type: NotificationType.ORDER_CANCELLED,
-                title: 'Order Cancelled - Not Shipped',
-                body: `Order #${order.reference} was ${daysPast} day(s) past its fulfilment deadline and still not shipped, so it has been cancelled and the customer refunded. Your earnings for it have been reversed.`,
+                title: fabricNeverCame ? 'Order Cancelled - Fabric Never Arrived' : 'Order Cancelled - Not Shipped',
+                body: fabricNeverCame
+                  ? `The fabric for order #${order.reference} never arrived from ${fabricShopName}, so the order has been cancelled and the customer refunded. You are not charged for lateness; your earnings for it have been reversed.`
+                  : `Order #${order.reference} was ${daysPast} day(s) past its fulfilment deadline and still not shipped, so it has been cancelled and the customer refunded. Your earnings for it have been reversed.`,
                 metadata: {
                   order_id: order._id,
                   order_reference: order.reference,
                   refund_amount: refundAmount,
                   days_past_deadline: daysPast,
                   abandon_after_days: abandonAfterDays,
-                  reason: 'abandoned_by_vendor',
+                  reason: fabricNeverCame ? 'fabric_never_arrived' : 'abandoned_by_vendor',
                 },
                 action_url: `/orders`,
               })
