@@ -66,7 +66,7 @@ Fly dashboard under the staging app → Secrets.
 | `PAYSTACK_SECRET_KEY` **and** `PAYSTACK_SECRET` | Paystack **test** secret key (`sk_test_…`) — both names, the webhook check reads the second |
 | `FLW_SECRET_KEY`, `FLW_SECRET_HASH` | Flutterwave **test mode** secret key, and a webhook hash you choose (enter the same in the dashboard) |
 | `QOREID_BASE_URL`, `QOREID_CLIENT_ID`, `QOREID_SECRET`, `QOREID_WORKFLOW_ID`, `QOREID_WEBHOOK_SECRET` | QoreID **sandbox** values |
-| `SHIPBUBBLE_API_KEY`, `SHIPBUBBLE_WEBHOOK_SECRET` | Shipbubble sandbox key if you have one; with dry run on, real bookings never happen either way |
+| `SHIPBUBBLE_BASE_URL`, `SHIPBUBBLE_API_KEY`, `SHIPBUBBLE_WEBHOOK_SECRET` | Shipbubble sandbox address and key if you have them, otherwise the live ones: dry run is on, so nothing is booked. **The first two are required:** the backend will not start without them. |
 | `FRONTEND_URL`, `VENDOR_FRONTEND_URL`, `ADMIN_FRONTEND_URL` | the staging addresses of the shop, vendor and admin sites (step 5) — used for links in emails and payment returns |
 
 **Can be the same as production:**
