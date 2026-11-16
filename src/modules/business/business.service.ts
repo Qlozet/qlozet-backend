@@ -1959,6 +1959,8 @@ export class BusinessService {
           // The shop apps show the store's cover on its showcase card and
           // link to /s/<slug>; both were missing from this list.
           cover_image_url: 1,
+          // The transparent PNG/SVG logo, laid over the cover when present.
+          business_logo_svg_url: 1,
           slug: 1,
           description: 1,
           city: 1,
@@ -2155,6 +2157,8 @@ export class BusinessService {
           // The shop apps show the store's cover on its showcase card and
           // link to /s/<slug>; both were missing from this list.
           cover_image_url: 1,
+          // The transparent PNG/SVG logo, laid over the cover when present.
+          business_logo_svg_url: 1,
           slug: 1,
           description: 1,
           city: 1,
