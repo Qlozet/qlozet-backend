@@ -2,6 +2,7 @@ jest.mock('@gradio/client', () => ({ Client: {}, handle_file: jest.fn() }));
 import { MeasurementService } from './measurement.service';
 import { ScanFileStore } from './scan-file.store';
 import { ScanUnreadableError } from './scan-result';
+import { spaceEndpoint, withTimeout } from './space-endpoint';
 
 /**
  * The body scan sends two silhouettes the phone cut out; the backend holds
@@ -25,7 +26,8 @@ const build = (spaceResult: unknown, balance = 100) => {
   svc.hbm = 'space';
   svc.logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
   svc.gradio = {
-    getClient: jest.fn().mockResolvedValue({ predict }),
+    getClient: jest.fn().mockResolvedValue({ predict, api_map: { '/run_predict': 3 } }),
+    clearClient: jest.fn(),
     bufferToBlob: (b: Buffer, type: string) => ({ b, type }),
   };
   svc.platformService = {
@@ -49,7 +51,7 @@ describe('silhouette scan', () => {
   it('measures from both silhouettes with the hybrid model and charges the scan price', async () => {
     const { svc, predict, spend, job, scanFiles } = build(payload());
     const r = await svc.silhouettePredict(job);
-    expect(predict).toHaveBeenCalledWith('/run_predict', expect.objectContaining({
+    expect(predict).toHaveBeenCalledWith('//run_predict', expect.objectContaining({
       model_choice: 'Hybrid (CNN+Tabular)',
       front_image: { b: Buffer.from('front'), type: 'image/png' },
       side_image: { b: Buffer.from('side'), type: 'image/png' },
@@ -90,5 +92,23 @@ describe('silhouette scan', () => {
     await expect(svc.silhouettePredict(job)).rejects.toThrow('Insufficient tokens');
     expect(predict).not.toHaveBeenCalled();
     scanFiles.onModuleDestroy();
+  });
+});
+
+describe('spaceEndpoint', () => {
+  it('reaches a route registered with a leading slash, as the Space does', () => {
+    expect(spaceEndpoint({ api_map: { '/run_predict': 0 } }, 'run_predict')).toBe('//run_predict');
+  });
+  it('reaches a route registered without one', () => {
+    expect(spaceEndpoint({ api_map: { run_predict: 0 } }, '/run_predict')).toBe('/run_predict');
+  });
+  it('says so when the Space has no such route', () => {
+    expect(spaceEndpoint({ api_map: { other: 0 } }, 'run_predict')).toBeNull();
+  });
+});
+
+describe('withTimeout', () => {
+  it('gives up on a call that never settles', async () => {
+    await expect(withTimeout(new Promise(() => undefined), 10, 'too long')).rejects.toThrow('too long');
   });
 });
