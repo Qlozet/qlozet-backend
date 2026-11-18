@@ -28,6 +28,9 @@ import {
 import { AvatarDto } from './dto/avatar.dto';
 import { EditGarmentDto } from './dto/edit-image.dto';
 import { RunPredictBodyDto } from './dto/run-predict.dto';
+import { ScanUnreadableError, scanResultUsable, toScanResult } from './scan-result';
+import { ScanFileStore } from './scan-file.store';
+import { SilhouetteScanJob } from './dto/silhouette-scan.dto';
 
 @Injectable()
 export class MeasurementService {
@@ -41,6 +44,7 @@ export class MeasurementService {
     private readonly tokenService: TokenService,
     private readonly platformService: PlatformService,
     private readonly styleLibrary: StyleLibraryService,
+    private readonly scanFiles: ScanFileStore,
   ) {}
 
   async generateOutfitImageFromConfig(params: GenerateOutfitRequestDto) {
@@ -355,24 +359,29 @@ export class MeasurementService {
         t_boost: 1.1,
       });
 
-      // // Uncomment this when ready:
+      // [0] front mask, [1] side mask, [2] DataFrame, [3] predictions JSON
+      // file — same treatment as run-prediction so the photo-scan path also
+      // carries the derived tailoring measurements. Checked before charging:
+      // a scan that found no body costs nothing.
+      const scan = toScanResult(await this.extractPrediction(result?.data, 2));
+      if (!scanResultUsable(scan)) throw new ScanUnreadableError();
       await this.tokenService.spend('image', business, customer);
+      // Photos sent through us are held in memory only (scan-file links);
+      // just the old Cloudinary uploads need deleting.
       await Promise.all(
         [bg, side, front]
-          .filter((file) => !!file)
+          .filter((file) => !!file && /res\.cloudinary\.com/.test(file))
           .map(async (file) => {
             const publicId = this.cloudinary.getCloudinaryPublicId(file);
             await this.cloudinary.deleteFile(publicId);
           }),
       );
 
-      // [0] front mask, [1] side mask, [2] DataFrame, [3] predictions JSON
-      // file — same treatment as run-prediction so the photo-scan path also
-      // carries the derived tailoring measurements.
-      return this.extractPrediction(result?.data, 2);
+      return scan;
     } catch (error) {
       // Expected and safe errors
       if (
+        error instanceof ScanUnreadableError ||
         error instanceof BadRequestException ||
         error instanceof UnauthorizedException ||
         error instanceof ConflictException
@@ -395,6 +404,46 @@ export class MeasurementService {
         'Failed to process image measurement.',
       );
     }
+  }
+
+  /**
+   * Measure from two silhouettes the phone cut out itself (no photo, no
+   * video). Same model as the video and photo scans: the Hybrid CNN+tabular
+   * on a front and a side mask. Charged only when it found a body.
+   */
+  async silhouettePredict(job: SilhouetteScanJob) {
+    const front = this.scanFiles.get(job.front_token);
+    const side = this.scanFiles.get(job.side_token);
+    if (!front || !side) {
+      throw new BadRequestException('The scan expired before it was measured. Please scan again.');
+    }
+    const priceKey = job.kind === 'photo' ? 'image' : 'video';
+    const settings = await this.platformService.getSettings();
+    const price =
+      priceKey === 'image'
+        ? settings.image_measurement_token_price
+        : settings.video_measurement_token_price;
+    const balance = await this.tokenService.balance(job.business, job.customer);
+    if (balance < price) {
+      throw new BadRequestException('Insufficient tokens, please fund your wallet');
+    }
+
+    const client = await this.gradio.getClient(this.hbm);
+    const result = await client.predict('/run_predict', {
+      model_choice: 'Hybrid (CNN+Tabular)',
+      front_image: this.gradio.bufferToBlob(front, 'image/png'),
+      side_image: this.gradio.bufferToBlob(side, 'image/png'),
+      height_cm: Number(job.height_cm),
+      weight: Number(job.weight) || null,
+      gender: job.gender || '',
+    });
+
+    // [0] DataFrame, [1] predictions JSON file, [2] schema v2 payload.
+    const scan = toScanResult(await this.extractPrediction(result?.data, 0));
+    if (!scanResultUsable(scan)) throw new ScanUnreadableError();
+    await this.tokenService.spend(priceKey, job.business, job.customer);
+    this.logger.log('Silhouette scan measured');
+    return scan;
   }
 
   async generateAvatar(params: AvatarDto) {
@@ -440,25 +489,33 @@ export class MeasurementService {
 
       const client = await this.gradio.getClient(this.hbm);
 
+      // The back view and the 3D mesh feed nothing we keep — and every frame
+      // the Space returns sits in its file cache — so neither is asked for.
+      void want_back;
+      void want_mesh_flag;
       const result = await client.predict('/_video_pipeline_url', {
         video_url,
         method: method || 'mp',
         mp_t: Number(mp_t) || 0.12,
         height_cm: Number(height_cm) || 175,
         model_choice: 'Hybrid (CNN+Tabular)',
-        want_back,
+        want_back: false,
         weight_val: Number(weight) || 0,
         gender_val: gender || '',
-        want_mesh_flag,
+        want_mesh_flag: false,
       });
 
+      // [4] DataFrame, [8] predictions JSON file, [9] schema v2 payload.
+      const scan = toScanResult(await this.extractPrediction(result?.data, 4));
+      if (!scanResultUsable(scan)) throw new ScanUnreadableError();
       await this.tokenService.spend('video', business, customer);
       this.logger.log('Video pipeline prediction completed successfully');
-      return result.data;
+      return scan;
     } catch (error) {
       this.logger.error('Video pipeline error:', error.message);
+      if (error instanceof ScanUnreadableError || error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException(
-        `Video processing failed: ${error.message}`,
+        `The scan didn't go through: ${error.message}`,
       );
     }
   }

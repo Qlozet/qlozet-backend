@@ -4,6 +4,7 @@ import { EditGarmentDto } from '../dto/edit-image.dto';
 import { GenerateOutfitRequestDto } from '../dto/generate-outfit.dto';
 import { RunPredictBodyDto } from '../dto/run-predict.dto';
 import { VideoPipelineSwaggerDto } from '../dto/video-pipeline.dto';
+import { SilhouetteScanJob } from '../dto/silhouette-scan.dto';
 
 export interface GenerateOutfitJobData extends GenerateOutfitRequestDto {
   type: 'generateOutfit';
@@ -15,6 +16,10 @@ export interface VideoPipelineJobData extends VideoPipelineSwaggerDto {
 
 export interface AutoMaskJobData extends AutoMaskSwaggerDto {
   type: 'autoMask';
+}
+
+export interface SilhouetteScanJobData extends SilhouetteScanJob {
+  type: 'silhouetteScan';
 }
 
 export interface AvatarJobData extends AvatarDto {
@@ -38,6 +43,7 @@ export type OutfitJobData =
   | GenerateOutfitJobData
   | VideoPipelineJobData
   | AutoMaskJobData
+  | SilhouetteScanJobData
   | AvatarJobData
   | EditGarmentJobData
   | RunPredictionJobData

@@ -8,6 +8,7 @@ import { JobStatus, JobStatusSchema } from 'src/common/schemas/job-status.schema
 import { WalletsModule } from '../wallets/wallets.module';
 import { BullModule } from '@nestjs/bullmq';
 import { JobStatusService } from './job-status.service';
+import { ScanFileStore } from './scan-file.store';
 import { OutfitQueueService } from './outfit-queue.service';
 import { OutfitProcessor } from './queue/outfit.processor';
 import { UmsModule } from '../ums/ums.module';
@@ -58,6 +59,7 @@ import { Order, OrderSchema } from '../orders/schemas/orders.schema';
     GradioService,
     JwtService,
     JobStatusService,
+    ScanFileStore,
     OutfitQueueService,
     OutfitProcessor,
     AnthropicAuthService,

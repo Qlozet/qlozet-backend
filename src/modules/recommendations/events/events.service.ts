@@ -52,6 +52,38 @@ export class EventsService {
         return saved;
     }
 
+    /**
+     * What a shopper has dismissed from their feed: items marked "Not
+     * interested" (properties.itemId) and stores hidden with "Hide this
+     * store" (properties.businessId). The home feed leaves both out — the
+     * negative taste weights alone only nudge ranking, so a dismissed item
+     * could come straight back. Last 180 days.
+     */
+    async feedExclusions(userId: string): Promise<{ itemIds: Set<string>; vendorIds: Set<string> }> {
+        const itemIds = new Set<string>();
+        const vendorIds = new Set<string>();
+        if (!userId) return { itemIds, vendorIds };
+        const since = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+        try {
+            const rows = await this.eventModel
+                .find(
+                    { userId, eventType: { $in: ['not_interested', 'hide_business'] }, timestamp: { $gte: since } },
+                    { eventType: 1, properties: 1 },
+                )
+                .sort({ timestamp: -1 })
+                .limit(1000)
+                .lean()
+                .exec();
+            for (const r of rows as any[]) {
+                if (r.eventType === 'not_interested' && r.properties?.itemId) itemIds.add(String(r.properties.itemId));
+                if (r.eventType === 'hide_business' && r.properties?.businessId) vendorIds.add(String(r.properties.businessId));
+            }
+        } catch (err: any) {
+            this.logger.warn(`Could not read feed exclusions: ${err?.message}`);
+        }
+        return { itemIds, vendorIds };
+    }
+
     async getRecentEvents(userId: string, limit: number = 50, since?: Date): Promise<Event[]> {
         const query: any = { userId };
         if (since) {

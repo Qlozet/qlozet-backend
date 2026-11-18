@@ -7,6 +7,7 @@ import { JobState } from 'src/common/schemas/job-status.schema';
 import { Logger } from '@nestjs/common';
 import { TokenService } from '../../wallets/token.service';
 import { FabricVisionService } from '../fabric-vision.service';
+import { ScanFileStore } from '../scan-file.store';
 
 // Only these job types pre-charge tokens in the controller (spend() before
 // queuing), so only these are refunded on failure. auto-mask / video-pipeline /
@@ -27,6 +28,7 @@ export class OutfitProcessor extends WorkerHost {
     private jobStatusService: JobStatusService,
     private tokenService: TokenService,
     private fabricVision: FabricVisionService,
+    private scanFiles: ScanFileStore,
   ) {
     super();
   }
@@ -73,29 +75,19 @@ export class OutfitProcessor extends WorkerHost {
           );
           break;
 
-        case 'videoPipeline': {
-          const videoMeasurement = await this.measurement.videoPipeline(
-            job.data,
-          );
-          const videoDataArray = videoMeasurement[4].data;
-
-          result = Object.fromEntries(
-            videoDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
-          );
+        // Both scans resolve to { measurements, tailoring_meta, inputs } —
+        // see scan-result.ts. Ready to save as-is.
+        case 'videoPipeline':
+          result = await this.measurement.videoPipeline(job.data);
           break;
-        }
 
-        case 'autoMask': {
-          const maskMeasurement = await this.measurement.autoMaskPredict(
-            job.data,
-          );
-          const maskDataArray = maskMeasurement.data;
-
-          result = Object.fromEntries(
-            maskDataArray.map(([name, cm, inch]) => [name, { cm, inch }]),
-          );
+        case 'autoMask':
+          result = await this.measurement.autoMaskPredict(job.data);
           break;
-        }
+
+        case 'silhouetteScan':
+          result = await this.measurement.silhouettePredict(job.data);
+          break;
 
         case 'avatar':
           result = await this.measurement.generateAvatar(job.data);
@@ -179,6 +171,11 @@ export class OutfitProcessor extends WorkerHost {
       );
 
       throw error;
+    } finally {
+      // Scan silhouettes were only ever held in memory; drop them the
+      // moment the job is over, pass or fail.
+      const d: any = job.data;
+      this.scanFiles.release([d.front_token, d.side_token]);
     }
   }
 
