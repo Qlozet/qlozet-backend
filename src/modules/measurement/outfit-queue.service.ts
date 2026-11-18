@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { VideoPipelineSwaggerDto } from './dto/video-pipeline.dto';
+import { SilhouetteScanJob } from './dto/silhouette-scan.dto';
 import { AutoMaskSwaggerDto } from './dto/auto-mask-predict.dto';
 import { GenerateOutfitRequestDto } from './dto/generate-outfit.dto';
 import { JobStatusService } from './job-status.service';
@@ -148,6 +149,21 @@ export class OutfitQueueService {
         status: 'queued',
       },
       message: 'Generation started. Use the jobId to check the status.',
+    };
+  }
+
+  /** Queue a silhouette scan. The payload holds in-memory keys only. */
+  async queueSilhouetteScan(payload: SilhouetteScanJob) {
+    const jobId = randomUUID();
+    await this.queue.add(
+      'silhouetteScan',
+      { type: 'silhouetteScan', ...payload },
+      { jobId },
+    );
+    await this.jobService.create(jobId, payload);
+    return {
+      data: { job_id: jobId, status: 'queued' },
+      message: 'Measuring. Use the job_id to check the status.',
     };
   }
 
