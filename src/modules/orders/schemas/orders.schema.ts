@@ -394,6 +394,12 @@ export class VendorShipment {
   @Prop({ type: Date, default: null })
   ship_by_warning_for?: Date | null;
 
+  // Days this vendor has to make and ship, as agreed (the quote's making
+  // time, or the longest item window). Lets the clock restart from the day
+  // fabric from another shop arrives (late-penalty.ts shipClock).
+  @Prop({ type: Number, default: null })
+  making_days?: number | null;
+
   @Prop({ type: Date, default: null })
   cancel_warning_for?: Date | null;
 
@@ -565,6 +571,17 @@ export class Order {
     submitted_at?: Date;
     reviewed_at?: Date | null;
     customer_note?: string | null;
+    /** Change requests used; the price includes INCLUDED_CHANGE_ROUNDS (order-agreement.ts). */
+    changes_requested_count?: number;
+    /** Earlier rounds, oldest first: the photos shown and what was asked for. */
+    history?: {
+      photos: string[];
+      note?: string | null;
+      status: string;
+      submitted_at: Date;
+      reviewed_at?: Date | null;
+      customer_note?: string | null;
+    }[];
   } | null;
 
   // Post-delivery fit feedback (bespoke) — the platform's ground truth for
@@ -585,6 +602,12 @@ export class Order {
   // was charged; quote_total holds the full price. null = paid in one go.
   @Prop({ type: Object, default: null })
   payment_plan?: PaymentPlan | null;
+
+  // Bespoke: the order agreement both sides agreed to, frozen when the
+  // deposit is paid (bespoke/order-agreement.ts). Customer, tailor and the
+  // Qlozet team see the same record.
+  @Prop({ type: Object, default: null })
+  agreement?: Record<string, any> | null;
 
   // Customer-facing payment/refund state (denormalised from Transactions so the
   // order list can render Paid/Refunded without joining the transactions coll).

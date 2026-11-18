@@ -37,9 +37,18 @@ import { TransactionService } from '../transactions/transactions.service';
 import { PaymentService } from '../payment/payment.service';
 import { NairaGatewayService } from '../payment/naira-gateway.service';
 import {
+  SHIP_AFTER_BALANCE_DAYS,
+  balanceDaysFrom,
   buildPaymentPlan,
   depositPercentFrom,
 } from '../orders/bespoke-payment-plan';
+import { lateRulesFrom } from '../orders/late-penalty';
+import { DISPUTE_WINDOW_DAYS } from '../business/settlement';
+import {
+  ORDER_AGREEMENT_TEXT_VERSION,
+  buildOrderAgreement,
+  type OrderAgreement,
+} from './order-agreement';
 import { WalletsService } from '../wallets/wallets.service';
 import { BusinessService } from '../business/business.service';
 import {
@@ -69,6 +78,16 @@ import { customerForVendor } from '../../common/utils/customer-privacy';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VendorRecipientsService } from '../notifications/vendor-recipients.service';
 import { VendorRole } from '../ums/schemas/role.schema';
+import { LogisticsService } from '../logistics/logistics.service';
+import {
+  DELIVERY_QUOTE_TTL_MS,
+  deliveryFromRates,
+  fabricLegsOf,
+  fabricParcel,
+  garmentParcel,
+  unpricedDelivery,
+  type BespokeDelivery,
+} from './bespoke-delivery';
 import { notifyQuoteAccepted } from './quote-accepted-notice';
 
 // Who at a vendor hears about a quote: the tailor is the person who can
@@ -118,6 +137,15 @@ function backViewsFor(
   }).map((v) => ({ front: v.front, back: v.back }));
 }
 
+
+/** Recent delivery prices (quote:address), so the price shown is the price charged. */
+const deliveryCache = new Map<string, BespokeDelivery>();
+
+
+/** The customer agreed to an agreement that no longer matches the order. */
+const AGREEMENT_CHANGED =
+  'The order details changed since you looked (for example the delivery price). Check the agreement again before paying.';
+
 @Injectable()
 export class BespokeService {
   private readonly logger = new Logger(BespokeService.name);
@@ -152,6 +180,7 @@ export class BespokeService {
     private readonly notificationsService: NotificationsService,
     private readonly vendorRecipients: VendorRecipientsService,
     private readonly productService: ProductService,
+    private readonly logistics: LogisticsService,
   ) {}
 
   /**
@@ -740,6 +769,8 @@ export class BespokeService {
     paymentMethod: 'wallet' | 'paystack' = 'paystack',
     addressId?: string,
     measurementSetName?: string,
+    /** The agreement version the customer ticked "I agree" to (GET …/agreement). */
+    agreementVersion?: string,
   ) {
     const quote = await this.quoteModel.findOne({
       _id: new Types.ObjectId(quoteId),
@@ -833,6 +864,17 @@ export class BespokeService {
       customer.id,
       measurementSetName,
     );
+    if (order && (order as any).agreement) {
+      // Retry of an earlier checkout: the agreement is the one built then.
+      const existing: any = (order as any).agreement;
+      if (agreementVersion && agreementVersion !== existing.version) {
+        throw new BadRequestException(AGREEMENT_CHANGED);
+      }
+      if (agreementVersion) {
+        (order as any).agreement = { ...existing, customer_agreed_at: new Date() };
+        order.markModified('agreement');
+      }
+    }
     if (order && bodyProfile) {
       // Retry of an earlier checkout — refresh the snapshot in case the
       // customer picked a different measurement set this time.
@@ -851,22 +893,7 @@ export class BespokeService {
       // (legacy) plain string — some address docs have a string-typed customer,
       // which a `new Types.ObjectId(...)` equality would silently miss. Compare
       // on the stringified value so both representations match.
-      const customerIdStr = String(customer.id);
-      const customerMatch = {
-        $expr: { $eq: [{ $toString: '$customer' }, customerIdStr] },
-      };
-      const address =
-        (addressId
-          ? await this.addressModel.findOne({
-              _id: new Types.ObjectId(addressId),
-              ...customerMatch,
-            })
-          : null) ||
-        (await this.addressModel.findOne({
-          ...customerMatch,
-          is_default: true,
-        })) ||
-        (await this.addressModel.findOne(customerMatch));
+      const address = await this.customerAddress(String(customer.id), addressId);
       if (!address) {
         const inCollection = await this.addressModel.estimatedDocumentCount();
         this.logger.warn(
@@ -1016,6 +1043,7 @@ export class BespokeService {
           status: ShipmentStatus.PENDING,
           confirmed: true,
           confirmed_at: new Date(),
+          // Set once delivery is priced, below.
           shipping_fee: 0,
         });
       }
@@ -1034,7 +1062,30 @@ export class BespokeService {
         fabricDepositFloor([pricing, ...extras.map((e) => e.pricing)].filter(Boolean) as QuoteFabric[]),
       );
       const tailorCharge = plan ? plan.deposit_amount : quote.total;
+      // Delivery from the tailor to this address, paid with the deposit
+      // (bespoke-delivery.ts). ₦0 when it cannot be priced.
+      const deliveries = await this.allDeliveriesFor(quote, address);
+      const delivery = deliveries.garment;
+      const fabricLegFee = (product: any) =>
+        deliveries.fabrics.find((f) => String(f.leg.product) === String(product))?.delivery.fee ?? 0;
 
+      // The agreement, from the same numbers as the charge. The customer
+      // ticked "I agree" to a version; refuse if it no longer matches.
+      const agreement = await this.agreementFor(quote, design, String(customer.id), address, {
+        bodyProfile,
+        deliveries,
+        planSettings,
+      });
+      if (agreementVersion && agreementVersion !== agreement.version) {
+        throw new BadRequestException(AGREEMENT_CHANGED);
+      }
+      if (agreementVersion) agreement.customer_agreed_at = new Date();
+
+      // Only legs this order actually creates (a fabric now the tailor's own
+      // has no transfer and no courier).
+      const fabricLegsShipping =
+        (fabricForeign ? fabricLegFee(design.fabric) : 0) +
+        extraTransfers.reduce((t, x) => t + fabricLegFee(x.fabric_product), 0);
       order = await new this.orderModel({
         reference: orderReference,
         customer: new Types.ObjectId(customer.id),
@@ -1098,7 +1149,21 @@ export class BespokeService {
             confirmed: true,
             confirmed_at: new Date(),
             fulfillment_deadline: deadline,
-            shipping_fee: 0,
+            // The quote's making time: restarts from the day fabric from
+            // another shop arrives (orders/late-penalty.ts shipClock).
+            making_days: quote.estimated_completion_days || 7,
+            shipping_fee: delivery.fee,
+            ...(delivery.unpriced
+              ? {}
+              : {
+                  // The courier picked at acceptance. Its token goes stale in
+                  // minutes; fulfilment fetches a fresh one for the same courier.
+                  request_token: delivery.request_token ?? undefined,
+                  courier_id: delivery.courier_id ?? undefined,
+                  courier_name: delivery.courier_name ?? undefined,
+                  service_code: delivery.service_code ?? undefined,
+                  rate_fetched_at: delivery.quoted_at,
+                }),
           },
           ...(fabricForeign
             ? [
@@ -1114,16 +1179,24 @@ export class BespokeService {
                   confirmed: true,
                   confirmed_at: new Date(),
                   fulfillment_deadline: fabricTransferDeadline,
-                  shipping_fee: 0,
+                  // The courier to the tailor, paid with the deposit.
+                  shipping_fee: fabricLegFee(design.fabric),
                 },
               ]
             : []),
-          ...extraTransfers.map((t) => ({ ...t, fulfillment_deadline: fabricTransferDeadline })),
+          ...extraTransfers.map((t) => ({
+            ...t,
+            fulfillment_deadline: fabricTransferDeadline,
+            shipping_fee: fabricLegFee(t.fabric_product),
+          })),
         ],
         subtotal: tailorCharge + fabricCost + extraOnTop,
-        shipping_fee: 0,
-        total: tailorCharge + fabricCost + extraOnTop,
+        // Every courier leg, paid with the deposit: the outfit to the
+        // customer and each other-shop fabric to the tailor.
+        shipping_fee: delivery.fee + fabricLegsShipping,
+        total: tailorCharge + fabricCost + extraOnTop + delivery.fee + fabricLegsShipping,
         payment_plan: plan,
+        agreement,
         status: OrderStatus.PENDING,
         customer_body_profile: bodyProfile,
       }).save();
@@ -1221,6 +1294,236 @@ export class BespokeService {
         },
         payment: paymentInit.data,
       },
+    };
+  }
+
+  /**
+   * The order agreement for this quote and customer (order-agreement.ts):
+   * the same quote, fabric pricing, payment plan and delivery as the charge.
+   */
+  private async agreementFor(
+    quote: any,
+    design: any,
+    customerId: string,
+    address: any,
+    pre: { bodyProfile?: any; deliveries?: any; planSettings?: any; measurementSetName?: string } = {},
+  ): Promise<OrderAgreement> {
+    const settings: any = pre.planSettings ?? (await this.platformSettingsModel.findOne().lean());
+    const deliveries = pre.deliveries ?? (await this.allDeliveriesFor(quote, address));
+    const bodyProfile =
+      pre.bodyProfile !== undefined
+        ? pre.bodyProfile
+        : await this.buildBodyProfileSnapshot(customerId, pre.measurementSetName);
+    const tailor: any = await this.businessModel
+      .findById(quote.vendor?._id ?? quote.vendor)
+      .select('business_name')
+      .lean();
+    const plan = buildPaymentPlan(
+      String(quote.vendor?._id ?? quote.vendor),
+      quote.total,
+      depositPercentFrom(settings),
+      fabricDepositFloor(quoteFabrics(quote)),
+    );
+    const late = lateRulesFrom(settings);
+    return buildOrderAgreement({
+      design,
+      quote,
+      tailorName: tailor?.business_name ?? 'Your tailor',
+      plan,
+      delivery: { garment: deliveries.garment.fee, fabric: deliveries.fabricFee },
+      settings: {
+        cancellation_fee_percent: Math.min(Math.max(Number(settings?.custom_cancellation_fee_percent ?? 30), 0), 100),
+        balance_days: balanceDaysFrom(settings),
+        late_percent_per_day: late.perDayPercent,
+        late_max_percent: late.maxPercent,
+        abandon_after_days: late.abandonAfterDays,
+        dispute_window_days: DISPUTE_WINDOW_DAYS,
+        ship_after_balance_days: SHIP_AFTER_BALANCE_DAYS,
+      },
+      measurements: bodyProfile,
+      address,
+      // Only a tailor who ticked the terms (quotes from before 13 Nov 2026 have none).
+      tailorAgreedAt: quote.terms_accepted_at ?? null,
+    });
+  }
+
+  /**
+   * GET /bespoke/quotes/:id/agreement: the order agreement the customer is
+   * about to agree to, shown before paying. Send its `version` back as
+   * `agreement_version` when accepting.
+   */
+  async quoteAgreement(
+    quoteId: string,
+    customerId: string,
+    addressId?: string,
+    measurementSetName?: string,
+  ) {
+    if (!Types.ObjectId.isValid(quoteId)) throw new NotFoundException('Quote not found');
+    const quote: any = await this.quoteModel
+      .findOne({ _id: new Types.ObjectId(quoteId), customer: new Types.ObjectId(customerId) })
+      .lean();
+    if (!quote) throw new NotFoundException('Quote not found');
+    const design = await this.designModel.findById(quote.design).lean();
+    if (!design) throw new NotFoundException('Design not found');
+    const address = await this.customerAddress(customerId, addressId);
+    if (!address) {
+      throw new BadRequestException('Add a delivery address to see the order agreement.');
+    }
+    return this.agreementFor(quote, design, customerId, address, { measurementSetName });
+  }
+
+  /** The customer's address: the one asked for, else their default, else any. */
+  private async customerAddress(customerId: string, addressId?: string) {
+    // Match the `customer` ref whether it's stored as an ObjectId or a
+    // (legacy) plain string: some address docs have a string-typed customer,
+    // which a `new Types.ObjectId(...)` equality would silently miss.
+    const customerMatch = {
+      $expr: { $eq: [{ $toString: '$customer' }, String(customerId)] },
+    };
+    return (
+      (addressId && Types.ObjectId.isValid(addressId)
+        ? await this.addressModel.findOne({
+            _id: new Types.ObjectId(addressId),
+            ...customerMatch,
+          })
+        : null) ||
+      (await this.addressModel.findOne({ ...customerMatch, is_default: true })) ||
+      (await this.addressModel.findOne(customerMatch))
+    );
+  }
+
+  /**
+   * Delivery from the quoting tailor to this address (bespoke-delivery.ts).
+   * Reused for 20 minutes for the same quote and address, so the customer
+   * pays what they were shown. Never throws: ₦0 when it cannot be priced.
+   */
+  private async deliveryFor(quote: any, address: any): Promise<BespokeDelivery> {
+    return this.priceParcel(`${quote._id}:${address?._id}`, quote, async () => {
+      const tailor: any = await this.businessModel
+        .findById(quote.vendor)
+        .select('address_code business_name')
+        .lean();
+      if (!address?.address_code) return 'The delivery address has not been validated.';
+      if (!tailor?.address_code) return "The tailor's pickup address has not been validated.";
+      return {
+        sender: tailor.address_code,
+        receiver: address.address_code,
+        parcel: garmentParcel(`Bespoke outfit ${quote.reference ?? ''}`.trim(), quote.total),
+      };
+    });
+  }
+
+  /**
+   * The courier for fabric another shop sends to the tailor (one leg per
+   * fabric), charged with the deposit like the garment's own delivery.
+   */
+  private async fabricDeliveryFor(
+    quote: any,
+    leg: { product: string; yards: number; amount: number; name: string },
+  ): Promise<BespokeDelivery> {
+    return this.priceParcel(`${quote._id}:fabric:${leg.product}`, quote, async () => {
+      const product: any = await this.productModel.findById(leg.product).lean();
+      const shopId = product?.business;
+      if (!shopId) return 'The fabric could not be found.';
+      const [shop, tailor]: any[] = await Promise.all([
+        this.businessModel.findById(shopId).select('address_code').lean(),
+        this.businessModel.findById(quote.vendor).select('address_code').lean(),
+      ]);
+      if (!shop?.address_code) return "The fabric shop's pickup address has not been validated.";
+      if (!tailor?.address_code) return "The tailor's address has not been validated.";
+      return {
+        sender: shop.address_code,
+        receiver: tailor.address_code,
+        parcel: fabricParcel(product?.fabric?.name ?? leg.name, leg.yards, leg.amount),
+      };
+    });
+  }
+
+  /** Every leg's delivery for this quote and address: the garment's and each fabric's. */
+  private async allDeliveriesFor(quote: any, address: any) {
+    const garment = await this.deliveryFor(quote, address);
+    const fabrics = await Promise.all(
+      fabricLegsOf(quote).map(async (leg) => ({ leg, delivery: await this.fabricDeliveryFor(quote, leg) })),
+    );
+    const fabricFee = fabrics.reduce((t, f) => t + f.delivery.fee, 0);
+    return { garment, fabrics, fabricFee, total: garment.fee + fabricFee };
+  }
+
+  /**
+   * One courier price, reused for 20 minutes under `key` so the price shown
+   * is the price charged. Never throws: ₦0 and `unpriced` when it cannot be
+   * had (the route callback returns a reason instead of a route).
+   */
+  private async priceParcel(
+    key: string,
+    quote: any,
+    route: () => Promise<string | { sender: string; receiver: string; parcel: any }>,
+  ): Promise<BespokeDelivery> {
+    const cached = deliveryCache.get(key);
+    if (cached && Date.now() - cached.quoted_at.getTime() < DELIVERY_QUOTE_TTL_MS) {
+      return cached;
+    }
+    let delivery: BespokeDelivery;
+    try {
+      const r = await route();
+      if (typeof r === 'string') {
+        delivery = unpricedDelivery(r);
+      } else {
+        const rates = await this.logistics.fetchRates([], {
+          sender_address_code: r.sender,
+          reciever_address_code: r.receiver,
+          pickup_date: new Date().toISOString().split('T')[0],
+          package_items: [r.parcel],
+          service_type: 'pickup',
+          category_id: 74794423, // "Fashion wears"
+          package_dimension: { length: 40, width: 30, height: 10 },
+        } as any);
+        delivery = deliveryFromRates(rates);
+      }
+    } catch (err: any) {
+      delivery = unpricedDelivery(`The courier service did not answer: ${err?.message ?? 'error'}`);
+    }
+    if (delivery.unpriced) {
+      this.logger.warn(
+        `[BespokeDelivery] No price for ${key} (quote ${quote?.reference ?? quote?._id}): ${delivery.reason} Qlozet pays the courier.`,
+      );
+    }
+    if (deliveryCache.size > 500) {
+      for (const [k, v] of deliveryCache) {
+        if (Date.now() - v.quoted_at.getTime() >= DELIVERY_QUOTE_TTL_MS) deliveryCache.delete(k);
+      }
+    }
+    deliveryCache.set(key, delivery);
+    return delivery;
+  }
+
+  /**
+   * GET /bespoke/quotes/:id/delivery: what delivery to this address costs,
+   * shown before the customer pays (the same price acceptance charges).
+   */
+  async quoteDelivery(quoteId: string, customerId: string, addressId?: string) {
+    if (!Types.ObjectId.isValid(quoteId)) throw new NotFoundException('Quote not found');
+    const quote = await this.quoteModel
+      .findOne({ _id: new Types.ObjectId(quoteId), customer: new Types.ObjectId(customerId) })
+      .lean();
+    if (!quote) throw new NotFoundException('Quote not found');
+    const address = await this.customerAddress(customerId, addressId);
+    if (!address) {
+      throw new BadRequestException('Add a delivery address to see the delivery price.');
+    }
+    const all = await this.allDeliveriesFor(quote, address);
+    return {
+      /** Everything charged for delivery with the deposit. */
+      fee: all.total,
+      /** The outfit from the tailor to the customer. */
+      garment_fee: all.garment.fee,
+      /** Fabric from other shops to the tailor (0 when there is none). */
+      fabric_fee: all.fabricFee,
+      courier_name: all.garment.courier_name,
+      eta: all.garment.eta,
+      /** The outfit's delivery could not be priced: it is free to the customer this time. */
+      unpriced: all.garment.unpriced,
+      address_id: String(address._id),
     };
   }
 
@@ -1731,6 +2034,10 @@ export class BespokeService {
     const previousStatus = quote.status;
     quote.status = BespokeQuoteStatus.SUBMITTED;
     quote.submitted_at = new Date();
+    if (dto.accept_terms) {
+      quote.terms_accepted_at = quote.submitted_at;
+      quote.terms_version = ORDER_AGREEMENT_TEXT_VERSION;
+    }
 
     // Restart the expiry clock from submission. expires_at was set at request
     // time, so a day-6 submission would leave the customer ~1 day to decide;

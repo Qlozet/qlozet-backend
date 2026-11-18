@@ -119,7 +119,7 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
     title: 'Ship by the date on the order',
     body:
       'Every order you confirm shows a ship-by date. It is counted from when you confirm, using the longest making time among your items; ' +
-      `an item without its own making time gets ${plural(terms.turnaround_days, 'day')}. You get a reminder before it is due.`,
+      `an item without its own making time gets ${plural(terms.turnaround_days, 'day')}. If the fabric comes from another shop, your time starts when it arrives, and time waiting for a customer's measurement answer (up to 3 days) is added. You get a reminder before it is due.`,
   });
 
   if (terms.late_percent_per_day > 0 && terms.late_max_percent > 0) {
@@ -157,8 +157,9 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
     body: split
       ? `The customer pays ${terms.deposit_percent}% of your quote when they accept it, or the fabric cost if that is more. ` +
         'The rest is charged after you send photos of the finished piece. ' +
-        `If they do not pay it within ${plural(terms.balance_days, 'day')}, the order closes and you keep the deposit.`
-      : 'The customer pays your whole quote when they accept it. You are paid on the usual schedule.',
+        `If they do not pay it within ${plural(terms.balance_days, 'day')}, the order closes and you keep the deposit. ` +
+        'Your price includes 2 rounds of changes after the photos; agree anything more in the order chat.'
+      : 'The customer pays your whole quote when they accept it. You are paid on the usual schedule. Your price includes 2 rounds of changes after the photos.',
   });
 
   cards.push({
@@ -168,7 +169,8 @@ export function orderRuleCards(terms: OrderRuleTerms): OrderRuleCard[] {
       terms.cancellation_fee_percent > 0
         ? 'Before you confirm, they cancel for free. A ready-made item can be cancelled with a full refund until you ship it. ' +
           `After you confirm a custom or bespoke piece, you keep ${terms.cancellation_fee_percent}% of it; ` +
-          'once you have sent photos of the finished piece, you keep at least the whole deposit.'
+          'once you have sent photos of the finished piece, you keep at least the whole deposit. ' +
+          'Fabric another shop has already sent to you stays paid to that shop. If you cancel after it was sent, its cost comes from your balance.'
         : 'Customers can cancel with a full refund until you ship.',
   });
 

@@ -1929,6 +1929,13 @@ export class ProductService {
     orderId: Types.ObjectId,
     businessId?: string | Types.ObjectId,
     itemId?: string | Types.ObjectId,
+    /**
+     * Fabric that already left the shop for a tailor is not back on the
+     * shelf: `skipItems` leaves those lines out entirely (a bespoke fabric
+     * line), `skipAppliedFabricFor` leaves out only the applied fabric of
+     * these garment lines.
+     */
+    keep?: { skipItems?: string[]; skipAppliedFabricFor?: string[] },
   ) {
     const session = await this.connection.startSession();
 
@@ -1966,6 +1973,11 @@ export class ProductService {
           // stock was restored when they were rejected, so restoring again would
           // double-count.
           items = items.filter((i) => !(i as any).rejected);
+        }
+        const skipItems = new Set((keep?.skipItems ?? []).map(String));
+        const skipApplied = new Set((keep?.skipAppliedFabricFor ?? []).map(String));
+        if (skipItems.size) {
+          items = items.filter((i) => !skipItems.has(String((i as any)._id)));
         }
 
         for (const item of items) {
@@ -2151,7 +2163,11 @@ export class ProductService {
           }
 
           // Restore applied fabric (from "Use Fabric" feature)
-          if (item.applied_fabric && item.applied_fabric_yards) {
+          if (
+            item.applied_fabric &&
+            item.applied_fabric_yards &&
+            !skipApplied.has(String((item as any)._id))
+          ) {
             const fabricProduct = await this.productModel
               .findById(item.applied_fabric)
               .session(session);

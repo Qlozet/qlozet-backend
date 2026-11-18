@@ -48,6 +48,18 @@ addresses — and keep the password strong.
 The connection string is staging's `MONGO_URI`. It starts empty; sign up on
 the staging shop and vendor sites to create test accounts.
 
+An empty database has no roles, so sign-up fails with "Customer role not
+found" until they are added. Once the backend is deployed (step 4), run the
+built seed inside the machine, which uses the staging database:
+
+```sh
+fly ssh console -a qlozet-backend-staging -C "sh -c 'cd /app && node dist/scripts/seed.js roles'"
+```
+
+Only `roles` (it adds the permissions too). Never `run` or `users`: they
+create sample accounts with a known password. Then, in the admin console, use
+the seed buttons on the categories and style library pages.
+
 To make yourself an admin on staging, do it the same way as on production,
 but against the staging database.
 
@@ -66,7 +78,7 @@ Fly dashboard under the staging app → Secrets.
 | `PAYSTACK_SECRET_KEY` **and** `PAYSTACK_SECRET` | Paystack **test** secret key (`sk_test_…`) — both names, the webhook check reads the second |
 | `FLW_SECRET_KEY`, `FLW_SECRET_HASH` | Flutterwave **test mode** secret key, and a webhook hash you choose (enter the same in the dashboard) |
 | `QOREID_BASE_URL`, `QOREID_CLIENT_ID`, `QOREID_SECRET`, `QOREID_WORKFLOW_ID`, `QOREID_WEBHOOK_SECRET` | QoreID **sandbox** values |
-| `SHIPBUBBLE_API_KEY`, `SHIPBUBBLE_WEBHOOK_SECRET` | Shipbubble sandbox key if you have one; with dry run on, real bookings never happen either way |
+| `SHIPBUBBLE_BASE_URL`, `SHIPBUBBLE_API_KEY`, `SHIPBUBBLE_WEBHOOK_SECRET` | Shipbubble sandbox address and key if you have them, otherwise the live ones: dry run is on, so nothing is booked. **The first two are required:** the backend will not start without them. |
 | `FRONTEND_URL`, `VENDOR_FRONTEND_URL`, `ADMIN_FRONTEND_URL` | the staging addresses of the shop, vendor and admin sites (step 5) — used for links in emails and payment returns |
 
 **Can be the same as production:**

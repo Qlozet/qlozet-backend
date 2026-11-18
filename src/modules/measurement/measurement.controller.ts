@@ -57,6 +57,11 @@ import {
 import { EditGarmentDto } from './dto/edit-image.dto';
 import { JobStatusService } from './job-status.service';
 import { UserType } from '../ums/schemas';
+import { ScanFileStore, isPng } from './scan-file.store';
+import { SilhouetteScanDto } from './dto/silhouette-scan.dto';
+
+/** A silhouette PNG is a few KB; anything near this is not a silhouette. */
+const SILHOUETTE_MAX_BYTES = 2 * 1024 * 1024;
 
 @Controller('measurements')
 @ApiTags('Measurements')
@@ -72,6 +77,7 @@ export class MeasurementController {
     private readonly tokenService: TokenService,
     private readonly userService: UserService,
     private readonly measurementPhoto: MeasurementPhotoService,
+    private readonly scanFiles: ScanFileStore,
   ) {}
 
   @Roles(UserType.CUSTOMER)
@@ -158,6 +164,74 @@ export class MeasurementController {
         error.message || 'Video processing failed',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  // Body scan from two silhouettes the phone cut out (front and side): no
+  // photo or video ever leaves the phone, and the silhouettes are held in
+  // memory only until the model has read them — never stored.
+  @Roles(UserType.CUSTOMER)
+  @Post('silhouette-scan')
+  @Throttle({ short: { limit: 1, ttl: 3000 }, long: { limit: 30, ttl: 3600000 } })
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'front', maxCount: 1 },
+        { name: 'side', maxCount: 1 },
+      ],
+      { storage: multer.memoryStorage(), limits: { fileSize: SILHOUETTE_MAX_BYTES } },
+    ),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Measure from front and side silhouettes',
+    description:
+      "Send `front` and `side` as PNG silhouettes (white person on black) plus height_cm, weight, gender and kind ('scan' or 'photo'). Returns a job_id; poll GET /measurements/job/:job_id. The result is { measurements (cm), tailoring_meta, inputs }, ready to save with method 'scan' or 'photo'.",
+  })
+  async silhouetteScan(
+    @Body() body: SilhouetteScanDto,
+    @Req() req: any,
+    @UploadedFiles()
+    files: { front?: Express.Multer.File[]; side?: Express.Multer.File[] } = {},
+  ) {
+    const front = files?.front?.[0]?.buffer;
+    const side = files?.side?.[0]?.buffer;
+    if (!isPng(front) || !isPng(side)) {
+      throw new BadRequestException('Send the front and side silhouettes as PNG images.');
+    }
+    const business = req.business?.id;
+    const customer = req.user?.id;
+    const kind = body.kind === 'photo' ? 'photo' : 'scan';
+    const settings = await this.platformService.getSettings();
+    const price =
+      kind === 'photo'
+        ? settings.image_measurement_token_price
+        : settings.video_measurement_token_price;
+    if ((await this.tokenService.balance(business, customer)) < price) {
+      throw new BadRequestException('Insufficient tokens, please fund your wallet');
+    }
+    if (!this.scanFiles.hasRoom(front!.length + side!.length)) {
+      throw new HttpException(
+        'Scans are busy right now. Please try again in a minute.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    const front_token = this.scanFiles.put(front!);
+    const side_token = this.scanFiles.put(side!);
+    try {
+      return await this.outfitService.queueSilhouetteScan({
+        front_token,
+        side_token,
+        height_cm: body.height_cm,
+        weight: body.weight,
+        gender: body.gender,
+        kind,
+        business,
+        customer,
+      });
+    } catch (error) {
+      this.scanFiles.release([front_token, side_token]);
+      throw error;
     }
   }
 

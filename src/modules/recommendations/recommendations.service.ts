@@ -115,13 +115,25 @@ export class RecommendationsService {
     });
     if (deadlineDays) filterSpec.deadlineDays = deadlineDays;
 
+    // What this shopper dismissed: hidden stores go through the blocked-
+    // vendor filter, "Not interested" items are dropped outright.
+    const exclusions = await this.eventsService.feedExclusions(userId);
+    if (exclusions.vendorIds.size > 0) {
+      filterSpec.blockedVendors = [
+        ...(filterSpec.blockedVendors ?? []),
+        ...exclusions.vendorIds,
+      ];
+    }
+
     // Apply hard filters (including vendor trust gating)
     const filterResult = this.filtersService.applyHardFilters(
       candidates,
       filterSpec,
       businesses,
     );
-    const filtered = filterResult.items;
+    const filtered = exclusions.itemIds.size > 0
+      ? filterResult.items.filter((item) => !exclusions.itemIds.has(String(item.itemId)))
+      : filterResult.items;
     const filterMetrics = filterResult.metrics;
 
     // 3.5 Read Cached Perfect Fit Products (pre-computed when measurements change)

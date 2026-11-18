@@ -416,9 +416,24 @@ export class PriceCalculationService {
     // Fabric / accessory products — flat price.
     const final = await this.calculateItemTotal(item);
 
+    // Fabric: `final` is already marked down (calculateFabricTotal); report
+    // the full price and the markdown so the two can't disagree.
+    if (product.kind === ProductKind.FABRIC) {
+      const ratio = this.fabricSaleRatio(product);
+      if (ratio < 1 && final > 0) {
+        const before = this.round(final / ratio);
+        return {
+          ...empty,
+          base: before,
+          before_discount: before,
+          discount: Math.max(0, this.round(before - final)),
+          final,
+        };
+      }
+    }
+
     // Accessories: surface any product-level discount so the PDP can show the
-    // pre-discount price. (Fabric is priced by yardage, which doesn't map cleanly
-    // onto base_price, so it stays a flat line with no computed discount.)
+    // pre-discount price.
     if (product.kind === ProductKind.ACCESSORY) {
       const qtyF = item.quantity ?? 1;
       const hasDisc =
@@ -468,9 +483,27 @@ export class PriceCalculationService {
 
     const selections = item.selections?.fabric_selection;
     if (selections && selections.length > 0) {
-      return this.round(await this.calculateFabricCost(selections, product));
+      // Yards and pieces are priced from price_per_yard / piece_price, so the
+      // store's discount is applied as the listing's own ratio — the sale
+      // price shoppers see per yard and per piece. It used to be skipped:
+      // listed at ₦1,800/yd, charged ₦2,000/yd.
+      const full = await this.calculateFabricCost(selections, product);
+      return this.round(full * this.fabricSaleRatio(product));
     }
     return this.round(effectivePrice * qty);
+  }
+
+  /**
+   * What a discounted fabric costs as a share of its full price
+   * (discounted_price / base_price; 1 with no discount). base_price is the
+   * per-yard price, so this is the per-yard markdown, which also holds for a
+   * whole piece (the shop shows the piece price marked down by it).
+   */
+  fabricSaleRatio(product: ProductDocument): number {
+    const base = Number(product.base_price) || 0;
+    const sale = Number(product.discounted_price) || 0;
+    if (!(base > 0) || !(sale > 0) || sale >= base) return 1;
+    return sale / base;
   }
 
   async calculateFabricCost(

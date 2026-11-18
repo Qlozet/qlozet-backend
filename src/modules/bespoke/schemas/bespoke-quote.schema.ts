@@ -93,6 +93,16 @@ export class BespokeQuote {
   @Prop({ type: String, default: null })
   vendor_notes: string;
 
+  /**
+   * The tailor ticked "I'll make this to Qlozet's bespoke terms" when sending
+   * the quote (bespoke/order-agreement.ts). The wording version they saw.
+   */
+  @Prop({ type: Date, default: null })
+  terms_accepted_at?: Date | null;
+
+  @Prop({ type: String, default: null })
+  terms_version?: string | null;
+
   // ─── Revision History ───
   @Prop({
     type: [

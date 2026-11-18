@@ -1,3 +1,4 @@
+import { LogisticsModule } from '../logistics/logistics.module';
 import { Module } from '@nestjs/common';
 import { BespokeRemindersCron } from './bespoke-reminders.cron';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -49,6 +50,7 @@ import { SuggestedVendorsService } from './suggested-vendors.service';
     ProductModule,       // provides Product model
     NotificationsModule, // provides MailService
     WalletsModule,       // provides WalletsService (wallet payment)
+    LogisticsModule,     // courier prices for delivery at acceptance
   ],
   controllers: [BespokeController, AdminBespokeController],
   providers: [BespokeService, SuggestedVendorsService, BespokeRemindersCron],

@@ -37,6 +37,7 @@ describe('admin template studio', () => {
         tokenService as any,
         { findById: jest.fn().mockResolvedValue({ type }) } as any,
         {} as any,
+        {} as any,
       );
       return { controller, tokenService, outfitService };
     };
@@ -82,6 +83,7 @@ describe('admin template studio', () => {
         { updateStatus: jest.fn().mockResolvedValue(undefined) } as any,
         { refund } as any,
         {} as any,
+        { release: jest.fn() } as any,
       );
       (processor as any).logger = {
         log: jest.fn(),

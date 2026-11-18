@@ -43,6 +43,19 @@ export interface PaymentPlan {
   forfeited_at?: Date | null;
 }
 
+/**
+ * Delivery paid with the deposit that was never used when an order closes
+ * because its balance went unpaid: every courier leg that has not moved (the
+ * finished outfit to the customer above all). Fabric already couriered to the
+ * tailor was a real cost and is kept, as when the customer cancels.
+ */
+export function unusedDeliveryOnForfeit(order: any): number {
+  const moved = ['shipped', 'in_transit', 'delivered'];
+  return ((order?.shipments ?? []) as any[])
+    .filter((s) => !s?.rejected && !moved.includes(String(s?.status)))
+    .reduce((t, s) => t + (Math.round(Number(s?.shipping_fee)) || 0), 0);
+}
+
 export const DEFAULT_DEPOSIT_PERCENT = 50;
 export const DEFAULT_BALANCE_DAYS = 14;
 /** Days the tailor gets to ship once the balance lands, at least. */

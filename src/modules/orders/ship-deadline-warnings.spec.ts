@@ -154,12 +154,14 @@ describe('the hourly job', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('looks only at deadlines from 7 days ago to 24 hours ahead', async () => {
+  it('looks at deadlines up to 24 hours ahead, reaching back past the cancel window', async () => {
     jest.useFakeTimers({ now: at, doNotFake: ['setTimeout'] });
     const { service, find } = setup([]);
     await service.warnBeforeShipDeadlines();
     const range = find.mock.calls[0][0].shipments.$elemMatch.fulfillment_deadline;
-    expect(at - range.$gt.getTime()).toBe(7 * DAY);
+    // 7 days of the cancel window plus 60: a clock can hold a vendor to a
+    // date later than the stored one (fabric arrived late, a measurement answer).
+    expect(at - range.$gt.getTime()).toBe((7 + 60) * DAY);
     expect(range.$lte.getTime() - at).toBe(24 * HOUR);
   });
 });
