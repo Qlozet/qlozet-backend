@@ -1,6 +1,6 @@
 import { ADMIN_COUNTED_ORDER } from './admin-order-scope';
 import { usesDefaultStyles, withDefaultStyles } from '../products/style-defaults';
-import { orderContactForVendor } from '../../common/utils/customer-privacy';
+import { orderContactForVendor, shortName } from '../../common/utils/customer-privacy';
 import {
   awaitingConfirmation,
   confirmByFor,
@@ -2169,6 +2169,10 @@ export class OrderService {
       .select('full_name measurementSets')
       .lean();
     if (!user) throw new NotFoundException('Customer not found');
+    // Vendors see a short name ("Ada O."), never the full one; admin keeps it.
+    const customerName = scopeBusinessId
+      ? shortName((user as any).full_name)
+      : (user as any).full_name;
 
     // Per-item snapshots first: one order can carry garments for DIFFERENT
     // bodies. Vendors see only their own items' profiles; admin sees all.
@@ -2219,7 +2223,7 @@ export class OrderService {
     if (hasMeasurements(snapshot)) {
       return {
         data: {
-          full_name: (user as any).full_name,
+          full_name: customerName,
           name: snapshot.set_name || 'At time of order',
           unit: snapshot.unit || 'cm',
           active: false,
@@ -2243,7 +2247,7 @@ export class OrderService {
       const first = itemProfiles[0];
       return {
         data: {
-          full_name: (user as any).full_name,
+          full_name: customerName,
           name: first.set_name || 'At time of order',
           unit: first.unit,
           active: false,
@@ -2269,7 +2273,7 @@ export class OrderService {
 
     return {
       data: {
-        full_name: (user as any).full_name,
+        full_name: customerName,
         name: active.name,
         unit: active.unit,
         active: !!active.active,
