@@ -30,6 +30,7 @@ import { EditGarmentDto } from './dto/edit-image.dto';
 import { RunPredictBodyDto } from './dto/run-predict.dto';
 import { ScanUnreadableError, scanResultUsable, toScanResult } from './scan-result';
 import { ScanFileStore } from './scan-file.store';
+import { spaceEndpoint, withTimeout } from './space-endpoint';
 import { SilhouetteScanJob } from './dto/silhouette-scan.dto';
 
 @Injectable()
@@ -428,15 +429,29 @@ export class MeasurementService {
       throw new BadRequestException('Insufficient tokens, please fund your wallet');
     }
 
-    const client = await this.gradio.getClient(this.hbm);
-    const result = await client.predict('/run_predict', {
-      model_choice: 'Hybrid (CNN+Tabular)',
-      front_image: this.gradio.bufferToBlob(front, 'image/png'),
-      side_image: this.gradio.bufferToBlob(side, 'image/png'),
-      height_cm: Number(job.height_cm),
-      weight: Number(job.weight) || null,
-      gender: job.gender || '',
-    });
+    let client = await this.gradio.getClient(this.hbm);
+    let endpoint = spaceEndpoint(client, 'run_predict');
+    if (!endpoint) {
+      // The connection is cached; reconnect once in case the Space changed.
+      this.gradio.clearClient(this.hbm);
+      client = await this.gradio.getClient(this.hbm);
+      endpoint = spaceEndpoint(client, 'run_predict');
+    }
+    if (!endpoint) {
+      throw new Error('The measurement model is unavailable (no run_predict route).');
+    }
+    const result = await withTimeout<any>(
+      client.predict(endpoint, {
+        model_choice: 'Hybrid (CNN+Tabular)',
+        front_image: this.gradio.bufferToBlob(front, 'image/png'),
+        side_image: this.gradio.bufferToBlob(side, 'image/png'),
+        height_cm: Number(job.height_cm),
+        weight: Number(job.weight) || null,
+        gender: job.gender || '',
+      }),
+      3 * 60 * 1000,
+      'Measuring took too long. Please try again.',
+    );
 
     // [0] DataFrame, [1] predictions JSON file, [2] schema v2 payload.
     const scan = toScanResult(await this.extractPrediction(result?.data, 0));
