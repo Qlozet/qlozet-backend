@@ -952,6 +952,10 @@ export class BusinessService {
           year_founded: 1,
           accepts_external_fabric: 1,
           createdAt: 1,
+          // The platform's verification tier, the same rule as the bespoke
+          // vendor picker's badge (suggested-vendors.service). Stores approved
+          // without it (manual fallback) are listed but not badged.
+          verified: { $eq: ['$status', BusinessStatus.VERIFIED] },
           // Exclude: created_by, revenue, orders, earnings, payout data,
           // team_members, order_settings, etc.
         },
@@ -3405,6 +3409,8 @@ export class BusinessService {
     if (totalCustomers === 0) {
       return {
         totalCustomers: 0,
+        repeatCustomers: 0,
+        favoriteProduct: null,
         topLocations: [],
         genderDistribution: [],
         wearsDistribution: [],
@@ -3539,8 +3545,54 @@ export class BusinessService {
       }
     }
 
+    // 5. Repeat customers and the customer favourite, from real orders only
+    // (the vendorOrderScope rule: paid, not a fabric reservation), so an
+    // abandoned checkout never makes someone a "repeat" customer.
+    const paidScope = {
+      'items.business': businessObjectId,
+      type: { $ne: 'reservation' },
+      payment_status: { $ne: 'unpaid' },
+    };
+    const [repeatAgg, favouriteAgg] = await Promise.all([
+      this.orderModel.aggregate([
+        { $match: paidScope },
+        { $group: { _id: '$customer', orders: { $sum: 1 } } },
+        { $match: { orders: { $gt: 1 } } },
+        { $count: 'n' },
+      ]),
+      // The product in the most orders (an item rejected by the vendor doesn't count).
+      this.orderModel.aggregate([
+        { $match: paidScope },
+        { $unwind: '$items' },
+        {
+          $match: {
+            'items.business': businessObjectId,
+            'items.product': { $ne: null },
+            'items.rejected': { $ne: true },
+          },
+        },
+        { $group: { _id: '$items.product', orders: { $addToSet: '$_id' } } },
+        { $project: { orders: { $size: '$orders' } } },
+        { $sort: { orders: -1 } },
+        { $limit: 1 },
+        { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
+        { $unwind: '$product' },
+        {
+          $project: {
+            orders: 1,
+            name: { $ifNull: ['$product.clothing.name', { $ifNull: ['$product.fabric.name', '$product.accessory.name'] }] },
+          },
+        },
+      ]),
+    ]);
+    const repeatCustomers: number = repeatAgg[0]?.n ?? 0;
+    const fav = favouriteAgg[0];
+    const favoriteProduct = fav?.name ? { name: String(fav.name), orders: fav.orders as number } : null;
+
     return {
       totalCustomers,
+      repeatCustomers,
+      favoriteProduct,
       topLocations,
       genderDistribution,
       wearsDistribution,
