@@ -6480,6 +6480,11 @@ export class OrderService {
    * instead of failing at the deduction step (which, for wallet, rolls the
    * whole order back). Customize garments are made-to-order and never gated.
    */
+  /** The same live stock check, for lines that are not in a cart yet. */
+  cartAvailabilityIssues(cartItems: any[], productMap: Map<string, any>) {
+    return this.validateCartAvailability(cartItems, productMap);
+  }
+
   private validateCartAvailability(
     cartItems: any[],
     productMap: Map<string, any>,

@@ -45,6 +45,7 @@ export function notificationRoute(n: RoutableNotification): string | null {
   if (orderRef) {
     const base = `/profile?tab=orders&order=${encodeURIComponent(orderRef)}`;
     if (n.type === 'new_message') return `${base}&view=chat`;
+    if (n.type === 'fit_feedback_request') return `${base}&view=fit`;
     if (n.category === 'shipping' && TRACKING_TYPES.has(n.type)) return `${base}&view=track`;
     return base;
   }

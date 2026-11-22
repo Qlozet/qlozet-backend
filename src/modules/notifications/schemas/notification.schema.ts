@@ -21,6 +21,8 @@ export enum NotificationType {
   ORDER_CONFIRMED = 'order_confirmed',
   MEASUREMENT_QUESTION = 'measurement_question',
   MEASUREMENT_ANSWERED = 'measurement_answered',
+  // Asked once, a few days after a made-to-measure piece arrives.
+  FIT_FEEDBACK_REQUEST = 'fit_feedback_request',
   ORDER_CANCELLED = 'order_cancelled',
   ORDER_STATUS_CHANGED = 'order_status_changed',
   LATE_FULFILLMENT_PENALTY = 'late_fulfillment_penalty',
