@@ -1185,9 +1185,15 @@ export class BusinessService {
         { new: true },
       );
     } catch (err) {
+      // Keep the courier's own status (a 4xx is the address, not us); an
+      // HttpException carries it in getStatus(), not response.status.
+      const status =
+        typeof err?.getStatus === 'function'
+          ? err.getStatus()
+          : err?.response?.status || 500;
       throw new HttpException(
         err.message || err?.response?.data || 'Unable to update address',
-        err?.response?.status || 500,
+        status,
       );
     }
   }
