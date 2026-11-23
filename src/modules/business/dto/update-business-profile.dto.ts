@@ -4,12 +4,15 @@ import {
   IsBoolean,
   IsNumber,
   IsIn,
+  IsArray,
+  ArrayMinSize,
   Matches,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SocialLinksDto } from './social-links.dto';
+import { OFFERINGS } from '../offerings';
 
 export class UpdateBusinessProfileDto {
   @ApiPropertyOptional({ example: 'Qlozet Fashion House' })
@@ -110,6 +113,19 @@ export class UpdateBusinessProfileDto {
   @IsOptional()
   @IsBoolean()
   accepts_bespoke?: boolean;
+
+  @ApiPropertyOptional({
+    example: ['made_to_measure', 'fabric'],
+    description:
+      'What the store sells. Never limits what it can list; sets the bespoke switch (see offerings.ts).',
+    enum: OFFERINGS,
+    isArray: true,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Pick at least one thing you sell.' })
+  @IsIn(OFFERINGS as unknown as string[], { each: true })
+  offerings?: string[];
 
   // ─── Vendor order preferences ───
   @ApiPropertyOptional({ example: false, description: 'Auto-confirm incoming orders' })
