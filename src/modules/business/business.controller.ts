@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   HttpException,
   HttpStatus,
   Param,
@@ -229,6 +230,28 @@ export class BusinessController {
   }
 
   // ─── Store address (shop.qlozet.app/s/<slug>) ───
+
+  // ─── First steps (dashboard "Get your store ready") ───
+
+  @Roles(UserType.VENDOR)
+  @Get('setup-steps')
+  @ApiOperation({
+    summary: "This store's first steps",
+    description:
+      'What the store sells (offerings), whether it has answered, and each first step ' +
+      'with done worked out from the real records. See offerings.ts.',
+  })
+  async getSetupSteps(@Req() req: any) {
+    return this.businessService.getSetupSteps(req.business.id);
+  }
+
+  @Roles(UserType.VENDOR)
+  @Post('setup-steps/dismiss')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Hide the first-steps card for this store' })
+  async dismissSetupSteps(@Req() req: any) {
+    return this.businessService.dismissSetupSteps(req.business.id);
+  }
 
   @Roles(UserType.VENDOR)
   @Get('store-address')

@@ -27,6 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
 import { MeasurementQuestionsService } from './measurement-questions.service';
+import { OrderAgainService } from './order-again.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import {
   CheckoutPreviewDto,
@@ -53,6 +54,7 @@ export class OrderController {
   constructor(
     private readonly orderService: OrderService,
     private readonly measurementQuestions: MeasurementQuestionsService,
+    private readonly orderAgain: OrderAgainService,
   ) {}
 
   /**
@@ -106,6 +108,35 @@ export class OrderController {
   })
   async priceItem(@Body() dto: PriceItemDto) {
     return this.orderService.priceItem(dto);
+  }
+
+  @Get('customer/makers')
+  @Roles(UserType.CUSTOMER)
+  @ApiOperation({
+    summary: 'Stores the customer has bought from (the Your tailors shelf)',
+    description:
+      'Most recent first, only stores still selling. Each row carries the latest order reference for Order again.',
+  })
+  @ApiQuery({ name: 'limit', required: false, description: '1 to 30, default 12' })
+  async customerMakers(@Req() req: any, @Query('limit') limit?: string) {
+    return this.orderAgain.makers(req.user?.id || req.user?._id, Number(limit) || 12);
+  }
+
+  @Roles(UserType.CUSTOMER)
+  @Post(':reference/reorder')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Order again: put a past order (or one item) back in the cart',
+    description:
+      'Rebuilds each line with the same size, colour, styles, fabric, measurement set and note, at current prices. Pieces no longer for sale or out of stock are skipped and listed with the reason.',
+  })
+  @ApiParam({ name: 'reference', description: 'Order reference' })
+  async reorder(
+    @Param('reference') reference: string,
+    @Body() body: { item_id?: string },
+    @Req() req: any,
+  ) {
+    return this.orderAgain.reorder(reference, req.user?.id || req.user?._id, body?.item_id);
   }
 
   // In your controller

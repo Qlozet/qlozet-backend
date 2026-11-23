@@ -24,6 +24,7 @@ export const PUSH_SWITCHES: Record<PushAudience, PushSwitch[]> = {
     { key: 'bespoke', label: 'Quotes and bespoke', description: 'New quotes and updates on your designs.', locked: false },
     { key: 'messages', label: 'Messages from tailors', description: 'When a tailor writes about your order.', locked: false },
     { key: 'product', label: 'Price drops and stock', description: 'Things you saved going on sale or back in stock.', locked: false },
+    { key: 'feedback', label: 'Fit check-ins', description: 'One quick question after delivery about how your piece fit.', locked: false },
     { key: 'announcements', label: 'News and offers', description: 'New collections and offers from Qlozet.', locked: false },
   ],
   vendor: [
@@ -44,6 +45,8 @@ export function switchFor(n: { type?: string; category?: string }): string {
   if (n.type === 'new_message') return 'messages';
   // A tailor asking about measurements needs an answer before cutting.
   if (n.type === 'measurement_question') return 'orders';
+  // A request for feedback, not news about the order: can be turned off.
+  if (n.type === 'fit_feedback_request') return 'feedback';
   switch (n.category) {
     case 'order':
     case 'shipping':

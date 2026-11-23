@@ -41,6 +41,7 @@ import { percentageChange } from '../../common/utils/percentageChange';
 import { ObjectIdUtils } from 'src/common/utils/objectId.utils';
 import { CreateBusinessAddressDto } from './dto/create-address.dto';
 import { settlementDate } from './settlement';
+import { normalizeOfferings, offeringsUpdate, setupSteps } from './offerings';
 import {
   SHIP_AFTER_BALANCE_DAYS,
   balanceDaysFrom,
@@ -316,14 +317,17 @@ export class BusinessService {
     order?: string,
     startDate?: string,
     endDate?: string,
+    offering?: string,
   ) {
     const skip = (page - 1) * size;
     const limit = size;
+    const [sells] = normalizeOfferings([offering]);
 
     const result = await this.businessModel.aggregate([
       // Narrow before the lookups below, so a filtered page does not join
       // products and orders for businesses it is about to discard.
       ...BusinessService.vendorStatusStage(status),
+      ...(sells ? [{ $match: { offerings: sells } }] : []),
       ...BusinessService.vendorOnboardedStage(startDate, endDate),
       // -------------------- Vendor info --------------------
       {
@@ -762,7 +766,7 @@ export class BusinessService {
           // public detail projection below: it is a competing checkout.
           'social_links total_items_sold ' +
           'success_rate is_featured year_founded accepts_external_fabric ' +
-          'accepts_bespoke createdAt'
+          'accepts_bespoke offerings createdAt'
         )
         .skip(skip)
         .limit(limit)
@@ -951,7 +955,14 @@ export class BusinessService {
           is_featured: 1,
           year_founded: 1,
           accepts_external_fabric: 1,
+          accepts_bespoke: 1,
+          // What the store sells (offerings.ts), for the labels under its name.
+          offerings: 1,
           createdAt: 1,
+          // The platform's verification tier, the same rule as the bespoke
+          // vendor picker's badge (suggested-vendors.service). Stores approved
+          // without it (manual fallback) are listed but not badged.
+          verified: { $eq: ['$status', BusinessStatus.VERIFIED] },
           // Exclude: created_by, revenue, orders, earnings, payout data,
           // team_members, order_settings, etc.
         },
@@ -1181,21 +1192,109 @@ export class BusinessService {
         { new: true },
       );
     } catch (err) {
+      // Keep the courier's own status (a 4xx is the address, not us); an
+      // HttpException carries it in getStatus(), not response.status.
+      const status =
+        typeof err?.getStatus === 'function'
+          ? err.getStatus()
+          : err?.response?.status || 500;
       throw new HttpException(
         err.message || err?.response?.data || 'Unable to update address',
-        err?.response?.status || 500,
+        status,
       );
     }
   }
 
   async updateBusinessProfile(businessId: string, dto: any) {
+    const set: Record<string, unknown> = { ...dto };
+    // What the store sells and the bespoke switch move together
+    // (offerings.ts), so read the current pair when either is sent.
+    if (dto?.offerings !== undefined || typeof dto?.accepts_bespoke === 'boolean') {
+      const current = await this.businessModel
+        .findById(businessId)
+        .select('offerings offerings_answered_at accepts_bespoke')
+        .lean();
+      if (!current) throw new NotFoundException('Business not found');
+      delete set.offerings;
+      delete set.accepts_bespoke;
+      Object.assign(set, offeringsUpdate(current as any, dto));
+    }
     const business = await this.businessModel.findByIdAndUpdate(
       businessId,
-      { $set: dto },
+      { $set: set },
       { new: true },
     );
     if (!business) throw new NotFoundException('Business not found');
     return business;
+  }
+
+  /**
+   * The dashboard's "Get your store ready" card: what the store sells and
+   * which first steps are done, worked out from the real records each time.
+   */
+  async getSetupSteps(businessId: string) {
+    const business = await this.businessModel
+      .findById(businessId)
+      .select(
+        'offerings offerings_answered_at setup_dismissed_at business_logo_url ' +
+          'description payout_account_number transfer_recipient_code stripe_connect_id',
+      )
+      .lean();
+    if (!business) throw new NotFoundException('Business not found');
+    const id = new Types.ObjectId(String(businessId));
+
+    const counts = await this.connection
+      .collection('products')
+      .aggregate([
+        { $match: { business: { $in: [id, String(id)] }, deleted_at: null } },
+        {
+          $group: {
+            _id: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$kind', 'fabric'] }, then: 'fabric' },
+                  { case: { $eq: ['$kind', 'accessory'] }, then: 'accessory' },
+                  {
+                    case: { $eq: ['$clothing.type', 'customize'] },
+                    then: 'made_to_measure',
+                  },
+                ],
+                default: 'ready_to_wear',
+              },
+            },
+            n: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+    const listings = { made_to_measure: 0, ready_to_wear: 0, fabric: 0, accessory: 0 };
+    for (const c of counts) (listings as any)[c._id] = c.n;
+
+    const b: any = business;
+    const offerings = normalizeOfferings(b.offerings);
+    const steps = setupSteps({
+      offerings,
+      hasLogo: !!b.business_logo_url,
+      hasDescription: !!String(b.description ?? '').trim(),
+      hasPayout: !!(b.payout_account_number || b.transfer_recipient_code || b.stripe_connect_id),
+      listings,
+    });
+    return {
+      offerings,
+      offerings_answered: !!b.offerings_answered_at,
+      dismissed: !!b.setup_dismissed_at,
+      steps,
+      done: steps.every((st) => st.done),
+    };
+  }
+
+  /** Hide the first-steps card for good. */
+  async dismissSetupSteps(businessId: string) {
+    await this.businessModel.updateOne(
+      { _id: businessId },
+      { $set: { setup_dismissed_at: new Date() } },
+    );
+    return { dismissed: true };
   }
 
   /**
@@ -3405,6 +3504,8 @@ export class BusinessService {
     if (totalCustomers === 0) {
       return {
         totalCustomers: 0,
+        repeatCustomers: 0,
+        favoriteProduct: null,
         topLocations: [],
         genderDistribution: [],
         wearsDistribution: [],
@@ -3539,8 +3640,54 @@ export class BusinessService {
       }
     }
 
+    // 5. Repeat customers and the customer favourite, from real orders only
+    // (the vendorOrderScope rule: paid, not a fabric reservation), so an
+    // abandoned checkout never makes someone a "repeat" customer.
+    const paidScope = {
+      'items.business': businessObjectId,
+      type: { $ne: 'reservation' },
+      payment_status: { $ne: 'unpaid' },
+    };
+    const [repeatAgg, favouriteAgg] = await Promise.all([
+      this.orderModel.aggregate([
+        { $match: paidScope },
+        { $group: { _id: '$customer', orders: { $sum: 1 } } },
+        { $match: { orders: { $gt: 1 } } },
+        { $count: 'n' },
+      ]),
+      // The product in the most orders (an item rejected by the vendor doesn't count).
+      this.orderModel.aggregate([
+        { $match: paidScope },
+        { $unwind: '$items' },
+        {
+          $match: {
+            'items.business': businessObjectId,
+            'items.product': { $ne: null },
+            'items.rejected': { $ne: true },
+          },
+        },
+        { $group: { _id: '$items.product', orders: { $addToSet: '$_id' } } },
+        { $project: { orders: { $size: '$orders' } } },
+        { $sort: { orders: -1 } },
+        { $limit: 1 },
+        { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
+        { $unwind: '$product' },
+        {
+          $project: {
+            orders: 1,
+            name: { $ifNull: ['$product.clothing.name', { $ifNull: ['$product.fabric.name', '$product.accessory.name'] }] },
+          },
+        },
+      ]),
+    ]);
+    const repeatCustomers: number = repeatAgg[0]?.n ?? 0;
+    const fav = favouriteAgg[0];
+    const favoriteProduct = fav?.name ? { name: String(fav.name), orders: fav.orders as number } : null;
+
     return {
       totalCustomers,
+      repeatCustomers,
+      favoriteProduct,
       topLocations,
       genderDistribution,
       wearsDistribution,

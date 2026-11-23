@@ -597,6 +597,11 @@ export class Order {
     created_at: Date;
   } | null;
 
+  // When the customer was asked how it fit (orders/fit-prompt.cron.ts).
+  // Set once, so the question is never repeated.
+  @Prop({ type: Date, default: null })
+  fit_prompt_sent_at?: Date | null;
+
   // Bespoke deposit + balance (see orders/bespoke-payment-plan.ts). While the
   // balance is unpaid, the tailor's item and the order total carry only what
   // was charged; quote_total holds the full price. null = paid in one go.
