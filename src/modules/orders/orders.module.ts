@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrderController } from './orders.controller';
 import { OrderService } from './orders.service';
 import { MeasurementQuestionsService } from './measurement-questions.service';
+import { OrderAgainService } from './order-again.service';
+import { FitPromptCron } from './fit-prompt.cron';
 import { OrderValidationService } from './orders.validation';
 import { PriceCalculationService } from './orders.price-calculation';
 import { Order, OrderSchema } from './schemas/orders.schema';
@@ -63,6 +65,8 @@ import { UmsModule } from '../ums/ums.module';
   controllers: [OrderController],
   providers: [
     MeasurementQuestionsService,
+    OrderAgainService,
+    FitPromptCron,
     OrderService,
     OrderValidationService,
     PriceCalculationService,

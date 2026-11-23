@@ -30,8 +30,15 @@ export class LogisticsService {
     };
   }
 
+  /**
+   * The API address for an endpoint. SHIPBUBBLE_BASE_URL is the host
+   * (https://api.shipbubble.com); a base that already ends in /v1 is
+   * accepted too, so it never becomes /v1/v1 (every call then 404s with
+   * "Requested resource not available", which is how staging broke).
+   */
   private buildUrl(endpoint: string) {
-    return `${this.baseUrl}/v1/${endpoint.replace(/^\/+/, '')}`;
+    const base = String(this.baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '');
+    return `${base}/v1/${endpoint.replace(/^\/+/, '')}`;
   }
 
   async validateAddress(
