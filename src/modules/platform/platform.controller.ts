@@ -144,6 +144,12 @@ export class PlatformController {
     required: false,
     description: 'Only vendors onboarded on or before this ISO date.',
   })
+  @ApiQuery({
+    name: 'offering',
+    required: false,
+    enum: ['made_to_measure', 'ready_to_wear', 'fabric', 'accessories'],
+    description: 'Only stores that said they sell this (offerings.ts).',
+  })
   async getAllBusinesses(
     @Query('page') page: number,
     @Query('size') size: number,
@@ -153,6 +159,7 @@ export class PlatformController {
     @Query('order') order?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('offering') offering?: string,
   ) {
     return this.businessService.findAllBusinesses(
       page,
@@ -163,6 +170,7 @@ export class PlatformController {
       order,
       startDate,
       endDate,
+      offering,
     );
   }
   // ------------------------------------------------------

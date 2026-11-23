@@ -162,6 +162,20 @@ export class Business extends Document {
   @Prop({ type: Boolean, default: true })
   accepts_bespoke: boolean;
 
+  /**
+   * What the store sells, as the vendor answered after sign-up (offerings.ts).
+   * Empty with no answer date = not asked yet; the vendor console asks once.
+   */
+  @Prop({ type: [String], default: [], index: true })
+  offerings: string[];
+
+  @Prop({ type: Date, default: null })
+  offerings_answered_at?: Date | null;
+
+  /** The vendor hid the dashboard's first-steps card. */
+  @Prop({ type: Date, default: null })
+  setup_dismissed_at?: Date | null;
+
   // ─── Vendor order preferences (flat, editable via PATCH /business/profile) ───
   @Prop({ type: Boolean, default: false })
   order_confirmation: boolean; // auto-confirm incoming orders
