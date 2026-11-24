@@ -7059,6 +7059,32 @@ export class OrderService {
       if ((preCheck as any).type === 'bespoke' && myShipment) {
         this.assertPreshipCleared(preCheck as any);
       }
+      // Everything that can refuse runs BEFORE the claim below, so a refusal
+      // never leaves the shipment parked at 'ready_to_ship' with no courier.
+      // Tailor waiting on fabric from another store: the finished garment
+      // can't ship until that fabric has been delivered.
+      if (myShipment && myShipment.shipment_type !== ShipmentType.FABRIC_TRANSFER) {
+        const pendingFabricTransfers = preCheck.shipments.filter(
+          (s) =>
+            s.shipment_type === ShipmentType.FABRIC_TRANSFER &&
+            s.destination_business?.toString() === businessId &&
+            s.status !== ShipmentStatus.DELIVERED,
+        );
+        if (pendingFabricTransfers.length > 0) {
+          const fabricVendors = await this.businessModel.find({
+            _id: { $in: pendingFabricTransfers.map((s) => s.business.toString()) },
+          });
+          const vendorNames = fabricVendors.map((v) => v.business_name).join(', ');
+          throw new BadRequestException(
+            `Cannot fulfill: waiting for fabric delivery from ${vendorNames}. ` +
+            `Fabric must be marked as delivered before you can ship the finished garment.`,
+          );
+        }
+      }
+      const transaction = await this.transactionService.findByOrderId(preCheck.id);
+      if (!transaction || transaction.status !== 'success') {
+        throw new BadRequestException('Cannot fulfill order: payment not completed');
+      }
     }
 
     // Atomic claim: set status to 'ready_to_ship' only if currently 'pending'
@@ -7095,150 +7121,112 @@ export class OrderService {
 
     const order = claimed;
 
-    // ── Fabric transfer gating: block tailor until fabric arrives ──
-    // If this is a vendor_to_customer shipment, check if any fabric_transfer
-    // shipments are destined for this vendor and haven't been delivered yet.
-    const thisShipment = order.shipments.find(
-      (s) => s.business.toString() === businessId,
-    );
-    if (thisShipment?.shipment_type !== ShipmentType.FABRIC_TRANSFER) {
-      const pendingFabricTransfers = order.shipments.filter(
-        (s) =>
-          s.shipment_type === ShipmentType.FABRIC_TRANSFER &&
-          s.destination_business?.toString() === businessId &&
-          s.status !== ShipmentStatus.DELIVERED,
-      );
-
-      if (pendingFabricTransfers.length > 0) {
-        // Find the fabric vendor name for a helpful error message
-        const fabricVendorIds = pendingFabricTransfers.map((s) => s.business.toString());
-        const fabricVendors = await this.businessModel.find({
-          _id: { $in: fabricVendorIds },
-        });
-        const vendorNames = fabricVendors
-          .map((v) => v.business_name)
-          .join(', ');
-
-        throw new BadRequestException(
-          `Cannot fulfill: waiting for fabric delivery from ${vendorNames}. ` +
-          `Fabric must be marked as delivered before you can ship the finished garment.`,
-        );
-      }
-    }
-
-    // Find the shipment for this vendor
-    const shipmentIndex = order.shipments.findIndex(
-      (s) => s.business.toString() === businessId,
-    );
-    if (shipmentIndex === -1) {
-      throw new BadRequestException(
-        'No shipment found for your business on this order. ' +
-        'This usually means a shipping option was not selected at checkout, ' +
-        'so there is no rate to create a label from.',
-      );
-    }
-    const shipment = order.shipments[shipmentIndex];
-
-    // Verify payment
-    const transaction = await this.transactionService.findByOrderId(order.id);
-    if (!transaction || transaction.status !== 'success') {
-      throw new BadRequestException(
-        'Cannot fulfill order: payment not completed',
-      );
-    }
-
-    // Check if rate token is stale (> 25 min)
-    let requestToken = shipment.request_token;
-    let courierId = dto.courier_id || shipment.courier_id;
-    let serviceCode = dto.service_code || shipment.service_code;
-
-    const RATE_TOKEN_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes
-    const tokenAge = shipment.rate_fetched_at
-      ? Date.now() - new Date(shipment.rate_fetched_at).getTime()
-      : Infinity;
-
-    if (tokenAge > RATE_TOKEN_MAX_AGE_MS) {
-      this.logger.log(
-        `Rate token for shipment is stale (${Math.round(tokenAge / 60000)}min old), re-fetching...`,
-      );
-
-      const customerAddress = order.address;
-      if (!customerAddress?.address_code || !business.address_code) {
-        throw new BadRequestException(
-          'Cannot re-fetch rates: missing address codes',
-        );
-      }
-
-      // Build items for this vendor only (skip any rejected individually — they
-      // aren't being shipped).
-      const vendorItems = order.items.filter(
-        (i) => i.business?.toString() === businessId && !(i as any).rejected,
-      );
-      const shippingItems = await Promise.all(
-        vendorItems.map(async (item) => {
-          const product = await this.productModel.findById(item.product);
-          const { name } = product
-            ? await this.getProductDetails(product)
-            : { name: 'Unknown' };
-          // Declared value = the line's real charged price (frozen at order
-          // time); fabric yardage comes from the stored selection.
-          const lineAmount = item.total_price ?? item.pricing?.final ?? 0;
-          const fabricYards = (item.fabric_selections?.[0] as any)?.yardage;
-          return this.buildManifestItem({
-            name,
-            kind: product?.kind,
-            unitAmount: lineAmount,
-            quantity: 1,
-            fabricYards,
-            baseWeightKg: product ? estimateProductWeightKg(product) : 0.5,
-          });
-        }),
-      );
-
-      const rateResponse = await this.logisticService.fetchRates([], {
-        sender_address_code: business.address_code,
-        reciever_address_code: customerAddress.address_code,
-        pickup_date: new Date().toISOString().split('T')[0],
-        package_items: shippingItems,
-        service_type: 'pickup',
-        category_id: 74794423, // "Fashion wears"
-        package_dimension: { length: 12, width: 10, height: 10 },
-      });
-
-      requestToken = rateResponse.request_token;
-      // Try to use the same courier, fall back to cheapest
-      const matchedCourier = rateResponse.couriers?.find(
-        (c) => String(c.courier_id) === courierId,
-      );
-      if (matchedCourier) {
-        courierId = String(matchedCourier.courier_id);
-        serviceCode = matchedCourier.service_code;
-      } else {
-        courierId = String(rateResponse.cheapest_courier.courier_id);
-        serviceCode = rateResponse.cheapest_courier.service_code;
-      }
-
-      // Update stored values
-      order.shipments[shipmentIndex].request_token = requestToken;
-      order.shipments[shipmentIndex].courier_id = courierId;
-      order.shipments[shipmentIndex].service_code = serviceCode;
-      order.shipments[shipmentIndex].rate_fetched_at = new Date();
-    }
-
-    if (!requestToken || !courierId || !serviceCode) {
-      throw new BadRequestException(
-        'Missing shipping data (request_token, courier_id, or service_code) for this shipment',
-      );
-    }
-
-    // Create shipment label.
-    // If Shipbubble fails (e.g. insufficient account balance, invalid address
-    // code), release the atomic claim so the shipment doesn't get stuck in
-    // 'ready_to_ship'. Reverting to 'pending' lets the vendor retry once the
-    // underlying issue is fixed. The original error is re-thrown so the vendor
-    // still sees the real Shipbubble message.
+    // From here until the label is booked, any failure (stale-rate re-fetch,
+    // missing shipping data, Shipbubble refusing the label: low balance, bad
+    // address code) releases the claim back to 'pending' so the vendor can
+    // retry once it's fixed. The original error is re-thrown so the vendor
+    // still sees the real message.
     let shipmentResult;
+    let shipmentIndex = -1;
     try {
+      // Find the shipment for this vendor
+      shipmentIndex = order.shipments.findIndex(
+        (s) => s.business.toString() === businessId,
+      );
+      if (shipmentIndex === -1) {
+        throw new BadRequestException(
+          'No shipment found for your business on this order. ' +
+          'This usually means a shipping option was not selected at checkout, ' +
+          'so there is no rate to create a label from.',
+        );
+      }
+      const shipment = order.shipments[shipmentIndex];
+
+      // Check if rate token is stale (> 25 min)
+      let requestToken = shipment.request_token;
+      let courierId = dto.courier_id || shipment.courier_id;
+      let serviceCode = dto.service_code || shipment.service_code;
+
+      const RATE_TOKEN_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes
+      const tokenAge = shipment.rate_fetched_at
+        ? Date.now() - new Date(shipment.rate_fetched_at).getTime()
+        : Infinity;
+
+      if (tokenAge > RATE_TOKEN_MAX_AGE_MS) {
+        this.logger.log(
+          `Rate token for shipment is stale (${Math.round(tokenAge / 60000)}min old), re-fetching...`,
+        );
+
+        const customerAddress = order.address;
+        if (!customerAddress?.address_code || !business.address_code) {
+          throw new BadRequestException(
+            'Cannot re-fetch rates: missing address codes',
+          );
+        }
+
+        // Build items for this vendor only (skip any rejected individually — they
+        // aren't being shipped).
+        const vendorItems = order.items.filter(
+          (i) => i.business?.toString() === businessId && !(i as any).rejected,
+        );
+        const shippingItems = await Promise.all(
+          vendorItems.map(async (item) => {
+            const product = await this.productModel.findById(item.product);
+            const { name } = product
+              ? await this.getProductDetails(product)
+              : { name: 'Unknown' };
+            // Declared value = the line's real charged price (frozen at order
+            // time); fabric yardage comes from the stored selection.
+            const lineAmount = item.total_price ?? item.pricing?.final ?? 0;
+            const fabricYards = (item.fabric_selections?.[0] as any)?.yardage;
+            return this.buildManifestItem({
+              name,
+              kind: product?.kind,
+              unitAmount: lineAmount,
+              quantity: 1,
+              fabricYards,
+              baseWeightKg: product ? estimateProductWeightKg(product) : 0.5,
+            });
+          }),
+        );
+
+        const rateResponse = await this.logisticService.fetchRates([], {
+          sender_address_code: business.address_code,
+          reciever_address_code: customerAddress.address_code,
+          pickup_date: new Date().toISOString().split('T')[0],
+          package_items: shippingItems,
+          service_type: 'pickup',
+          category_id: 74794423, // "Fashion wears"
+          package_dimension: { length: 12, width: 10, height: 10 },
+        });
+
+        requestToken = rateResponse.request_token;
+        // Try to use the same courier, fall back to cheapest
+        const matchedCourier = rateResponse.couriers?.find(
+          (c) => String(c.courier_id) === courierId,
+        );
+        if (matchedCourier) {
+          courierId = String(matchedCourier.courier_id);
+          serviceCode = matchedCourier.service_code;
+        } else {
+          courierId = String(rateResponse.cheapest_courier.courier_id);
+          serviceCode = rateResponse.cheapest_courier.service_code;
+        }
+
+        // Update stored values
+        order.shipments[shipmentIndex].request_token = requestToken;
+        order.shipments[shipmentIndex].courier_id = courierId;
+        order.shipments[shipmentIndex].service_code = serviceCode;
+        order.shipments[shipmentIndex].rate_fetched_at = new Date();
+      }
+
+      if (!requestToken || !courierId || !serviceCode) {
+        throw new BadRequestException(
+          'Missing shipping data (request_token, courier_id, or service_code) for this shipment',
+        );
+      }
+
+      // Book the courier and create the label.
       shipmentResult = await this.logisticService.createShipmentFromToken({
         request_token: requestToken,
         courier_id: courierId,
@@ -7258,7 +7246,7 @@ export class OrderService {
         { $set: { 'shipments.$.status': ShipmentStatus.PENDING } },
       );
       this.logger.error(
-        `[Fulfill] Label creation failed for order ${orderReference} (business ${businessId}); ` +
+        `[Fulfill] Could not book the courier for order ${orderReference} (business ${businessId}); ` +
         `reverted shipment ready_to_ship → pending. Reason: ${err?.response?.data?.message || err?.message}`,
       );
       throw err;
@@ -7294,8 +7282,9 @@ export class OrderService {
 
     // Check if all shipments are now shipped
     const allShipped = order.shipments.every(
-      (s, i) =>
+      (s: any, i) =>
         i === shipmentIndex ||
+        s.rejected ||
         s.status === ShipmentStatus.SHIPPED ||
         s.status === ShipmentStatus.IN_TRANSIT ||
         s.status === ShipmentStatus.DELIVERED,
@@ -7309,6 +7298,10 @@ export class OrderService {
 
     await order.save();
 
+    this.notifyCustomerCourierBooked(order, business, order.shipments[shipmentIndex]).catch((err) =>
+      this.logger.error('Failed to send courier-booked notification', err),
+    );
+
     return {
       message: 'Shipment created successfully',
       data: {
@@ -7318,6 +7311,37 @@ export class OrderService {
         order_status: order.status,
       },
     };
+  }
+
+  /**
+   * Tell the customer a store has packed their part and booked the courier.
+   * The "on its way" message and the shipped email still come from the
+   * courier's pickup update; this only closes the silent gap before it.
+   */
+  private async notifyCustomerCourierBooked(
+    order: OrderDocument,
+    business: Business | BusinessDocument,
+    shipment: any,
+  ) {
+    const businessName = (business as any).business_name || 'Your store';
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      audience: 'customer',
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_SHIPPED,
+      title: 'Courier booked',
+      body: `${businessName} has packed your order #${order.reference} and booked a courier. We'll tell you when it's picked up.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+        stage: 'booked',
+        tracking_number: shipment?.tracking_number ?? null,
+        tracking_url: shipment?.tracking_url ?? null,
+      },
+      // Opens the order's tracking screen in the shop app.
+      action_url: `/profile?tab=orders&order=${encodeURIComponent(order.reference)}&view=track`,
+    });
   }
 
   // ==================== ADMIN DASHBOARD CHARTS ====================
