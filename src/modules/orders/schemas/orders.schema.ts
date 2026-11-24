@@ -313,6 +313,21 @@ export class VendorShipment {
   @Prop({ type: String, default: null })
   tracking_url?: string | null;
 
+  // The day (YYYY-MM-DD, Lagos) the courier is booked to collect from the
+  // store, fixed at fulfilment by pickup-schedule.ts (next working day after
+  // the cut-off).
+  @Prop({ type: String, default: null })
+  pickup_date?: string | null;
+
+  // When the vendor and the ops team were told this parcel wasn't collected
+  // (or the courier cancelled). Set once per booking; cleared on rebook.
+  @Prop({ type: Date, default: null })
+  pickup_alerted_at?: Date | null;
+
+  // How many times the vendor booked a new courier for this part.
+  @Prop({ type: Number, default: 0 })
+  rebook_count?: number;
+
   // Every courier update for this parcel, oldest first, so the customer sees
   // a timeline rather than only the latest state. `status` is the courier's
   // own word (booked, picked_up, in_transit, out_for_delivery, delivered,
