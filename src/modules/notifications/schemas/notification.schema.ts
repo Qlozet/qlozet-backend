@@ -30,6 +30,9 @@ export enum NotificationType {
   // Shipping
   ORDER_SHIPPED = 'order_shipped',
   ORDER_DELIVERED = 'order_delivered',
+  // The courier didn't collect a booked parcel, or cancelled the booking:
+  // the vendor rebooks, the ops team follows up.
+  PICKUP_MISSED = 'pickup_missed',
 
   // Payment
   PAYMENT_CONFIRMED = 'payment_confirmed',

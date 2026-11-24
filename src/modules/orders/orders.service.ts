@@ -21,6 +21,12 @@ import {
   SHIP_BY_WARNING_LEAD_HOURS,
   withLatePreview,
 } from './late-penalty';
+import {
+  canRebookCollection,
+  collectionProblem,
+  pickupDateFor,
+  pickupDayInWords,
+} from './pickup-schedule';
 import { Length } from 'class-validator';
 import {
   unusedDeliveryOnForfeit,
@@ -7036,6 +7042,10 @@ export class OrderService {
 
     // ── Gate: vendor must confirm before fulfilling ──
     const preCheck = await this.orderModel.findOne({ reference: orderReference });
+    // A part the courier cancelled, or one flagged as never collected, can be
+    // booked again (pickup-schedule.ts). Anything else follows the first-time
+    // rules: pending, or ready_to_ship left by a crash mid-fulfil.
+    let rebookFrom: ShipmentStatus | null = null;
     if (preCheck) {
       // Never ship an unpaid order (same rule as confirmVendorShipment).
       await this.assertOrderPaid(preCheck, 'fulfilled');
@@ -7059,19 +7069,81 @@ export class OrderService {
       if ((preCheck as any).type === 'bespoke' && myShipment) {
         this.assertPreshipCleared(preCheck as any);
       }
+      // Everything that can refuse runs BEFORE the claim below, so a refusal
+      // never leaves the shipment parked at 'ready_to_ship' with no courier.
+      // Tailor waiting on fabric from another store: the finished garment
+      // can't ship until that fabric has been delivered.
+      if (myShipment && myShipment.shipment_type !== ShipmentType.FABRIC_TRANSFER) {
+        const pendingFabricTransfers = preCheck.shipments.filter(
+          (s) =>
+            s.shipment_type === ShipmentType.FABRIC_TRANSFER &&
+            s.destination_business?.toString() === businessId &&
+            s.status !== ShipmentStatus.DELIVERED,
+        );
+        if (pendingFabricTransfers.length > 0) {
+          const fabricVendors = await this.businessModel.find({
+            _id: { $in: pendingFabricTransfers.map((s) => s.business.toString()) },
+          });
+          const vendorNames = fabricVendors.map((v) => v.business_name).join(', ');
+          throw new BadRequestException(
+            `Cannot fulfill: waiting for fabric delivery from ${vendorNames}. ` +
+            `Fabric must be marked as delivered before you can ship the finished garment.`,
+          );
+        }
+      }
+      const transaction = await this.transactionService.findByOrderId(preCheck.id);
+      if (!transaction || transaction.status !== 'success') {
+        throw new BadRequestException('Cannot fulfill order: payment not completed');
+      }
+      if (myShipment && canRebookCollection(myShipment as any)) {
+        rebookFrom = myShipment.status as ShipmentStatus;
+        // Cancel the first booking before making a new one, so two couriers
+        // never turn up for the same parcel. A cancelled/failed booking is
+        // already off the courier's list.
+        if (rebookFrom === ShipmentStatus.SHIPPED && myShipment.shipment_id) {
+          try {
+            await this.logisticService.cancelShipment(myShipment.shipment_id);
+          } catch (err: any) {
+            this.logger.error(
+              `[Rebook] Could not cancel booking ${myShipment.shipment_id} on ${orderReference}: ${err?.response?.data?.message || err?.message}`,
+            );
+            throw new BadRequestException(
+              "We couldn't cancel the first courier booking, so we haven't booked another. Contact support and we'll sort it out.",
+            );
+          }
+        }
+      }
     }
 
     // Atomic claim: set status to 'ready_to_ship' only if currently 'pending'
     // This prevents double-fulfillment from concurrent requests
+    // (one $elemMatch, so the status and the business are the same part).
     const claimed = await this.orderModel.findOneAndUpdate(
       {
         reference: orderReference,
-        'shipments.business': businessId,
-        'shipments.status': { $in: [ShipmentStatus.PENDING, ShipmentStatus.READY_TO_SHIP] },
+        shipments: {
+          $elemMatch: rebookFrom
+            ? { business: businessId, status: rebookFrom }
+            : {
+                business: businessId,
+                status: { $in: [ShipmentStatus.PENDING, ShipmentStatus.READY_TO_SHIP] },
+              },
+        },
       },
-      {
-        $set: { 'shipments.$.status': ShipmentStatus.READY_TO_SHIP },
-      },
+      rebookFrom
+        ? {
+            // The old booking is gone: clear it so nothing tracks it.
+            $set: {
+              'shipments.$.status': ShipmentStatus.READY_TO_SHIP,
+              'shipments.$.shipment_id': null,
+              'shipments.$.tracking_number': null,
+              'shipments.$.label_url': null,
+              'shipments.$.tracking_url': null,
+              'shipments.$.pickup_alerted_at': null,
+            },
+            $inc: { 'shipments.$.rebook_count': 1 },
+          }
+        : { $set: { 'shipments.$.status': ShipmentStatus.READY_TO_SHIP } },
       { new: true },
     );
 
@@ -7095,150 +7167,123 @@ export class OrderService {
 
     const order = claimed;
 
-    // ── Fabric transfer gating: block tailor until fabric arrives ──
-    // If this is a vendor_to_customer shipment, check if any fabric_transfer
-    // shipments are destined for this vendor and haven't been delivered yet.
-    const thisShipment = order.shipments.find(
-      (s) => s.business.toString() === businessId,
-    );
-    if (thisShipment?.shipment_type !== ShipmentType.FABRIC_TRANSFER) {
-      const pendingFabricTransfers = order.shipments.filter(
-        (s) =>
-          s.shipment_type === ShipmentType.FABRIC_TRANSFER &&
-          s.destination_business?.toString() === businessId &&
-          s.status !== ShipmentStatus.DELIVERED,
-      );
-
-      if (pendingFabricTransfers.length > 0) {
-        // Find the fabric vendor name for a helpful error message
-        const fabricVendorIds = pendingFabricTransfers.map((s) => s.business.toString());
-        const fabricVendors = await this.businessModel.find({
-          _id: { $in: fabricVendorIds },
-        });
-        const vendorNames = fabricVendors
-          .map((v) => v.business_name)
-          .join(', ');
-
-        throw new BadRequestException(
-          `Cannot fulfill: waiting for fabric delivery from ${vendorNames}. ` +
-          `Fabric must be marked as delivered before you can ship the finished garment.`,
-        );
-      }
-    }
-
-    // Find the shipment for this vendor
-    const shipmentIndex = order.shipments.findIndex(
-      (s) => s.business.toString() === businessId,
-    );
-    if (shipmentIndex === -1) {
-      throw new BadRequestException(
-        'No shipment found for your business on this order. ' +
-        'This usually means a shipping option was not selected at checkout, ' +
-        'so there is no rate to create a label from.',
-      );
-    }
-    const shipment = order.shipments[shipmentIndex];
-
-    // Verify payment
-    const transaction = await this.transactionService.findByOrderId(order.id);
-    if (!transaction || transaction.status !== 'success') {
-      throw new BadRequestException(
-        'Cannot fulfill order: payment not completed',
-      );
-    }
-
-    // Check if rate token is stale (> 25 min)
-    let requestToken = shipment.request_token;
-    let courierId = dto.courier_id || shipment.courier_id;
-    let serviceCode = dto.service_code || shipment.service_code;
-
-    const RATE_TOKEN_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes
-    const tokenAge = shipment.rate_fetched_at
-      ? Date.now() - new Date(shipment.rate_fetched_at).getTime()
-      : Infinity;
-
-    if (tokenAge > RATE_TOKEN_MAX_AGE_MS) {
-      this.logger.log(
-        `Rate token for shipment is stale (${Math.round(tokenAge / 60000)}min old), re-fetching...`,
-      );
-
-      const customerAddress = order.address;
-      if (!customerAddress?.address_code || !business.address_code) {
-        throw new BadRequestException(
-          'Cannot re-fetch rates: missing address codes',
-        );
-      }
-
-      // Build items for this vendor only (skip any rejected individually — they
-      // aren't being shipped).
-      const vendorItems = order.items.filter(
-        (i) => i.business?.toString() === businessId && !(i as any).rejected,
-      );
-      const shippingItems = await Promise.all(
-        vendorItems.map(async (item) => {
-          const product = await this.productModel.findById(item.product);
-          const { name } = product
-            ? await this.getProductDetails(product)
-            : { name: 'Unknown' };
-          // Declared value = the line's real charged price (frozen at order
-          // time); fabric yardage comes from the stored selection.
-          const lineAmount = item.total_price ?? item.pricing?.final ?? 0;
-          const fabricYards = (item.fabric_selections?.[0] as any)?.yardage;
-          return this.buildManifestItem({
-            name,
-            kind: product?.kind,
-            unitAmount: lineAmount,
-            quantity: 1,
-            fabricYards,
-            baseWeightKg: product ? estimateProductWeightKg(product) : 0.5,
-          });
-        }),
-      );
-
-      const rateResponse = await this.logisticService.fetchRates([], {
-        sender_address_code: business.address_code,
-        reciever_address_code: customerAddress.address_code,
-        pickup_date: new Date().toISOString().split('T')[0],
-        package_items: shippingItems,
-        service_type: 'pickup',
-        category_id: 74794423, // "Fashion wears"
-        package_dimension: { length: 12, width: 10, height: 10 },
-      });
-
-      requestToken = rateResponse.request_token;
-      // Try to use the same courier, fall back to cheapest
-      const matchedCourier = rateResponse.couriers?.find(
-        (c) => String(c.courier_id) === courierId,
-      );
-      if (matchedCourier) {
-        courierId = String(matchedCourier.courier_id);
-        serviceCode = matchedCourier.service_code;
-      } else {
-        courierId = String(rateResponse.cheapest_courier.courier_id);
-        serviceCode = rateResponse.cheapest_courier.service_code;
-      }
-
-      // Update stored values
-      order.shipments[shipmentIndex].request_token = requestToken;
-      order.shipments[shipmentIndex].courier_id = courierId;
-      order.shipments[shipmentIndex].service_code = serviceCode;
-      order.shipments[shipmentIndex].rate_fetched_at = new Date();
-    }
-
-    if (!requestToken || !courierId || !serviceCode) {
-      throw new BadRequestException(
-        'Missing shipping data (request_token, courier_id, or service_code) for this shipment',
-      );
-    }
-
-    // Create shipment label.
-    // If Shipbubble fails (e.g. insufficient account balance, invalid address
-    // code), release the atomic claim so the shipment doesn't get stuck in
-    // 'ready_to_ship'. Reverting to 'pending' lets the vendor retry once the
-    // underlying issue is fixed. The original error is re-thrown so the vendor
-    // still sees the real Shipbubble message.
+    // From here until the label is booked, any failure (stale-rate re-fetch,
+    // missing shipping data, Shipbubble refusing the label: low balance, bad
+    // address code) releases the claim back to 'pending' so the vendor can
+    // retry once it's fixed. The original error is re-thrown so the vendor
+    // still sees the real message.
     let shipmentResult;
+    let shipmentIndex = -1;
     try {
+      // Find the shipment for this vendor
+      shipmentIndex = order.shipments.findIndex(
+        (s) => s.business.toString() === businessId,
+      );
+      if (shipmentIndex === -1) {
+        throw new BadRequestException(
+          'No shipment found for your business on this order. ' +
+          'This usually means a shipping option was not selected at checkout, ' +
+          'so there is no rate to create a label from.',
+        );
+      }
+      const shipment = order.shipments[shipmentIndex];
+
+      // Check if rate token is stale (> 25 min)
+      let requestToken = shipment.request_token;
+      let courierId = dto.courier_id || shipment.courier_id;
+      let serviceCode = dto.service_code || shipment.service_code;
+
+      const RATE_TOKEN_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes
+      const tokenAge = shipment.rate_fetched_at
+        ? Date.now() - new Date(shipment.rate_fetched_at).getTime()
+        : Infinity;
+      // The courier collects on the pickup day: today before the cut-off on
+      // a working day, else the next working day. A quote priced for a
+      // different day (checkout quotes use the UTC date) is re-fetched.
+      const pickupDate = pickupDateFor(new Date());
+      const pricedFor =
+        (shipment as any).pickup_date ??
+        (shipment.rate_fetched_at
+          ? new Date(shipment.rate_fetched_at).toISOString().slice(0, 10)
+          : null);
+
+      if (tokenAge > RATE_TOKEN_MAX_AGE_MS || pricedFor !== pickupDate || rebookFrom) {
+        this.logger.log(
+          `Re-fetching rate for ${orderReference} (token ${Math.round(tokenAge / 60000)}min old, ` +
+          `priced for ${pricedFor}, pickup ${pickupDate}${rebookFrom ? ', rebook' : ''})`,
+        );
+
+        const customerAddress = order.address;
+        if (!customerAddress?.address_code || !business.address_code) {
+          throw new BadRequestException(
+            'Cannot re-fetch rates: missing address codes',
+          );
+        }
+
+        // Build items for this vendor only (skip any rejected individually — they
+        // aren't being shipped).
+        const vendorItems = order.items.filter(
+          (i) => i.business?.toString() === businessId && !(i as any).rejected,
+        );
+        const shippingItems = await Promise.all(
+          vendorItems.map(async (item) => {
+            const product = await this.productModel.findById(item.product);
+            const { name } = product
+              ? await this.getProductDetails(product)
+              : { name: 'Unknown' };
+            // Declared value = the line's real charged price (frozen at order
+            // time); fabric yardage comes from the stored selection.
+            const lineAmount = item.total_price ?? item.pricing?.final ?? 0;
+            const fabricYards = (item.fabric_selections?.[0] as any)?.yardage;
+            return this.buildManifestItem({
+              name,
+              kind: product?.kind,
+              unitAmount: lineAmount,
+              quantity: 1,
+              fabricYards,
+              baseWeightKg: product ? estimateProductWeightKg(product) : 0.5,
+            });
+          }),
+        );
+
+        const rateResponse = await this.logisticService.fetchRates([], {
+          sender_address_code: business.address_code,
+          reciever_address_code: customerAddress.address_code,
+          pickup_date: pickupDate,
+          package_items: shippingItems,
+          service_type: 'pickup',
+          category_id: 74794423, // "Fashion wears"
+          package_dimension: { length: 12, width: 10, height: 10 },
+        });
+
+        requestToken = rateResponse.request_token;
+        // Try to use the same courier, fall back to cheapest
+        const matchedCourier = rateResponse.couriers?.find(
+          (c) => String(c.courier_id) === courierId,
+        );
+        if (matchedCourier) {
+          courierId = String(matchedCourier.courier_id);
+          serviceCode = matchedCourier.service_code;
+        } else {
+          courierId = String(rateResponse.cheapest_courier.courier_id);
+          serviceCode = rateResponse.cheapest_courier.service_code;
+        }
+
+        // Update stored values
+        order.shipments[shipmentIndex].request_token = requestToken;
+        order.shipments[shipmentIndex].courier_id = courierId;
+        order.shipments[shipmentIndex].service_code = serviceCode;
+        order.shipments[shipmentIndex].rate_fetched_at = new Date();
+      }
+      (order.shipments[shipmentIndex] as any).pickup_date = pickupDate;
+
+      if (!requestToken || !courierId || !serviceCode) {
+        throw new BadRequestException(
+          'Missing shipping data (request_token, courier_id, or service_code) for this shipment',
+        );
+      }
+
+      // Book the courier and create the label.
       shipmentResult = await this.logisticService.createShipmentFromToken({
         request_token: requestToken,
         courier_id: courierId,
@@ -7258,7 +7303,7 @@ export class OrderService {
         { $set: { 'shipments.$.status': ShipmentStatus.PENDING } },
       );
       this.logger.error(
-        `[Fulfill] Label creation failed for order ${orderReference} (business ${businessId}); ` +
+        `[Fulfill] Could not book the courier for order ${orderReference} (business ${businessId}); ` +
         `reverted shipment ready_to_ship → pending. Reason: ${err?.response?.data?.message || err?.message}`,
       );
       throw err;
@@ -7280,10 +7325,11 @@ export class OrderService {
     if (typeof trackingUrl === 'string' && /^https:\/\//i.test(trackingUrl)) {
       order.shipments[shipmentIndex].tracking_url = trackingUrl;
     }
-    // First entry on the customer's timeline: the courier is booked.
+    // First entry on the customer's timeline: the courier is booked (or
+    // booked again after the first courier didn't come).
     order.shipments[shipmentIndex].tracking_events = [
       ...((order.shipments[shipmentIndex] as any).tracking_events ?? []),
-      { status: 'booked', at: new Date(), message: null },
+      { status: rebookFrom ? 'rebooked' : 'booked', at: new Date(), message: null },
     ];
     if (!order.shipments[shipmentIndex].courier_name) {
       order.shipments[shipmentIndex].courier_name =
@@ -7294,8 +7340,9 @@ export class OrderService {
 
     // Check if all shipments are now shipped
     const allShipped = order.shipments.every(
-      (s, i) =>
+      (s: any, i) =>
         i === shipmentIndex ||
+        s.rejected ||
         s.status === ShipmentStatus.SHIPPED ||
         s.status === ShipmentStatus.IN_TRANSIT ||
         s.status === ShipmentStatus.DELIVERED,
@@ -7309,6 +7356,10 @@ export class OrderService {
 
     await order.save();
 
+    this.notifyCustomerCourierBooked(order, business, order.shipments[shipmentIndex], !!rebookFrom).catch((err) =>
+      this.logger.error('Failed to send courier-booked notification', err),
+    );
+
     return {
       message: 'Shipment created successfully',
       data: {
@@ -7318,6 +7369,158 @@ export class OrderService {
         order_status: order.status,
       },
     };
+  }
+
+  /**
+   * Tell the customer a store has packed their part and booked the courier.
+   * The "on its way" message and the shipped email still come from the
+   * courier's pickup update; this only closes the silent gap before it.
+   */
+  private async notifyCustomerCourierBooked(
+    order: OrderDocument,
+    business: Business | BusinessDocument,
+    shipment: any,
+    rebooked = false,
+  ) {
+    const businessName = (business as any).business_name || 'Your store';
+    const when = pickupDayInWords(shipment?.pickup_date, new Date());
+    await this.notificationsService.create({
+      recipient: order.customer.toString(),
+      audience: 'customer',
+      category: NotificationCategory.ORDER,
+      type: NotificationType.ORDER_SHIPPED,
+      title: rebooked ? 'New courier booked' : 'Courier booked',
+      body: rebooked
+        ? `The first courier didn't collect your order #${order.reference}, so ${businessName} has booked another${when ? ` to collect it ${when}` : ''}. We'll tell you when it's picked up.`
+        : `${businessName} has packed your order #${order.reference} and booked a courier${when ? ` to collect it ${when}` : ''}. We'll tell you when it's picked up.`,
+      metadata: {
+        order_id: order._id,
+        order_reference: order.reference,
+        business_name: businessName,
+        stage: rebooked ? 'rebooked' : 'booked',
+        pickup_date: shipment?.pickup_date ?? null,
+        tracking_number: shipment?.tracking_number ?? null,
+        tracking_url: shipment?.tracking_url ?? null,
+      },
+      // Opens the order's tracking screen in the shop app.
+      action_url: `/profile?tab=orders&order=${encodeURIComponent(order.reference)}&view=track`,
+    });
+  }
+
+  /**
+   * Courier collections that went wrong. Every hour: a part booked but
+   * still not picked up past its due time (midday the day after its pickup
+   * day), or one the courier cancelled / failed. Once the part is booked
+   * the late penalty and the abandon job stop watching it, so without this
+   * an uncollected parcel sat at "shipped" forever with nobody told.
+   *
+   * Each problem is flagged once (pickup_alerted_at, claimed atomically so
+   * overlapping runs can't double-send). The vendor's operations team is
+   * told to rebook from the order; platform admins get it in their queue.
+   * Rebooking clears the flag, so a second miss is flagged again.
+   */
+  @Cron('10 * * * *', { timeZone: 'Africa/Lagos' })
+  async checkUncollectedShipments(now: Date = new Date()) {
+    try {
+      const recentCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const orders = await this.orderModel
+        .find({
+          status: {
+            $in: [OrderStatus.IN_REVIEW, OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT],
+          },
+          shipments: {
+            $elemMatch: {
+              status: { $in: [ShipmentStatus.SHIPPED, ShipmentStatus.FAILED] },
+              rejected: { $ne: true },
+              pickup_alerted_at: null,
+              // Only bookings from the last month: older failed parts predate
+              // this check and were handled by hand.
+              shipped_at: { $gte: recentCutoff },
+            },
+          },
+        })
+        .limit(500);
+      if (orders.length === 0) return;
+
+      for (const order of orders) {
+        for (const shipment of order.shipments as any[]) {
+          const problem = collectionProblem(shipment, now);
+          if (!problem) continue;
+          if (!shipment.shipped_at || new Date(shipment.shipped_at) < recentCutoff) continue;
+
+          const claimed = await this.orderModel.updateOne(
+            {
+              _id: order._id,
+              shipments: { $elemMatch: { _id: shipment._id, pickup_alerted_at: null } },
+            },
+            { $set: { 'shipments.$.pickup_alerted_at': now } },
+          );
+          if (!claimed.modifiedCount) continue;
+
+          const businessId = shipment.business?.toString();
+          const store = await this.businessModel
+            .findById(businessId)
+            .select('business_name')
+            .lean()
+            .catch(() => null);
+          const storeName = (store as any)?.business_name || 'The store';
+          const toTailor = shipment.shipment_type === ShipmentType.FABRIC_TRANSFER;
+          const metadata = {
+            order_id: order._id,
+            order_reference: order.reference,
+            business_id: businessId,
+            shipment_id: shipment.shipment_id ?? null,
+            tracking_number: shipment.tracking_number ?? null,
+            pickup_date: shipment.pickup_date ?? null,
+            courier_name: shipment.courier_name ?? null,
+            problem,
+          };
+          this.logger.warn(
+            `[Pickup] ${problem} on ${order.reference} (business ${businessId}, booking ${shipment.shipment_id ?? 'none'})`,
+          );
+
+          const vendorBody =
+            problem === 'courier_cancelled'
+              ? `The courier cancelled the pickup for order #${order.reference}. Open the order and book a new courier.`
+              : `The courier hasn't collected order #${order.reference}${toTailor ? ' (fabric for the tailor)' : ''} yet. If it's still with you, open the order and book a new courier. If the courier has it, contact support.`;
+          const recipients = await this.vendorRecipients
+            .resolve(businessId, OPERATIONS_ROLES)
+            .catch(() => []);
+          for (const member of recipients) {
+            this.notificationsService
+              .create({
+                recipient: member.userId,
+                recipient_business: businessId,
+                category: NotificationCategory.SHIPPING,
+                type: NotificationType.PICKUP_MISSED,
+                title: problem === 'courier_cancelled' ? 'Courier cancelled the pickup' : 'Parcel not collected',
+                body: vendorBody,
+                metadata,
+                action_url: `/orders`,
+              })
+              .catch((err) =>
+                this.logger.error(`[Pickup] Failed to notify vendor: ${err.message}`),
+              );
+          }
+
+          this.notificationsService
+            .notifyPlatformAdmins({
+              category: NotificationCategory.SHIPPING,
+              type: NotificationType.PICKUP_MISSED,
+              title: problem === 'courier_cancelled' ? 'Courier cancelled a pickup' : 'Parcel not collected',
+              body:
+                problem === 'courier_cancelled'
+                  ? `The courier cancelled the pickup from ${storeName} for order #${order.reference}. The store has been asked to rebook.`
+                  : `${storeName}'s parcel for order #${order.reference} was booked for ${shipment.pickup_date ?? 'pickup'} and still hasn't been collected. The store has been asked to rebook.`,
+              metadata,
+              action_url: '/orders',
+            })
+            .catch(() => undefined);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`[Pickup] Collection check failed: ${err?.message}`);
+    }
   }
 
   // ==================== ADMIN DASHBOARD CHARTS ====================
