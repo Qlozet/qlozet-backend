@@ -126,6 +126,7 @@ describe('measurement questions', () => {
       const users: any = {
         getAllMeasurementSets: jest.fn(async () => ({ sets })),
         updateMeasurementSet: jest.fn(async (...a: any[]) => updates.push(a)),
+        recordMeasurementCorrections: jest.fn(async () => 1),
       };
       const service = new MeasurementQuestionsService(
         (base as any).orderModel,
@@ -140,11 +141,11 @@ describe('measurement questions', () => {
       });
       const qid = String(order.measurement_questions[0]._id);
       const res = await service.answer('ORD-1', String(customer), qid, body);
-      return { res, updates, order };
+      return { res, updates, order, users };
     };
 
     it("copies the corrections into the set the order used, in that set's unit", async () => {
-      const { res, updates, order } = await askAndAnswer(
+      const { res, updates, order, users } = await askAndAnswer(
         [{ name: 'Me', active: true, unit: 'cm' }, { name: 'Dad', active: false, unit: 'inch' }],
         { measurements: { waist: 84 }, save_to_profile: true },
       );
@@ -153,6 +154,13 @@ describe('measurement questions', () => {
       expect(updates[0][1]).toBe('Dad');
       expect(updates[0][2]).toEqual({ measurements: { waist: 33.1 } });
       expect(res.data.saved_to_profile).toBe('Dad');
+      // The correction is logged for fit learning, whichever set it lands in.
+      expect(users.recordMeasurementCorrections).toHaveBeenCalledTimes(1);
+      expect(users.recordMeasurementCorrections.mock.calls[0][0]).toMatchObject({
+        source: 'tailor_question',
+        set_name: 'Dad',
+        order: String(order._id),
+      });
     });
 
     it('leaves the profile alone unless asked', async () => {
