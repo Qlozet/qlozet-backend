@@ -40,6 +40,7 @@ describe('AuthService.loginWithGoogle', () => {
   let service: AuthService;
   let userModel: any;
   let walletModel: any;
+  let mailService: any;
   let tokenModel: any;
   let roleModel: any;
 
@@ -68,6 +69,7 @@ describe('AuthService.loginWithGoogle', () => {
         },
       ]),
       updateOne: jest.fn().mockResolvedValue({}),
+      findByIdAndUpdate: jest.fn().mockResolvedValue({}),
       exists: jest.fn().mockResolvedValue(null),
       findById: jest.fn((id: string) => ({
         select: jest.fn().mockResolvedValue({
@@ -80,6 +82,10 @@ describe('AuthService.loginWithGoogle', () => {
       })),
     };
     walletModel = { create: jest.fn().mockResolvedValue([{}]) };
+    mailService = {
+      sendCustomerWelcomeEmail: jest.fn().mockResolvedValue(undefined),
+      sendVendorWelcomeEmail: jest.fn().mockResolvedValue(undefined),
+    };
     tokenModel = { create: jest.fn().mockResolvedValue([{}]) };
     roleModel = { findOne: jest.fn().mockResolvedValue({ _id: 'role-id' }) };
 
@@ -105,7 +111,7 @@ describe('AuthService.loginWithGoogle', () => {
           useValue: { startSession: jest.fn().mockResolvedValue(session) },
         },
         { provide: JwtService, useValue: { signAsync: jest.fn().mockResolvedValue('jwt') } },
-        { provide: MailService, useValue: {} },
+        { provide: MailService, useValue: mailService },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
       ],
     }).compile();
@@ -236,6 +242,10 @@ describe('AuthService.loginWithGoogle', () => {
       expect(result.data.token).toBeDefined();
       // New to the shop, so it gets the welcome steps too.
       expect(result.data.is_new_user).toBe(true);
+      expect(mailService.sendCustomerWelcomeEmail).toHaveBeenCalledWith(
+        'ada@example.com',
+        'Ada Obi',
+      );
     });
   });
 
