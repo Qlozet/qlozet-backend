@@ -130,4 +130,44 @@ describe('cart lines', () => {
     expect(cart.items).toHaveLength(2);
     expect(cart.items.find((i: any) => i.line_key === `${P2}|`).quantity).toBe(2);
   });
+  describe('editing a line (PUT /cart/lines/:lineId)', () => {
+    it('changes the choices in place: same id and quantity, re-priced, new key', async () => {
+      const { service, cart } = build([
+        { product_id: P1, line_key: `${P1}|M`, size: 'M', quantity: 2, unit_price: 10000, total_price: 20000 },
+      ]);
+      const id = String(cart.items[0]._id);
+      (service as any).priceCalculationService.calculateItemTotal.mockResolvedValueOnce(12000);
+      await service.replaceLine('u1', id, { lineKey: `${P1}|L`, size: 'L' });
+      expect(cart.items).toHaveLength(1);
+      expect(String(cart.items[0]._id)).toBe(id);
+      expect(cart.items[0]).toMatchObject({ size: 'L', line_key: `${P1}|L`, quantity: 2, unit_price: 12000, total_price: 24000 });
+      expect(cart.subtotal).toBe(24000);
+    });
+
+    it('an edit that makes it the same as another line merges the two', async () => {
+      const { service, cart } = build([
+        { product_id: P1, line_key: `${P1}|M`, size: 'M', quantity: 2, unit_price: 10000, total_price: 20000 },
+        { product_id: P1, line_key: `${P1}|L`, size: 'L', quantity: 1, unit_price: 10000, total_price: 10000 },
+      ]);
+      const m = String(cart.items[0]._id);
+      const l = String(cart.items[1]._id);
+      await service.replaceLine('u1', m, { lineKey: `${P1}|L`, size: 'L' });
+      expect(cart.items).toHaveLength(1);
+      expect(String(cart.items[0]._id)).toBe(l);
+      expect(cart.items[0].quantity).toBe(3);
+      expect(cart.subtotal).toBe(30000);
+    });
+
+    it('a missing line is a 404, and a product no longer on sale is refused', async () => {
+      const { service, cart } = build([
+        { product_id: 'pending', line_key: 'pending|', quantity: 1, unit_price: 1, total_price: 1 },
+      ]);
+      await expect(
+        service.replaceLine('u1', new Types.ObjectId().toString(), {}),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.replaceLine('u1', String(cart.items[0]._id), {}),
+      ).rejects.toThrow('not available');
+    });
+  });
 });
