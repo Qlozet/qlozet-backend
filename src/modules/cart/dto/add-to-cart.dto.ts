@@ -13,7 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { OrderItemSelectionsDto } from '../../orders/dto/selection.dto';
 
 export class AddToCartDto {
@@ -103,6 +103,15 @@ export class AddToCartDto {
   @IsString()
   appliedFabricSize?: string;
 }
+
+/**
+ * The cart's Edit: a line's new choices. The product and quantity stay the
+ * line's own, so neither is sent.
+ */
+export class ReplaceCartLineDto extends OmitType(AddToCartDto, [
+  'productId',
+  'quantity',
+] as const) {}
 
 export class UpdateCartLineDto {
   @ApiProperty({ example: 2, minimum: 1, maximum: 999 })

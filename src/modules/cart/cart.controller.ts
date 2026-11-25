@@ -4,6 +4,7 @@ import {
   Get,
   Delete,
   Patch,
+  Put,
   Body,
   Param,
   Req,
@@ -16,6 +17,7 @@ import { CartService } from './cart.service';
 import {
   AddToCartDto,
   MergeCartDto,
+  ReplaceCartLineDto,
   UpdateCartLineDto,
 } from './dto/add-to-cart.dto';
 
@@ -64,6 +66,20 @@ export class CartController {
     @Body() dto: UpdateCartLineDto,
   ) {
     return this.cartService.updateLine(req.user.id, lineId, dto.quantity);
+  }
+
+  @Put('lines/:lineId')
+  @ApiOperation({
+    summary: "Change one cart line's choices (the cart's Edit)",
+    description:
+      'Sends the same choices as POST /cart/add, without productId and quantity: the line keeps its product, id and quantity and is re-priced. If the new choices match another line, the two merge and this line goes. Returns the whole cart.',
+  })
+  async replaceLine(
+    @Req() req,
+    @Param('lineId') lineId: string,
+    @Body() dto: ReplaceCartLineDto,
+  ) {
+    return this.cartService.replaceLine(req.user.id, lineId, dto);
   }
 
   @Delete('lines/:lineId')

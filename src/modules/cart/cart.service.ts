@@ -47,23 +47,22 @@ export class CartService {
     return cart;
   }
 
-  async addItem(
-    userId: string,
+  /**
+   * What one unit of a line costs with these choices, from the server's own
+   * prices: base + selected styles/fabric/accessories/addons/variants (with
+   * discount), plus any fabric the customer brings from another listing.
+   * Shared by add and edit so an edited line is priced exactly as a new one.
+   */
+  private async priceLine(
     productId: string,
-    quantity = 1,
-    appliedFabricId?: string,
-    appliedFabricYards?: number,
-    note?: string,
-    selections?: OrderItemSelectionsDto,
-    // Trailing so existing positional callers are unaffected.
-    appliedFabricSize?: string,
-    line?: {
-      lineKey?: string;
-      size?: string;
-      color?: string;
-      measurementSet?: string;
-    },
-  ): Promise<CartDocument> {
+    appliedFabricId: string | undefined,
+    appliedFabricYards: number | undefined,
+    selections: OrderItemSelectionsDto | undefined,
+  ): Promise<{
+    unitPrice: number;
+    fabricObjectId?: Types.ObjectId;
+    appliedFabricYards?: number;
+  }> {
     const product = await this.productModel.findById(productId);
     if (!product) throw new NotFoundException('Product not found');
     if (!isCustomerVisible(product)) {
@@ -156,6 +155,35 @@ export class CartService {
       fabricObjectId = new Types.ObjectId(appliedFabricId);
     }
 
+    return { unitPrice, fabricObjectId, appliedFabricYards };
+  }
+
+  async addItem(
+    userId: string,
+    productId: string,
+    quantity = 1,
+    appliedFabricId?: string,
+    appliedFabricYards?: number,
+    note?: string,
+    selections?: OrderItemSelectionsDto,
+    // Trailing so existing positional callers are unaffected.
+    appliedFabricSize?: string,
+    line?: {
+      lineKey?: string;
+      size?: string;
+      color?: string;
+      measurementSet?: string;
+    },
+  ): Promise<CartDocument> {
+    const priced = await this.priceLine(
+      productId,
+      appliedFabricId,
+      appliedFabricYards,
+      selections,
+    );
+    const { unitPrice, fabricObjectId } = priced;
+    appliedFabricYards = priced.appliedFabricYards;
+
     const totalPrice = unitPrice * quantity;
 
     const cart = await this.getCart(userId);
@@ -211,6 +239,76 @@ export class CartService {
     const line = this.findLine(cart, lineId);
     line.quantity = quantity;
     line.total_price = quantity * line.unit_price;
+    this.calculateTotals(cart);
+    cart.markModified('items');
+    await cart.save();
+    return this.getCart(userId);
+  }
+
+  /**
+   * Change a line's choices (size, colour, styles, fabric, measurement set,
+   * note) in place: the cart's Edit. The line keeps its id and quantity and
+   * is re-priced from scratch. If the new choices make it the same as
+   * another line, the two become one (quantities added) rather than leaving
+   * two identical lines.
+   */
+  async replaceLine(
+    userId: string,
+    lineId: string,
+    next: {
+      appliedFabricId?: string;
+      appliedFabricYards?: number;
+      appliedFabricSize?: string;
+      note?: string;
+      selections?: OrderItemSelectionsDto;
+      lineKey?: string;
+      size?: string;
+      color?: string;
+      measurementSet?: string;
+    },
+  ): Promise<CartDocument> {
+    const cart = await this.getCart(userId);
+    const line: any = this.findLine(cart, lineId);
+    const productId = String(line.product_id?._id ?? line.product_id);
+
+    // Also refuses a product that has gone or can no longer be bought.
+    const { unitPrice, fabricObjectId, appliedFabricYards } =
+      await this.priceLine(
+        productId,
+        next.appliedFabricId,
+        next.appliedFabricYards,
+        next.selections,
+      );
+
+    const key = next.lineKey || productId;
+    const twin: any = cart.items.find(
+      (i: any) => String(i._id) !== String(lineId) && this.keyOf(i) === key,
+    );
+
+    if (twin) {
+      twin.quantity += line.quantity;
+      twin.unit_price = unitPrice;
+      twin.total_price = twin.quantity * unitPrice;
+      if (next.note !== undefined) twin.note = next.note;
+      cart.items = cart.items.filter(
+        (i: any) => String(i._id) !== String(lineId),
+      ) as any;
+    } else {
+      line.selections = (next.selections ?? {}) as any;
+      line.applied_fabric_id = fabricObjectId ?? null;
+      line.applied_fabric_yards = fabricObjectId ? appliedFabricYards : null;
+      line.applied_fabric_size = fabricObjectId
+        ? next.appliedFabricSize || null
+        : null;
+      line.unit_price = unitPrice;
+      line.total_price = line.quantity * unitPrice;
+      line.line_key = next.lineKey || null;
+      line.size = next.size || null;
+      line.color = next.color || null;
+      line.measurement_set = next.measurementSet || null;
+      if (next.note !== undefined) line.note = next.note;
+    }
+
     this.calculateTotals(cart);
     cart.markModified('items');
     await cart.save();
