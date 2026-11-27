@@ -29,6 +29,12 @@ export class RecommendationsController {
   @ApiQuery({ name: 'category', required: false })
   @ApiQuery({ name: 'gender', required: false })
   @ApiQuery({ name: 'userId', required: false })
+  @ApiQuery({
+    name: 'onSale',
+    required: false,
+    type: Boolean,
+    description: "Only products on sale (the listing's on_sale rule), still ranked for this shopper",
+  })
   async getFeed(
     @Req() req: any,
     @Query('sessionId') sessionId?: string,
@@ -38,6 +44,7 @@ export class RecommendationsController {
     @Query('category') category?: string,
     @Query('gender') gender?: string,
     @Query('userId') userId?: string,
+    @Query('onSale') onSale?: string,
   ) {
     // Prefer the authenticated user; fall back to an explicit query param.
     const uid = req.user?.id ?? userId;
@@ -53,6 +60,7 @@ export class RecommendationsController {
       deadlineDays: deadlineDays ? Number(deadlineDays) : undefined,
       category,
       gender,
+      onSale: onSale === 'true' || onSale === '1',
     });
   }
 
