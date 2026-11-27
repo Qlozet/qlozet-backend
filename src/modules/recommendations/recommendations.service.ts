@@ -1,3 +1,6 @@
+import { SizeGuideService } from '../size-guide/size-guide.service';
+import { fitsMeItems, type FitMatch } from './fits-me';
+import { isOnSale } from './on-sale';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -40,6 +43,7 @@ export class RecommendationsService {
     private eventsService: EventsService,
     private businessService: BusinessService,
     private catalogService: CatalogService,
+    private sizeGuideService: SizeGuideService,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
     @InjectModel(PlatformSettings.name)
@@ -54,9 +58,11 @@ export class RecommendationsService {
     deadlineDays?: number;
     category?: string;
     gender?: string;
+    /** Only products on sale, ranked for this shopper ("From the sale, for you"). */
+    onSale?: boolean;
   }) {
     const startTime = Date.now();
-    const { userId, sessionId, limit, budgetMax, deadlineDays } = options;
+    const { userId, sessionId, limit, budgetMax, deadlineDays, onSale } = options;
 
     // 1. User Context & Embeddings
     const userProfileVector =
@@ -87,8 +93,10 @@ export class RecommendationsService {
     const candidates =
       await this.retrievalService.retrieveCandidatesForHomeFeed({
         userStyleVector: blendedVector,
-        limit: limit * 2, // Fetch more for filtering
-        numCandidates: 1000,
+        // Fetch more for filtering; far more when only sale items will do,
+        // since most of the catalogue isn't discounted.
+        limit: onSale ? limit * 8 : limit * 2,
+        numCandidates: onSale ? 2000 : 1000,
       });
 
     // 2.5 Fetch Vendor/Business Data
@@ -166,7 +174,9 @@ export class RecommendationsService {
     };
     const ranked = this.rankersService.rankCandidates(filtered, rankingContext);
 
-    const finalItems = ranked.slice(0, limit);
+    // On sale: keep the whole ranked list until the prices are known (they
+    // come with the product data), then take the first [limit] on sale.
+    const finalItems = onSale ? ranked : ranked.slice(0, limit);
 
     // 5. Explanations
     const recentHistory = await this.eventsService.getRecentEvents(userId, 20);
@@ -199,8 +209,9 @@ export class RecommendationsService {
       metrics: filterMetrics, // Added detailed metrics to log
     });
 
+    const hydrated = await this.hydrateWithProductData(results);
     return {
-      items: await this.hydrateWithProductData(results),
+      items: onSale ? hydrated.filter((i) => isOnSale(i.product)).slice(0, limit) : hydrated,
       debug: {
         coldStartLevel,
         usedSessionBlend,
@@ -208,6 +219,27 @@ export class RecommendationsService {
         filteredCount: filtered.length,
         durationMs: duration,
       },
+    };
+  }
+
+  /**
+   * "Fits your measurements": products whose size guide fits the shopper's
+   * active measurement set, best fit first, minus what they dismissed. Each
+   * item carries `fit` ({ bestSize, fitScore }) so a card can say
+   * "Your size: M". Empty without measurements or matching size guides.
+   */
+  async getFitsMeFeed(options: { userId: string; limit: number }) {
+    const { userId, limit } = options;
+    const [fits, exclusions] = await Promise.all([
+      this.sizeGuideService.findProductsThatFit(userId, { limit: 300 }),
+      this.eventsService.feedExclusions(userId),
+    ]);
+    // A few spare, for products the hydration drops (inactive, store not approved).
+    const items = fitsMeItems(fits as FitMatch[], exclusions, limit + 12);
+    const fitById = new Map(items.map((i) => [i.itemId, i.fit]));
+    const hydrated = await this.hydrateWithProductData(items);
+    return {
+      items: hydrated.slice(0, limit).map((h) => ({ ...h, fit: fitById.get(h.itemId) })),
     };
   }
 
