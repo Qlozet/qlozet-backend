@@ -1,3 +1,4 @@
+import { SizeGuideModule } from '../size-guide/size-guide.module';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RecommendationsController } from './recommendations.controller';
@@ -53,6 +54,8 @@ import { OnboardingService } from './onboarding/onboarding.service';
     RouterModule,
     EvaluationModule,
     BusinessModule,
+    // "Fits your measurements": products whose size guide fits the shopper.
+    SizeGuideModule,
   ],
   controllers: [RecommendationsController, OnboardingController],
   providers: [RecommendationsService, FeedMixerService, OnboardingService],

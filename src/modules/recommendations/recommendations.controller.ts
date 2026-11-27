@@ -64,6 +64,20 @@ export class RecommendationsController {
     });
   }
 
+  /** "Fits your measurements" on the shop's For You page. */
+  @Get('fits-me')
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getFitsMe(@Req() req: any, @Query('limit') limit: number = 24) {
+    const uid = req.user?.id;
+    if (!uid) {
+      return { items: [] };
+    }
+    return this.recommendationsService.getFitsMeFeed({
+      userId: uid,
+      limit: Math.min(Math.max(Number(limit) || 24, 1), 60),
+    });
+  }
+
   @Get('vendors')
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'productsPerVendor', required: false, type: Number })
